@@ -36,6 +36,11 @@ The native launcher opens at 820×530 logical pixels, resizes down to 640×460, 
 
 **Profiles → Local skin PNG** previews a 64×64/64×32 skin (or an integer HD multiple) with its hat layer. Without a selected file, the launcher uses the installed Steve texture when present, otherwise a clearly labeled original Solaris avatar. This is a launcher preview only: it does not change the skin used by an offline server. See [launcher verification and remaining acceptance gates](docs/LAUNCHER_REDESIGN.md).
 
+`solaris-launcher --capture-window /absolute/path/window.png` opens the normal
+launcher, saves one frame from its own wgpu renderer, then exits. The output
+directory must already exist; `--tab settings` or `--tab logs` selects that
+surface. This is not an OS-desktop capture or a gameplay acceptance result.
+
 ### Connect to the Solaris test server
 
 The launcher ships with a server entry `Solaris test` = `135.106.208.217:25565` (Minecraft Java 26.3, offline mode). Select it, choose a username (3–16 Latin letters, digits or `_`, as vanilla offline names) and press PLAY. Use **+ Add server** to add others (`host` or `host:port`).
@@ -73,7 +78,7 @@ On Solaris servers with `[lod]` enabled the client draws a coarse heightfield of
 ## System requirements
 
 - 64-bit Linux (glibc 2.35 or newer, e.g. Ubuntu 22.04+), Windows 10/11 x86_64, or macOS 11+ on Apple Silicon.
-- A GPU and driver with **Vulkan 1.1+** on Linux/Windows (Intel, AMD or NVIDIA; software Vulkan via Mesa `lavapipe` also works but slowly), or Metal support on macOS. The launcher uses OpenGL 3.3 on Linux/Windows and the system graphics stack on macOS.
+- A GPU and driver supported by wgpu: Vulkan on Linux, Direct3D 12 or Vulkan on Windows, or Metal on macOS. The launcher uses the same native API family, not an OpenGL shell. Software Vulkan via Mesa `lavapipe` also works on Linux but slowly.
 - 4 GB RAM, ~1.5 GB free disk, and working audio output (ALSA/PulseAudio/PipeWire on Linux; Core Audio on macOS).
 - Internet access on first run.
 
@@ -139,7 +144,13 @@ cargo build --release          # builds solaris-client and solaris-launcher into
 
 `rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses OpenGL/X11/Wayland on Linux and the system graphics stack on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
 
+Resource discovery converts Windows filesystem separators to `/` in Minecraft resource IDs; resource ID validation remains platform-independent.
+
 CI (`.github/workflows/release.yml`) builds Linux and Windows archives plus an ad-hoc-signed Apple Silicon `Solaris.app` zip on every `v*` tag, attaches checksums, and asserts that no `.jar` or `assets/` directory is in the package.
+
+Windows release builds set `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static` for both the client workspace and the pinned server checkout. This also signals Cargo native build scripts to select the static CRT; the staged launcher, client and singleplayer server are checked with MSVC `dumpbin /dependents` before packaging, and the release fails if any imports the Visual C++ redistributable. The Windows 10/11 system UCRT is still a system dependency. The gate checks executable imports, not a clean-machine launch.
+
+To reproduce the Windows release locally, use the Windows x64 MSVC Rust targets, Visual Studio C++ tools, the pinned server and plugin revisions, and the zlib-header setup and staging commands in `.github/workflows/release.yml`. Run `pwsh -NoProfile -File packaging/test-windows-crt.ps1`, build both workspaces with that target-specific environment variable, stage all three executables with `packaging/stage-singleplayer.sh stage .exe`, then run `pwsh -NoProfile -File packaging/check-windows-crt.ps1 -Stage stage`. Finally package the zip and test it on a clean Windows user without installing the VC redistributable: open the launcher, start the client, and start singleplayer so the embedded server runs. Record the artifact hashes and observed outcomes; obtain fresh approval for any safety prompt.
 
 ### Publishing the data bundles
 

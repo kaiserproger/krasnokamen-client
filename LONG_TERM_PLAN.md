@@ -33,6 +33,15 @@ unsupported presentation and the four added entity visual families remain
 unaccepted, and inherited lint/GPU-environment issues remain in `BUGS.md`.
 C00–C02 acceptance and the sole P0 cursor above are intentionally unchanged.
 
+The 2026-11-01 launcher/packaging checkpoint is also scoped, not a stage
+advancement. The wgpu launcher passed actual isolated Linux Home/Settings
+captures and a PNG write-error path; its normal static-CRT Windows executable
+opened Home, accepted Settings/Logs navigation and closed with exit 0 without
+security changes. The 90 launcher tests and package-strict Clippy passed.
+The current macOS manual-candidate runtime gate has not executed yet; its source
+does not establish a platform pass. Broader gameplay, platform acceptance and
+the sole P0 cursor remain unchanged. See `docs/LAUNCHER_REDESIGN.md`.
+
 ## Gate and evidence policy
 
 Each stage supplies working vertical behavior. Unit tests, prepared fixtures and a window alone do not substitute for gameplay, GPU/audio or service evidence. Preserve source workload/settings after A/B starts. Parent records exact tree/build/locks, platform/device/backend, server/oracle, input and packet/event traces, assertion results, raw metrics, frame/resource/state IDs and actual audio sink. Native onscreen evidence is required where specified. No accepted row without a receipt. Unavailable external prerequisites stay explicit and prohibit the associated completeness claim.

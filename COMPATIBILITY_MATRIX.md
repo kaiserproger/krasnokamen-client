@@ -135,9 +135,9 @@ all packet behavior or any mandatory domain below.
 | acceptance | `PERF-03` | Многочасовой mixed run не накапливает handles, watchers, textures, wasm stores и input leases | `SRC-0931` (line 931) | not_started | — |
 | acceptance | `REL-01` | Чистая сборка/установка на целевых ОС, правильные licenses/signatures и pinned dependencies | `SRC-0932` (line 932) | not_started | — |
 | acceptance | `REL-02` | Каждый unsupported service/pack-extension/version виден в compatibility matrix; нет полного claim с пустыми обязательными строками | `SRC-0933` (line 933) | not_started | — |
-| platform | `PLAT-LINUX` | Linux x86-64 / Vulkan; mandatory first desktop | `SRC-0051` (line 51) | not_started | — |
-| platform | `PLAT-WINDOWS` | Windows x86-64 / DX12; mandatory first desktop | `SRC-0051` (line 51) | not_started | — |
-| platform | `PLAT-MACOS` | macOS arm64 / Metal; mandatory before full desktop release | `SRC-0051` (line 51) | not_started | — |
+| platform | `PLAT-LINUX` | Linux x86-64 / Vulkan; mandatory first desktop | `SRC-0051` (line 51) | not_started | Scoped 2026-11-01 launcher Home/Settings actual Xvfb/lavapipe PNG and write-error checks pass; not full-platform acceptance. See `docs/LAUNCHER_REDESIGN.md`. |
+| platform | `PLAT-WINDOWS` | Windows x86-64 / DX12; mandatory first desktop | `SRC-0051` (line 51) | not_started | Scoped 2026-11-01 normal static-CRT launcher Home/Settings/Logs/Close pass, exit 0, no security bypass; earlier native title/Options/Done/Quit proof remains separate. Not full gameplay/platform acceptance. |
+| platform | `PLAT-MACOS` | macOS arm64 / Metal; mandatory before full desktop release | `SRC-0051` (line 51) | not_started | Candidate manual workflow now includes packaged real-window GUI checks; not executed yet and not a macOS pass. |
 | hardware | `GPU-AMD-INTEL` | AMD/Intel capability baseline | `SRC-0775` (line 775) | not_started | — |
 | service | `MICROSOFT-XBOX-MINECRAFT` | Own application registration, OAuth, entitlement/profile/session join; external access gate | `SRC-0084` (line 84) | not_started | — |
 | service | `REALMS-SOCIAL-REPORTING` | Official API/access evidence; absence blocks service completeness | `SRC-0765` (line 765) | not_started | — |

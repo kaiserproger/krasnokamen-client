@@ -21,6 +21,8 @@ zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["blocking", "rustls"] }
 tar = "0.4"
 zstd = "0.13"
-eframe = { version = "=0.33.3", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+eframe = { version = "=0.33.3", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+# eframe disables backend defaults; standalone launcher builds need native APIs.
+wgpu = { version = "=27.0.1", default-features = false, features = ["dx12", "metal", "vulkan"] }
 png = "=0.18.1"
 solaris-paths = { path = "../paths" }

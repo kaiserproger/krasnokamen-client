@@ -1,5 +1,6 @@
 //! Solaris launcher: downloads the game content, then starts `solaris-client`.
 mod bootstrap;
+mod capture;
 mod config;
 mod launch;
 mod media;
@@ -35,6 +36,7 @@ Options:
   --username NAME        Offline username for --play / --autoplay
   --autoplay         Window mode: start the install/Play flow immediately
   --tab play|settings|logs   Window mode: initial tab
+  --capture-window ABS_PNG_PATH   Window mode: save one rendered frame, then exit
   --force            Re-verify every download
   --help             This text";
 
@@ -49,6 +51,7 @@ pub struct Args {
     pub autoplay: bool,
     pub force: bool,
     pub tab: Option<String>,
+    pub capture_window: Option<PathBuf>,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Args>> {
@@ -63,6 +66,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Args>> {
         autoplay: false,
         force: false,
         tab: None,
+        capture_window: None,
     };
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
@@ -73,12 +77,24 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Args>> {
             "--server" => out.server = Some(value("--server")?),
             "--username" => out.username = Some(value("--username")?),
             "--tab" => out.tab = Some(value("--tab")?),
+            "--capture-window" => out.capture_window = Some(value("--capture-window")?.into()),
             "--headless-bootstrap" => out.headless = true,
             "--singleplayer-runtime" => out.singleplayer_runtime = true,
             "--play" => out.play = true,
             "--autoplay" => out.autoplay = true,
             "--force" => out.force = true,
             other => bail!("unknown argument {other} (see --help)"),
+        }
+    }
+    if let Some(path) = &out.capture_window {
+        if !path.is_absolute() {
+            bail!(
+                "--capture-window needs an absolute PNG path: {}",
+                path.display()
+            );
+        }
+        if out.headless || out.singleplayer_runtime {
+            bail!("--capture-window requires window mode");
         }
     }
     Ok(Some(out))

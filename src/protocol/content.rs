@@ -1,8 +1,8 @@
-use super::models::shapes::{rectangles_cover, FeatureRequirements, TerrainFact};
+use super::models::shapes::{FeatureRequirements, TerrainFact, rectangles_cover};
 pub use super::models::{BakedModel, BakedQuad, ModelTransform, TintKind};
 use super::{
-    models::{Baker, JavaRandom},
     Result,
+    models::{Baker, JavaRandom},
 };
 use crate::api::{AtlasMip, AtlasPatch, RenderLayer};
 use serde_json::{Map, Value};
@@ -45,7 +45,6 @@ fn interaction_fact_versions_match(
         && interaction == INTERACTION_FACTS_VERSION
         && item_properties == ITEM_PROPERTIES_VERSION
 }
-
 
 #[derive(serde::Deserialize)]
 struct ItemDefaultsReport {
@@ -322,9 +321,7 @@ struct StatePredicates {
 fn state_predicates(bytes: &[u8], count: usize) -> Result<BTreeMap<usize, StatePredicates>> {
     let report: StatePredicatesReport<'_> = serde_json::from_slice(bytes)
         .map_err(|error| format!("invalid block state predicates: {error}"))?;
-    if report.game_version != STATE_PREDICATES_VERSION
-        || report.states.len() != count
-    {
+    if report.game_version != STATE_PREDICATES_VERSION || report.states.len() != count {
         return Err(
             "block state predicate source version or complete holder coverage mismatch".into(),
         );
@@ -764,6 +761,10 @@ fn collect_resources(
                 .rsplit_once('.')
                 .ok_or("resource extension missing")?
                 .0;
+            #[cfg(windows)]
+            let path = path.replace('\\', "/");
+            #[cfg(windows)]
+            let path = path.as_str();
             out.insert(normalize_id(&format!("{ns}:{path}"))?);
             if out.len() > max {
                 return Err("resource count bound".into());
@@ -974,9 +975,9 @@ impl Content {
     }
     fn load_mode(presentation: bool) -> Result<Self> {
         let root =
-            PathBuf::from(std::env::var("SOLARIS_CLIENT_RESOURCE_ROOT").map_err(|_| {
-                "SOLARIS_CLIENT_RESOURCE_ROOT required for verified local resources"
-            })?);
+            PathBuf::from(std::env::var("SOLARIS_CLIENT_RESOURCE_ROOT").map_err(
+                |_| "SOLARIS_CLIENT_RESOURCE_ROOT required for verified local resources",
+            )?);
         let data = PathBuf::from(
             std::env::var("SOLARIS_CLIENT_DATA_DIR")
                 .map_err(|_| "SOLARIS_CLIENT_DATA_DIR required for pinned local data")?,
@@ -2109,7 +2110,9 @@ impl Content {
     #[cfg(test)]
     pub(crate) fn insert_test_texture(&mut self, name: &str, region: TextureRegion) {
         self.textures.insert(name.to_owned(), region);
-        self.texture_materials.entry(name.to_owned()).or_insert(RenderLayer::Opaque);
+        self.texture_materials
+            .entry(name.to_owned())
+            .or_insert(RenderLayer::Opaque);
     }
     #[cfg(test)]
     pub(crate) fn insert_test_state_properties(
@@ -2209,19 +2212,28 @@ impl Content {
         self.insert_test_block_interaction(1, false);
         self.block_interactions[1].use_without_item = Arc::from("DoorBlock");
         self.block_interactions[1].hand_open = Some(true);
-        self.required_features.blocks.insert(self.names[1].clone(), Arc::from([]));
-        self.property_domains.insert(self.names[1].clone(), BTreeMap::from([
-            ("half".into(), vec!["lower".into(), "upper".into()]),
-            ("open".into(), vec!["false".into(), "true".into()]),
-        ]));
+        self.required_features
+            .blocks
+            .insert(self.names[1].clone(), Arc::from([]));
+        self.property_domains.insert(
+            self.names[1].clone(),
+            BTreeMap::from([
+                ("half".into(), vec!["lower".into(), "upper".into()]),
+                ("open".into(), vec!["false".into(), "true".into()]),
+            ]),
+        );
         for _ in 0..3 {
             self.states.push(self.states[1].clone());
             self.properties.push(BTreeMap::new());
         }
         let domains = &self.property_domains[&self.names[1]];
         let mut states = vec![u32::MAX; 4];
-        for (id, half, open) in [(1, "lower", "false"), (2, "lower", "true"),
-                                 (3, "upper", "false"), (4, "upper", "true")] {
+        for (id, half, open) in [
+            (1, "lower", "false"),
+            (2, "lower", "true"),
+            (3, "upper", "false"),
+            (4, "upper", "true"),
+        ] {
             let properties = BTreeMap::from([
                 ("half".to_owned(), half.to_owned()),
                 ("open".to_owned(), open.to_owned()),
@@ -2231,9 +2243,15 @@ impl Content {
             self.properties[id as usize] = properties;
         }
         self.block_states[1] = states;
-        self.insert_test_block_sound(1, 1., 1., BTreeMap::from([
-            ("open".into(), "test:open".into()), ("close".into(), "test:close".into()),
-        ]));
+        self.insert_test_block_sound(
+            1,
+            1.,
+            1.,
+            BTreeMap::from([
+                ("open".into(), "test:open".into()),
+                ("close".into(), "test:close".into()),
+            ]),
+        );
     }
     #[cfg(test)]
     pub(crate) fn test_cube() -> Self {
@@ -3069,6 +3087,30 @@ impl Simplex2 {
 mod tests {
     use super::*;
     #[test]
+    fn discovered_nested_resources_use_logical_paths() {
+        struct TempRoot(PathBuf);
+        impl Drop for TempRoot {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = TempRoot(
+            std::env::temp_dir().join(format!("solaris-resource-paths-{}", uuid::Uuid::new_v4())),
+        );
+        let nested = root.0.join("assets/example/textures/block/nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("stone.png"), b"fixture").unwrap();
+        let source =
+            ResourceSource::new(vec![root.0.clone()], None, ResourceLimits::default()).unwrap();
+        assert_eq!(
+            source.resource_names("textures", "png").unwrap(),
+            BTreeSet::from(["example:block/nested/stone".to_string()])
+        );
+        fs::write(nested.join("Invalid.png"), b"fixture").unwrap();
+        assert!(source.resource_names("textures", "png").is_err());
+    }
+
+    #[test]
     fn published_26_3_block_report_labels_are_accepted() {
         let mining = serde_json::json!({"version": "26.3"});
         let light = serde_json::json!({"version": "26.3"});
@@ -3089,12 +3131,13 @@ mod tests {
 
     #[test]
     fn all_published_26_3_interaction_fact_labels_are_required() {
-        assert!(interaction_fact_versions_match("26.3", "26.3", "26.3", "26.3"));
+        assert!(interaction_fact_versions_match(
+            "26.3", "26.3", "26.3", "26.3"
+        ));
         assert!(!interaction_fact_versions_match(
             "26.3", "26.1.2", "26.3", "26.3"
         ));
     }
-
 
     #[test]
     fn received_tag_order_drives_menu_indices_without_changing_membership() {
@@ -3117,27 +3160,35 @@ mod tests {
                 .unwrap(),
             &[7, 2, 9, 2]
         );
-        assert!(content
-            .registry_tag_contains("minecraft:block", "test:selection", 2)
-            .unwrap());
-        assert!(!content
-            .registry_tag_contains("minecraft:block", "test:selection", 3)
-            .unwrap());
+        assert!(
+            content
+                .registry_tag_contains("minecraft:block", "test:selection", 2)
+                .unwrap()
+        );
+        assert!(
+            !content
+                .registry_tag_contains("minecraft:block", "test:selection", 3)
+                .unwrap()
+        );
         assert_eq!(
             content
                 .registry_tag_optional("minecraft:block", "test:absent")
                 .unwrap(),
             None
         );
-        assert!(content
-            .registry_tag_optional("test:unobserved_registry", "test:absent")
-            .is_err());
-        assert!(content
-            .set_tags(BTreeMap::from([(
-                "minecraft:block".into(),
-                BTreeMap::from([("test:selection".into(), vec![10])]),
-            )]))
-            .is_err());
+        assert!(
+            content
+                .registry_tag_optional("test:unobserved_registry", "test:absent")
+                .is_err()
+        );
+        assert!(
+            content
+                .set_tags(BTreeMap::from([(
+                    "minecraft:block".into(),
+                    BTreeMap::from([("test:selection".into(), vec![10])]),
+                )]))
+                .is_err()
+        );
         assert_eq!(
             content
                 .registry_tag("minecraft:block", "test:selection")
@@ -3153,9 +3204,11 @@ mod tests {
         limits
             .check_sprite_preprocessing("test:large_sprite", 780 * 608 * 4, 7_364_236, 268_173_312)
             .unwrap();
-        assert!(limits
-            .check_sprite_preprocessing("test:oversized", usize::MAX, 0, 0)
-            .is_err());
+        assert!(
+            limits
+                .check_sprite_preprocessing("test:oversized", usize::MAX, 0, 0)
+                .is_err()
+        );
     }
 
     #[test]

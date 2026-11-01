@@ -1,6 +1,7 @@
 //! Native Soft Minimal launcher. Game installation/launch remain on the existing paths.
 use crate::{
     Args, bootstrap,
+    capture::WindowCapture,
     config::{self, ClientSettings, Config, Profile, Server},
     launch,
     media::{self, MediaCache},
@@ -16,7 +17,9 @@ use eframe::egui::{
     Stroke, StrokeKind, Vec2,
 };
 use std::{
+    cell::RefCell,
     process::Child,
+    rc::Rc,
     sync::{Arc, mpsc},
 };
 
@@ -96,10 +99,15 @@ struct App {
     custom_json: String,
     transfer_path: String,
     dialog_error: Option<String>,
+    capture: Option<Rc<RefCell<WindowCapture>>>,
 }
 
 pub fn run(args: Args, layout: Layout) -> Result<()> {
     let mut app = App::new(layout);
+    let capture = args
+        .capture_window
+        .map(|path| Rc::new(RefCell::new(WindowCapture::new(path))));
+    app.capture = capture.clone();
     if let Some(url) = args.manifest {
         app.manifest = url;
     }
@@ -139,7 +147,11 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
             Ok(Box::new(app))
         }),
     )
-    .map_err(|e| anyhow::anyhow!("window error: {e}"))
+    .map_err(|e| anyhow::anyhow!("window error: {e}"))?;
+    if let Some(capture) = capture {
+        capture.borrow_mut().finish()?;
+    }
+    Ok(())
 }
 
 fn load_icon() -> Option<egui::IconData> {
@@ -244,6 +256,7 @@ impl App {
             custom_json: String::new(),
             transfer_path: String::new(),
             dialog_error: None,
+            capture: None,
         }
     }
     fn busy(&self) -> bool {
@@ -1483,12 +1496,15 @@ impl eframe::App for App {
             }
         }
         self.draw(ctx);
+        if let Some(capture) = &self.capture {
+            capture.borrow_mut().update(ctx);
+        }
         // Existing process/progress observation cadence, only while work is active.
         if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn on_exit(&mut self) {
         self.save_config();
         if matches!(self.phase, Phase::Installing { .. }) {
             self.rep.cancel();

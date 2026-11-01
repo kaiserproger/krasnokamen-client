@@ -31,6 +31,24 @@ strict-lint result and no warnings were suppressed. Exact output and the
 changed-range classification are in `.analysis/parity-polish/clippy-final.jsonl`
 and `.analysis/parity-polish/clippy-summary.json`.
 
+Windows resource-path checkpoint (2026-11-01, base `b73105c`): cross-target
+release Clippy still reports **423 library / 448 library-test errors**. The
+baseline and corrected tree have identical multisets of diagnostic message and
+primary source path (453 parsed spans, zero additions or removals). Neither
+the resource separator conversion nor its filesystem regression has a
+diagnostic. Receipts: `.analysis/breaker-windows/clippy-{baseline,current}.log`
+and `.analysis/breaker-windows/clippy-comparison.json`. This remains quarantined
+strict-lint debt, not a green Clippy result.
+
+## CLIENT-FMT-001 — whole-workspace formatting debt (open)
+
+The 2026-11-01 `cargo fmt --all -- --check` run failed with formatting
+differences in unchanged client and launcher files. No broad restyle was applied.
+The changed launcher capture/main/UI files and the Windows content-path file
+pass the targeted Rust 2024 formatter check. This does not turn the workspace
+formatter gate green. Raw output is retained locally at
+`.analysis/breaker-windows/whole-workspace-fmt.log`.
+
 ## CLIENT-TEST-001 — historical graphics-preset assertion (superseded)
 
 The earlier `65a7f76` receipt recorded

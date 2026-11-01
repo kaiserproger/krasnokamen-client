@@ -3,9 +3,10 @@
 ## Scope
 
 This change redesigns the **launcher**, not the game's renderer or gameplay UI.
-It retains the Rust/eframe 0.33.3 native OpenGL shell and existing content
-bootstrap, download verification and client-process launch paths. It introduces
-no additional dependencies, Microsoft authentication, web engine or image service.
+It uses the Rust/eframe 0.33.3 native wgpu shell with explicit Vulkan, Direct3D 12
+and Metal backend features, including standalone launcher builds. Existing
+content bootstrap, download verification and client-process launch paths remain.
+There is no Microsoft authentication, web engine or image service.
 The client remains an offline/test-identity preview, not full vanilla parity.
 
 ## Interface
@@ -106,6 +107,27 @@ git diff --check
 ```
 
 These are launcher-scoped checks, not a full-workspace gameplay or release gate.
+
+### 2026-11-01 renderer/runtime checkpoint
+
+The launcher no longer requires the VM's unavailable OpenGL implementation.
+The cumulative static-CRT Windows binary opened the normal Home window,
+navigated Settings and Logs, and closed normally with exit 0. No redistributable,
+execution-policy override, file unblocking or security-setting change was used.
+Local evidence is under `targets/qa-windows-launcher/` in the shared work area.
+
+The opt-in `--capture-window ABS_PNG_PATH` requests the normal painter's
+`egui::Event::Screenshot`, writes PNG and exits through the usual lifecycle.
+Home/Settings actual-window captures passed under isolated Linux Xvfb/lavapipe;
+an unwritable PNG destination returned exit 1. The 90 launcher tests and strict
+launcher Clippy passed. An egui-wgpu backend failure can log without emitting a
+screenshot event; bounded external runtime gates fail rather than declaring a
+missing image successful. `EFRAME_SCREENSHOT_TO` is not supported by wgpu.
+
+The manual macOS workflow now exercises the extracted app and retains curated
+own-window evidence. Its runtime result remains pending until that candidate
+actually executes; compilation, a descriptor or Linux captures are not macOS
+proof. Unrelated whole-workspace formatting/lint debt is not declared green.
 
 ## Remaining acceptance and known limitations
 
