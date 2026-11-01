@@ -775,6 +775,15 @@ impl App {
             (1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.),
         )?;
         let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.;
+        // GPU completion alone can still capture transparent entering controls
+        // over the outgoing screen. Existing redraws advance the UI owner clock.
+        let capture = match capture {
+            Some(request) if self.session.ui.as_ref().is_some_and(|ui| ui.animating()) => {
+                self.pending_capture = Some(request);
+                None
+            }
+            other => other,
+        };
         if let Some(renderer) = &mut self.renderer {
             let mut shared = self
                 .shared

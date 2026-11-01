@@ -40,6 +40,16 @@ diagnostic. Receipts: `.analysis/breaker-windows/clippy-{baseline,current}.log`
 and `.analysis/breaker-windows/clippy-comparison.json`. This remains quarantined
 strict-lint debt, not a green Clippy result.
 
+## CLIENT-CAPTURE-001 — screen-transition capture ordering
+
+The first packaged macOS 14.8.9 ARM64/Metal [CI run](https://github.com/kaiserproger/solaris-client/actions/runs/41287142010)
+was green, but visual review rejected `native-options.png`: Done and most controls
+were still transparent over the outgoing Title. The old capture path admitted the
+first GPU-completed transition frame without consulting `UiState::animating()`.
+The draw owner now retains that request through its existing animation redraws,
+without sleeps, retries or disabling animations. Runtime execution and actual
+visual acceptance remain separate; the rejected image is retained as evidence.
+
 ## CLIENT-FMT-001 — whole-workspace formatting debt (open)
 
 The 2026-11-01 `cargo fmt --all -- --check` run failed with formatting

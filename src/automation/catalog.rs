@@ -26,7 +26,7 @@ pub(super) fn tools() -> &'static Vec<Value> {
         }
         tools.push(serde_json::json!({
             "name":"client_capture",
-            "description":"Capture the real GPU scene target to a PNG artifact.",
+            "description":"Capture the real GPU scene target after active UI animations settle, to a PNG artifact.",
             "inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":100}},"required":["name"],"additionalProperties":false},
             "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
         }));

@@ -124,10 +124,15 @@ launcher Clippy passed. An egui-wgpu backend failure can log without emitting a
 screenshot event; bounded external runtime gates fail rather than declaring a
 missing image successful. `EFRAME_SCREENSHOT_TO` is not supported by wgpu.
 
-The manual macOS workflow now exercises the extracted app and retains curated
-own-window evidence. Its runtime result remains pending until that candidate
-actually executes; compilation, a descriptor or Linux captures are not macOS
-proof. Unrelated whole-workspace formatting/lint debt is not declared green.
+The manual macOS workflow executed the extracted app on macOS 14.8.9 ARM64 with
+the Apple Paravirtual Metal device ([run](https://github.com/kaiserproger/solaris-client/actions/runs/41287142010)).
+Its first Options capture was rejected despite green CI: it caught entering
+controls over the outgoing Title. The pending capture now stays with the native
+owner while `UiState::animating()` is true; ordinary redraws produce the settled
+UI before GPU capture. There is no sleep, retry, second animation clock or disabled
+animation. Curated images still require visual review; compilation, metadata or
+Linux captures never substitute for macOS proof. Unrelated whole-workspace
+formatting/lint debt is not declared green.
 
 ## Remaining acceptance and known limitations
 

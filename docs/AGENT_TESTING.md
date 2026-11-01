@@ -146,6 +146,14 @@ Same-instance `mcp attach --instance <ID> --stdio` is also implemented. `fixture
 
 Native capture uses the same textured indexed depth target, grass biome tint/alpha overlay and HUD rendered to the actual window, with GPU mapping to PNG. Metadata separates `present_requested` from `display_scanout_verified=false`. The HUD displays selected slot, numeric item ID and count; it is **not full vanilla UI parity**. Fresh exact-instance capabilities and receipts remain authoritative.
 
+For native window captures, the pending request remains with the draw owner while
+the existing UI animation owner is active. The same redraw loop advances enter,
+exit, hover and value easing and emits its final settled overlay before capture.
+GPU completion by itself does not establish that UI controls have appeared:
+the first 2026-11-01 macOS Options image was rejected on that distinction.
+Review the actual PNG; frame metadata and a green execution gate are not visual
+acceptance or physical-scanout proof.
+
 `minecraft_press_inputs` accepts `hold: true` or `hold: false` with `keys` and
 `ticks: 1` to press or release controller-owned inputs across MCP calls; controller
 revocation still releases them. For example, hold `key.keyboard.tab`, capture

@@ -38,9 +38,13 @@ advancement. The wgpu launcher passed actual isolated Linux Home/Settings
 captures and a PNG write-error path; its normal static-CRT Windows executable
 opened Home, accepted Settings/Logs navigation and closed with exit 0 without
 security changes. The 90 launcher tests and package-strict Clippy passed.
-The current macOS manual-candidate runtime gate has not executed yet; its source
-does not establish a platform pass. Broader gameplay, platform acceptance and
-the sole P0 cursor remain unchanged. See `docs/LAUNCHER_REDESIGN.md`.
+The macOS manual candidate also executed on macOS 14.8.9/ARM64/Metal
+([run](https://github.com/kaiserproger/solaris-client/actions/runs/41287142010)).
+Its first Options frame was visually rejected: GPU completion had caught the
+enter/exit animation before all controls appeared. Capture eligibility now uses
+the existing UI animation owner, not a sleep or repeated MCP requests.
+Broader gameplay, platform acceptance and the sole P0 cursor remain unchanged.
+See `docs/LAUNCHER_REDESIGN.md`.
 
 ## Gate and evidence policy
 
