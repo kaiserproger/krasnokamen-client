@@ -113,8 +113,8 @@ backwards. Completions are cleared when disconnecting from a server.
 
 ## Troubleshooting
 
-- **No window / "Failed to create wgpu adapter" / black window.** The client needs Vulkan on Linux/Windows and uses Metal on macOS. Check `vulkaninfo --summary` on Linux; install your GPU's Vulkan driver (Linux: `mesa-vulkan-drivers`, or NVIDIA's proprietary driver). On Windows update the GPU driver. `WGPU_BACKEND=gl` selects the OpenGL fallback if Vulkan is broken. Set it in your shell, then start the launcher from that shell.
-- **Launcher window does not open or is garbled.** It needs OpenGL 3.3 on Linux/Windows (`LIBGL_ALWAYS_SOFTWARE=1 ./solaris-launcher` forces Mesa software rendering). Check `glxinfo -B`.
+- **No window / wgpu adapter failure / black window.** Both programs use Vulkan on Linux, Direct3D 12 or Vulkan on Windows, and Metal on macOS. Check `vulkaninfo --summary` and the installed Vulkan driver on Linux (`mesa-vulkan-drivers`, or NVIDIA's driver); update the GPU driver on Windows. Keep the reported adapter/surface error when reporting a failure.
+- **Launcher window does not open or is garbled.** A standalone launcher build enables Vulkan/Direct3D 12/Metal, not GLES. Start it from a terminal and check its wgpu error; `WGPU_BACKEND=gl`, `LIBGL_ALWAYS_SOFTWARE` and `glxinfo` are not a standalone launcher-renderer solution. Linux software testing uses Mesa lavapipe's Vulkan ICD.
 - **Wayland vs X11 (Linux).** Both work. If a window is missing, scaled wrongly or has no input under Wayland, force X11 with `WAYLAND_DISPLAY= WINIT_UNIX_BACKEND=x11 ./solaris-launcher`; to force Wayland unset `DISPLAY`. The game inherits the launcher's environment.
 - **macOS says Solaris.app cannot be opened.** The app is ad-hoc signed but not notarized. Control-click it, choose **Open**, and confirm; or run `xattr -dr com.apple.quarantine /path/to/Solaris.app` after verifying the download.
 - **Download fails / stalls.** Press PLAY again: it resumes. Behind a proxy set `HTTPS_PROXY`/`HTTP_PROXY` (also used for the Solaris data download over plain HTTP). **Verify / repair** re-checks every file. The full log is in the Logs tab and `logs/launcher.log`.
@@ -142,7 +142,7 @@ solaris-client --help
 cargo build --release          # builds solaris-client and solaris-launcher into target/release/
 ```
 
-`rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses OpenGL/X11/Wayland on Linux and the system graphics stack on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
+`rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses wgpu with Vulkan/X11/Wayland on Linux, Direct3D 12 or Vulkan on Windows, and Metal on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
 
 Resource discovery converts Windows filesystem separators to `/` in Minecraft resource IDs; resource ID validation remains platform-independent.
 
