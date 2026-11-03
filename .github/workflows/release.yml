@@ -12,7 +12,7 @@ env:
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
   # `local_addr` listening-line change the singleplayer port discovery relies on.
-  SOLARIS_REVISION: 41498d761aa34411cb845ec8111fe6d4ffad5d45
+  SOLARIS_REVISION: b70474d01c9b5843db4cdad6a89a6fdd110994c3
   SOLARIS_PLUGINS_REVISION: d2f3022f03ebdb20228797bd22e9b17affb6338c
 
 permissions:
@@ -108,8 +108,7 @@ jobs:
           repository: ${{ github.repository_owner }}/solaris-default-plugins
           ref: ${{ env.SOLARIS_PLUGINS_REVISION }}
           path: solaris-default-plugins
-      # Current core declares Rust 1.99 in Cargo.toml and rust-toolchain.toml.
-      # Reconcile this install with the final pinned core before rc.4 dispatch.
+      # The pinned core declares Rust 1.99 in Cargo.toml and rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.99
         with:
           targets: ${{ matrix.rust_target }}
