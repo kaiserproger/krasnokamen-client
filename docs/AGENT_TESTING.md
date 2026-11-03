@@ -4,6 +4,17 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### Server resource-pack offers
+
+The client does not install server-provided packs. It declines each offer by
+UUID in Configuration or Play and leaves the server to enforce required packs;
+the server's disconnect reason is displayed normally. The focused
+`session::packets::tests::resource_pack_push_declined_in_both_phases` test checks
+both response packets and subsequent packet handling. The ignored
+`resource_pack_live_optional_join` test requires pinned local client content and
+`SOLARIS_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
+optional pack; it waits for the real headless session to reach a ready world.
+
 ### Death-screen respawn and controller leases
 
 Clicking the exact `DeathScreen` `Respawn` button through

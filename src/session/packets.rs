@@ -93,7 +93,7 @@ impl Session {
                     r.done()?;
                     *self.ignored_presentation.entry(id).or_default() += 1;
                 }
-                configuration::clientbound::RESOURCE_PACK_PUSH => return Err("server resource-pack activation unsupported; refusing ambiguous mandatory content".into()),
+                configuration::clientbound::RESOURCE_PACK_PUSH => self.decline_resource_pack(&mut r, configuration::serverbound::RESOURCE_PACK)?,
                 configuration::clientbound::TRANSFER => return Err("server transfer unsupported".into()),
                 configuration::clientbound::SHOW_DIALOG | configuration::clientbound::CODE_OF_CONDUCT => return Err("configuration dialog/code-of-conduct requires unsupported human UI".into()),
                 _ => return Err(format!("unknown mandatory Configuration packet {id}")),
@@ -101,6 +101,17 @@ impl Session {
             Phase::Play => self.play(id, &mut r)?,
         }
         Ok(())
+    }
+    fn decline_resource_pack(&self, r: &mut Reader<'_>, response_id: i32) -> Result<()> {
+        let mut response = Writer(r.take(16)?.to_vec());
+        r.string(32767)?;
+        r.string(40)?;
+        r.bool()?;
+        if r.bool()? { r.nbt()?; }
+        r.done()?;
+        // ResourcePackAction::Declined, as defined by mc-protocol.
+        response.var(1);
+        self.send(response_id, response)
     }
     fn custom_payload(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let channel = r.string(32767)?;
@@ -601,7 +612,7 @@ impl Session {
                     audio.stop();
                 }
             }
-            cb::RESOURCE_PACK_PUSH => return Err("Play resource-pack activation unsupported".into()),
+            cb::RESOURCE_PACK_PUSH => self.decline_resource_pack(r, sb::RESOURCE_PACK)?,
             cb::TRANSFER => return Err("server transfer unsupported".into()),
             cb::COOKIE_REQUEST => {
                 let key = r.string(32767)?;
@@ -886,6 +897,104 @@ fn chunk_key(p: [i32; 3]) -> [i32; 2] {
 mod tests {
     use super::*;
     use crate::protocol::world::{Palette, Section, SurfaceHeightmap};
+
+    #[test]
+    fn resource_pack_push_declined_in_both_phases() {
+        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, sync::mpsc, thread};
+        fn packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
+            let mut header = Vec::new();
+            loop {
+                let mut byte = [0];
+                socket.read_exact(&mut byte).unwrap();
+                header.push(byte[0]);
+                if byte[0] & 128 == 0 { break; }
+            }
+            let mut body = vec![0; Reader::new(&header).count(1024).unwrap()];
+            socket.read_exact(&mut body).unwrap();
+            let mut r = Reader::new(&body);
+            let id = r.var().unwrap();
+            (id, body[r.offset..].to_vec())
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready, wait_ready) = mpsc::channel();
+        let (finish, wait_finish) = mpsc::channel();
+        let peer = thread::spawn(move || {
+            let (mut login, _) = listener.accept().unwrap();
+            let (mut status, _) = listener.accept().unwrap();
+            login.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            packet(&mut status);
+            packet(&mut status);
+            let mut response = Writer::default();
+            response.string(r#"{"version":{"protocol":777}}"#);
+            status.write_all(&protocol::frame(0, &response.0, None).unwrap()).unwrap();
+            packet(&mut login);
+            packet(&mut login);
+            ready.send(()).unwrap();
+            let uuid: Vec<u8> = (0..16).collect();
+            for id in [configuration::serverbound::RESOURCE_PACK, sb::RESOURCE_PACK] {
+                let (received_id, body) = packet(&mut login);
+                assert_eq!(received_id, id);
+                let mut expected = uuid.clone();
+                expected.push(1); // ResourcePackAction::Declined
+                assert_eq!(body, expected);
+                ready.send(()).unwrap();
+            }
+            wait_finish.recv().unwrap();
+        });
+        let mut session = Session::new_mode("pack-test".into(), false);
+        session.content = Some(Content::test_cube());
+        session.network = Some(Network::connect(address.to_string(), "PackTest".into(), 8, Arc::new(|| {})).unwrap());
+        wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut push = Writer((0..16).collect());
+        push.string("https://example.invalid/pack.zip");
+        push.string("");
+        push.byte(0); // optional
+        push.byte(0); // no prompt
+        for (phase, id) in [
+            (Phase::Configuration, configuration::clientbound::RESOURCE_PACK_PUSH),
+            (Phase::Play, cb::RESOURCE_PACK_PUSH),
+        ] {
+            session.apply(phase, id, &push.0).unwrap();
+            wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
+            // A later packet is still processed, not a local disconnect.
+            let mut ping = Writer::default();
+            ping.i32(123);
+            session.apply(phase, if phase == Phase::Configuration {
+                configuration::clientbound::PING
+            } else {
+                cb::PING
+            }, &ping.0).unwrap();
+            assert!(session.error.is_none());
+        }
+        finish.send(()).unwrap();
+        peer.join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires an optional-pack loopback server and pinned local client content"]
+    fn resource_pack_live_optional_join() {
+        use std::{thread, time::Instant};
+        let address = std::env::var("SOLARIS_PACK_SMOKE_SERVER").unwrap();
+        assert!(address.parse::<std::net::SocketAddr>().unwrap().ip().is_loopback());
+        let mut session = Session::new_mode("pack-live".into(), false);
+        let owner = thread::current();
+        session.set_wake(Arc::new(move || owner.unpark()));
+        session.connect(&address, "PackTest").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(180);
+        loop {
+            session.process_events();
+            assert!(session.error.is_none(), "{:?}", session.error);
+            if session.phase == "play" && session.play_world_presentation_ready() {
+                assert!(session.packet_counts.get(&configuration::clientbound::RESOURCE_PACK_PUSH).copied().unwrap_or(0) > 0);
+                eprintln!("optional_pack_seen=true play_world_ready=true");
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(!remaining.is_zero(), "live join deadline: {}", session.phase);
+            thread::park_timeout(remaining);
+        }
+    }
 
     #[test]
     fn disconnect_packet_context_keeps_component_readable() {
