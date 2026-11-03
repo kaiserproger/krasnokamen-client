@@ -17,8 +17,20 @@ pub(super) struct UsingItem {
     pub slot_identity: u64,
     pub duration: i32,
     pub remaining: i32,
+    pub crossbow_charge_ticks: f32,
+    pub crossbow_components: Option<Arc<BTreeMap<String, Value>>>,
     pub movement_factor: f32,
     pub can_sprint: bool,
+}
+
+impl UsingItem {
+    pub(super) fn crossbow_pull(&self, partial: f32) -> f32 {
+        if self.crossbow_charge_ticks > 0. {
+            ((self.duration - self.remaining) as f32 + partial) / self.crossbow_charge_ticks
+        } else {
+            0.
+        }
+    }
 }
 
 impl Player {
@@ -1060,6 +1072,11 @@ impl Player {
             return Ok(());
         };
         let duration = self.use_duration(item, content)?;
+        let crossbow_charge_ticks = if content.item_names.get(&item.id).map(String::as_str) == Some("minecraft:crossbow") {
+            self.crossbow_charge_ticks(item, content)?
+        } else {
+            0.
+        };
         let effects = item.component("minecraft:use_effects");
         self.using = Some(UsingItem {
             hand,
@@ -1071,6 +1088,8 @@ impl Player {
             })?,
             duration,
             remaining: duration,
+            crossbow_charge_ticks,
+            crossbow_components: (crossbow_charge_ticks > 0.).then(|| Arc::clone(&item.components)),
             movement_factor: effects
                 .and_then(|value| value.get("speed_multiplier"))
                 .and_then(Value::as_f64)
@@ -1227,7 +1246,8 @@ mod tests {
         ]));
         player.pose_known = true;
         player.using = Some(UsingItem { hand: 0, item_id: 1, slot_identity: 0,
-            duration: 32, remaining: 4, movement_factor: 1., can_sprint: true });
+            duration: 32, remaining: 4, crossbow_charge_ticks: 0., crossbow_components: None,
+            movement_factor: 1., can_sprint: true });
         let mut packets = Vec::new();
         player.tick(&world, &content, &inventory, &entities,
             &BTreeSet::from(["use".into()]), 1, &mut packets).unwrap();

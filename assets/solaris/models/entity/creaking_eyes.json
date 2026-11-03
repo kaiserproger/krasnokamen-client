@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "id": "creaking_eyes",
+  "texture": {
+    "path": "entity/creaking/creaking_eyes.png",
+    "size": [
+      64,
+      64
+    ]
+  },
+  "roles": {
+    "head": [
+      "head"
+    ]
+  },
+  "bones": [
+    {
+      "name": "head",
+      "pivot": [
+        0,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -3,
+            -10,
+            -3.025
+          ],
+          "size": [
+            6,
+            10,
+            0
+          ],
+          "faces": {
+            "up": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "down": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "right": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "front": [
+              6,
+              6,
+              12,
+              16
+            ],
+            "left": [
+              0,
+              0,
+              1,
+              1
+            ],
+            "back": [
+              0,
+              0,
+              1,
+              1
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

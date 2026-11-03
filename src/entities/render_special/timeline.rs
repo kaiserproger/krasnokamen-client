@@ -33,7 +33,6 @@ pub(crate) struct State {
     pub discarded: bool,
     fang_started: bool,
     fang_life: i32,
-    pub bob_offset: f32,
     pub crystal_offset: i32,
 }
 #[derive(Default)]
@@ -61,11 +60,9 @@ impl State {
         } else {
             (0, 0)
         };
-        let bob_offset = if matches!(kind, Kind::Item) {
-            random.borrow_mut().next_float() * std::f32::consts::TAU
-        } else {
-            0.
-        };
+        if matches!(kind, Kind::Item) {
+            random.borrow_mut().next_float();
+        }
         let crystal_offset = if matches!(kind, Kind::Crystal) {
             random.borrow_mut().next_int(100000) as i32
         } else {
@@ -89,7 +86,6 @@ impl State {
             discarded: false,
             fang_started: false,
             fang_life: 22,
-            bob_offset,
             crystal_offset,
         }
     }

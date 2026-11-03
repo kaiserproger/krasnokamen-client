@@ -1,7 +1,7 @@
 //! Source-specific nonliving presentation. Shared mesh emission and item baking have one owner.
 mod display_snapshot;
+pub(super) mod item_frame;
 mod items;
-mod frame;
 mod kernels;
 mod painting;
 mod projectiles;
@@ -53,10 +53,41 @@ pub(crate) struct Cache {
     models: BTreeMap<String, BakedModel>,
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
+    clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
 }
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
         self.text.remove(&handle);
+        self.clock_needles.remove(&handle);
+    }
+    pub(super) fn clock_context(
+        &mut self,
+        entity: &Entity,
+        stack: Option<&Stack>,
+        content: &Content,
+        position: [f64; 3],
+        environment: Option<super::ClockEnvironment<'_>>,
+    ) -> Result<Option<ItemContext>> {
+        let is_clock = stack.is_some_and(|stack| {
+            !stack.empty()
+                && crate::ui::items::item_model_id(content, stack)
+                    .is_some_and(|id| crate::ui::items::item_model_location(id) == ("minecraft", "clock"))
+        });
+        let Some((base, time_at)) = environment.filter(|_| is_clock) else {
+            self.clock_needles.remove(&entity.handle);
+            return Ok(None);
+        };
+        let Some(mut world) = base.world.clone() else {
+            return Ok(None);
+        };
+        let (sun_angle, moon_phase) = time_at(position)?;
+        world.position = position;
+        world.sun_angle = sun_angle;
+        world.moon_phase = moon_phase;
+        world.needles = self.clock_needles.entry(entity.handle).or_default().clone();
+        let mut context = base.clone();
+        context.world = Some(world);
+        Ok(Some(context))
     }
     fn model<'a>(&'a mut self, content: &Content, name: &str) -> Result<&'a BakedModel> {
         if !self.models.contains_key(name) {
@@ -111,6 +142,7 @@ pub(crate) fn append(
     origin: [f64; 3],
     tick: u64,
     partial: f32,
+    clock_context: Option<&ItemContext>,
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
@@ -131,8 +163,8 @@ pub(crate) fn append(
             dimensions, scale, light_source)? else {
             return Ok(Handled::PendingLighting);
         };
-        frame::append(entity, models, &mut store.special_render_cache,
-            &mut store.items, content, origin, tick, partial, light, out)
+        item_frame::append(entity, models, &mut store.special_render_cache,
+            &mut store.items, content, origin, tick, partial, clock_context, light, out)
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);
@@ -142,3 +174,4 @@ pub(crate) fn append(
     }
     result
 }
+pub(super) use items::observed_stack;

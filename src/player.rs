@@ -203,7 +203,6 @@ pub struct Player {
     pub pose_known: bool,
     pub pose: Pose,
     pub entity_id: i32,
-    sound_entity_generation: Option<u64>,
     pub game_mode: u8,
     pub health: Option<f32>,
     pub food: Option<i32>,
@@ -298,7 +297,6 @@ impl Default for Player {
             pose_known: false,
             pose: Pose::Standing,
             entity_id: 0,
-            sound_entity_generation: None,
             game_mode: 0,
             health: None,
             food: None,
@@ -396,14 +394,6 @@ impl Player {
     }
     pub fn new() -> Self {
         Self::default()
-    }
-    pub(crate) fn bind_sound_entity(&mut self, entity_id: i32, generation: u64) {
-        self.entity_id = entity_id;
-        self.sound_entity_generation = Some(generation);
-    }
-    pub fn sound_entity_generation(&self) -> Result<u64> {
-        self.sound_entity_generation
-            .ok_or_else(|| "local sound entity lifetime is unbound".into())
     }
     pub fn set_enabled_features(&mut self, features: Arc<BTreeSet<String>>) {
         self.enabled_features = features;

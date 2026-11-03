@@ -877,7 +877,7 @@ impl Prediction<'_> {
                 stack = self.slot(index)?.clone();
                 if self.cursor.empty() {
                     if self.may_pickup(index)? {
-                        let n = if button == 0 {
+                        let n = if button == 0 || self.menu.kind.virtual_result(index) {
                             stack.count
                         } else {
                             (stack.count + 1) / 2

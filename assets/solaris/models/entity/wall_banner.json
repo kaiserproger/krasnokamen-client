@@ -1,18 +1,59 @@
 {
   "schema": 1,
   "id": "wall_banner",
-  "texture": {"path": "entity/banner/banner_base.png", "size": [64, 64]},
+  "texture": {
+    "path": "entity/banner/banner_base.png",
+    "size": [
+      64,
+      64
+    ]
+  },
   "bones": [
     {
-      "name": "bar", "pivot": [0, 0, 0],
+      "name": "bar",
       "cubes": [
-        {"origin": [-10, -18, -1], "size": [20, 2, 2], "uv": [0, 42]}
+        {
+          "origin": [
+            -11,
+            -23,
+            10
+          ],
+          "size": [
+            22,
+            2,
+            2
+          ],
+          "uv": [
+            0,
+            42
+          ]
+        }
       ]
     },
     {
-      "name": "flag", "pivot": [0, -16, 0],
+      "name": "flag",
+      "pivot": [
+        0,
+        -21,
+        11
+      ],
       "cubes": [
-        {"origin": [-10, 0, -0.5], "size": [20, 39, 1], "uv": [0, 1]}
+        {
+          "origin": [
+            -10,
+            0,
+            -0.5
+          ],
+          "size": [
+            20,
+            40,
+            1
+          ],
+          "uv": [
+            0,
+            0
+          ]
+        }
       ]
     }
   ]

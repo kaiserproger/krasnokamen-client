@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "id": "armor_baby_zombie_feet",
+  "texture": {
+    "path": "entity/equipment/humanoid_baby/iron.png",
+    "size": [
+      64,
+      64
+    ]
+  },
+  "roles": {
+    "right_leg": [
+      "right_leg"
+    ],
+    "left_leg": [
+      "left_leg"
+    ]
+  },
+  "bones": [
+    {
+      "name": "right_leg",
+      "pivot": [
+        -1.5,
+        18,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -1.5,
+            3.0,
+            -1.5
+          ],
+          "size": [
+            3,
+            3.0,
+            3
+          ],
+          "uv": [
+            0,
+            25
+          ],
+          "inflate": 1.0,
+          "faces": {
+            "up": [
+              3,
+              25,
+              6,
+              28
+            ],
+            "down": [
+              6,
+              25,
+              9,
+              28
+            ],
+            "right": [
+              0,
+              28,
+              3,
+              33
+            ],
+            "front": [
+              3,
+              28,
+              6,
+              33
+            ],
+            "left": [
+              6,
+              28,
+              9,
+              33
+            ],
+            "back": [
+              9,
+              28,
+              12,
+              33
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "left_leg",
+      "pivot": [
+        1.5,
+        18,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -1.5,
+            3.0,
+            -1.5
+          ],
+          "size": [
+            3,
+            3.0,
+            3
+          ],
+          "uv": [
+            0,
+            25
+          ],
+          "inflate": 1.0,
+          "faces": {
+            "up": [
+              3,
+              25,
+              6,
+              28
+            ],
+            "down": [
+              6,
+              25,
+              9,
+              28
+            ],
+            "right": [
+              0,
+              28,
+              3,
+              33
+            ],
+            "front": [
+              3,
+              28,
+              6,
+              33
+            ],
+            "left": [
+              6,
+              28,
+              9,
+              33
+            ],
+            "back": [
+              9,
+              28,
+              12,
+              33
+            ]
+          },
+          "mirror": true
+        }
+      ]
+    }
+  ]
+}

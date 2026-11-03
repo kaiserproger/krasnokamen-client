@@ -119,6 +119,32 @@ shapes rather than viewing through walls. Remote living models use interpolated
 motion for walking limbs, body/head turns and hurt flashes; this does not claim
 complete special-pose or entity-family parity.
 
+First-person crossbow draw models use the active hand's use time and the
+held stack's enchantment-modified charge duration. This does not establish
+full animation or resource-pack parity.
+
+Local-player clock and compass item models use the received world context in the
+hotbar and first-person hand. Clock models also use world time in item frames
+and dropped items; framed day/night changes were exercised in a native scene.
+The server currently sends the player's join position as the default spawn,
+so an ordinary compass can point to the wrong place. Dynamic compass context
+for dropped items and item frames remains unverified.
+
+Opening a populated lectern uses the verified book background instead of
+disconnecting on a missing container texture. A native scene exercised the
+menu and received book stack, but page text rendering remains unimplemented.
+
+While using a spyglass in first person, the view zooms, hides the held model,
+and displays the activated scope texture with dark outer bars; releasing it
+restores the ordinary view. A windowed native-client scene exercised sustained
+use and release with a received spyglass. This is not a matched vanilla
+comparison or a claim of exact FOV, texture, animation, or resource-pack parity.
+
+Goat-horn use submits the instrument's sound from the local player using its
+configured event and range; the source follows the player's position and stops
+on connection or dimension changes. Submission does not prove physical audio
+audibility.
+
 Entity nameplates use received custom-name metadata and player profile names,
 including scoreboard team formatting and visibility. Ordinary named entities
 show their label when targeted or when `CustomNameVisible` is set; armor stands
@@ -206,12 +232,22 @@ changing look/movement. MCP exposes `minecraft.player.hurt_tilt_deg`,
 Containers (chest, furnace, crafting table, enchanting, anvil, …), recipe
 book, and creative inventory work with mouse (click / shift-click /
 right-click split / drag-distribute) plus hotbar number keys.
+Using an item frame or glow item frame on a supporting block sends the ordinary
+use action to the server. The client predicts the held-stack change for a valid
+placement; the server creates the frame and remains authoritative.
 
 Received worn armor on players, zombie/skeleton families and piglins uses the
 activated per-slot humanoid armor models and equipment textures, including baby
 models/textures, leather dye (including black), and the existing enchantment
 glint pass. Armor-stand/small-stand equipment remains supported. Armor trims are
 not rendered: their generated palette atlas/decal pass is not activated.
+
+Item stacks with enchantments, or an explicit enchantment glint override, use
+the activated item-glint texture in inventory, hotbar and first-person item
+geometry; an explicit false override suppresses it. The same item-material
+path is used for ordinary held and displayed entities. This implementation has
+not yet been verified in a real client; special item geometry using other
+entity materials does not currently receive this item glint.
 
 Advancements (Esc → Advancements) groups received rows under displayed root
 tabs (including story, nether, end, adventure and husbandry when sent by the

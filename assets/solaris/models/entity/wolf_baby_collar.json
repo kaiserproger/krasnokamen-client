@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "id": "wolf_baby_collar",
+  "texture": {
+    "path": "entity/wolf/wolf_collar_baby.png",
+    "size": [
+      32,
+      32
+    ]
+  },
+  "roles": {},
+  "bones": [
+    {
+      "name": "body",
+      "pivot": [
+        0,
+        18,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -3,
+            0,
+            -3
+          ],
+          "size": [
+            6,
+            4,
+            7
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "faces": {
+            "up": [
+              8,
+              0,
+              14,
+              8
+            ],
+            "down": [
+              14,
+              0,
+              20,
+              8
+            ],
+            "right": [
+              0,
+              8,
+              8,
+              12
+            ],
+            "front": [
+              8,
+              8,
+              14,
+              12
+            ],
+            "left": [
+              14,
+              8,
+              22,
+              12
+            ],
+            "back": [
+              22,
+              8,
+              28,
+              12
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

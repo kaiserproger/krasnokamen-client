@@ -190,7 +190,6 @@ pub(crate) struct BlockAnimation {
 pub(crate) struct SignalState {
     pub jukebox_elapsed: Option<i64>,
     pub jukebox_duration: Option<i64>,
-    pub comparator_output: i32,
     pub test_powered: bool,
 }
 #[derive(Default, Debug)]
@@ -446,20 +445,11 @@ impl BlockEntity {
         (self.type_name == "minecraft:jukebox")
             .then_some(self.animation.signals.jukebox_elapsed.is_some())
     }
-    pub(crate) fn comparator_output(&self) -> Option<i32> {
-        (self.type_name == "minecraft:comparator")
-            .then_some(self.animation.signals.comparator_output)
-    }
     pub(crate) fn test_block_powered(&self) -> Option<bool> {
         (self.type_name == "minecraft:test_block").then_some(self.animation.signals.test_powered)
     }
 }
 impl Store {
-    pub(crate) fn comparator_output(&self, position: [i32; 3]) -> Option<i32> {
-        self.block_entities
-            .get(&position)
-            .and_then(BlockEntity::comparator_output)
-    }
     pub(crate) fn jukebox_playing(&self, position: [i32; 3]) -> Option<bool> {
         self.block_entities
             .get(&position)

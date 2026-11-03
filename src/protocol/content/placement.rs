@@ -62,7 +62,6 @@ struct ActionFacts {
     sound_type: usize,
     spawn_terrain_particles: bool,
     render_invisible: bool,
-    has_analog_output: bool,
 }
 #[derive(serde::Deserialize)]
 pub struct SourceBlockSound {
@@ -286,22 +285,6 @@ impl Content {
             .ok_or("Source property outside domain")?;
         self.with_state_property(state, key, &domain[(index + 1) % domain.len()])
     }
-    pub fn state_property_index(&self, state: u32, key: &str) -> Result<usize> {
-        let info = self.info(state)?;
-        let domain = self
-            .property_domains
-            .get(&self.names[info.block])
-            .and_then(|properties| properties.get(key))
-            .ok_or("missing Source property domain")?;
-        let value = self
-            .state_properties(state)
-            .and_then(|properties| properties.get(key))
-            .ok_or("missing Source state property")?;
-        domain
-            .iter()
-            .position(|candidate| candidate == value)
-            .ok_or_else(|| "Source property outside domain".into())
-    }
     pub fn block_is_solid_render(&self, state: u32) -> Result<bool> {
         Ok(self.info(state)?.solid_render)
     }
@@ -310,15 +293,6 @@ impl Content {
     }
     pub fn block_render_invisible(&self, state: u32) -> Result<bool> {
         Ok(self.action_state(state)?.render_invisible)
-    }
-    pub fn block_analog_output_owner(&self, state: u32) -> Result<Option<&str>> {
-        if !self.action_state(state)?.has_analog_output {
-            return Ok(None);
-        }
-        self.placement_metadata(state)?["analog_output_owner"]
-            .as_str()
-            .map(Some)
-            .ok_or_else(|| "missing Source analog output owner".into())
     }
     pub fn block_brush_sound(&self, state: u32) -> Result<Option<&str>> {
         Ok(self
@@ -372,6 +346,29 @@ impl Content {
     #[cfg(test)]
     pub(crate) fn insert_test_fluid_legacy_state(&mut self, name: &str, state: u32) {
         self.placement.fluid_legacy.insert(name.into(), state);
+    }
+    #[cfg(test)]
+    pub(crate) fn insert_test_solid_states(&mut self) {
+        self.placement.states = [false, true].into_iter().map(|solid| StateFacts {
+            is_solid: solid,
+            blocks_motion: solid,
+            liquid: false,
+            can_burn: false,
+            instrument: String::new(),
+            instrument_above: false,
+            static_support_cache: false,
+            supports: None,
+            collision_face_full: None,
+            support_face_full: None,
+            collision_boxes: None,
+            support_boxes: None,
+            empty_supports: None,
+            empty_collision_face_full: None,
+            empty_support_face_full: None,
+            empty_collision_boxes: None,
+            empty_support_boxes: None,
+            candle_offsets: Vec::new(),
+        }).collect();
     }
     #[cfg(test)]
     pub(crate) fn insert_test_entity_dimensions(&mut self, name: &str, dimensions: [f32; 2]) {
@@ -665,7 +662,6 @@ impl Content {
                 sound_type: 0,
                 spawn_terrain_particles: false,
                 render_invisible: false,
-                has_analog_output: false,
             });
         self.placement.actions[state as usize].sound_type = index;
         self.placement.sounds.push(SourceBlockSound {

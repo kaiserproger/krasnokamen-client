@@ -205,8 +205,11 @@ mod tests {
             cullface: Some(1),
             face: 1,
             shade: true,
+            shade_direction: None,
+            gui_light_side: true,
             ambient_occlusion: true,
             layer: RenderLayer::Opaque,
+            entity_material: None,
             alpha: 1.,
             texture_layer: 0,
         }

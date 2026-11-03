@@ -12,6 +12,16 @@ impl Session {
             .as_ref()
             .map_or(Value::Null, Terrain::capture_metrics)
     }
+    pub(crate) fn terrain_wait_epochs(&self) -> (u64, u64, u64) {
+        (self.connection_epoch, self.dimension_epoch, self.resource_epoch)
+    }
+    pub(crate) fn terrain_settled_revisions(&self, keys: &[[i32; 3]]) -> Option<Vec<u64>> {
+        let terrain = self.terrain.as_ref()?;
+        keys.iter().map(|key| {
+            let revision = terrain.settled_revision(*key)?;
+            (self.scene.chunks.get(key)?.revision == revision).then_some(revision)
+        }).collect()
+    }
     pub fn minecraft_observation(&self) -> Value {
         let screen = self
             .ui
@@ -49,6 +59,8 @@ impl Session {
             && self.spawn_meshes_presented();
         let mut value = json!({"in_play":in_play,"screen":screen,"overlay":{"open":false,"class":"none"},"recent_chat":recent_chat,
             "debug_overlay":self.debug_overlay_pending,"state_version":self.state_version,"client_tick":self.client_tick,"origin":"received_state_and_explicit_local_player_prediction"});
+        value["inputs"] = json!({"held": self.keys});
+        value["using"] = self.player.using_observation(self.client_tick).unwrap_or(Value::Null);
         value["loader"] = self.loader.observation();
         value["far_terrain"] = self.far.metrics();
         if let Some(error) = &self.error {
@@ -125,6 +137,18 @@ impl Session {
                 .ok()
                 .flatten(),
         );
+        for (key, slot) in [("selected_map", 36 + u16::from(self.inventory.selected_slot)), ("offhand_map", 45)] {
+            let map = self.inventory.received_player_slot(slot)
+                .ok().flatten()
+                .and_then(|stack| stack.component("minecraft:map_id"))
+                .and_then(Value::as_i64)
+                .and_then(|id| i32::try_from(id).ok())
+                .and_then(|id| self.ui.as_ref()?.maps().get(&id));
+            value[key] = map.map_or(Value::Null, |map| json!({
+                "id": map.id, "revision": map.revision, "visible_pixels": map.visible_pixels(),
+                "visible_pixel_runs": map.visible_pixel_runs(), "origin": "received_map_packets"
+            }));
+        }
         let mut inventory = Vec::new();
         for slot in 0..43u16 {
             let wire = match slot {
@@ -406,6 +430,7 @@ impl Session {
             _ => None,
         }.map(str::to_owned);
         let local_air = self.local_air_supply();
+        let scoping = self.first_person_scoping();
         if let Some(ui) = &mut self.ui {
             // armor: LivingEntity.getArmorValue floors minecraft:armor.
             let armor = self
@@ -479,6 +504,7 @@ impl Session {
                     vignette: if world_ready { self.environment.vignette() } else { 0. },
                     players,
                     player_list_visible,
+                    scoping,
                     ..Default::default()
                 },
                 loading,
@@ -654,6 +680,30 @@ impl Session {
             self.scene.revision += 1;
             return Ok(true);
         }
+        let item_context = if world_ready {
+            let (sun_angle, moon_phase) = self.environment.item_time_attributes(&self.world, self.player.position)?;
+            let dimension = self.dimension.as_ref().ok_or("item dimension unavailable")?.clone();
+            crate::ui::items::ItemContext {
+                dimension: dimension.clone(),
+                world: Some(crate::ui::item_dynamic::ItemWorldContext {
+                    dimension,
+                    position: self.player.position,
+                    yaw: self.player.yaw,
+                    game_tick: self.environment.game_time(),
+                    sun_angle,
+                    moon_phase,
+                    spawn: self.item_spawn.clone(),
+                    death: self.item_death.clone(),
+                    needles: Arc::clone(&self.item_needles),
+                }),
+                ..Default::default()
+            }
+        } else {
+            crate::ui::items::ItemContext::default()
+        };
+        if let Some(ui) = &mut self.ui {
+            ui.set_item_context(item_context.clone());
+        }
         self.scene.origin = [
             (self.player.position[0] / 256.).floor() * 256.,
             0.,
@@ -661,6 +711,10 @@ impl Session {
         ];
         self.scene.dynamic.vertices.clear();
         for indices in &mut self.scene.dynamic.indices {
+            indices.clear();
+        }
+        self.scene.first_person.vertices.clear();
+        for indices in &mut self.scene.first_person.indices {
             indices.clear();
         }
         self.scene.entity_presentation = Default::default();
@@ -761,6 +815,7 @@ impl Session {
                         .zip(block)
                         .map(|(sky, block)| [f32::from(sky), f32::from(block)]))
                 };
+                let item_time_at = |point| self.environment.item_time_attributes(world, point);
                 self.scene.entity_presentation = self.entities.append_geometry(
                     content,
                     self.scene.origin,
@@ -769,6 +824,8 @@ impl Session {
                     self.render_distance as f32 * 16.,
                     self.client_tick,
                     self.presentation_partial,
+                    self.environment.game_time(),
+                    Some((&item_context, &item_time_at)),
                     &sample_light,
                     &|position| {
                         let state = world.block(position)?;
@@ -801,14 +858,17 @@ impl Session {
                     world,
                     self.scene.origin,
                     self.scene.camera_position,
+                    [self.scene.yaw, self.scene.pitch],
                     self.render_distance as f32 * 16.,
                     self.player.is_scoping(content),
                     // Match the filtering preference sent by client_information.
                     false,
+                    self.environment.game_time(),
                     self.presentation_partial,
                     &sample_light,
                     &mut self.scene.dynamic,
                 )?;
+                self.scene.portal_sprites = portal_sprites(content, &self.scene.dynamic)?;
                 self.scene.entity_presentation.block_entity_indices =
                     self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>() - entity_indices;
                 self.scene.entity_presentation.block_entities += blocks.block_entities;
@@ -869,7 +929,10 @@ impl Session {
                         .unrendered
                         .extend(nameplates.unrendered);
                 }
-                if self.camera_mode == 0 && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false) {
+                if self.camera_mode == 0
+                    && !self.first_person_scoping()
+                    && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
+                {
                     if let Some(light) = sample_light(self.player.eye_position())? {
                         let result = self.player.append_first_person(
                             content,
@@ -878,6 +941,8 @@ impl Session {
                             &mut self.scene,
                             self.presentation_partial,
                             light,
+                            &item_context,
+                            self.ui.as_ref(),
                         );
                         if let Err(reason) = result {
                             self.scene.entity_presentation.unrendered.insert(
@@ -1338,6 +1403,27 @@ impl Session {
     }
 }
 
+fn portal_sprites(
+    content: &Content,
+    geometry: &crate::api::DynamicGeometry,
+) -> Result<Option<[crate::api::ShaderSprite; 2]>> {
+    if ![crate::api::EntityMaterial::EndPortal, crate::api::EntityMaterial::EndGateway]
+        .into_iter()
+        .any(|material| !geometry.indices[material as usize].is_empty())
+    {
+        return Ok(None);
+    }
+    let sprite = |name: &str| {
+        let texture = content.texture(name)
+            .ok_or_else(|| format!("missing mandatory portal texture {name}"))?;
+        Ok::<_, String>(crate::api::ShaderSprite { uv: texture.uv, layer: texture.layer })
+    };
+    Ok(Some([
+        sprite("minecraft:environment/end_sky")?,
+        sprite("minecraft:entity/end_portal/end_portal")?,
+    ]))
+}
+
 /// Maps a baked quad's atlas-space UVs into a destroy-stage region: normalize
 /// into the quad's own sprite 0..1 range, then into `stage_uv`. Axes stay
 /// independent (the old fold destructured `([umin, umax], [vmin, vmax])` while
@@ -1375,6 +1461,28 @@ mod destruction_tests {
     use super::*;
     use crate::protocol::content::TextureRegion;
     use std::sync::Arc;
+
+    #[test]
+    fn portal_scene_binds_required_atlas_sprites_only_for_portal_geometry() {
+        let mut content = Content::test_cube();
+        let mut geometry = crate::api::DynamicGeometry::default();
+        assert!(portal_sprites(&content, &geometry).unwrap().is_none());
+        geometry.indices[crate::api::EntityMaterial::EndGateway as usize].push(0);
+        assert!(portal_sprites(&content, &geometry).is_err());
+        for (name, layer) in [
+            ("minecraft:environment/end_sky", 3),
+            ("minecraft:entity/end_portal/end_portal", 7),
+        ] {
+            content.insert_test_texture(name, TextureRegion {
+                uv: [0., 0., 1., 1.],
+                layer,
+                width: 16,
+                height: 16,
+            });
+        }
+        let sprites = portal_sprites(&content, &geometry).unwrap().unwrap();
+        assert_eq!([sprites[0].layer, sprites[1].layer], [3, 7]);
+    }
 
     fn session_with_cube(position: [i32; 3], light: bool) -> Session {
         let mut session = Session::new_mode("destruction-test".into(), false);

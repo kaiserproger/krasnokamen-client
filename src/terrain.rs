@@ -341,6 +341,10 @@ impl Terrain {
             .get(&key)
             .is_none_or(|section| !self.pending.contains(&key) && section.running.is_none())
     }
+    pub(crate) fn settled_revision(&self, key: [i32; 3]) -> Option<u64> {
+        let section = self.sections.get(&key)?;
+        (!self.pending.contains(&key) && section.running.is_none()).then_some(section.revision)
+    }
     /// Dimension cardinal shading and user visual settings are explicit inputs,
     /// not renderer guesses. A rule change invalidates all section results.
     pub fn set_render_rules(

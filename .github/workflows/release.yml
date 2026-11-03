@@ -12,10 +12,8 @@ env:
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
   # `local_addr` listening-line change the singleplayer port discovery relies on.
-  # Push both pinned commits before CI runs; re-bump the core SHA if
-  # pauline/release moves before the release tag is created.
-  SOLARIS_REVISION: 954833419395c29af30cd0d06524b1097594e4cd
-  SOLARIS_PLUGINS_REVISION: 63540715138d5e74d5a00a595992d5ebe9056371
+  SOLARIS_REVISION: 41498d761aa34411cb845ec8111fe6d4ffad5d45
+  SOLARIS_PLUGINS_REVISION: d2f3022f03ebdb20228797bd22e9b17affb6338c
 
 permissions:
   contents: read
@@ -30,6 +28,9 @@ jobs:
       # Pinned to the channel in rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.95.0
       - uses: Swatinem/rust-cache@v2
+      - name: Test Windows CRT dependency gate
+        shell: pwsh
+        run: ./packaging/test-windows-crt.ps1
       - run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libvulkan-dev cmake
@@ -39,7 +40,7 @@ jobs:
 
   release:
     name: Release (${{ matrix.name }})
-    # Tags publish a prerelease; manual dispatch only builds (no uploads).
+    # Tags stage assets for a prerelease; manual dispatch uploads only macOS UI evidence.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
@@ -59,7 +60,7 @@ jobs:
             exe_suffix: .exe
             archive: zip
           - name: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             rust_target: aarch64-apple-darwin
             exe_suffix: ""
             archive: zip
@@ -71,6 +72,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: launcher-release-${{ matrix.name }}
+      - name: Select static MSVC runtime
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-C target-feature=+crt-static" >> $env:GITHUB_ENV
+          ./packaging/test-windows-crt.ps1
       - name: Install GUI dependencies
         if: matrix.name == 'linux-x86_64'
         run: |
@@ -101,8 +108,9 @@ jobs:
           repository: ${{ github.repository_owner }}/solaris-default-plugins
           ref: ${{ env.SOLARIS_PLUGINS_REVISION }}
           path: solaris-default-plugins
-      # The server pins its own toolchain; its rust-toolchain.toml selects it.
-      - uses: dtolnay/rust-toolchain@1.94
+      # Current core declares Rust 1.99 in Cargo.toml and rust-toolchain.toml.
+      # Reconcile this install with the final pinned core before rc.4 dispatch.
+      - uses: dtolnay/rust-toolchain@1.99
         with:
           targets: ${{ matrix.rust_target }}
       - name: Build Solaris server
@@ -111,7 +119,7 @@ jobs:
       - name: Stage Linux package
         if: matrix.name == 'linux-x86_64'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
           dir="solaris-client-${TAG}-linux-x86_64"
@@ -134,6 +142,10 @@ jobs:
           install -m 0644 launcher/assets/icon.png stage/icon.png
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE stage/
           packaging/stage-singleplayer.sh stage .exe
+      - name: Check staged Windows executable dependencies
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: ./packaging/check-windows-crt.ps1 -Stage stage
       - name: Stage macOS app
         if: matrix.name == 'macos-aarch64'
         run: |
@@ -146,6 +158,7 @@ jobs:
           install -m 0755 target/release/solaris-client "$macos/solaris-client"
           packaging/stage-singleplayer.sh "$macos"
           install -m 0644 packaging/Info.plist "$app/Contents/Info.plist"
+          install -m 0644 LICENSE-MIT LICENSE-APACHE "$resources/"
           for size in 16 32 128 256 512; do
             sips -z "$size" "$size" launcher/assets/icon.png --out "$resources/Solaris.iconset/icon_${size}x${size}.png"
             doubled=$((size * 2))
@@ -169,7 +182,7 @@ jobs:
       - name: Package Linux tarball
         if: matrix.name == 'linux-x86_64'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
           tar -C stage -czf "solaris-client-${TAG}-linux-x86_64.tar.gz" \
@@ -179,7 +192,7 @@ jobs:
       - name: Smoke packaged Linux client
         if: matrix.name == 'linux-x86_64'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
           tar -C "$RUNNER_TEMP" -xzf "solaris-client-${TAG}-linux-x86_64.tar.gz"
@@ -189,19 +202,46 @@ jobs:
       - name: Package Windows zip
         if: matrix.name == 'windows-x86_64'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         shell: pwsh
         run: Compress-Archive -Path stage/* -DestinationPath "solaris-client-${env:TAG}-windows-x86_64.zip"
       - name: Package macOS app
         if: matrix.name == 'macos-aarch64'
         env:
-          TAG: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
-          ditto -c -k --sequesterRsrc --keepParent stage/Solaris.app "solaris-client-${TAG}-macos-aarch64.zip"
-      # Uploaded straight to the release: no Actions artifact storage involved.
+          ditto -c -k --sequesterRsrc --keepParent stage/Solaris.app "solaris-client-${PACKAGE_VERSION}-macos-aarch64.zip"
+      - name: Gate packaged macOS startup and normal UI
+        if: matrix.name == 'macos-aarch64'
+        timeout-minutes: 35
+        env:
+          PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 packaging/macos-runtime-gate.py \
+            --package "$GITHUB_WORKSPACE/solaris-client-${PACKAGE_VERSION}-macos-aarch64.zip" \
+            --work-dir "$RUNNER_TEMP/solaris-macos-runtime" \
+            --evidence-dir "$RUNNER_TEMP/solaris-macos-evidence"
+      - name: Retain curated macOS startup UI evidence
+        if: always() && matrix.name == 'macos-aarch64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-startup-ui-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 2
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/solaris-macos-evidence/report.json
+            ${{ runner.temp }}/solaris-macos-evidence/gate.log
+            ${{ runner.temp }}/solaris-macos-evidence/discovery.json
+            ${{ runner.temp }}/solaris-macos-evidence/launcher-home.png
+            ${{ runner.temp }}/solaris-macos-evidence/launcher-settings.png
+            ${{ runner.temp }}/solaris-macos-evidence/native-title.png
+            ${{ runner.temp }}/solaris-macos-evidence/native-title.json
+            ${{ runner.temp }}/solaris-macos-evidence/native-options.png
+            ${{ runner.temp }}/solaris-macos-evidence/native-options.json
       - name: Checksum
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           shopt -s nullglob
@@ -212,8 +252,32 @@ jobs:
               shasum -a 256 "$f" > "$f.sha256"
             fi
           done
+      - name: Retain gated release assets
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.name }}
+          overwrite: true
+          retention-days: 2
+          if-no-files-found: error
+          path: |
+            solaris-client-*.tar.gz
+            solaris-client-*.zip
+            solaris-client-*.sha256
+
+  publish:
+    name: Publish gated release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
         with:
           # Hyphenated tags (v1.0.0-rc.1) stay prereleases; final tags become `latest`.
           prerelease: ${{ contains(github.ref_name, '-') }}

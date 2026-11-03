@@ -79,6 +79,12 @@ impl Player {
         } else {
             36 + u16::from(inventory.selected_slot)
         })?;
+        if using.crossbow_components.as_ref().is_some_and(|components| !Arc::ptr_eq(components, &item.components)) {
+            let charge_ticks = self.crossbow_charge_ticks(item, content)?;
+            let using = self.using.as_mut().unwrap();
+            using.crossbow_charge_ticks = charge_ticks;
+            using.crossbow_components = Some(Arc::clone(&item.components));
+        }
         self.using.as_mut().unwrap().slot_identity = identity;
         if let Some(consumable) = item.component("minecraft:consumable") {
             let duration = consume_ticks(consumable);

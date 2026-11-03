@@ -1,6 +1,7 @@
 //! Native Soft Minimal launcher. Game installation/launch remain on the existing paths.
 use crate::{
     Args, bootstrap,
+    capture::WindowCapture,
     config::{self, ClientSettings, Config, Profile, Server},
     launch,
     media::{self, MediaCache},
@@ -16,7 +17,9 @@ use eframe::egui::{
     Stroke, StrokeKind, Vec2,
 };
 use std::{
+    cell::RefCell,
     process::Child,
+    rc::Rc,
     sync::{Arc, mpsc},
 };
 
@@ -96,6 +99,7 @@ struct App {
     custom_json: String,
     transfer_path: String,
     dialog_error: Option<String>,
+    capture: Option<Rc<RefCell<WindowCapture>>>,
 }
 
 pub fn run(args: Args, layout: Layout) -> Result<()> {
@@ -111,6 +115,8 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
         Some("logs") => Tab::Logs,
         _ => Tab::Play,
     };
+    let capture = args.capture_window.map(|path| Rc::new(RefCell::new(WindowCapture::new(path))));
+    app.capture = capture.clone();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Solaris Launcher")
         .with_app_id("solaris-launcher")
@@ -139,7 +145,11 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
             Ok(Box::new(app))
         }),
     )
-    .map_err(|e| anyhow::anyhow!("window error: {e}"))
+    .map_err(|e| anyhow::anyhow!("window error: {e}"))?;
+    if let Some(capture) = capture {
+        capture.borrow_mut().finish()?;
+    }
+    Ok(())
 }
 
 fn load_icon() -> Option<egui::IconData> {
@@ -227,6 +237,7 @@ impl App {
             args_server: None,
             args_username: None,
             force_next: false,
+            capture: None,
             media: MediaCache::default(),
             logo: None,
             page_reveal: motion::Reveal::default(),
@@ -1484,19 +1495,36 @@ impl eframe::App for App {
         }
         self.draw(ctx);
         // Existing process/progress observation cadence, only while work is active.
+        if let Some(capture) = &self.capture {
+            capture.borrow_mut().update(ctx);
+        }
         if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
+
+    #[cfg(not(target_os = "macos"))]
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.finish_exit();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn on_exit(&mut self) {
+        self.finish_exit();
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        self.palette.background.to_normalized_gamma_f32()
+    }
+}
+
+impl App {
+    fn finish_exit(&mut self) {
         self.save_config();
         if matches!(self.phase, Phase::Installing { .. }) {
             self.rep.cancel();
         }
         // Closing the launcher deliberately leaves a running game alone.
-    }
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.palette.background.to_normalized_gamma_f32()
     }
 }
 

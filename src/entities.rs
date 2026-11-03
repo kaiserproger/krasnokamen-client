@@ -1,11 +1,12 @@
 //! Native protocol-777 remote presentation. Session remains the local physics/health owner.
 //! Derived model data is explicitly activated; no Java process is used by the client.
 use crate::protocol::packet_ids::play::clientbound as cb;
-mod analog;
 mod block_components;
 mod blocks;
+mod creaking_eyes;
 mod display;
 mod dragon;
+mod drowned_outer;
 mod equipment;
 mod local;
 #[cfg(test)]
@@ -15,6 +16,7 @@ mod nameplates;
 mod physical;
 mod prediction;
 mod presentation;
+mod preview;
 mod profiles;
 mod render_blocks;
 mod render_living;
@@ -54,6 +56,12 @@ use std::{
     path::Path,
     sync::Arc,
 };
+
+/// World time inputs used to render clocks owned by received entities.
+pub type ClockEnvironment<'a> = (
+    &'a crate::ui::items::ItemContext,
+    &'a dyn Fn([f64; 3]) -> Result<(f32, f32)>,
+);
 
 const MAX_ENTITIES: usize = 100_000;
 const MAX_BLOCK_ENTITIES: usize = 65_536;
@@ -253,10 +261,13 @@ pub struct Store {
     pub dropped_events: u64,
     pub(crate) transforms: Vec<Mat4>,
     pub(crate) items: crate::ui::items::ItemModels,
+    pub(crate) snow_pumpkin_state: Option<u32>,
+    pub(crate) mooshroom_mushroom_states: [Option<u32>; 2],
     equipment_cache: equipment::Cache,
     pub(crate) text: Option<Arc<crate::ui::render::TextRenderer>>,
     pub(crate) nameplate_cache: render_nameplates::Cache,
     pub(crate) block_render_cache: render_blocks::Cache,
+    preview_cache: BTreeMap<[i32; 3], preview::Entry>,
     pub(crate) special_render_cache: render_special::Cache,
     local_avatar: Option<Entity>,
     local_avatar_tick: Option<u64>,
@@ -276,7 +287,10 @@ impl Store {
     }
     pub fn activate_models(&mut self, models: Arc<Models>) {
         self.items.set_entity_models(models.clone());
+        self.preview_cache.clear();
         self.equipment_cache = equipment::Cache::default();
+        self.snow_pumpkin_state = None;
+        self.mooshroom_mushroom_states = [None; 2];
         self.nameplate_cache = render_nameplates::Cache::default();
         self.special_render_cache = render_special::Cache::default();
         self.models = Some(models);
@@ -321,6 +335,7 @@ impl Store {
         self.items.clear();
         self.equipment_cache = equipment::Cache::default();
         self.block_entities.clear();
+        self.preview_cache.clear();
         self.predicted_block_data.clear();
         self.block_render_cache = render_blocks::Cache::default();
         self.special_render_cache = render_special::Cache::default();
@@ -351,6 +366,7 @@ impl Store {
             return Err("entity configuration registry bound".into());
         }
         self.registries.insert(name.to_owned(), entries.to_vec());
+        self.preview_cache.clear();
         for entity in &mut self.slots {
             entity.binding = None;
         }
@@ -364,14 +380,6 @@ impl Store {
     }
     pub fn get(&self, id: i32) -> Option<&Entity> {
         self.ids.get(&id).map(|i| &self.slots[*i])
-    }
-    pub(crate) fn client_entities(&self) -> impl Iterator<Item = &Entity> {
-        self.slots.iter().filter(|entity| {
-            !entity
-                .source
-                .as_ref()
-                .is_some_and(|source| source.discarded || source.special.discarded)
-        })
     }
     /// Records retained from server packets, including entities hidden by local prediction.
     pub(crate) fn received_entities(&self) -> impl Iterator<Item = &Entity> {
@@ -1528,6 +1536,7 @@ impl Store {
         self.predicted_block_data.remove(&position);
         self.block_active.remove(&position);
         self.block_render_cache.remove(position);
+        self.preview_cache.remove(&position);
         self.revision += 1;
     }
     pub fn block_changed(&mut self, p: [i32; 3], state: u32) {
@@ -1542,10 +1551,13 @@ impl Store {
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.predicted_block_data
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
+        self.preview_cache.retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.block_active
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.revision += 1;
     }
+    // The scene pass receives its existing frame inputs directly.
+    #[allow(clippy::too_many_arguments)]
     pub fn append_geometry(
         &mut self,
         content: &Content,
@@ -1555,6 +1567,8 @@ impl Store {
         radius: f32,
         tick: u64,
         partial: f32,
+        game_time: i64,
+        clock_environment: Option<ClockEnvironment<'_>>,
         light: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
         bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
         out: &mut DynamicGeometry,
@@ -1574,6 +1588,8 @@ impl Store {
             radius,
             tick,
             partial,
+            game_time,
+            clock_environment,
             light,
             bed_direction,
             out,

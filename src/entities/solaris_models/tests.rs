@@ -50,6 +50,17 @@ fn rc2_authored_village_models_have_coherent_body_parts() {
 }
 
 #[test]
+fn goat_horn_spacing_tracks_observed_front_silhouette() {
+    let rig = authored("minecraft:goat#main").unwrap();
+    let right = rig.bones[rig.part_by_name["right_horn"]].pivot.x;
+    let left = rig.bones[rig.part_by_name["left_horn"]].pivot.x;
+    // Matched 26.3 front shots: observed horn centres are about 27 pixels
+    // apart, versus 22 pixels with the previous 2.5-unit separation.
+    let spacing_in_model_units = (left - right).abs() * 16.;
+    assert!((3.0..=3.2).contains(&spacing_in_model_units), "{spacing_in_model_units}");
+}
+
+#[test]
 fn quads_wind_counter_clockwise_and_face_outward() {
     for mirror in [false, true] {
         for inflate in [0., 0.5] {
@@ -168,18 +179,24 @@ fn rig_key_resolution() {
         ("minecraft:conduit_shell#main", "conduit_shell"),
         ("minecraft:breeze_wind_charge#renderer/model", "wind_charge"),
         ("minecraft:zombie#layer3/modelSet/head", "armor_head"),
-        (
-            "minecraft:piglin#layer3/babyModelSet/feet",
-            "armor_baby_feet",
-        ),
         ("minecraft:armor_stand#boots", "armor_feet"),
         ("minecraft:armor_stand_small#chestplate", "armor_baby_chest"),
         ("minecraft:armor_stand#renderer_main", "armor_stand"),
         ("minecraft:double_chest_left#main", "double_chest_left"),
+        ("minecraft:poplar_boat#renderer/model", "boat"),
+        ("minecraft:poplar_chest_boat#renderer/model", "chest_boat"),
     ] {
         assert_eq!(model_id(key), id, "{key}");
     }
+    // 26.3 families resolve to shipped geometry, not the placeholder.
+    for key in [
+        "minecraft:poplar_boat#renderer/model",
+        "minecraft:poplar_chest_boat#renderer/model",
+    ] {
+        assert!(authored(key).is_some(), "{key}");
+    }
 }
+
 
 #[test]
 fn placeholder_is_a_visible_entity_sized_box() {
@@ -376,5 +393,80 @@ fn chest_rims_are_single_and_the_latch_straddles_the_lid_seam() {
             (2., 2.),
             "{id}: latch hangs across the seam"
         );
+    }
+}
+
+/// `(width, height, opaque)` of the PNG: a texel is opaque when its alpha is non-zero.
+fn png_opaque(path: &std::path::Path) -> (usize, usize, Vec<bool>) {
+    let mut decoder =
+        png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().unwrap();
+    let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+    let frame = reader.next_frame(&mut bytes).unwrap();
+    let channels = match frame.color_type {
+        png::ColorType::Rgba => 4,
+        png::ColorType::GrayscaleAlpha => 2,
+        _ => 0,
+    };
+    let (width, height) = (frame.width as usize, frame.height as usize);
+    let opaque = (0..width * height)
+        .map(|i| channels == 0 || bytes[i * channels + channels - 1] != 0)
+        .collect();
+    (width, height, opaque)
+}
+
+/// A limb whose baked quads sample only fully transparent texels of the rig's default skin is
+/// invisible once the cutout material discards them (the zombie, husk and giant lost their left
+/// arm and leg this way). Bakes every shipped rig and samples the baked UVs against the locally
+/// supplied vanilla skin; skipped when those textures are absent.
+#[test]
+fn baked_limbs_sample_visible_texels_of_the_default_skin() {
+    let Some(root) = texture_root() else {
+        eprintln!("vanilla textures not available: limb visibility check skipped");
+        return;
+    };
+    let limbs = [
+        BoneRole::RightArm,
+        BoneRole::LeftArm,
+        BoneRole::RightLeg,
+        BoneRole::LeftLeg,
+    ];
+    for (file, source) in EMBEDDED {
+        let model = ModelFile::parse(source).unwrap();
+        let rig = model.bake().unwrap_or_else(|e| panic!("{file}: {e}"));
+        if !rig.bones.iter().any(|bone| limbs.contains(&bone.role)) {
+            continue;
+        }
+        let (width, height, opaque) = png_opaque(&root.join(&model.texture.path));
+        for bone in rig.bones.iter().filter(|bone| limbs.contains(&bone.role)) {
+            if bone.quads.is_empty() {
+                continue;
+            }
+            let visible = bone
+                .quads
+                .iter()
+                .map(|quad| {
+                    let span = |axis: usize, size: usize| {
+                        let values = quad.map(|vertex| vertex[axis] * size as f32);
+                        let low = values.iter().copied().fold(f32::MAX, f32::min).round();
+                        let high = values.iter().copied().fold(f32::MIN, f32::max).round();
+                        (low as usize, (high as usize).min(size))
+                    };
+                    let (x0, x1) = span(3, width);
+                    let (y0, y1) = span(4, height);
+                    (y0..y1)
+                        .flat_map(|y| (x0..x1).map(move |x| y * width + x))
+                        .filter(|&i| opaque[i])
+                        .count()
+                })
+                .sum::<usize>();
+            assert!(
+                visible > 0,
+                "{file}: limb bone {} samples only transparent texels of {}",
+                bone.name,
+                model.texture.path
+            );
+        }
     }
 }

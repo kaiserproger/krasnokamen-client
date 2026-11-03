@@ -1448,4 +1448,29 @@ pub(super) const MATERIALS: [Descriptor; EntityMaterial::COUNT] = [
         sort: false,
         sort_key: 31,
     }, // Clouds
+    // World-space fire uses unlit, alpha-tested atlas sprites. Shader kind 20
+    // is the cloud layer; fire has its own kind.
+    Descriptor {
+        shader: ShaderKey {
+            kind: 21,
+            cutoff: 10,
+            cardinal: false,
+            per_face: false,
+            overlay: false,
+            lightmap: false,
+            wrap: false,
+            fog: true,
+            dissolve: false,
+            view_offset: 0,
+            portal_layers: 0,
+        },
+        blend: 0,
+        depth: 1,
+        write_depth: true,
+        cull: false,
+        bias: false,
+        color_write: true,
+        sort: false,
+        sort_key: 13,
+    }, // EntityFire
 ];

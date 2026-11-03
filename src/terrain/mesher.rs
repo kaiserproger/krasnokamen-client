@@ -283,11 +283,15 @@ fn model_quad(
         |p| samples.light_sample(p),
     )?;
     let tint = samples.tint(quad.tint, position, rules.biome_blend_radius)?;
-    let shade = if quad.shade {
-        rules.directional_shade[quad.face as usize]
-    } else {
-        rules.directional_shade[1]
-    };
+    // 26.3 `BlockModelLighter.getDirectionalBrightness`: a `shade_direction_override`
+    // names the cardinal weight outright (world-space, so blockstate rotation never
+    // turns it); legacy `shade: false` flattens to the up weight; otherwise the quad's
+    // own face. The weights are whatever `rules` carries for the dimension.
+    let shade = rules.directional_shade[match quad.shade_direction {
+        Some(face) => face as usize,
+        None if quad.shade => quad.face as usize,
+        None => 1,
+    }];
     let tagged = samples.catalog.state(state)?;
     let offset = tagged.fact.offset.at(position).map(|value| value as f32);
     let normal_base = NORMALS[quad.face as usize].map(|v| v as f32);

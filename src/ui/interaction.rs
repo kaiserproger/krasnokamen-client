@@ -187,8 +187,19 @@ impl UiState {
         bounds: [f32; 4],
         interactive: bool,
     ) -> Result<()> {
-        let label = self.text.language.plain(&component)?;
         let layout = Arc::new(self.text.layout(&component, bounds[2].max(1.))?);
+        self.rich_layout_label(id, component, layout, bounds, interactive)
+    }
+    /// `rich_label` with a caller-prepared layout (e.g. centered lines).
+    pub(crate) fn rich_layout_label(
+        &mut self,
+        id: &str,
+        component: Arc<Value>,
+        layout: Arc<super::shaping::TextLayout>,
+        bounds: [f32; 4],
+        interactive: bool,
+    ) -> Result<()> {
+        let label = self.text.language.plain(&component)?;
         self.add(
             id.into(),
             "text",
@@ -207,14 +218,13 @@ impl UiState {
                 if layout.runs[glyph.style].style.click.is_none() || glyph.advance <= 0. {
                     continue;
                 }
-                if let Some((style, rect)) = regions.last_mut() {
-                    if *style == glyph.style
-                        && rect[1] == glyph.position[1]
-                        && (rect[0] + rect[2] - glyph.position[0]).abs() < 0.01
-                    {
-                        rect[2] += glyph.advance;
-                        continue;
-                    }
+                if let Some((style, rect)) = regions.last_mut()
+                    && *style == glyph.style
+                    && rect[1] == glyph.position[1]
+                    && (rect[0] + rect[2] - glyph.position[0]).abs() < 0.01
+                {
+                    rect[2] += glyph.advance;
+                    continue;
                 }
                 regions.push((
                     glyph.style,
@@ -254,6 +264,9 @@ impl UiState {
         content: &Content,
         effects: &mut UiEffects,
     ) -> Result<()> {
+        if self.screen == Screen::ServerDialog {
+            return self.dialog_component_click(event, effects);
+        }
         if !matches!(self.screen, Screen::Chat | Screen::Book) {
             return Err("component_action_not_visible".into());
         }
@@ -391,34 +404,7 @@ impl UiState {
             }
             return Ok(());
         }
-        let hovered = self.nodes.iter().rev().find_map(|node| {
-            let [x, y, w, h] = node.bounds;
-            let [px, py] = self.pointer;
-            if !node.visible || !node.enabled || px < x || py < y || px >= x + w || py >= y + h {
-                return None;
-            }
-            if matches!(node.action, NodeAction::CreativeTab(_)) {
-                return Some(std::sync::Arc::new(json!({"action":"show_text","value":{"text":node.label}})));
-            }
-            let Paint::RichText(layout) = &node.paint else {
-                return None;
-            };
-            let p = [
-                self.pointer[0] - node.bounds[0],
-                self.pointer[1] - node.bounds[1],
-            ];
-            layout
-                .glyphs
-                .iter()
-                .find(|glyph| {
-                    p[0] >= glyph.position[0]
-                        && p[0] < glyph.position[0] + glyph.advance
-                        && p[1] >= glyph.position[1]
-                        && p[1] < glyph.position[1] + 9.
-                })
-                .and_then(|glyph| layout.runs[glyph.style].style.hover.clone())
-        });
-        let Some(event) = hovered else {
+        let Some(event) = self.hovered_text_event() else {
             return Ok(());
         };
         let component = match event["action"].as_str() {
@@ -449,29 +435,65 @@ impl UiState {
             }
             _ => return Err("component_hover_action_not_allowed".into()),
         };
-        let width = 240f32.min((self.width - 16.).max(1.));
-        let layout = self.text.layout(&component, width)?;
-        let x = (self.pointer[0] + 12.).min(self.width - width - 8.).max(0.);
-        let y = (self.pointer[1] + 12.)
-            .min(self.height - layout.height - 8.)
-            .max(0.);
+        // Vanilla `renderComponentHoverEffect` + `DefaultTooltipPositioner`: lines wrap at
+        // max(half the GUI width, 200); the box sits 12 right of and 12 above the pointer, flips
+        // left when it would leave the screen and lifts above the bottom edge (top kept on-screen).
+        let wrap = (self.width / 2.).max(200.).min((self.width - 8.).max(1.));
+        let layout = self.text.layout(&component, wrap)?;
+        let (width, height) = (layout.width.max(1.), layout.height);
+        // Whole GUI pixels like vanilla's integer mouse coordinates: a fractional origin makes
+        // glyph quads sample the neighbouring font atlas row (`_` above `o` in ascii.png).
+        let [px, py] = self.pointer.map(f32::floor);
+        let mut x = px + 12.;
+        if x + width > self.width {
+            x = (x - 24. - width).max(4.).floor();
+        }
+        let y = (py - 12.).min(self.height - height - 3.).max(3.).floor();
         self.add(
             "component/hover/background".into(),
             "tooltip",
             String::new(),
-            [x - 3., y - 3., width + 6., layout.height + 6.],
+            [x - 3., y - 3., width + 6., height + 6.],
             true,
             None,
             NodeAction::None,
             Paint::Solid([0.06; 3], 0.94),
         )?;
-        self.rich_label(
+        self.rich_layout_label(
             "component/hover/text",
             Arc::new(component),
-            [x, y, width, layout.height],
+            Arc::new(layout),
+            [x, y, width, height],
             false,
         )?;
         Ok(())
+    }
+    /// Hover event of the styled run under the pointer, within the painted (clipped) area.
+    pub(crate) fn hovered_text_event(&self) -> Option<Arc<Value>> {
+        self.nodes.iter().rev().find_map(|node| {
+            let [x, y, w, h] = node.clip.unwrap_or(node.bounds);
+            let [px, py] = self.pointer;
+            if !node.visible || !node.enabled || px < x || py < y || px >= x + w || py >= y + h {
+                return None;
+            }
+            if matches!(node.action, NodeAction::CreativeTab(_)) {
+                return Some(Arc::new(json!({"action":"show_text","value":{"text":node.label}})));
+            }
+            let Paint::RichText(layout) = &node.paint else {
+                return None;
+            };
+            let p = [px - node.bounds[0], py - node.bounds[1]];
+            layout
+                .glyphs
+                .iter()
+                .find(|glyph| {
+                    p[0] >= glyph.position[0]
+                        && p[0] < glyph.position[0] + glyph.advance
+                        && p[1] >= glyph.position[1]
+                        && p[1] < glyph.position[1] + 9.
+                })
+                .and_then(|glyph| layout.runs[glyph.style].style.hover.clone())
+        })
     }
     pub(crate) fn narrate_focus(&self, effects: &mut UiEffects) -> Result<()> {
         if !matches!(

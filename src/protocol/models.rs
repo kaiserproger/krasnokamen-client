@@ -32,8 +32,18 @@ pub struct BakedQuad {
     pub cullface: Option<u8>,
     pub face: u8,
     pub shade: bool,
+    /// 26.3 `shade_direction_override`: face index (0 down, 1 up, 2 north, 3 south,
+    /// 4 west, 5 east) whose cardinal-light weight replaces the quad's own. It is a
+    /// world-space name and is never rotated by blockstate `x`/`y` or element rotation.
+    /// Wins over the legacy `shade` flag; only the block-model lighter reads it
+    /// (vanilla item quads are lit by the shader from their normals and ignore it).
+    pub shade_direction: Option<u8>,
+    /// Inherited item-model GUI lighting mode; retained per quad for composite graphs.
+    pub gui_light_side: bool,
     pub ambient_occlusion: bool,
     pub layer: RenderLayer,
+    /// Optional entity render type for special item layers; ordinary models use their layer.
+    pub entity_material: Option<crate::api::EntityMaterial>,
     pub alpha: f32,
     pub texture_layer: u32,
 }
@@ -66,11 +76,15 @@ struct WeightedPart {
 }
 impl BakedModel {
     /// Enumerates chosen parts without allocating; random source and reseeding match 26.1.2.
-    pub fn for_each_quad(&self, position: [i32; 3], mut emit: impl FnMut(&BakedQuad)) {
+    pub fn for_each_quad(&self, position: [i32; 3], emit: impl FnMut(&BakedQuad)) {
+        self.for_each_quad_seeded(position_seed(position), emit);
+    }
+    /// Source `BlockStateModel.collectParts` from an explicit seed; block displays use 42.
+    pub fn for_each_quad_seeded(&self, seed: i64, mut emit: impl FnMut(&BakedQuad)) {
         for q in &self.quads {
             emit(q);
         }
-        let mut random = JavaRandom::new(position_seed(position));
+        let mut random = JavaRandom::new(seed);
         let seed = if self.multipart {
             Some(random.next_long())
         } else {
@@ -529,11 +543,31 @@ fn uv_basis(face: u8) -> (Vec3, Vec3) {
         _ => (-Vec3::Z, -Vec3::Y),
     }
 }
+/// Vanilla `CuboidModelElement.Deserializer.getShadeDirectionOverride`: absent means
+/// no override; a non-string or unknown direction name is a model error.
+fn shade_direction_override(element: &Value) -> Result<Option<u8>> {
+    match element.get("shade_direction_override") {
+        None => Ok(None),
+        Some(Value::String(name)) => direction(name)
+            .map(Some)
+            .map_err(|_| format!("unknown shade_direction_override {name}")),
+        Some(_) => Err("shade_direction_override must be a direction name".into()),
+    }
+}
+fn gui_light_side(model: &Value) -> Result<bool> {
+    match model.get("gui_light").and_then(Value::as_str) {
+        None | Some("side") => Ok(true),
+        Some("front") => Ok(false),
+        Some(other) => Err(format!("unknown gui_light {other}")),
+    }
+}
+
 fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Vec<RawQuad>> {
     let rotation = Mat3::from_rotation_y(quarter(&descriptor["y"])?)
         * Mat3::from_rotation_x(quarter(&descriptor["x"])?);
     let uvlock = descriptor["uvlock"].as_bool().unwrap_or(false);
     let mut out = Vec::new();
+    let gui_light_side = gui_light_side(model)?;
     let Some(elements) = model["elements"].as_array() else {
         return Ok(out);
     };
@@ -543,6 +577,7 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
     for element in elements {
         let min = vector(&element["from"])?;
         let max = vector(&element["to"])?;
+        let shade_direction = shade_direction_override(element)?;
         let mut er = Mat3::IDENTITY;
         let mut origin = Vec3::ZERO;
         if !element["rotation"].is_null() {
@@ -654,8 +689,11 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
                     cullface,
                     face: transformed_face,
                     shade: element["shade"].as_bool().unwrap_or(true),
+                    shade_direction,
+                    gui_light_side,
                     ambient_occlusion: model["ambientocclusion"].as_bool().unwrap_or(true),
                     layer: RenderLayer::Opaque,
+                    entity_material: None,
                     alpha: 1.,
                     texture_layer: 0,
                 },
@@ -686,6 +724,7 @@ fn display_transforms(model: &Value) -> Result<BTreeMap<String, ModelTransform>>
     Ok(out)
 }
 fn generated_elements(source: &ResourceSource, model: &Value) -> Result<Vec<RawQuad>> {
+    let gui_light_side = gui_light_side(model)?;
     let mut out = Vec::new();
     for layer in 0..5 {
         let reference = format!("layer{layer}");
@@ -759,8 +798,11 @@ fn generated_elements(source: &ResourceSource, model: &Value) -> Result<Vec<RawQ
                     cullface: None,
                     face,
                     shade: false,
+                    shade_direction: None,
+                    gui_light_side,
                     ambient_occlusion: false,
                     layer: RenderLayer::Opaque,
+                    entity_material: None,
                     alpha: 1.,
                     texture_layer: 0,
                 },
@@ -1007,6 +1049,16 @@ mod tests {
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
     }
     #[test]
+    fn baked_faces_retain_resolved_gui_light_mode() {
+        let mut model = slab();
+        let bake = |model: &Value| bake_elements(model, &serde_json::json!({}), TintKind::None).unwrap();
+        assert!(bake(&model).iter().all(|q| q.quad.gui_light_side));
+        model["gui_light"] = serde_json::json!("front");
+        assert!(bake(&model).iter().all(|q| !q.quad.gui_light_side));
+        model["gui_light"] = serde_json::json!("side");
+        assert!(bake(&model).iter().all(|q| q.quad.gui_light_side));
+    }
+    #[test]
     fn cyclic_texture_is_rejected() {
         assert!(texture_ref(
             &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
@@ -1185,5 +1237,177 @@ mod tests {
         let base_model = &baker.into_models()[base_id];
         assert_eq!(base_model.quads.len(), 6);
         assert!(base_model.parts.is_empty());
+    }
+    /// Element 0 (lower half: up, north, east faces) carries the override value;
+    /// element 1 (upper half: up, north faces) never does.
+    fn override_model(value: Value) -> Value {
+        serde_json::json!({"textures":{"all":"test:tex"},"elements":[
+            {"from":[0,0,0],"to":[16,8,16],"shade_direction_override":value,
+             "faces":{"up":{"texture":"#all"},"north":{"texture":"#all"},"east":{"texture":"#all"}}},
+            {"from":[0,8,0],"to":[16,16,16],
+             "faces":{"up":{"texture":"#all"},"north":{"texture":"#all"}}}
+        ]})
+    }
+    #[test]
+    fn shade_direction_override_is_per_element_and_leaves_geometry_alone() {
+        let qs = bake_elements(
+            &override_model(serde_json::json!("up")),
+            &serde_json::json!({}),
+            TintKind::None,
+        )
+        .unwrap();
+        let pairs: BTreeSet<(u8, Option<u8>)> = qs
+            .iter()
+            .map(|q| (q.quad.face, q.quad.shade_direction))
+            .collect();
+        assert_eq!(
+            pairs,
+            BTreeSet::from([(1, Some(1)), (2, Some(1)), (5, Some(1)), (1, None), (2, None)])
+        );
+        // The legacy flag is untouched: the override does not masquerade as `shade: false`.
+        assert!(qs.iter().all(|q| q.quad.shade));
+    }
+    #[test]
+    fn every_direction_name_selects_its_own_cardinal_weight() {
+        for (index, name) in NAMES.iter().enumerate() {
+            let qs = bake_elements(
+                &override_model(serde_json::json!(*name)),
+                &serde_json::json!({}),
+                TintKind::None,
+            )
+            .unwrap();
+            let chosen: Vec<u8> = qs.iter().filter_map(|q| q.quad.shade_direction).collect();
+            assert_eq!(chosen, vec![index as u8; 3], "{name}");
+        }
+    }
+    #[test]
+    fn shade_direction_override_is_not_rotated_by_blockstate_rotation() {
+        let model = override_model(serde_json::json!("north"));
+        for descriptor in [
+            serde_json::json!({"y":90}),
+            serde_json::json!({"x":180,"y":90}),
+            serde_json::json!({"y":270,"uvlock":true}),
+        ] {
+            let qs = bake_elements(&model, &descriptor, TintKind::None).unwrap();
+            let chosen: Vec<u8> = qs.iter().filter_map(|q| q.quad.shade_direction).collect();
+            assert_eq!(chosen, vec![2; 3], "{descriptor}");
+        }
+        // The geometry did rotate (y=90 sends the north face to east) while the
+        // override keeps naming world north.
+        let qs = bake_elements(&model, &serde_json::json!({"y":90}), TintKind::None).unwrap();
+        assert!(qs
+            .iter()
+            .any(|q| q.quad.face == 5 && q.quad.shade_direction == Some(2)));
+    }
+    #[test]
+    fn legacy_shade_flag_still_parses_next_to_the_override() {
+        let mut model = override_model(serde_json::json!("up"));
+        model["elements"][0]["shade"] = serde_json::json!(false);
+        model["elements"][1]["shade"] = serde_json::json!(false);
+        let qs = bake_elements(&model, &serde_json::json!({}), TintKind::None).unwrap();
+        assert!(qs.iter().all(|q| !q.quad.shade));
+        assert_eq!(
+            qs.iter().filter(|q| q.quad.shade_direction == Some(1)).count(),
+            3
+        );
+        let plain = bake_elements(&slab(), &serde_json::json!({}), TintKind::None).unwrap();
+        assert!(plain
+            .iter()
+            .all(|q| q.quad.shade && q.quad.shade_direction.is_none()));
+    }
+    #[test]
+    fn invalid_shade_direction_override_is_a_model_error() {
+        for value in [
+            serde_json::json!("Up"),
+            serde_json::json!("sideways"),
+            serde_json::json!(""),
+            serde_json::json!(1),
+            serde_json::json!(null),
+            serde_json::json!(["up"]),
+        ] {
+            let error = bake_elements(
+                &override_model(value.clone()),
+                &serde_json::json!({}),
+                TintKind::None,
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{value} must be rejected"));
+            assert!(error.contains("shade_direction_override"), "{value}: {error}");
+        }
+    }
+    #[test]
+    fn shade_direction_override_survives_parent_inheritance_and_blockstate_rotation() {
+        struct TempRoot(std::path::PathBuf);
+        impl Drop for TempRoot {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).ok();
+            }
+        }
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let holder = TempRoot(std::env::temp_dir().join(format!(
+            "solaris-shade-override-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        )));
+        let write = |rel: &str, value: serde_json::Value| {
+            let path = holder.0.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        };
+        let torch = |value: Value| {
+            let mut element = serde_json::json!({
+                "from": [7, 0, 7], "to": [9, 10, 9],
+                "faces": {"north": {"texture": "#all"}, "south": {"texture": "#all"}}
+            });
+            if !value.is_null() {
+                element["shade_direction_override"] = value;
+            }
+            element
+        };
+        write(
+            "assets/test/models/block/template.json",
+            serde_json::json!({"textures": {"all": "test:tex"}, "elements": [torch(serde_json::json!("up"))]}),
+        );
+        write(
+            "assets/test/models/block/child.json",
+            serde_json::json!({"parent": "test:block/template"}),
+        );
+        write(
+            "assets/test/models/block/replaced.json",
+            serde_json::json!({"parent": "test:block/template", "elements": [torch(Value::Null)]}),
+        );
+        let source = super::super::content::ResourceSource::new(
+            vec![holder.0.clone()],
+            None,
+            super::super::content::ResourceLimits::default(),
+        )
+        .unwrap();
+        let mut baker = Baker::new(&source);
+        let child = baker
+            .state(
+                "test:torch",
+                &serde_json::json!({}),
+                &serde_json::json!({"variants": {"": {"model": "test:block/child", "y": 90}}}),
+            )
+            .unwrap();
+        let replaced = baker
+            .state(
+                "test:replaced",
+                &serde_json::json!({}),
+                &serde_json::json!({"variants": {"": {"model": "test:block/replaced", "y": 90}}}),
+            )
+            .unwrap();
+        let models = baker.into_models();
+        let faces = |id: usize| -> BTreeSet<(u8, Option<u8>)> {
+            models[id]
+                .quads
+                .iter()
+                .map(|q| (q.quad.face, q.quad.shade_direction))
+                .collect()
+        };
+        // y=90 turns north to east and south to west; the inherited override stays "up".
+        assert_eq!(faces(child), BTreeSet::from([(5, Some(1)), (4, Some(1))]));
+        // A child that replaces `elements` replaces the override with them.
+        assert_eq!(faces(replaced), BTreeSet::from([(5, None), (4, None)]));
     }
 }

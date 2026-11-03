@@ -7,7 +7,7 @@ A Rust/wgpu client for Minecraft Java Edition **26.3**, with a small launcher th
 1. Download the archive for your system from the project's Releases page:
    - Linux x86_64: `solaris-client-<version>-linux-x86_64.tar.gz`
    - Windows x86_64: `solaris-client-<version>-windows-x86_64.zip`
-   - macOS Apple Silicon: `solaris-client-<version>-macos-aarch64.zip`
+   - macOS Apple Silicon: `solaris-client-<version>-macos-aarch64.zip` (when listed for the release)
 2. Unpack it anywhere. On Linux and Windows, keep `solaris-launcher` and `solaris-client` in the same folder. On macOS, keep the complete `Solaris.app` bundle intact.
 3. Run the launcher: `./solaris-launcher` (Linux), double-click `solaris-launcher.exe` (Windows), or open `Solaris.app` (macOS).
    Linux desktop entry (optional): `./install-desktop.sh` adds "Solaris Launcher" to your application menu; `./install-desktop.sh --uninstall` removes it.
@@ -50,7 +50,7 @@ The first Play installs the server's content cache (Minecraft 26.3 registries, t
 
 ### Server dialogs
 
-The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button tooltips and vanilla's "custom screen" warning button. The server side is documented in the Solaris repo (`docs/DIALOGS.md`).
+The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). Plain-message text is centered line by line like vanilla; hovering a styled run shows its `hover_event` tooltip, and clicking a run with a `click_event` runs it like a button action (`custom` with its typed payload, `run_command`; other kinds are reported, not executed) followed by the dialog's `after_action`. `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button and title tooltips and vanilla's "custom screen" warning button. The server side is documented in the Solaris repo (`docs/DIALOGS.md`).
 
 ### Far terrain
 The render-distance setting ranges from 2 to 32 chunks in both the launcher

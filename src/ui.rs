@@ -17,6 +17,7 @@ mod hud_locator;
 mod hud_math;
 mod hud_view;
 mod interaction;
+pub(crate) mod item_dynamic;
 pub mod items;
 pub mod layout;
 mod links;

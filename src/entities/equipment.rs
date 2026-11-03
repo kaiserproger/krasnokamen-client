@@ -50,20 +50,23 @@ impl Layer {
     }
 }
 
+type EquipmentAssets = BTreeMap<String, BTreeMap<String, Result<Option<Vec<Layer>>>>>;
+
 #[derive(Default)]
 pub(super) struct Cache {
-    assets: BTreeMap<String, Result<BTreeMap<String, Vec<Layer>>>>,
+    assets: EquipmentAssets,
     transforms: Vec<Mat4>,
 }
 impl Cache {
-    fn activate(&mut self, content: &Content, asset: &str) {
-        if self.assets.contains_key(asset) {
+    fn activate(&mut self, content: &Content, asset: &str, kind: &str) {
+        if self.assets.get(asset).is_some_and(|layers| layers.contains_key(kind)) {
             return;
         }
         if self.assets.len() >= 4096 {
             self.assets.clear();
         }
-        self.assets.insert(asset.into(), load_asset(content, asset));
+        self.assets.entry(asset.into()).or_default()
+            .insert(kind.into(), load_asset(content, asset, kind));
     }
 
     pub(super) fn append(
@@ -84,26 +87,48 @@ impl Cache {
         };
         let stand = e.type_name == "minecraft:armor_stand";
         let baby = !stand && p::boolean(models, e, "DATA_BABY_ID");
-        let key = if stand {
-            let small = p::number(models, e, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0;
-            armor_rig(slot, small)
+        let horse = e.type_name == "minecraft:horse" && matches!(slot, 6 | 7);
+        let wolf = e.type_name == "minecraft:wolf" && slot == 6;
+        let animal = horse || wolf;
+        if animal && baby {
+            return Err("baby animal equipment overlay is not available".into());
+        }
+        let (key, kind) = if wolf {
+            (Some("minecraft:wolf_body_equipment#main"), "wolf_body")
+        } else if horse {
+            match slot {
+                6 => (Some("minecraft:horse_body_equipment#main"), "horse_body"),
+                7 => (Some("minecraft:horse_saddle_equipment#main"), "horse_saddle"),
+                _ => unreachable!(),
+            }
         } else {
-            humanoid_rig(models, e, slot, baby)
+            let key = if stand {
+                // Small stands scale the whole adult rig about their feet, including equipment.
+                armor_rig(slot)
+            } else {
+                humanoid_rig(models, e, slot, baby)
+            };
+            let kind = if baby {
+                "humanoid_baby"
+            } else if slot == 3 {
+                "humanoid_leggings"
+            } else {
+                "humanoid"
+            };
+            (key, kind)
         };
         let Some(key) = key else {
             return Ok(false);
         };
+        if animal && !models.has_authored_rig(key) {
+            return Err(format!("animal equipment rig not activated: {key}"));
+        }
         let rig = models.rig(key);
-        self.activate(content, asset);
-        let layers = self.assets[asset].as_ref().map_err(Clone::clone)?;
-        let kind = if baby {
-            "humanoid_baby"
-        } else if slot == 3 {
-            "humanoid_leggings"
-        } else {
-            "humanoid"
-        };
-        let Some(layers) = layers.get(kind) else {
+        self.activate(content, asset, kind);
+        let Some(layers) = self.assets[asset][kind].as_ref().map_err(Clone::clone)? else {
+            if animal {
+                return Err(format!("equipment asset {asset} has no {kind} layer"));
+            }
             // Equipment without this layer type is also omitted by HumanoidArmorLayer.
             return Ok(true);
         };
@@ -138,51 +163,111 @@ impl Cache {
                 out,
             )?;
             if glint_pending {
+                let texture = content
+                    .texture("minecraft:misc/enchanted_glint_armor")
+                    .ok_or("armor glint texture not activated")?;
+                let start = out.vertices.len();
                 p::emit_rig(
                     rig,
                     &self.transforms,
-                    content
-                        .texture("minecraft:misc/enchanted_glint_armor")
-                        .ok_or("armor glint texture not activated")?,
+                    texture,
                     color,
                     EntityMaterial::ArmorEntityGlint,
                     1.,
                     light,
                     out,
                 )?;
+                // The wrapped material expects local coordinates and an atlas rectangle,
+                // not the atlas-space UV and NO_OVERLAY values emitted by the rig.
+                let size = [texture.uv[2] - texture.uv[0], texture.uv[3] - texture.uv[1]];
+                let scroll = ((tick % 24000) as f32 + partial) / 600.;
+                for vertex in &mut out.vertices[start..] {
+                    vertex.uv = [
+                        (vertex.uv[0] - texture.uv[0]) / size[0] + scroll,
+                        (vertex.uv[1] - texture.uv[1]) / size[1],
+                    ];
+                    vertex.overlay_uv = [texture.uv[0], texture.uv[1]];
+                    vertex.overlay_tint = [size[0], size[1], 0.];
+                }
                 glint_pending = false;
             }
+        }
+        // Source EquipmentLayerRenderer omits trim for the humanoid-baby layer.
+        if !baby && !animal
+            && let Some(trim) = stack.component("minecraft:trim")
+        {
+            let (texture, decal) = trim_texture(content, trim, asset, kind)?;
+            p::emit_rig(
+                rig,
+                &self.transforms,
+                texture,
+                [1.; 3],
+                if decal {
+                    EntityMaterial::ArmorDecalCutoutNoCull
+                } else {
+                    EntityMaterial::ArmorCutoutNoCull
+                },
+                1.,
+                light,
+                out,
+            )?;
         }
         Ok(true)
     }
 }
 
-fn load_asset(content: &Content, asset: &str) -> Result<BTreeMap<String, Vec<Layer>>> {
+fn trim_holder<'a>(content: &'a Content, value: &'a serde_json::Value, registry: &str) -> Result<&'a serde_json::Value> {
+    if let Some(id) = value.as_str() {
+        content.registry_entries(registry)?
+            .iter()
+            .find(|(name, _)| name == id)
+            .map(|(_, entry)| entry)
+            .ok_or_else(|| format!("unknown {registry} holder {id}"))
+    } else if value.is_object() {
+        Ok(value)
+    } else {
+        Err(format!("invalid {registry} holder"))
+    }
+}
+
+fn trim_texture(content: &Content, trim: &serde_json::Value, asset: &str, kind: &str) -> Result<(TextureRegion, bool)> {
+    let material = trim_holder(content, &trim["material"], "minecraft:trim_material")?;
+    let pattern = trim_holder(content, &trim["pattern"], "minecraft:trim_pattern")?;
+    let material_name = material["override_armor_assets"][asset]
+        .as_str()
+        .or_else(|| material["asset_name"].as_str())
+        .ok_or("trim material asset_name missing")?;
+    let pattern_id = pattern["asset_id"].as_str().ok_or("trim pattern asset_id missing")?;
+    let (namespace, path) = pattern_id.split_once(':').unwrap_or(("minecraft", pattern_id));
+    let name = format!("{namespace}:trims/entity/{kind}/{path}_{material_name}");
+    // Network registry NBT projects byte booleans to JSON integers; inline holders use bool.
+    let decal = pattern["decal"].as_bool().or_else(|| match pattern["decal"].as_i64() {
+        Some(0) => Some(false),
+        Some(1) => Some(true),
+        _ => None,
+    }).ok_or("trim pattern decal missing or invalid")?;
+    Ok((p::texture(content, &name)?, decal))
+}
+
+fn load_asset(content: &Content, asset: &str, kind: &str) -> Result<Option<Vec<Layer>>> {
     let (ns, path) = asset.split_once(':').unwrap_or(("minecraft", asset));
     let bytes = content.resource_bytes(&format!("assets/{ns}/equipment/{path}.json"))?;
-    let asset: Asset = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    let mut layers = BTreeMap::new();
-    for (kind, definitions) in asset.layers {
-        if !matches!(
-            kind.as_str(),
-            "humanoid" | "humanoid_leggings" | "humanoid_baby"
-        ) {
-            continue;
-        }
-        let mut activated = Vec::with_capacity(definitions.len());
-        for definition in definitions {
-            let (ns, path) = definition
-                .texture
-                .split_once(':')
-                .unwrap_or(("minecraft", &definition.texture));
-            activated.push(Layer {
-                texture: p::texture(content, &format!("{ns}:entity/equipment/{kind}/{path}"))?,
-                dyeable: definition.dyeable.map(|v| v.color_when_undyed),
-            });
-        }
-        layers.insert(kind, activated);
+    let mut asset: Asset = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let Some(definitions) = asset.layers.remove(kind) else {
+        return Ok(None);
+    };
+    let mut activated = Vec::with_capacity(definitions.len());
+    for definition in definitions {
+        let (ns, path) = definition
+            .texture
+            .split_once(':')
+            .unwrap_or(("minecraft", &definition.texture));
+        activated.push(Layer {
+            texture: p::texture(content, &format!("{ns}:entity/equipment/{kind}/{path}"))?,
+            dyeable: definition.dyeable.map(|v| v.color_when_undyed),
+        });
     }
-    Ok(layers)
+    Ok(Some(activated))
 }
 
 fn humanoid_rig<'a>(models: &'a Models, e: &Entity, slot: usize, baby: bool) -> Option<&'a str> {
@@ -196,28 +281,26 @@ fn humanoid_rig<'a>(models: &'a Models, e: &Entity, slot: usize, baby: bool) -> 
     models.armor_rig(&e.type_name, baby, part)
 }
 
-fn armor_asset(stack: &Stack, slot: usize) -> Option<&str> {
+pub(super) fn armor_asset(stack: &Stack, slot: usize) -> Option<&str> {
     let name = match slot {
         2 => "feet",
         3 => "legs",
         4 => "chest",
         5 => "head",
+        6 => "body",
+        7 => "saddle",
         _ => return None,
     };
     let equippable = stack.component("minecraft:equippable")?;
     (equippable["slot"].as_str()? == name).then_some(())?;
     equippable["asset_id"].as_str()
 }
-fn armor_rig(slot: usize, small: bool) -> Option<&'static str> {
-    Some(match (slot, small) {
-        (2, false) => "minecraft:armor_stand#boots",
-        (3, false) => "minecraft:armor_stand#leggings",
-        (4, false) => "minecraft:armor_stand#chestplate",
-        (5, false) => "minecraft:armor_stand#helmet",
-        (2, true) => "minecraft:armor_stand_small#boots",
-        (3, true) => "minecraft:armor_stand_small#leggings",
-        (4, true) => "minecraft:armor_stand_small#chestplate",
-        (5, true) => "minecraft:armor_stand_small#helmet",
+fn armor_rig(slot: usize) -> Option<&'static str> {
+    Some(match slot {
+        2 => "minecraft:armor_stand#boots",
+        3 => "minecraft:armor_stand#leggings",
+        4 => "minecraft:armor_stand#chestplate",
+        5 => "minecraft:armor_stand#helmet",
         _ => return None,
     })
 }
@@ -351,7 +434,7 @@ mod tests {
         let mut cache = Cache::default();
         cache.assets.insert(
             "test:cloth".into(),
-            Ok([
+            [
                 ("humanoid", 2, 32),
                 ("humanoid_leggings", 3, 32),
                 ("humanoid_baby", 4, 64),
@@ -360,7 +443,7 @@ mod tests {
             .map(|(kind, layer, height)| {
                 (
                     kind.into(),
-                    vec![Layer {
+                    Ok(Some(vec![Layer {
                         texture: TextureRegion {
                             layer,
                             uv: [0., 0., 1., 1.],
@@ -368,12 +451,242 @@ mod tests {
                             height,
                         },
                         dyeable: Some(Some(0x804020)),
-                    }],
+                    }])),
                 )
             })
-            .collect()),
+            .collect(),
         );
         (store, models, content, cache)
+    }
+
+    #[test]
+    fn horse_received_body_and_saddle_layers_render_and_strip_independently() {
+        use crate::protocol::{Reader, Writer};
+        use serde_json::json;
+
+        let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:horse");
+        for (id, slot, asset) in [(5, "body", "test:horse_armor"), (6, "saddle", "test:horse_saddle")] {
+            content.item_names.insert(id, format!("test:{slot}"));
+            content.insert_test_item_components(id, BTreeMap::from([(
+                "minecraft:equippable".into(), json!({"slot":slot,"asset_id":asset}),
+            )]));
+        }
+        content.insert_test_resource("assets/test/equipment/horse_armor.json",
+            br#"{"layers":{"horse_body":[{"texture":"test:armor","dyeable":{"color_when_undyed":16777215}}]}}"#);
+        content.insert_test_resource("assets/test/equipment/horse_saddle.json",
+            br#"{"layers":{"horse_saddle":[{"texture":"test:saddle"}]}}"#);
+        for (name, layer) in [("test:entity/equipment/horse_body/armor", 10), ("test:entity/equipment/horse_saddle/saddle", 11)] {
+            content.insert_test_texture(name, TextureRegion { layer, uv:[0.,0.,1.,1.], width:64, height:64 });
+        }
+        content.insert_test_texture("minecraft:misc/enchanted_glint_armor",
+            TextureRegion { layer: 12, uv:[0.,0.,1.,1.], width:64, height:64 });
+        let mut equipment = Writer::default();
+        equipment.var(4);
+        for (slot, id) in [(6, 5), (7, 6)] {
+            equipment.byte(slot | if slot == 6 { 0x80 } else { 0 });
+            equipment.var(1);
+            equipment.var(id);
+            equipment.var(0);
+            equipment.var(0);
+        }
+        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&equipment.0), &content, 2).unwrap();
+        let entity = store.get(4).unwrap();
+        for (slot, expected_layer) in [(6, 10), (7, 11)] {
+            let mut out = DynamicGeometry::default();
+            assert!(cache.append(entity, slot, entity.equipment_value(slot).unwrap(), &models,
+                &content, Mat4::IDENTITY, 2, 0., [15.; 2], &mut out).unwrap());
+            assert!(!out.vertices.is_empty());
+            assert!(out.vertices.iter().all(|v| v.texture_layer == expected_layer));
+        }
+        let mut dyed = entity.equipment_value(6).unwrap().clone();
+        let components = Arc::make_mut(&mut dyed.components);
+        components.insert("minecraft:dyed_color".into(), json!(0xff0000));
+        components.insert("minecraft:enchantment_glint_override".into(), json!(true));
+        let mut tinted = DynamicGeometry::default();
+        assert!(cache.append(entity, 6, &dyed, &models, &content, Mat4::IDENTITY,
+            2, 0., [15.; 2], &mut tinted).unwrap());
+        assert!(!tinted.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
+        assert!(tinted.vertices.iter().any(|v| v.texture_layer == 10 && v.color == [1., 0., 0.]));
+        let mut invalid = entity.equipment_value(6).unwrap().clone();
+        Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
+            json!({"slot":"body","asset_id":"test:missing"}));
+        assert!(cache.append(entity, 6, &invalid, &models, &content, Mat4::IDENTITY,
+            2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
+            json!({"slot":"body","asset_id":"test:horse_saddle"}));
+        assert!(cache.append(entity, 6, &invalid, &models, &content, Mat4::IDENTITY,
+            2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
+        let baby = store.get(4).unwrap();
+        assert!(cache.append(baby, 7, baby.equipment_value(7).unwrap(), &models, &content,
+            Mat4::IDENTITY, 2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(false));
+
+        let mut stripped = Writer::default();
+        stripped.var(4);
+        stripped.byte(6);
+        stripped.var(0);
+        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&stripped.0), &content, 3).unwrap();
+        let entity = store.get(4).unwrap();
+        assert!(entity.equipment_value(6).is_none());
+        let mut saddle = DynamicGeometry::default();
+        assert!(cache.append(entity, 7, entity.equipment_value(7).unwrap(), &models,
+            &content, Mat4::IDENTITY, 3, 0., [15.; 2], &mut saddle).unwrap());
+        assert!(!saddle.vertices.is_empty());
+        store.get_mut(4).unwrap().type_name = "minecraft:cow".into();
+        let entity = store.get(4).unwrap();
+        assert!(!cache.append(entity, 7, entity.equipment_value(7).unwrap(), &models,
+            &content, Mat4::IDENTITY, 3, 0., [15.; 2], &mut DynamicGeometry::default()).unwrap());
+    }
+
+    #[test]
+    fn horse_overlay_joints_follow_authored_horse_pose() {
+        use super::super::{animation_tests, render_living};
+        let (models, mut entity) = animation_tests::fixture();
+        entity.type_name = "minecraft:horse".into();
+        let mut source = entity.source.take().unwrap();
+        for x in [0.2, 0.4] {
+            source.living.as_mut().unwrap().tick(&models, &entity, &render_living::TickInput {
+                age: 1, position: [x, 0., 0.], yaw: 0., alive: true, passenger: false,
+                baby: false, visually_swimming: false, in_water: false, uses_y_for_walk: false,
+                rotation_changed_before_base_tick: false, is_mob: true,
+                first_passenger_is_mob: false, max_head_yaw: 75., max_body_head_yaw: 75.,
+                attack_active: false, camel_sitting: false, camel_visually_sitting: false,
+                camel_sitting_down: false, camel_pose_transition: false, camel_pose_time: 0,
+            });
+        }
+        entity.source = Some(source);
+        for overlay_key in ["minecraft:horse_body_equipment#main", "minecraft:horse_saddle_equipment#main"] {
+            let horse = models.rig("minecraft:horse#main");
+            let overlay = models.rig(overlay_key);
+            let mut base_transforms = Vec::new();
+            let mut overlay_transforms = Vec::new();
+            p::evaluate_rig(horse, &entity, &models, 2, 1., Mat4::IDENTITY, &mut base_transforms);
+            p::evaluate_rig(overlay, &entity, &models, 2, 1., Mat4::IDENTITY, &mut overlay_transforms);
+            for (index, bone) in overlay.bones.iter().enumerate() {
+                let base = horse.part_by_name[&bone.name];
+                assert_eq!(overlay_transforms[index], base_transforms[base], "joint {}", bone.name);
+            }
+        }
+    }
+
+    #[test]
+    fn received_wolf_armor_emits_layers_and_strip_removes_them() {
+        use crate::protocol::{Reader, Writer};
+        use serde_json::json;
+
+        let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:wolf");
+        for slot in 2..=5 {
+            store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&[4, slot, 0]), &content, 3).unwrap();
+        }
+        content.item_names.insert(5, "test:wolf_armor".into());
+        content.insert_test_item_components(5, BTreeMap::from([(
+            "minecraft:equippable".into(), json!({"slot":"body","asset_id":"test:wolf_armor"}),
+        )]));
+        content.insert_test_resource("assets/test/equipment/wolf_armor.json", br#"{
+            "layers":{"wolf_body":[{"texture":"test:base"},{"texture":"test:overlay","dyeable":{}}]}
+        }"#);
+        for (name, layer) in [("test:entity/equipment/wolf_body/base", 10),
+                              ("test:entity/equipment/wolf_body/overlay", 11)] {
+            content.insert_test_texture(name, TextureRegion {
+                layer, uv: [0., 0., 1., 1.], width: 64, height: 32,
+            });
+        }
+        let mut packet = Writer::default();
+        packet.var(4);
+        packet.byte(6);
+        packet.var(1);
+        packet.var(5);
+        packet.var(0);
+        packet.var(0);
+        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&packet.0), &content, 4).unwrap();
+        let entity = store.get(4).unwrap();
+        assert_eq!(entity.equipment[6].as_ref().unwrap().id, 5);
+        let rig = models.rig("minecraft:wolf#main");
+        let mut transforms = Vec::new();
+        p::evaluate_rig(rig, entity, &models, 4, 0., Mat4::IDENTITY, &mut transforms);
+        let mut out = DynamicGeometry::default();
+        let mut stats = p::PresentationStats::default();
+        let mut items = crate::ui::items::ItemModels::new();
+        p::append_equipment(entity, rig, &transforms, &mut items, &mut cache, Mat4::IDENTITY,
+            &content, &models, 4, 0., [15.; 2], &mut out, &mut stats).unwrap();
+        assert!(out.vertices.iter().any(|vertex| vertex.texture_layer == 10));
+        assert!(!out.vertices.iter().any(|vertex| vertex.texture_layer == 11));
+        assert!(stats.unrendered.is_empty());
+        let mut dyed = entity.equipment_value(6).unwrap().clone();
+        Arc::make_mut(&mut dyed.components).insert("minecraft:dyed_color".into(), json!(0xff0000));
+        let mut colored = DynamicGeometry::default();
+        assert!(cache.append(entity, 6, &dyed, &models, &content, Mat4::IDENTITY,
+            4, 0., [15.; 2], &mut colored).unwrap());
+        assert!(colored.vertices.iter().any(|v| v.texture_layer == 11 && v.color == [1., 0., 0.]));
+
+        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&[4, 6, 0]), &content, 5).unwrap();
+        let entity = store.get(4).unwrap();
+        assert!(entity.equipment_value(6).is_none());
+        let mut stripped = DynamicGeometry::default();
+        let mut stats = p::PresentationStats::default();
+        p::append_equipment(entity, rig, &transforms, &mut items, &mut cache, Mat4::IDENTITY,
+            &content, &models, 5, 0., [15.; 2], &mut stripped, &mut stats).unwrap();
+        assert!(stripped.vertices.is_empty());
+        assert!(stats.unrendered.is_empty());
+    }
+
+    #[test]
+    fn worn_trim_uses_received_registry_assets_slot_and_baby_rules() {
+        use serde_json::json;
+        let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:zombie");
+        content.set_registries(BTreeMap::from([
+            ("minecraft:trim_material".into(), vec![("test:metal".into(), json!({
+                "asset_name":"gold", "override_armor_assets":{"test:cloth":"gold_darker"}
+            }))]),
+            ("minecraft:trim_pattern".into(), vec![("test:pattern".into(), json!({
+                "asset_id":"minecraft:sentry", "decal":0
+            }))]),
+        ]));
+        for (name, layer) in [
+            ("minecraft:trims/entity/humanoid/sentry_gold_darker", 10),
+            ("minecraft:trims/entity/humanoid_leggings/sentry_gold_darker", 11),
+            ("minecraft:trims/entity/humanoid/sentry_gold", 12),
+        ] {
+            content.insert_test_texture(name, TextureRegion {
+                layer, uv: [0., 0., 1., 1.], width: 64, height: 32,
+            });
+        }
+        let entity = store.get(4).unwrap();
+        for (slot, expected) in [(4, 10), (3, 11)] {
+            let mut stack = entity.equipment_value(slot).unwrap().clone();
+            Arc::make_mut(&mut stack.components).insert(
+                "minecraft:trim".into(),
+                json!({"material":"test:metal","pattern":"test:pattern"}),
+            );
+            let mut out = DynamicGeometry::default();
+            assert!(cache.append(entity, slot, &stack, &models, &content, Mat4::IDENTITY,
+                2, 0., [15.; 2], &mut out).unwrap());
+            assert_eq!(out.vertices.len(), 8);
+            assert!(out.vertices[4..].iter().all(|v| v.texture_layer == expected));
+        }
+        let material = json!({"asset_name":"gold"});
+        let decal = json!({"asset_id":"minecraft:sentry","decal":true});
+        let mut stack = entity.equipment_value(4).unwrap().clone();
+        Arc::make_mut(&mut stack.components).insert(
+            "minecraft:trim".into(), json!({"material":material,"pattern":decal}),
+        );
+        let mut out = DynamicGeometry::default();
+        cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
+            2, 0., [15.; 2], &mut out).unwrap();
+        assert_eq!(out.indices[EntityMaterial::ArmorDecalCutoutNoCull as usize].len(), 6);
+        assert!(out.vertices[4..].iter().all(|v| v.texture_layer == 12));
+        let byte_decal = json!({"material":{"asset_name":"gold"},
+            "pattern":{"asset_id":"minecraft:sentry","decal":1}});
+        assert!(trim_texture(&content, &byte_decal, "test:cloth", "humanoid").unwrap().1);
+        let invalid_decal = json!({"material":{"asset_name":"gold"},
+            "pattern":{"asset_id":"minecraft:sentry","decal":2}});
+        assert!(trim_texture(&content, &invalid_decal, "test:cloth", "humanoid").is_err());
+        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
+        let mut baby_out = DynamicGeometry::default();
+        cache.append(store.get(4).unwrap(), 4, &stack, &models, &content, Mat4::IDENTITY,
+            2, 0., [15.; 2], &mut baby_out).unwrap();
+        assert_eq!(baby_out.vertices.len(), 4);
     }
 
     #[test]
@@ -484,15 +797,60 @@ mod tests {
     }
 
     #[test]
+    fn worn_glint_uses_its_atlas_rectangle_and_animated_coordinates() {
+        let (store, models, mut content, mut cache) = humanoid_fixture("minecraft:zombie");
+        let texture = TextureRegion {
+            layer: 7,
+            uv: [0.25, 0.5, 0.375, 0.75],
+            width: 64,
+            height: 64,
+        };
+        content.insert_test_texture("minecraft:misc/enchanted_glint_armor", texture);
+        let entity = store.get(4).unwrap();
+        let mut stack = entity.equipment_value(4).unwrap().clone();
+        Arc::make_mut(&mut stack.components).insert(
+            "minecraft:enchantment_glint_override".into(),
+            serde_json::json!(true),
+        );
+        let mut first = DynamicGeometry::default();
+        let mut later = DynamicGeometry::default();
+        for (tick, out) in [(0, &mut first), (120, &mut later)] {
+            cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
+                tick, 0., [15.; 2], out).unwrap();
+        }
+        let indices = &first.indices[EntityMaterial::ArmorEntityGlint as usize];
+        assert_eq!(indices.len(), 6);
+        let a = &first.vertices[indices[0] as usize];
+        let b = &later.vertices[later.indices[EntityMaterial::ArmorEntityGlint as usize][0] as usize];
+        assert_eq!(a.texture_layer, texture.layer);
+        assert_eq!(a.overlay_uv, [0.25, 0.5]);
+        assert_eq!(a.overlay_tint[..2], [0.125, 0.25]);
+        assert_eq!(a.uv, [0., 0.]);
+        assert_ne!(a.uv, b.uv);
+        assert_eq!(a.position, first.vertices[0].position);
+
+        Arc::make_mut(&mut stack.components).insert(
+            "minecraft:enchantment_glint_override".into(),
+            serde_json::json!(false),
+        );
+        let mut disabled = DynamicGeometry::default();
+        cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
+            0, 0., [15.; 2], &mut disabled).unwrap();
+        assert!(disabled.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
+    }
+
+    #[test]
     fn p1_humanoid_armor_black_dye_white_overlay_and_only_first_layer_glint() {
         let (store, models, mut content, mut cache) = humanoid_fixture("minecraft:player");
         let layers = cache
             .assets
             .get_mut("test:cloth")
             .unwrap()
+            .get_mut("humanoid")
+            .unwrap()
             .as_mut()
             .unwrap()
-            .get_mut("humanoid")
+            .as_mut()
             .unwrap();
         layers.push(Layer {
             texture: layers[0].texture,
@@ -624,26 +982,6 @@ mod tests {
     }
 
     #[test]
-    fn p1_armor_stand_uses_source_per_slot_and_small_rigs() {
-        for (slot, part) in [
-            (2, "boots"),
-            (3, "leggings"),
-            (4, "chestplate"),
-            (5, "helmet"),
-        ] {
-            assert_eq!(
-                armor_rig(slot, false).unwrap(),
-                format!("minecraft:armor_stand#{part}")
-            );
-            assert_eq!(
-                armor_rig(slot, true).unwrap(),
-                format!("minecraft:armor_stand_small#{part}")
-            );
-        }
-        assert_eq!(armor_rig(0, false), None);
-    }
-
-    #[test]
     fn p1_armor_layer_dye_and_undyed_overlay_colors() {
         let texture = TextureRegion {
             layer: 0,
@@ -754,13 +1092,13 @@ mod tests {
         let mut cache = Cache::default();
         cache.assets.insert(
             "test:plate".into(),
-            Ok(BTreeMap::from([(
+            BTreeMap::from([(
                 "humanoid".into(),
-                vec![Layer {
+                Ok(Some(vec![Layer {
                     texture,
                     dyeable: None,
-                }],
-            )])),
+                }])),
+            )]),
         );
         let entity = store.get(4).unwrap();
         let mut out = DynamicGeometry::default();
@@ -793,9 +1131,11 @@ mod tests {
             .assets
             .get_mut("test:plate")
             .unwrap()
+            .get_mut("humanoid")
+            .unwrap()
             .as_mut()
             .unwrap()
-            .get_mut("humanoid")
+            .as_mut()
             .unwrap()
             .push(Layer {
                 texture,

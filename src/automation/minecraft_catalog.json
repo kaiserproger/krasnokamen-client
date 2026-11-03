@@ -17,7 +17,7 @@
  },
  {
   "name": "minecraft_read_item_components",
-  "description": "Read one actual received stack's native components on demand. Selected forbids slot; player/container require slot; container requires a visible menu.",
+  "description": "Read one actual received stack's native components on demand. Selected forbids slot; player/container require slot; container requires a visible menu. Entity requires slot 0..7 and entity_id, entity_uuid and entity_type identity fence; unobserved equipment is an error, not an empty stack.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -26,13 +26,27 @@
      "enum": [
       "selected",
       "player",
-      "container"
+      "container",
+      "entity"
      ]
     },
     "slot": {
      "type": "integer",
      "minimum": 0,
      "maximum": 32767
+    },
+    "entity_id": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 2147483647
+    },
+    "entity_uuid": {
+     "type": "string",
+     "maxLength": 36
+    },
+    "entity_type": {
+     "type": "string",
+     "maxLength": 128
     }
    },
    "required": [
@@ -634,6 +648,46 @@
     }
    },
    "required": [],
+   "additionalProperties": false
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false,
+   "idempotentHint": true,
+   "openWorldHint": true
+  }
+ },
+ {
+  "name": "minecraft_wait_for_terrain",
+  "description": "Wait for named section meshes to be uploaded and included in a completed native frame. This does not prove visible pixels.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "sections": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 64,
+     "items": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+       "type": "integer",
+       "minimum": -2147483648,
+       "maximum": 2147483647
+      }
+     }
+    },
+    "timeout_seconds": {
+     "type": "number",
+     "minimum": 0.1,
+     "maximum": 120.0,
+     "default": 30.0
+    }
+   },
+   "required": [
+    "sections"
+   ],
    "additionalProperties": false
   },
   "annotations": {

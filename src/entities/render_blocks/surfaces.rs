@@ -12,11 +12,56 @@ fn registry_asset<'a>(c: &'a Content, registry: &str, name: &str) -> Result<&'a 
         .map(|(_, v)| v)
         .ok_or_else(|| format!("source registry asset not observed: {registry}/{name}"))
 }
+// Banner layers share the block frame's material and lighting inputs.
+#[allow(clippy::too_many_arguments)]
+fn paint_banner_part(
+    rig: &Rig,
+    root: Mat4,
+    tex: TextureRegion,
+    color: [f32; 3],
+    layer: EntityMaterial,
+    light: [f32; 2],
+    flag_angle: f32,
+    flag_only: bool,
+    transforms: &mut Vec<Mat4>,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    transforms.clear();
+    transforms.reserve(rig.bones.len());
+    for bone in &rig.bones {
+        let mut rotation = bone.rotation;
+        if bone.name == "flag" {
+            rotation.x = flag_angle;
+        }
+        let parent = bone.parent.map(|i| transforms[i]).unwrap_or(root);
+        let matrix = parent * resources::transform(bone.pivot, rotation, bone.scale);
+        transforms.push(matrix);
+        if (bone.name == "flag") != flag_only {
+            continue;
+        }
+        let normal_matrix = matrix.inverse().transpose();
+        for (quad, normal) in bone.quads.iter().zip(&bone.normals) {
+            let positions = quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array());
+            let uv = quad.map(|v| [
+                tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
+                tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
+            ]);
+            emit(positions, uv, color, tex.layer, layer, 1., light, out)?;
+            let normal = normal_matrix.transform_vector3(Vec3::from_array(*normal)).normalize_or_zero().to_array();
+            let first = out.vertices.len() - 4;
+            for vertex in &mut out.vertices[first..] {
+                vertex.normal = normal;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn banner(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    f: &mut BlockFrame,
+    f: &StaticBlockFrame,
     root: Mat4,
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
@@ -50,47 +95,42 @@ pub(super) fn banner(
         + f.partial)
         / 100.;
     let flag_angle = math::banner_angle(phase);
-    let flag = rig(m, &format!("{key}#flag"))?;
-    paint_rig(
-        rig(m, &format!("{key}#main"))?,
+    let banner = rig(m, &format!("{key}#main"))?;
+    paint_banner_part(
+        banner,
         root,
         texture(c, "entity/banner/banner_base")?,
         [1.; 3],
         EntityMaterial::EntitySolid,
         f.light,
+        flag_angle,
+        false,
         t,
         out,
-        |_, _, _| {},
     )?;
-    paint_rig(
-        flag,
+    paint_banner_part(
+        banner,
         root,
         texture(c, "entity/banner/banner_base")?,
         [1.; 3],
         EntityMaterial::EntitySolid,
         f.light,
+        flag_angle,
+        true,
         t,
         out,
-        |name, _, r| {
-            if name == "flag" {
-                r.x = flag_angle
-            }
-        },
     )?;
-    paint_rig(
-        flag,
+    paint_banner_part(
+        banner,
         root,
         texture(c, "entity/banner/base")?,
         rgb(dye(color).0),
         EntityMaterial::BannerPattern,
         f.light,
+        flag_angle,
+        true,
         t,
         out,
-        |name, _, r| {
-            if name == "flag" {
-                r.x = flag_angle
-            }
-        },
     )?;
     if let Some(patterns) = e.data_value()["patterns"].as_array() {
         for pattern in patterns.iter().take(16) {
@@ -100,20 +140,17 @@ pub(super) fn banner(
                 .ok_or("banner pattern asset id")?;
             let (namespace, path) = identifier_path(asset);
             let material = format!("{namespace}:entity/banner/{path}");
-            paint_rig(
-                flag,
+            paint_banner_part(
+                banner,
                 root,
                 texture(c, &material)?,
                 rgb(dye(pattern["color"].as_str().unwrap_or("white")).0),
                 EntityMaterial::BannerPattern,
                 f.light,
+                flag_angle,
+                true,
                 t,
                 out,
-                |name, _, r| {
-                    if name == "flag" {
-                        r.x = flag_angle
-                    }
-                },
             )?;
         }
     }
@@ -123,7 +160,7 @@ pub(super) fn pot(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    f: &mut BlockFrame,
+    f: &StaticBlockFrame,
     root: Mat4,
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
@@ -160,10 +197,10 @@ pub(super) fn pot(
         |_, _, _| {},
     )?;
     let sides = rig(m, "minecraft:decorated_pot_sides#main")?;
-    for (index, side) in ["back", "left", "right", "front"].iter().enumerate() {
+    for side in ["back", "left", "right", "front"] {
         let item = e.data_value()["sherds"]
-            .get(index)
-            .and_then(Value::as_str)
+            .get(side)
+            .and_then(|template| template["id"].as_str())
             .unwrap_or("minecraft:brick");
         let material = if let Some(pattern) = item
             .strip_prefix("minecraft:")
@@ -179,7 +216,7 @@ pub(super) fn pot(
             let parent = bone.parent.map(|i| t[i]).unwrap_or(root);
             let matrix = parent * resources::transform(bone.pivot, bone.rotation, bone.scale);
             t.push(matrix);
-            if bone.name != *side {
+            if bone.name != side {
                 continue;
             }
             for quad in &bone.quads {
@@ -428,6 +465,125 @@ fn structure_box(data: &Value) -> ([i32; 3], [i32; 3]) {
         [dx.abs(), size[1], dz.abs()],
     )
 }
+pub(super) fn beacon(
+    e: &BlockEntity,
+    c: &Content,
+    root: Mat4,
+    camera: [f64; 3],
+    time: f32,
+    scoping: bool,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    if e.animation.source.pending_world {
+        return Ok(BlockRenderStatus::WorldPending);
+    }
+    if e.animation.source.beacon_levels == 0 {
+        return Ok(BlockRenderStatus::SourceHidden);
+    }
+    let sections = &e.animation.source.beam_sections;
+    let distance = ((camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
+        + (camera[2] - f64::from(e.position[2]) - 0.5).powi(2))
+    .sqrt() as f32;
+    let radius = if scoping { 1. } else { (distance / 96.).max(1.) };
+    let mut start = 0;
+    for (i, section) in sections.iter().enumerate() {
+        beam(
+            c,
+            root,
+            time,
+            start,
+            if i + 1 == sections.len() { 2048 } else { section.height },
+            section.color,
+            1.,
+            0.2 * radius,
+            0.25 * radius,
+            "entity/beacon/beacon_beam",
+            out,
+        )?;
+        start += section.height;
+    }
+    Ok(BlockRenderStatus::Rendered)
+}
+
+pub(super) fn portal(
+    e: &BlockEntity,
+    c: &Content,
+    f: &StaticBlockFrame,
+    root: Mat4,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let gateway = e.type_name == "minecraft:end_gateway";
+    let mut visible = [false; 6];
+    for direction in 0..6 {
+        if gateway {
+            let d = super::super::physical::direction(direction)?;
+            let neighbor = std::array::from_fn(|i| e.position[i] + d[i] as i32);
+            if neighbor[1] < f.world.min_y || neighbor[1] >= f.world.min_y + f.world.height {
+                visible[direction as usize] = true;
+                continue;
+            }
+            let Some(state) = f.world.block(neighbor) else {
+                return Ok(BlockRenderStatus::WorldPending);
+            };
+            visible[direction as usize] = !c.info(state)?.occludes[(direction ^ 1) as usize];
+        } else {
+            visible[direction as usize] = direction == 0 || direction == 1;
+        }
+    }
+    let layer = c.texture("minecraft:environment/end_sky")
+        .ok_or("missing mandatory portal texture minecraft:environment/end_sky")?
+        .layer;
+    if gateway
+        && let Some((scale, height, spawning)) = math::gateway_beam(
+            e.animation.source.gateway_age,
+            e.animation.source.gateway_cooldown,
+            f.partial,
+            f.world.min_y + f.world.height - 1,
+        )
+    {
+        beam(
+            c,
+            root,
+            (f.game_time % 40) as f32 + f.partial,
+            -height,
+            height * 2,
+            dye(if spawning { "magenta" } else { "purple" }).0,
+            scale,
+            0.15,
+            0.175,
+            "entity/end_portal/end_gateway_beam",
+            out,
+        )?;
+    }
+    let matrix = if gateway {
+        root
+    } else {
+        root * Mat4::from_translation(Vec3::new(0., 0.375, 0.))
+            * Mat4::from_scale(Vec3::new(1., 0.375, 1.))
+    };
+    for direction in 0..6 {
+        if !visible[direction as usize] {
+            continue;
+        }
+        emit(
+            FACES[direction as usize]
+                .map(|v| matrix.transform_point3(Vec3::from_array(v)).to_array()),
+            [[0.; 2]; 4],
+            [1.; 3],
+            layer,
+            if gateway {
+                EntityMaterial::EndGateway
+            } else {
+                EntityMaterial::EndPortal
+            },
+            1.,
+            [-1.; 2],
+            out,
+        )?;
+    }
+    Ok(BlockRenderStatus::Rendered)
+}
+
 pub(super) fn append(
     e: &BlockEntity,
     c: &Content,
@@ -437,101 +593,9 @@ pub(super) fn append(
 ) -> Result<BlockRenderStatus> {
     let time = (f.game_time % 40) as f32 + f.partial;
     match e.type_name.as_str() {
-        "minecraft:beacon" => {
-            let mut start = 0;
-            if e.animation.source.beacon_levels == 0 {
-                return Ok(BlockRenderStatus::SourceHidden);
-            }
-            let sections = &e.animation.source.beam_sections;
-            let distance = ((f.camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
-                + (f.camera[2] - f64::from(e.position[2]) - 0.5).powi(2))
-            .sqrt() as f32;
-            let radius = if f.scoping {
-                1.
-            } else {
-                (distance / 96.).max(1.)
-            };
-            for (i, s) in sections.iter().enumerate() {
-                beam(
-                    c,
-                    root,
-                    time,
-                    start,
-                    if i + 1 == sections.len() {
-                        2048
-                    } else {
-                        s.height
-                    },
-                    s.color,
-                    1.,
-                    0.2 * radius,
-                    0.25 * radius,
-                    "entity/beacon_beam",
-                    out,
-                )?;
-                start += s.height;
-            }
-        }
+        "minecraft:beacon" => return beacon(e, c, root, f.camera, time, f.scoping, out),
         "minecraft:end_portal" | "minecraft:end_gateway" => {
-            let gateway = e.type_name == "minecraft:end_gateway";
-            if gateway {
-                if let Some((scale, height, spawning)) = math::gateway_beam(
-                    e.animation.source.gateway_age,
-                    e.animation.source.gateway_cooldown,
-                    f.partial,
-                    f.world.min_y + f.world.height - 1,
-                ) {
-                    beam(
-                        c,
-                        root,
-                        time,
-                        -height,
-                        height * 2,
-                        dye(if spawning { "magenta" } else { "purple" }).0,
-                        scale,
-                        0.15,
-                        0.175,
-                        "entity/end_portal/end_gateway_beam",
-                        out,
-                    )?;
-                }
-            }
-            let matrix = if gateway {
-                root
-            } else {
-                root * Mat4::from_translation(Vec3::new(0., 0.375, 0.))
-                    * Mat4::from_scale(Vec3::new(1., 0.375, 1.))
-            };
-            for direction in 0..6 {
-                if !gateway && direction != 0 && direction != 1 {
-                    continue;
-                }
-                let d = super::super::physical::direction(direction)?;
-                let neighbor = std::array::from_fn(|i| e.position[i] + d[i] as i32);
-                if gateway {
-                    let Some(state) = f.world.block(neighbor) else {
-                        return Ok(BlockRenderStatus::WorldPending);
-                    };
-                    if c.info(state)?.occludes[(direction ^ 1) as usize] {
-                        continue;
-                    }
-                }
-                emit(
-                    FACES[direction as usize]
-                        .map(|v| matrix.transform_point3(Vec3::from_array(v)).to_array()),
-                    [[0.; 2]; 4],
-                    [1.; 3],
-                    u32::MAX,
-                    if gateway {
-                        EntityMaterial::EndGateway
-                    } else {
-                        EntityMaterial::EndPortal
-                    },
-                    1.,
-                    [-1.; 2],
-                    out,
-                )?;
-            }
+            return portal(e, c, &StaticBlockFrame::from(&*f), root, out);
         }
         "minecraft:structure_block" => {
             if !f.game_master && !f.spectator {
@@ -629,7 +693,7 @@ fn test(
             1.,
             0.2,
             0.25,
-            "entity/beacon_beam",
+            "entity/beacon/beacon_beam",
             out,
         )?;
     }

@@ -344,6 +344,28 @@ pub(super) fn start(
             }
             return Ok(Some(Outcome::Complete(json!({"status":"ok"}))));
         }
+        "client_pointer" => {
+            // Native-only: the ordinary pointer path (hover rebuild, hit test, activation).
+            let point = ["x", "y"].map(|axis| args[axis].as_f64().unwrap_or(f64::NAN));
+            let content = session.content.as_ref().ok_or("content_not_ready")?;
+            let intents = session.ui.as_mut().ok_or("ui_not_ready")?.exact_pointer(
+                &session.inventory,
+                content,
+                text(args, "expected_screen_class")?,
+                text(args, "expected_title")?,
+                point,
+                text(args, "action")? == "click",
+            )?;
+            for intent in intents {
+                if session.phase != "play" {
+                    session.execute_title_ui_for_mcp(intent)?;
+                } else {
+                    session.execute_ui(intent)?;
+                }
+            }
+            let tooltip = session.ui.as_ref().and_then(|ui| ui.tooltip_text());
+            return Ok(Some(Outcome::Complete(json!({"status":"ok","tooltip":tooltip}))));
+        }
         "minecraft_read_item_components" => {
             require_play(session)?;
             return Ok(Some(Outcome::Complete(read_components(session, args)?)));
@@ -611,7 +633,25 @@ fn read_components(session: &Session, args: &Value) -> Result<Value> {
             result["container_id"] = json!(menu.id);
             result["container_state_id"] = json!(menu.state_id);
         }
-        _ => return Err("source must be selected, player, or container".into()),
+        "entity" => {
+            slot = integer(args, "slot", 0, 7)? as u16;
+            let id = integer(args, "entity_id", 0, i32::MAX)?;
+            let uuid = uuid::Uuid::parse_str(text(args, "entity_uuid")?)
+                .map_err(|_| "invalid entity UUID")?
+                .to_string();
+            let kind = text(args, "entity_type")?;
+            let entity = session
+                .entities
+                .get(id)
+                .filter(|entity| entity.uuid == uuid && entity.type_name == kind)
+                .ok_or("entity identity changed or is not client-visible")?;
+            result["entity_id"] = json!(id);
+            result["entity_uuid"] = json!(uuid);
+            result["entity_type"] = json!(kind);
+            // Never use equipment_value here: that accessor includes local prediction.
+            stack = entity.equipment[usize::from(slot)].as_ref();
+        }
+        _ => return Err("source must be selected, player, container, or entity".into()),
     }
     let stack = stack.ok_or("stack not observed")?;
     result["slot"] = json!(slot);
@@ -650,4 +690,63 @@ fn recipe_book(session: &Session, limit: usize) -> Value {
         .take_while(|(id, expected)| id == expected)
         .count();
     json!({"collection_count":collection_count,"entry_count":recipes.len(),"listed_count":ids.len(),"truncated":ids.len()<recipes.len(),"contiguous_prefix_count":prefix,"min_display_id":recipes.keys().next().copied().unwrap_or(-1),"max_display_id":recipes.keys().next_back().copied().unwrap_or(-1),"display_ids":ids})
+}
+
+#[cfg(test)]
+mod equipment_component_tests {
+    use super::*;
+    use crate::protocol::{Reader, Writer};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn entity_components_read_received_equipment_not_prediction() {
+        let mut session = Session::new_mode("equipment-components-test".into(), false);
+        let mut content = Content::test_cube();
+        content.entity_names.insert(1, "minecraft:armor_stand".into());
+        content.item_names.insert(1, "minecraft:diamond_chestplate".into());
+        content.insert_test_item_components(
+            1,
+            BTreeMap::from([(
+                "minecraft:trim".into(),
+                json!({"material":"minecraft:gold","pattern":"minecraft:sentry"}),
+            )]),
+        );
+        let mut spawn = Writer::default();
+        spawn.var(4);
+        spawn.0.extend([0u8; 16]);
+        spawn.var(1);
+        for _ in 0..3 {
+            spawn.f64(0.);
+        }
+        spawn.0.extend([0u8; 5]);
+        session.entities.apply(1, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        let mut equipment = Writer::default();
+        equipment.var(4);
+        equipment.byte(4);
+        equipment.var(1);
+        equipment.var(1);
+        equipment.var(0);
+        equipment.var(0);
+        session.entities.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&equipment.0), &content, 2).unwrap();
+        let handle = session.entities.get(4).unwrap().handle;
+        session.entities.predict_equipment(handle, 4, None).unwrap();
+        session.content = Some(content);
+        let args = json!({"source":"entity","slot":4,"entity_id":4,
+            "entity_uuid":"00000000-0000-0000-0000-000000000000","entity_type":"minecraft:armor_stand"});
+        let result = read_components(&session, &args).unwrap();
+        assert_eq!(result["item_id"], "minecraft:diamond_chestplate");
+        assert_eq!(result["components"]["minecraft:trim"]["material"], "minecraft:gold");
+        assert_eq!(result["components"]["minecraft:trim"]["pattern"], "minecraft:sentry");
+        let mut invalid = args.clone();
+        invalid["entity_type"] = json!("minecraft:zombie");
+        assert!(read_components(&session, &invalid).is_err());
+        invalid = args.clone();
+        invalid["entity_uuid"] = json!("00000000-0000-0000-0000-000000000001");
+        assert!(read_components(&session, &invalid).is_err());
+        invalid = args.clone();
+        invalid["slot"] = json!(8);
+        assert!(read_components(&session, &invalid).is_err());
+        invalid["slot"] = json!(3);
+        assert_eq!(read_components(&session, &invalid).unwrap_err(), "stack not observed");
+    }
 }

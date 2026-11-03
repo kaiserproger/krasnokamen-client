@@ -260,3 +260,25 @@ fn particle(r: &mut Reader<'_>, content: &Content, models: &super::Models) -> Re
     };
     Ok(json!({"type_id":id,"type":name,"data":data}))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::animation_tests::fixture;
+
+    #[test]
+    fn painting_holder_metadata_resolves_registry_and_inline_variants() {
+        let (models, _) = fixture();
+        let content = Content::test_cube();
+        for (wire, expected) in [(25, 24), (26, 25), (34, 33)] {
+            let bytes = [9, 34, wire, 255];
+            let metadata = decode(&mut Reader::new(&bytes), &content, &models).unwrap();
+            assert!(matches!(metadata.get(&9), Some(Metadata::Registry { serializer: 34, id }) if *id == expected));
+        }
+        let bytes = [9, 34, 0, 2, 3, 9, b't', b'e', b's', b't', b':', b'a', b'r', b't', b'1', 0, 0, 255];
+        let metadata = decode(&mut Reader::new(&bytes), &content, &models).unwrap();
+        assert!(matches!(metadata.get(&9), Some(Metadata::InlinePaintingVariant(value))
+            if value["width"] == 2 && value["height"] == 3 && value["asset_id"] == "test:art1"));
+        assert!(decode(&mut Reader::new(&[9, 34, 0]), &content, &models).is_err());
+    }
+}

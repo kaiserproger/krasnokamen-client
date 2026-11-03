@@ -175,7 +175,7 @@ impl Store {
             .as_ref()
             .ok_or("local avatar not synchronized")?;
         if entity.binding.is_none() {
-            let binding = presentation::material(self, models, entity, content);
+            let binding = presentation::material(self, models, entity, content, 0);
             self.local_avatar.as_mut().unwrap().binding = Some(binding);
         }
         self.local_avatar

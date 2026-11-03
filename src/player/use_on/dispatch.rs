@@ -42,7 +42,7 @@ impl Player {
                 self.block_item_result(item_owner, hit, hand, world, content, inventory, entities)?;
             if result.consumes() {
                 self.predict_block_interaction(
-                    item_owner, hit, hand, false, world, content, inventory, entities, tick,
+                    item_owner, hit, hand, false, world, content, inventory,
                 )?;
                 return Ok(result);
             }
@@ -58,8 +58,6 @@ impl Player {
                         world,
                         content,
                         inventory,
-                        entities,
-                        tick,
                     )?;
                     return Ok(result);
                 }

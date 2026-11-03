@@ -26,9 +26,21 @@ pub(super) fn tools() -> &'static Vec<Value> {
         }
         tools.push(serde_json::json!({
             "name":"client_capture",
-            "description":"Capture the real GPU scene target to a PNG artifact.",
+            "description":"Capture the real GPU scene target after active UI animations settle, to a PNG artifact.",
             "inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":100}},"required":["name"],"additionalProperties":false},
             "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}
+        }));
+        tools.push(serde_json::json!({
+            "name":"client_pointer",
+            "description":"Move the pointer to window pixel x,y (the ui_nodes bounds frame), or click there with the left button, through the ordinary pointer path after matching the current screen's exact class and title. Returns the tooltip text the pointer then shows, if any.",
+            "inputSchema":{"type":"object","properties":{
+                "expected_screen_class":{"type":"string","minLength":1,"maxLength":256},
+                "expected_title":{"type":"string","minLength":1,"maxLength":256},
+                "action":{"type":"string","enum":["move","click"]},
+                "x":{"type":"number","minimum":0,"maximum":32768},
+                "y":{"type":"number","minimum":0,"maximum":32768}
+            },"required":["expected_screen_class","expected_title","action","x","y"],"additionalProperties":false},
+            "annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
         }));
         tools
     });
@@ -39,6 +51,7 @@ pub(super) fn state_supported(name: &str) -> bool {
     !matches!(
         name,
         "client_capture"
+            | "client_pointer"
             | "minecraft_screenshot"
             | "minecraft_click_confirmation_button"
             | "minecraft_click_screen_button"

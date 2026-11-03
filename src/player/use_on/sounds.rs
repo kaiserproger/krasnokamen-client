@@ -46,6 +46,21 @@ impl Player {
         Ok(())
     }
 
+    pub(super) fn play_use_player_sound(
+        &mut self,
+        world: &World,
+        event: &str,
+        category: SoundCategory,
+        volume: f32,
+        pitch: f32,
+    ) -> Result<()> {
+        let mut request = SoundRequest::positional(
+            event, category, self.position, volume, pitch, world.sound_seed()?,
+        );
+        request.source = SoundOrigin::LocalPlayer { position: self.position };
+        self.predict_use(UsePrediction::Sound(request))
+    }
+
     pub(super) fn play_use_local_sound(
         &mut self,
         world: &World,

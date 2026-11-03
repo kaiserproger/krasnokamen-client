@@ -125,6 +125,9 @@ pub struct Session {
     registry_tags: BTreeMap<String, BTreeMap<String, Vec<i32>>>,
     features: Arc<BTreeSet<String>>,
     dimension: Option<String>,
+    item_spawn: Option<crate::ui::item_dynamic::GlobalPos>,
+    item_death: Option<crate::ui::item_dynamic::GlobalPos>,
+    item_needles: Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>,
     flat_world: bool,
     predicted_blocks: BTreeMap<[i32; 3], PredictedBlock>,
     received_chunks: BTreeMap<[i32; 2], u64>,
@@ -229,6 +232,9 @@ impl Session {
             registry_tags: BTreeMap::new(),
             features: Arc::new(BTreeSet::new()),
             dimension: None,
+            item_spawn: None,
+            item_death: None,
+            item_needles: Arc::default(),
             flat_world: false,
             predicted_blocks: BTreeMap::new(),
             received_chunks: BTreeMap::new(),
@@ -506,6 +512,9 @@ impl Session {
         self.username = Some(username.into());
         self.player = Player::new();
         self.environment = Environment::new();
+        self.item_spawn = None;
+        self.item_death = None;
+        self.item_needles = Arc::default();
         self.entities.clear_connection();
         self.registries.clear();
         self.registry_tags.clear();
@@ -617,12 +626,16 @@ impl Session {
         self.torch_particles.clear();
         self.block_motion.clear();
         self.dimension = None;
+        self.item_spawn = None;
+        self.item_death = None;
+        self.item_needles = Arc::default();
         if let Some(terrain) = &mut self.terrain {
             terrain.reset(&mut self.scene.chunks);
         }
         self.scene.vertices.clear();
         self.scene.indices.clear();
         self.scene.dynamic = Default::default();
+        self.scene.first_person = Default::default();
         self.scene.entity_presentation = Default::default();
         self.scene.overlay = Default::default();
         self.scene.revision += 1;
@@ -1045,6 +1058,7 @@ impl Session {
         if let Some(audio) = &self.audio {
             if let Err(error) = audio.listener(
                 self.scene.camera_position,
+                self.player.position,
                 self.player.yaw,
                 self.player.pitch,
             ) {
@@ -1053,6 +1067,9 @@ impl Session {
         }
         changed = true;
         changed
+    }
+    fn first_person_scoping(&self) -> bool {
+        self.camera_mode == 0 && self.content.as_ref().is_some_and(|content| self.player.is_scoping(content))
     }
     fn camera(&mut self) {
         let view = self.player.visual_view(self.presentation_partial);
@@ -1079,7 +1096,7 @@ impl Session {
             }
         }
         self.scene.roll_deg = if self.camera_mode == 0 { view.roll_deg } else { 0. };
-        self.scene.fov_deg = self.fov_deg * view.fov;
+        self.scene.fov_deg = self.fov_deg * view.fov * if self.first_person_scoping() { 0.1 } else { 1. };
         self.scene.hurt_tilt_deg = self.player.hurt_tilt_deg(
             self.client_tick,
             self.presentation_partial,
@@ -1312,6 +1329,33 @@ mod title_connection_tests {
         session.disconnect();
         assert_eq!(session.player.health, None);
         assert_eq!(session.player.death_message, None);
+    }
+
+    #[test]
+    fn first_person_geometry_is_cleared_by_disconnect_command_and_transport_failure() {
+        for transport_failure in [false, true] {
+            let mut session = Session::new_mode("disconnect-first-person".into(), false);
+            session.phase = "play".into();
+            let mut held = Scene::default();
+            fixture_cube(&mut held, [0, 0, 1], [1.; 3]);
+            session.scene.first_person.vertices = held.vertices;
+            session.scene.first_person.indices[crate::api::EntityMaterial::ItemCutout as usize] = held.indices;
+            assert_eq!(session.scene.first_person.vertices.len(), 24);
+            assert_eq!(session.scene.first_person.indices.iter().map(Vec::len).sum::<usize>(), 36);
+            let scene_revision = session.scene.revision;
+            if transport_failure {
+                session.fail("fixture transport EOF".into());
+                assert_eq!(session.phase, "error");
+            } else {
+                assert_eq!(session.command(Command::Disconnect).unwrap()["phase"], "disconnected");
+                assert_eq!(session.phase, "disconnected");
+            }
+            assert!(session.scene.first_person.vertices.is_empty(), "stale held geometry survived session reset");
+            assert!(session.scene.first_person.indices.iter().all(Vec::is_empty));
+            assert!(session.scene.vertices.is_empty());
+            assert!(session.scene.indices.is_empty());
+            assert!(session.scene.revision > scene_revision, "renderer must observe cleared geometry");
+        }
     }
 
     #[test]
@@ -1573,4 +1617,16 @@ fn cpu_hotpath_execution_context_is_bounded_and_preserves_fences() {
     }
     assert!(full.data["entities"].is_object(), "explicit full snapshots remain available");
     assert!(session.minecraft_observation().is_object(), "canonical queries still run on the real owner");
+}
+
+#[cfg(test)]
+#[test]
+fn minecraft_observation_projects_real_held_inputs() {
+    let mut session = Session::new_mode("held-observation".into(), false);
+    assert_eq!(session.minecraft_observation()["inputs"]["held"], json!([]));
+    assert!(session.minecraft_observation()["using"].is_null());
+    session.keys.insert("use".into());
+    assert_eq!(session.minecraft_observation()["inputs"]["held"], json!(["use"]));
+    session.keys.clear();
+    assert_eq!(session.minecraft_observation()["inputs"]["held"], json!([]));
 }

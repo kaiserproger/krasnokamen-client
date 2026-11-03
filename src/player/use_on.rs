@@ -99,10 +99,6 @@ pub enum UsePrediction {
         components: Arc<BTreeMap<String, Value>>,
         patch: Arc<crate::inventory::ComponentPatch>,
     },
-    ComparatorOutput {
-        position: [i32; 3],
-        signal: i32,
-    },
     EntitySwing {
         handle: Handle,
         hand: u8,
@@ -1361,6 +1357,22 @@ impl Player {
                 kind => return Err(format!("unregistered source numeric effect type {kind}")),
             },
         )
+    }
+    pub(crate) fn crossbow_charge_ticks(&mut self, item: &Stack, content: &Content) -> Result<f32> {
+        let mut seconds = 1.25;
+        if let Some(values) = item.component("minecraft:enchantments").and_then(Value::as_object) {
+            for (name, level) in values {
+                let level = level.as_i64().and_then(|value| i32::try_from(value).ok())
+                    .ok_or("invalid enchantment level")?;
+                if let Some(effect) = enchantment(content, name)?
+                    .get("effects")
+                    .and_then(|effects| effects.get("minecraft:crossbow_charge_time"))
+                {
+                    seconds = self.value_effect(effect, level, seconds, 0)?;
+                }
+            }
+        }
+        Ok((seconds * 20.).floor().max(1.))
     }
     pub(super) fn trident_spin_strength(&mut self, item: &Stack, content: &Content) -> Result<f32> {
         let Some(values) = item

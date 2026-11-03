@@ -237,6 +237,16 @@ pub enum MenuKind {
     Horse,
 }
 impl MenuKind {
+    pub(crate) fn virtual_result(self, slot: usize) -> bool {
+        match self {
+            Self::Inventory | Self::Crafting => slot == 0,
+            Self::Anvil | Self::Grindstone | Self::Merchant | Self::Cartography => slot == 2,
+            Self::Smithing | Self::Loom => slot == 3,
+            Self::Stonecutter => slot == 1,
+            _ => false,
+        }
+    }
+
     pub fn from_wire(id: i32) -> Result<Self> {
         Ok(match id {
             0..=5 => Self::Chest(id as u8 + 1),
@@ -1224,5 +1234,42 @@ mod tests {
         assert!(store.apply(107, &mut Reader::new(&[3]), &Content::test_cube()).unwrap());
         assert_eq!(store.selected_slot, 3);
         assert!(!store.apply(cb::SET_ENTITY_MOTION, &mut Reader::new(&[3]), &Content::test_cube()).unwrap());
+    }
+
+    #[test]
+    fn right_click_takes_whole_virtual_result_but_half_furnace_output() {
+        use crate::ui::{ClickMode, UiIntent};
+        let mut content = Content::test_cube();
+        content.item_names.insert(1, "test:output".into());
+        content.insert_test_item_components(1, BTreeMap::from([
+            ("minecraft:max_stack_size".into(), json!(64)),
+        ]));
+        let stack = read_stack(&mut Reader::new(&[4, 1, 0, 0]), &content).unwrap();
+        for (kind, slot, expected, left) in [
+            (MenuKind::Inventory, 0, 4, 0),
+            (MenuKind::Furnace, 2, 2, 2),
+        ] {
+            let mut store = InventoryStore::default();
+            store.screen_open = true;
+            store.player.slots.fill(Some(Stack::default()));
+            store.cursor = Some(Stack::default());
+            if kind == MenuKind::Inventory {
+                store.player.slots[slot] = Some(stack.clone());
+            } else {
+                let mut menu = Menu::new(1, kind, Value::Null);
+                menu.slots.fill(Some(Stack::default()));
+                menu.slots[slot] = Some(stack.clone());
+                store.active = Some(menu);
+            }
+            let intent = UiIntent::ClickSlot {
+                context: store.context(),
+                slot: slot as i16,
+                button: 1,
+                mode: ClickMode::Pickup,
+            };
+            assert_eq!(store.execute(&intent, &content).unwrap().len(), 1);
+            assert_eq!(store.cursor.as_ref().unwrap().count, expected);
+            assert_eq!(store.menu().slots[slot].as_ref().unwrap().count, left);
+        }
     }
 }

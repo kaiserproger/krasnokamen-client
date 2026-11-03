@@ -1051,3 +1051,96 @@ fn flat_water_surface_merges_into_one_double_sided_quad() {
     // Merged tile keeps both windings: 21 tops x 12 indices among the layer.
     assert!(translucent.len() >= 21 * 12);
 }
+
+const OVERWORLD_SHADE: [f32; 6] = [0.5, 1., 0.8, 0.8, 0.6, 0.6];
+const NETHER_SHADE: [f32; 6] = [0.9, 0.9, 0.8, 0.8, 0.6, 0.6];
+
+/// Vertex colour of each face of one isolated, fully lit cube meshed with the
+/// cardinal `weights`, after `edit` rewrote the fixture cube's model quads. The
+/// fixture stores each face's index in `texture_layer`, so quads stay attributable.
+fn face_shades(weights: [f32; 6], edit: impl Fn(&mut crate::protocol::models::BakedQuad)) -> [f32; 6] {
+    let mut content = fixture_content();
+    for quad in &mut content.models[0].quads {
+        edit(quad);
+    }
+    let catalog = Catalog::capture(&content).expect("fixture catalog must capture");
+    let mut world = World::new(0, 16);
+    world
+        .insert([0, 0], lit_chunk(&[[8, 8, 8]], 1, 16))
+        .unwrap();
+    let section = mesher::build(
+        &world.snapshot([0, 0]),
+        &catalog,
+        [0, 0, 0],
+        Rules {
+            directional_shade: weights,
+            ..deterministic_rules()
+        },
+        &AtomicU64::new(0),
+        0,
+        BYTE_LIMIT,
+    )
+    .expect("fixture build must succeed")
+    .expect("center section must be present");
+    assert_deterministic(&section);
+    let mut colors = [f32::NAN; 6];
+    for vertex in &section.geometry.vertices {
+        let face = vertex.texture_layer as usize;
+        assert!(
+            colors[face].is_nan() || colors[face] == vertex.color[0],
+            "one quad must carry one colour"
+        );
+        colors[face] = vertex.color[0];
+    }
+    assert!(colors.iter().all(|c| c.is_finite()), "all six faces emitted");
+    colors
+}
+
+/// Source packs gray = floor(255 * weight) before the white tint multiplies it.
+fn packed_shade(weight: f32) -> f32 {
+    (255. * weight).floor() / 255.
+}
+
+#[test]
+fn faces_without_override_use_their_own_cardinal_weight() {
+    assert_eq!(
+        face_shades(OVERWORLD_SHADE, |_| {}),
+        OVERWORLD_SHADE.map(packed_shade)
+    );
+}
+
+#[test]
+fn shade_direction_override_replaces_the_faces_cardinal_weight() {
+    // down -> up, north -> down, west -> north; up, south and east keep their own.
+    let colors = face_shades(OVERWORLD_SHADE, |quad| {
+        quad.shade_direction = match quad.face {
+            0 => Some(1),
+            2 => Some(0),
+            4 => Some(2),
+            _ => None,
+        };
+    });
+    assert_eq!(colors, [1., 1., 0.5, 0.8, 0.8, 0.6].map(packed_shade));
+}
+
+#[test]
+fn shade_direction_override_wins_over_the_legacy_flat_shade_flag() {
+    assert_eq!(
+        face_shades(OVERWORLD_SHADE, |quad| quad.shade = false),
+        [1.; 6].map(packed_shade)
+    );
+    let colors = face_shades(OVERWORLD_SHADE, |quad| {
+        quad.shade = false;
+        if quad.face == 5 {
+            quad.shade_direction = Some(0);
+        }
+    });
+    assert_eq!(colors, [1., 1., 1., 1., 1., 0.5].map(packed_shade));
+}
+
+#[test]
+fn shade_direction_override_reads_the_dimensions_weights() {
+    // The Nether weights "up" at 0.9; an override must not hard-code 1.0.
+    let colors = face_shades(NETHER_SHADE, |quad| quad.shade_direction = Some(1));
+    assert_eq!(colors, [0.9; 6].map(packed_shade));
+}

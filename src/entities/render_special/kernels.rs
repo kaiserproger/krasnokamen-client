@@ -3,14 +3,12 @@
 use crate::protocol::models::JavaRandom;
 use glam::{Mat4, Vec3};
 
-pub(super) fn tnt_scale(fuse: f32) -> f32 {
+pub(super) fn tnt_matrix(fuse: f32) -> Mat4 {
     let urgency = (1. - fuse / 10.).clamp(0., 1.);
     let square = urgency * urgency;
-    1. + square * square * 0.3
-}
-pub(super) fn tnt_matrix(fuse: f32) -> Mat4 {
+    let scale = 1. + square * square * 0.3;
     Mat4::from_translation(Vec3::new(0., 0.5, 0.))
-        * Mat4::from_scale(Vec3::splat(tnt_scale(fuse)))
+        * Mat4::from_scale(Vec3::splat(scale))
         * Mat4::from_rotation_y(-std::f32::consts::FRAC_PI_2)
         * Mat4::from_translation(Vec3::new(-0.5, -0.5, 0.5))
         * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)

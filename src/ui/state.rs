@@ -200,6 +200,7 @@ pub struct HudState {
     pub attack: Option<f32>,
     /// Darkness vignette strength under the HUD, 0 (none) ..= 1.
     pub vignette: f32,
+    pub scoping: bool,
     pub hardcore: bool,
     pub heart_kind: String,
     pub hunger: bool,
@@ -411,7 +412,7 @@ pub struct UiState {
     pub(crate) width: f32,
     pub(crate) height: f32,
     pub(crate) scale: f64,
-    framebuffer_size: [u32; 2],
+    pub(crate) framebuffer_size: [u32; 2],
     pub(crate) nodes: Vec<SemanticNode>,
     pub(crate) dirty: bool,
     pub(crate) inventory_revision: u64,
@@ -445,6 +446,9 @@ pub struct UiState {
     pub(crate) drag: Option<PointerButton>,
     pub(crate) drag_slots: Vec<i16>,
     pub(crate) drag_carrying: bool,
+    pub(crate) drag_pickup: bool,
+    pub(crate) drag_origin: Option<i16>,
+    pub(crate) drag_expected: Option<crate::inventory::Stack>,
     pub(crate) drag_fence: Option<UiContext>,
     last_slot_click: Option<(i16, u8, Instant)>,
     collect_on_release: bool,
@@ -568,6 +572,9 @@ impl UiState {
             drag: None,
             drag_slots: Vec::new(),
             drag_carrying: false,
+            drag_pickup: false,
+            drag_origin: None,
+            drag_expected: None,
             drag_fence: None,
             release_pending: false,
             chat: VecDeque::new(),
@@ -1150,6 +1157,9 @@ impl UiState {
         self.drag = None;
         self.drag_slots.clear();
         self.drag_carrying = false;
+        self.drag_pickup = false;
+        self.drag_origin = None;
+        self.drag_expected = None;
         self.drag_fence = None;
         self.last_slot_click = None;
         self.collect_on_release = false;
@@ -1477,6 +1487,8 @@ impl UiState {
             } else if matches!(self.screen, Screen::Menu | Screen::Creative | Screen::Sign) {
                 self.editor = None;
                 self.transition(Screen::Game);
+            } else if self.close_dialog_over_closed_menu() {
+                self.editor = None;
             }
         }
         if self.selected_slot != inventory.selected_slot {
@@ -1999,6 +2011,12 @@ impl UiState {
                 self.pointer = [x as f32 / self.scale as f32, y as f32 / self.scale as f32];
                 if matches!(self.screen, Screen::Chat | Screen::Book | Screen::Creative) {
                     self.dirty = true;
+                } else if self.screen == Screen::ServerDialog
+                    && (self.hovered_text_event().is_some()
+                        || self.nodes.iter().any(|n| n.id == "component/hover/background"))
+                {
+                    // Body text tooltips follow the pointer and vanish when it leaves the run.
+                    self.dirty = true;
                 }
                 let target = self
                     .nodes
@@ -2030,6 +2048,9 @@ impl UiState {
                         self.drag = button;
                         self.drag_slots.clear();
                         self.drag_carrying = inventory.cursor.as_ref().is_some_and(|s| !s.empty());
+                        self.drag_pickup = false;
+                        self.drag_origin = None;
+                        self.drag_expected = inventory.cursor.clone().filter(|stack| !stack.empty());
                         self.drag_fence = Some(self.context(inventory));
                         if let Some((id, action, enabled)) = target {
                             if !enabled {
@@ -2047,7 +2068,7 @@ impl UiState {
                                 self.focus = Some(id);
                                 self.invalidate();
                             } else if let NodeAction::Slot(slot) = action {
-                                self.drag_slots.push(slot);
+                                self.drag_origin = Some(slot);
                                 let button = match button {
                                     Some(PointerButton::Right) => 1,
                                     Some(PointerButton::Middle) => 2,
@@ -2070,6 +2091,22 @@ impl UiState {
                                     ClickMode::Pickup
                                 };
                                 if !self.drag_carrying || modifiers.shift || button == 2 {
+                                    self.drag_pickup = !self.drag_carrying
+                                        && !modifiers.shift
+                                        && button != 2;
+                                    if self.drag_pickup {
+                                        self.drag_expected = inventory.menu().slots
+                                            .get(slot as usize)
+                                            .and_then(Option::as_ref)
+                                            .filter(|stack| !stack.empty())
+                                            .cloned()
+                                            .map(|mut stack| {
+                                                if button == 1 && !inventory.menu().kind.virtual_result(slot as usize) {
+                                                    stack.count = (stack.count + 1) / 2;
+                                                }
+                                                stack
+                                            });
+                                    }
                                     self.execute_inner(
                                         UiIntent::ClickSlot {
                                             context: self.context(inventory),
@@ -2081,6 +2118,9 @@ impl UiState {
                                         content,
                                         effects,
                                     )?;
+                                    if modifiers.shift || button == 2 {
+                                        self.drag_origin = None;
+                                    }
                                     self.drag_slots.clear();
                                 }
                             } else if let NodeAction::Creative(key) = action {
@@ -2180,45 +2220,31 @@ impl UiState {
                         }
                     }
                     PointerPhase::Up => {
-                        if !self.drag_slots.is_empty() && self.drag_carrying {
-                            let fence = self.drag_fence.clone().ok_or("drag_context_missing")?;
-                            self.validate(&fence, inventory)?;
-                            let b = if matches!(self.drag, Some(PointerButton::Right)) {
-                                1
-                            } else {
-                                0
-                            };
-                            if self.drag_slots.len() == 1 {
-                                self.execute_inner(
-                                    UiIntent::ClickSlot {
-                                        context: fence,
-                                        slot: self.drag_slots[0],
-                                        button: b,
-                                        mode: if self.collect_on_release
-                                            && matches!(target, Some((_, NodeAction::Slot(slot), true)) if slot == self.drag_slots[0])
-                                        {
-                                            ClickMode::PickupAll
-                                        } else {
-                                            ClickMode::Pickup
-                                        },
-                                    },
-                                    inventory,
-                                    content,
-                                    effects,
-                                )?;
-                            } else {
+                        let same_menu = self.drag_fence.as_ref().is_some_and(|start| {
+                            start.screen_instance == inventory.screen_instance
+                                && start.container_id == inventory.menu().id
+                        });
+                        let same_cursor = self.drag_expected.as_ref().is_some_and(|expected| {
+                            inventory.cursor.as_ref() == Some(expected)
+                        });
+                        if same_menu && same_cursor && self.drag_origin.is_some() {
+                            let b = u8::from(matches!(self.drag, Some(PointerButton::Right)));
+                            let fence = self.context(inventory);
+                            // A drag that only ever touched its origin slot is a plain
+                            // click (vanilla: one quick-craft slot is a pickup click).
+                            let spread = self
+                                .drag_slots
+                                .iter()
+                                .any(|slot| Some(*slot) != self.drag_origin);
+                            if self.drag_carrying && spread {
                                 let mut gesture = Vec::with_capacity(self.drag_slots.len() + 2);
                                 for (slot, button) in std::iter::once((-999, b * 4))
                                     .chain(self.drag_slots.iter().map(|s| (*s, b * 4 + 1)))
                                     .chain(std::iter::once((-999, b * 4 + 2)))
                                 {
-                                    self.target(&format!("slot/{slot}")).or_else(|error| {
-                                        if slot == -999 {
-                                            Ok(&self.nodes[0])
-                                        } else {
-                                            Err(error)
-                                        }
-                                    })?;
+                                    if slot != -999 {
+                                        self.target(&format!("slot/{slot}"))?;
+                                    }
                                     gesture.push(UiIntent::ClickSlot {
                                         context: fence.clone(),
                                         slot,
@@ -2227,11 +2253,50 @@ impl UiState {
                                     });
                                 }
                                 effects.commands.push(UiCommand::InventoryGesture(gesture));
+                            } else if self.drag_carrying || self.drag_pickup {
+                                let layout = super::layout::Layout::menu(inventory.menu())?;
+                                let bounds = [
+                                    (self.width - layout.width) / 2.,
+                                    (self.height - layout.height) / 2.,
+                                    layout.width,
+                                    layout.height,
+                                ];
+                                let destination = match target {
+                                    Some((_, NodeAction::Slot(slot), true)) => Some(slot),
+                                    None if !contains(bounds, self.pointer) => Some(-999),
+                                    _ => None,
+                                };
+                                // A plain initial click picks up on down and must not
+                                // put the stack back on release over its source.
+                                if let Some(slot) = destination.filter(|slot| {
+                                    self.drag_carrying || Some(*slot) != self.drag_origin
+                                }) {
+                                    self.execute_inner(
+                                        UiIntent::ClickSlot {
+                                            context: fence,
+                                            slot,
+                                            button: b,
+                                            mode: if self.collect_on_release
+                                                && Some(slot) == self.drag_origin
+                                            {
+                                                ClickMode::PickupAll
+                                            } else {
+                                                ClickMode::Pickup
+                                            },
+                                        },
+                                        inventory,
+                                        content,
+                                        effects,
+                                    )?;
+                                }
                             }
                         }
                         self.slider_drag = None;
                         self.drag = None;
                         self.drag_slots.clear();
+                        self.drag_pickup = false;
+                        self.drag_origin = None;
+                        self.drag_expected = None;
                         self.drag_fence = None;
                         self.collect_on_release = false;
                     }
@@ -3394,7 +3459,34 @@ impl UiState {
         let result = self.render_nodes(content, inventory, out, transform, &nodes, exit.as_ref());
         self.nodes = nodes;
         self.anim.exit = exit;
-        result
+        result?;
+        if matches!(self.screen, Screen::Menu | Screen::Creative)
+            && let Some(stack) = inventory.cursor.as_ref().filter(|stack| !stack.empty())
+        {
+            let [x, y] = self.pointer;
+            let icon = [x - 8., y - 8., 16., 16.];
+            let model = self.models.icon_model(content, stack, &self.item_context);
+            append_stack_item(content, stack, model, icon, transform, out)?;
+            if stack.count > 1 {
+                let layout = self.text.layout(
+                    &json!({"text":stack.count.to_string(),"shadow_color":0xff3f3f3fu32}),
+                    24.,
+                )?;
+                self.text.append_layout(
+                    content,
+                    &layout,
+                    transform * Mat4::from_translation(Vec3::new(
+                        icon[0] + 17. - layout.width,
+                        icon[1] + 9.,
+                        0.,
+                    )),
+                    0xffffffff,
+                    None,
+                    out,
+                )?;
+            }
+        }
+        Ok(())
     }
     /// The darkness vignette lies under the whole HUD. Its dedicated overlay
     /// partition multiplies the frame by `1 - texel * colour`, so the quad
@@ -3647,7 +3739,7 @@ impl UiState {
                         if !s.empty() {
                             let model = self.models.icon_model(content, s, &self.item_context);
                             let icon = [x + 1., y + 1., w - 2., h - 2.];
-                            append_item(model, icon, transform, p.out)?;
+                            append_stack_item(content, s, model, icon, transform, p.out)?;
                             if s.count > 1 {
                                 let layout = self
                                     .text
@@ -3675,7 +3767,7 @@ impl UiState {
                     }
                     let stack = &self.creative_stacks[id];
                     let model = self.models.icon_model(content, stack, &self.item_context);
-                    append_item(model, node.bounds, transform, p.out)?;
+                    append_stack_item(content, stack, model, node.bounds, transform, p.out)?;
                 }
                 Paint::TradeItem { offer, part } => {
                     let trade = inventory
@@ -3696,7 +3788,7 @@ impl UiState {
                         _ => &trade.sell,
                     };
                     let model = self.models.icon_model(content, stack, &self.item_context);
-                    append_item(model, node.bounds, transform, p.out)?;
+                    append_stack_item(content, stack, model, node.bounds, transform, p.out)?;
                 }
                 Paint::RecipeDisplay(id) => {
                     let recipe = inventory.recipes.get(id).ok_or("recipe_not_observed")?;
@@ -3721,7 +3813,7 @@ impl UiState {
                     if !variants.is_empty() {
                         let stack = &variants[(self.tick / 20) as usize % variants.len()];
                         let model = self.models.icon_model(content, stack, &self.item_context);
-                        append_item(model, node.bounds, transform, p.out)?;
+                        append_stack_item(content, stack, model, node.bounds, transform, p.out)?;
                     }
                 }
                 Paint::Variants(variants, ghost) => {
@@ -3731,7 +3823,7 @@ impl UiState {
                     if !variants.is_empty() {
                         let stack = &variants[(self.tick / 20) as usize % variants.len()];
                         let model = self.models.icon_model(content, stack, &self.item_context);
-                        append_item(model, node.bounds, transform, p.out)?;
+                        append_stack_item(content, stack, model, node.bounds, transform, p.out)?;
                     }
                     if *ghost {
                         p.solid(node.bounds, [1.; 3], 48. / 255.);
@@ -3849,7 +3941,6 @@ impl UiState {
                     || heading
                     || matches!(node.paint, Paint::Button)
                     || node.id == "dialog/title"
-                    || node.id.starts_with("dialog/body/")
                     || matches!(
                         node.id.as_str(),
                         "title/subtitle"
@@ -4047,57 +4138,130 @@ fn valid_identifier(id: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_./-".contains(c))
 }
+fn append_stack_item(
+    content: &Content,
+    stack: &crate::inventory::Stack,
+    model: &crate::protocol::models::BakedModel,
+    bounds: [f32; 4],
+    parent: Mat4,
+    out: &mut MeshGeometry,
+) -> Result<()> {
+    let foil = super::items::foil_texture(content, stack)?;
+    let start = out.vertices.len();
+    append_item(model, bounds, parent, out)?;
+    if let Some(texture) = foil {
+        super::items::mark_foil(&mut out.vertices[start..], texture);
+    }
+    Ok(())
+}
+
 fn append_item(
     model: &crate::protocol::models::BakedModel,
     [x, y, w, h]: [f32; 4],
     parent: Mat4,
     out: &mut MeshGeometry,
 ) -> Result<()> {
-    let d = model.display.get("gui").copied().unwrap_or_default();
-    let r = d.rotation.map(f32::to_radians);
+    let display = super::items::display_matrix(model, "gui");
     let transform = parent
         * Mat4::from_translation(Vec3::new(x + w / 2., y + h / 2., 0.))
         * Mat4::from_scale(Vec3::new(w, -h, 1.))
-        * Mat4::from_translation(Vec3::from_array(d.translation) / 16.)
-        * Mat4::from_rotation_y(r[1])
-        * Mat4::from_rotation_x(r[0])
-        * Mat4::from_rotation_z(r[2])
-        * Mat4::from_scale(Vec3::from_array(d.scale))
-        * Mat4::from_translation(Vec3::splat(-0.5));
+        * display;
     if model.quads.len() > 65536 {
         return Err("item_geometry_limit".into());
     }
-    for q in &model.quads {
-        let color = match q.tint {
-            TintKind::Constant(c) => c,
-            TintKind::None => [1.; 3],
-            _ => return Err("unresolved_item_tint".into()),
-        };
-        let base = out.vertices.len() as u32;
-        for i in 0..4 {
-            out.vertices.push(Vertex {
-                position: transform
-                    .transform_point3(Vec3::from_array(q.positions[i]))
-                    .to_array(),
-                color,
-                uv: q.uv[i],
-                overlay_uv: [-1.; 2],
-                overlay_tint: [1.; 3],
-                alpha: q.alpha,
-                texture_layer: q.texture_layer,
-                light: [-1.; 2],
-                normal: [0.; 3],
-            });
-        }
-        out.indices[RenderLayer::Translucent as usize].extend([
-            base,
-            base + 1,
-            base + 2,
-            base,
-            base + 2,
-            base + 3,
-        ]);
+    if model.quads.iter().any(|q| {
+        matches!(q.entity_material, Some(crate::api::EntityMaterial::BannerPattern | crate::api::EntityMaterial::EntitySolid))
+    }) {
+        return append_depth_sorted_item(model, transform, display, out);
     }
+    // Preserve layered/cutout and translucent models' original composition. Opaque
+    // item faces need painter ordering because the overlay discards depth.
+    if model.quads.iter().all(|q| q.layer == RenderLayer::Opaque && q.alpha == 1.) {
+        return append_depth_sorted_item(model, transform, display, out);
+    }
+    for q in &model.quads {
+        let positions = q.positions.map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
+        append_item_quad(q, positions, display, out)?;
+    }
+    Ok(())
+}
+
+fn append_depth_sorted_item(
+    model: &crate::protocol::models::BakedModel,
+    transform: Mat4,
+    display: Mat4,
+    out: &mut MeshGeometry,
+) -> Result<()> {
+    // The UI has no depth buffer. Cache transformed vertices once and order
+    // far-to-near, keeping original order for equal depths.
+    const STACK_QUADS: usize = 128;
+    let mut stack = [(0.0_f32, 0_usize, [[0.0_f32; 3]; 4]); STACK_QUADS];
+    let mut heap = Vec::new();
+    let depths = if model.quads.len() <= STACK_QUADS {
+        &mut stack[..model.quads.len()]
+    } else {
+        heap.resize(model.quads.len(), (0.0, 0, [[0.0; 3]; 4]));
+        &mut heap[..]
+    };
+    for (index, (entry, q)) in depths.iter_mut().zip(&model.quads).enumerate() {
+        let positions = q.positions.map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
+        let depth = positions.iter().map(|p| p[2]).sum::<f32>() * 0.25;
+        *entry = (depth, index, positions);
+    }
+    depths.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    for &(_, index, positions) in depths.iter() {
+        append_item_quad(&model.quads[index], positions, display, out)?;
+    }
+    Ok(())
+}
+
+fn append_item_quad(
+    q: &crate::protocol::models::BakedQuad,
+    positions: [[f32; 3]; 4],
+    display: Mat4,
+    out: &mut MeshGeometry,
+) -> Result<()> {
+    let mut color = match q.tint {
+        TintKind::Constant(c) => c,
+        TintKind::None => [1.; 3],
+        _ => return Err("unresolved_item_tint".into()),
+    };
+    if q.gui_light_side && q.shade {
+        let [a, b, c, _] = q.positions.map(Vec3::from_array);
+        let normal = display.transform_vector3(b - a)
+            .cross(display.transform_vector3(c - a))
+            .normalize_or_zero();
+        if normal != Vec3::ZERO {
+            // Same two-light diffuse equation as the pinned item shader. The
+            // directions are the client's pinned default cardinal light vectors.
+            let light0 = Vec3::new(0.2, 1., -0.7).normalize();
+            let light1 = Vec3::new(-0.2, 1., 0.7).normalize();
+            let brightness = (0.4 + 0.6 * (normal.dot(light0).max(0.) + normal.dot(light1).max(0.))).min(1.);
+            color = color.map(|c| c * brightness);
+        }
+    }
+    let base = out.vertices.len() as u32;
+    for (i, position) in positions.into_iter().enumerate() {
+        out.vertices.push(Vertex {
+            position,
+            color,
+            uv: q.uv[i],
+            overlay_uv: [-1.; 2],
+            overlay_tint: [1.; 3],
+            alpha: q.alpha,
+            texture_layer: q.texture_layer,
+            light: [-1.; 2],
+            normal: [0.; 3],
+        });
+    }
+    out.indices[RenderLayer::Translucent as usize].extend([
+        base,
+        base + 1,
+        base + 2,
+        base,
+        base + 2,
+        base + 3,
+    ]);
     Ok(())
 }
 
@@ -4396,3 +4560,122 @@ mod vignette_tests {
         assert!(paint(&ui).vertices.is_empty());
     }
 }
+
+#[cfg(test)]
+mod item_projection_tests {
+    use super::*;
+
+    #[test]
+    fn opaque_overlapping_faces_put_near_texture_last_for_either_input_order() {
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        let mut far = model.quads[0].clone();
+        let mut near = far.clone();
+        far.positions = [[0., 0., 0.2], [0., 1., 0.2], [1., 1., 0.2], [1., 0., 0.2]];
+        near.positions = [[0., 0., 0.8], [0., 1., 0.8], [1., 1., 0.8], [1., 0., 0.8]];
+        far.texture_layer = 10;
+        near.texture_layer = 20;
+        for quads in [vec![far.clone(), near.clone()], vec![near.clone(), far.clone()]] {
+            model.quads = quads;
+            let mut mesh = MeshGeometry::default();
+            append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
+            let indices = &mesh.indices[RenderLayer::Translucent as usize];
+            assert_eq!(indices.len(), 12);
+            assert_eq!(mesh.vertices[indices[0] as usize].texture_layer, 10);
+            assert_eq!(mesh.vertices[indices[6] as usize].texture_layer, 20);
+        }
+    }
+
+    #[test]
+    fn gui_projection_uses_item_transform_rotation_and_translation() {
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        model.quads.truncate(1);
+        model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
+            rotation: [30., 225., 0.],
+            translation: [0.25, 0.125, 0.],
+            scale: [0.625; 3],
+        });
+        let source = Vec3::from_array(model.quads[0].positions[0]);
+        let expected = Mat4::from_translation(Vec3::new(8., 8., 0.))
+            * Mat4::from_scale(Vec3::new(16., -16., 1.))
+            * Mat4::from_translation(Vec3::new(0.25, 0.125, 0.))
+            * Mat4::from_rotation_x(30_f32.to_radians())
+            * Mat4::from_rotation_y(225_f32.to_radians())
+            * Mat4::from_scale(Vec3::splat(0.625))
+            * Mat4::from_translation(Vec3::splat(-0.5));
+        let mut mesh = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
+        assert!((Vec3::from_array(mesh.vertices[0].position) - expected.transform_point3(source)).length() < 1e-5);
+    }
+
+    #[test]
+    fn gui_side_light_changes_face_color_but_front_mode_does_not() {
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        model.quads.truncate(1); // down-facing normal, away from both lights
+        let mut side = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut side).unwrap();
+        assert!((side.vertices[0].color[0] - 0.4).abs() < 1e-5);
+        model.quads[0].gui_light_side = false;
+        let mut front = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut front).unwrap();
+        assert_eq!(front.vertices[0].color, [1.; 3]);
+    }
+
+    #[test]
+    fn gui_side_light_ignores_shade_direction_override_like_vanilla_items() {
+        // Vanilla only reads the override in the block-model lighter; item quads are lit
+        // by the shader from their normals, so the override must not change this face.
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        model.quads.truncate(1); // down-facing normal, away from both lights
+        model.quads[0].shade_direction = Some(1);
+        let mut mesh = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
+        assert!((mesh.vertices[0].color[0] - 0.4).abs() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod banner_item_order_tests {
+    use super::*;
+
+    #[test]
+    fn banner_gui_draws_far_faces_before_near_faces_after_transform() {
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        model.quads.truncate(2);
+        for position in &mut model.quads[0].positions {
+            position[2] = 0.8;
+        }
+        model.quads[0].texture_layer = 10;
+        model.quads[0].entity_material = Some(crate::api::EntityMaterial::BannerPattern);
+        for position in &mut model.quads[1].positions {
+            position[2] = 0.2;
+        }
+        model.quads[1].texture_layer = 20;
+        let mut mesh = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
+        assert_eq!(mesh.vertices[0].texture_layer, 20);
+        assert_eq!(mesh.vertices[4].texture_layer, 10);
+        model.quads[0].entity_material = Some(crate::api::EntityMaterial::EntitySolid);
+        let mut plain_shield = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut plain_shield).unwrap();
+        assert_eq!(plain_shield.vertices[0].texture_layer, 20);
+        assert_eq!(plain_shield.vertices[4].texture_layer, 10);
+
+        model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
+            rotation: [0., 180., 0.],
+            ..Default::default()
+        });
+        let mut rotated = MeshGeometry::default();
+        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut rotated).unwrap();
+        assert_eq!(rotated.vertices[0].texture_layer, 10);
+        assert_eq!(rotated.vertices[4].texture_layer, 20);
+    }
+}
+
+#[cfg(test)]
+#[path = "drag_tests.rs"]
+mod drag_tests;

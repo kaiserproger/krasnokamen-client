@@ -76,6 +76,8 @@ pub(crate) struct BlockFrame<'a, 'paint> {
 /// Geometry-only factories need no item/entity painters.
 struct StaticBlockFrame<'a> {
     world: &'a World,
+    camera_rotation: [f32; 2],
+    game_time: i64,
     partial: f32,
     light: [f32; 2],
     blocks: &'a std::collections::BTreeMap<[i32; 3], BlockEntity>,
@@ -86,6 +88,8 @@ impl<'a> From<&BlockFrame<'a, '_>> for StaticBlockFrame<'a> {
     fn from(frame: &BlockFrame<'a, '_>) -> Self {
         Self {
             world: frame.world,
+            camera_rotation: frame.camera_rotation,
+            game_time: frame.game_time,
             partial: frame.partial,
             light: frame.light,
             blocks: frame.blocks,
@@ -222,17 +226,20 @@ impl super::Store {
         stats.vertices = out.vertices.len() - initial;
         Ok(stats)
     }
-    /// Native scene factories whose geometry depends only on received block state.
-    /// Other factories retain their real item/entity painters in the full pass.
+    /// Native scene factories using received block state and the shared item painter.
+    // The scene pass receives its existing frame inputs directly.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_static_block_geometry(
         &mut self,
         content: &Content,
         world: &World,
         origin: [f64; 3],
         camera: [f64; 3],
+        camera_rotation: [f32; 2],
         radius: f32,
         scoping: bool,
         text_filtering: bool,
+        game_time: i64,
         partial: f32,
         sample_light: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
         out: &mut DynamicGeometry,
@@ -240,10 +247,8 @@ impl super::Store {
         if !radius.is_finite() || !(0. ..=4096.).contains(&radius) {
             return Err("block presentation radius bound".into());
         }
-        let models = self
-            .models
-            .as_ref()
-            .ok_or("entity model cache not activated")?;
+        let models = self.models.clone().ok_or("entity model cache not activated")?;
+        let models = models.as_ref();
         let mut stats = super::PresentationStats {
             state_revision: self.revision.to_string(),
             ..Default::default()
@@ -261,12 +266,31 @@ impl super::Store {
                     | "minecraft:bed"
                     | "minecraft:bell"
                     | "minecraft:lectern"
+                    | "minecraft:copper_golem_statue"
+                    | "minecraft:banner"
+                    | "minecraft:decorated_pot"
+                    | "minecraft:shulker_box"
+                    | "minecraft:enchanting_table"
+                    | "minecraft:conduit"
+                    | "minecraft:campfire"
+                    | "minecraft:brushable_block"
+                    | "minecraft:shelf"
+                    | "minecraft:vault"
+                    | "minecraft:mob_spawner"
+                    | "minecraft:trial_spawner"
+                    | "minecraft:beacon"
+                    | "minecraft:end_portal"
+                    | "minecraft:end_gateway"
+                    | "minecraft:skull"
             )
         }) {
+            let gateway = block.type_name == "minecraft:end_gateway";
             let distance = (0..3)
+                .filter(|&i| i != 1 || !(gateway || block.type_name == "minecraft:beacon"))
                 .map(|i| (f64::from(block.position[i]) + 0.5 - camera[i]).powi(2))
                 .sum::<f64>();
-            if distance > radius_squared {
+            let limit = if gateway { 256_f64.powi(2) } else { radius_squared };
+            if distance > limit {
                 continue;
             }
             let Some(light) = super::presentation::sampled(
@@ -280,6 +304,8 @@ impl super::Store {
             let root = relative_position(block, origin);
             let frame = StaticBlockFrame {
                 world,
+                camera_rotation,
+                game_time,
                 partial,
                 light,
                 blocks: &self.block_entities,
@@ -288,7 +314,100 @@ impl super::Store {
             };
             let vertices = out.vertices.len();
             let indices = out.indices.each_ref().map(Vec::len);
+            // Project against an immutable Store before entering the drawing
+            // closure, which mutates only disjoint cache/render fields.
+            let prepared = if matches!(block.type_name.as_str(), "minecraft:mob_spawner" | "minecraft:trial_spawner")
+                && self.preview_cache.get(&block.position).is_none_or(|entry| {
+                    entry.revision != block.revision || entry.entity.as_ref().ok()
+                        .is_some_and(|entity| super::presentation::binding_stale(models, entity, game_time))
+                })
+            {
+                Some((|| -> Result<Option<super::Entity>> {
+                    let Some(data) = items::spawner_entity(block, content)? else { return Ok(None) };
+                    let mut entity = super::preview::from_nbt(data, self, models, content, self.frame_tick)?;
+                    let binding = super::presentation::material(self, models, &entity, content, game_time)?;
+                    if !models.has_authored_rig(&binding.rig) {
+                        return Err(format!("spawner entity rig not activated: {}", binding.rig));
+                    }
+                    entity.binding = Some(Ok(binding));
+                    Ok(Some(entity))
+                })())
+            } else {
+                None
+            };
             let result = match block.type_name.as_str() {
+                "minecraft:mob_spawner" | "minecraft:trial_spawner" => (|| {
+                    if items::spawner_entity(block, content)?.is_none() {
+                        return Ok(BlockRenderStatus::SourceHidden);
+                    }
+                    if let Some(prepared) = prepared {
+                        let entity = prepared.and_then(|entity| entity.ok_or_else(|| "spawner preview data disappeared".into()));
+                        self.preview_cache.insert(block.position, super::preview::Entry {
+                            revision: block.revision,
+                            entity,
+                        });
+                    }
+                    let entity = self.preview_cache[&block.position].entity.as_ref().map_err(Clone::clone)?;
+                    let (dimensions, scale) = models.dimensions(entity)?;
+                    let size = (dimensions.width * scale).max(dimensions.height * scale).max(1.);
+                    let preview_scale = 0.53125 / size;
+                    let tick = self.frame_tick;
+                    let mut draw_store = super::presentation::DrawStore {
+                        transforms: &mut self.transforms,
+                        items: &mut self.items,
+                        equipment_cache: &mut self.equipment_cache,
+                        snow_pumpkin_state: &mut self.snow_pumpkin_state,
+                        mooshroom_mushroom_states: &mut self.mooshroom_mushroom_states,
+                        // A spawner preview has no bed in the world to lie along.
+                        bed_direction: &|_| None,
+                        clock_context: None,
+                    };
+                    let mut painter = |_: &Value, matrix: Mat4, light: [f32; 2], out: &mut DynamicGeometry| {
+                        let mut diagnostics = super::PresentationStats::default();
+                        super::presentation::draw_entity(entity, models, content, [0.; 3], tick, partial,
+                            light, Some(matrix * Mat4::from_scale(Vec3::splat(preview_scale))),
+                            &mut draw_store, out, &mut diagnostics)?;
+                        if let Some((key, error)) = diagnostics.unrendered.into_iter().next() {
+                            return Err(format!("{key}: {error}"));
+                        }
+                        Ok(BlockRenderStatus::Rendered)
+                    };
+                    items::spawner(block, models, content, root, light, partial, &mut painter, out)
+                })(),
+                "minecraft:campfire" | "minecraft:vault" | "minecraft:brushable_block" | "minecraft:shelf" => {
+                    let mut item = |observed: &Value,
+                                    context: &str,
+                                    seed: i32,
+                                    root: Mat4,
+                                    light: [f32; 2],
+                                    out: &mut DynamicGeometry| {
+                        super::render_special::append_observed_item(
+                            content,
+                            observed,
+                            context,
+                            seed,
+                            root,
+                            light,
+                            &mut self.items,
+                            &mut self.special_render_cache,
+                            out,
+                        )
+                    };
+                    if block.type_name == "minecraft:vault" {
+                        items::vault(block, root, light, partial, &mut item, out)
+                    } else if block.type_name == "minecraft:campfire" {
+                        items::campfire(block, content, root, light, &mut item, out)
+                            .map(|()| BlockRenderStatus::Rendered)
+                    } else {
+                        items::display(
+                            block,
+                            content,
+                            &mut items::DisplayFrame { light, sample_light, item: &mut item },
+                            root,
+                            out,
+                        )
+                    }
+                }
                 "minecraft:sign" | "minecraft:hanging_sign" => signs::append(
                     block,
                     content,
@@ -331,7 +450,7 @@ impl super::Store {
                     &mut self.transforms,
                     out,
                 ),
-                "minecraft:lectern" => book(
+                "minecraft:lectern" | "minecraft:enchanting_table" => book(
                     block,
                     models,
                     content,
@@ -340,6 +459,82 @@ impl super::Store {
                     &mut self.transforms,
                     out,
                 ),
+                "minecraft:banner" => surfaces::banner(
+                    block,
+                    models,
+                    content,
+                    &frame,
+                    root,
+                    &mut self.transforms,
+                    out,
+                ),
+                "minecraft:decorated_pot" => surfaces::pot(
+                    block,
+                    models,
+                    content,
+                    &frame,
+                    root,
+                    &mut self.transforms,
+                    out,
+                ),
+                "minecraft:shulker_box" => shulker(
+                    block,
+                    models,
+                    content,
+                    &frame,
+                    root,
+                    &mut self.transforms,
+                    out,
+                ),
+                "minecraft:conduit" => conduit(
+                    block,
+                    models,
+                    content,
+                    &frame,
+                    root,
+                    &mut self.transforms,
+                    out,
+                ),
+                "minecraft:copper_golem_statue" => copper_statue(
+                    block,
+                    models,
+                    content,
+                    root,
+                    light,
+                    &mut self.transforms,
+                    out,
+                ),
+                "minecraft:beacon" => surfaces::beacon(
+                    block,
+                    content,
+                    root,
+                    camera,
+                    (game_time % 40) as f32 + partial,
+                    scoping,
+                    out,
+                ),
+                "minecraft:end_portal" | "minecraft:end_gateway" => {
+                    surfaces::portal(block, content, &frame, root, out)
+                }
+                "minecraft:skull" => (|| {
+                    let name = block_name(block, content)?;
+                    if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
+                        && !block.data["profile"].is_null()
+                    {
+                        return Err("player head profile texture resolution is not connected to the native scene".into());
+                    }
+                    skull_geometry(
+                        block,
+                        models,
+                        content,
+                        root,
+                        partial,
+                        light,
+                        None,
+                        &mut self.transforms,
+                        out,
+                    )
+                })(),
                 _ => unreachable!(),
             };
             match result {
@@ -454,7 +649,9 @@ fn around(point: Vec3, rotation: Mat4) -> Mat4 {
 fn rig<'a>(m: &'a Models, key: &str) -> Result<&'a Rig> {
     Ok(m.rig(key))
 }
-fn paint_rig(
+// Rig emission needs the independent material and lighting inputs.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_rig(
     r: &Rig,
     root: Mat4,
     tex: TextureRegion,
@@ -476,7 +673,7 @@ fn paint_rig(
     }
     emit_rig(r, transforms, tex, color, layer, 1., light, out)
 }
-fn rgb(color: u32) -> [f32; 3] {
+pub(super) fn rgb(color: u32) -> [f32; 3] {
     [
         (color >> 16 & 255) as f32 / 255.,
         (color >> 8 & 255) as f32 / 255.,
@@ -562,14 +759,14 @@ fn append_inner(
         "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:ender_chest" => {
             chest(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out)
         }
-        "minecraft:shulker_box" => shulker(e, m, c, f, root, transforms, out),
+        "minecraft:shulker_box" => shulker(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
         "minecraft:skull" => skull(e, m, c, f, root, transforms, out),
         "minecraft:enchanting_table" | "minecraft:lectern" => {
             book(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out)
         }
-        "minecraft:conduit" => conduit(e, m, c, f, root, transforms, out),
-        "minecraft:banner" => surfaces::banner(e, m, c, f, root, transforms, out),
-        "minecraft:decorated_pot" => surfaces::pot(e, m, c, f, root, transforms, out),
+        "minecraft:conduit" => conduit(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
+        "minecraft:banner" => surfaces::banner(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
+        "minecraft:decorated_pot" => surfaces::pot(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
         "minecraft:beacon"
         | "minecraft:end_portal"
         | "minecraft:end_gateway"
@@ -585,49 +782,63 @@ fn append_inner(
         "minecraft:bed" => bed(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
         "minecraft:bell" => bell(e, m, c, &StaticBlockFrame::from(&*f), root, transforms, out),
         "minecraft:copper_golem_statue" => {
-            let pose = prop(e, c, "pose").unwrap_or("standing");
-            let key = match pose {
-                "standing" => "minecraft:copper_golem#main",
-                "running" => "minecraft:copper_golem_running#main",
-                "sitting" => "minecraft:copper_golem_sitting#main",
-                "star" => "minecraft:copper_golem_star#main",
-                _ => return Err("invalid copper statue pose".into()),
-            };
-            let name = block_name(e, c)?;
-            let suffix = if name.contains("oxidized") {
-                "_oxidized"
-            } else if name.contains("weathered") {
-                "_weathered"
-            } else if name.contains("exposed") {
-                "_exposed"
-            } else {
-                ""
-            };
-            let root = root
-                * Mat4::from_translation(Vec3::new(0.5, 0., 0.5))
-                * Mat4::from_rotation_y(
-                    (180. - yaw(prop(e, c, "facing").unwrap_or("north"))).to_radians(),
-                );
-            paint_rig(
-                rig(m, key)?,
-                root,
-                texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?,
-                [1.; 3],
-                EntityMaterial::EntityCutout,
-                f.light,
-                transforms,
-                out,
-                |name, pivot, rotation| {
-                    if name == "root" {
-                        pivot.y = 0.;
-                        rotation.z = PI;
-                    }
-                },
-            )?;
-            Ok(BlockRenderStatus::Rendered)
+            copper_statue(e, m, c, root, f.light, transforms, out)
         }
         _ => unreachable!(),
     }
+}
+fn copper_statue(
+    e: &BlockEntity,
+    m: &Models,
+    c: &Content,
+    root: Mat4,
+    light: [f32; 2],
+    transforms: &mut Vec<Mat4>,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let pose = prop(e, c, "copper_golem_pose")
+        .ok_or("copper statue block state has no copper_golem_pose")?;
+    let key = match pose {
+        "standing" => "minecraft:copper_golem#main",
+        "running" => "minecraft:copper_golem_running#main",
+        "sitting" => "minecraft:copper_golem_sitting#main",
+        "star" => "minecraft:copper_golem_star#main",
+        _ => return Err("invalid copper statue pose".into()),
+    };
+    if !m.has_authored_rig(key) {
+        return Err(format!("missing authored copper statue rig: {key}"));
+    }
+    let name = block_name(e, c)?;
+    let suffix = if name.contains("oxidized") {
+        "_oxidized"
+    } else if name.contains("weathered") {
+        "_weathered"
+    } else if name.contains("exposed") {
+        "_exposed"
+    } else {
+        ""
+    };
+    let facing = prop(e, c, "facing").ok_or("copper statue block state has no facing")?;
+    let root = root
+        * Mat4::from_translation(Vec3::new(0.5, 1.5, 0.5))
+        * Mat4::from_rotation_y((180. - yaw(facing)).to_radians());
+    paint_rig(
+        rig(m, key)?,
+        root,
+        texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?,
+        [1.; 3],
+        EntityMaterial::EntityCutout,
+        light,
+        transforms,
+        out,
+        |name, pivot, rotation| {
+            if name == "root" {
+                pivot.y = 0.;
+                rotation.z = PI;
+            }
+        },
+    )?;
+    Ok(BlockRenderStatus::Rendered)
 }
 fn bell(
     e: &BlockEntity,
@@ -756,7 +967,7 @@ fn shulker(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    f: &mut BlockFrame,
+    f: &StaticBlockFrame,
     root: Mat4,
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
@@ -814,26 +1025,35 @@ fn skull(
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
+    let name = block_name(e, c)?.replace("_wall", "");
+    let skin = if name == "minecraft:player_head" && !e.data["profile"].is_null() {
+        let Some(skin) = (f.skin)(&e.data["profile"])? else {
+            return Ok(BlockRenderStatus::ProfilePending);
+        };
+        Some(skin)
+    } else {
+        None
+    };
+    skull_geometry(e, m, c, root, f.partial, f.light, skin, t, out)
+}
+// Skull geometry shares the block frame's existing render inputs.
+#[allow(clippy::too_many_arguments)]
+fn skull_geometry(
+    e: &BlockEntity,
+    m: &Models,
+    c: &Content,
+    root: Mat4,
+    partial: f32,
+    light: [f32; 2],
+    skin: Option<TextureRegion>,
+    t: &mut Vec<Mat4>,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
     let name = block_name(e, c)?.trim_start_matches("minecraft:");
     let kind = name.replace("_wall", "");
-    let (key, material) = match kind.as_str() {
-        "skeleton_skull" => ("minecraft:skeleton_skull#main", "entity/skeleton/skeleton"),
-        "wither_skeleton_skull" => (
-            "minecraft:wither_skeleton_skull#main",
-            "entity/skeleton/wither_skeleton",
-        ),
-        "zombie_head" => ("minecraft:zombie_head#main", "entity/zombie/zombie"),
-        "creeper_head" => ("minecraft:creeper_head#main", "entity/creeper/creeper"),
-        "dragon_head" => ("minecraft:dragon_skull#main", "entity/enderdragon/dragon"),
-        "piglin_head" => ("minecraft:piglin_head#main", "entity/piglin/piglin"),
-        "player_head" => ("minecraft:player_head#main", ""),
-        _ => return Err("unknown source skull block".into()),
-    };
+    let (key, material) = skull_parts(&kind).ok_or("unknown source skull block")?;
     let (tex, layer) = if kind == "player_head" {
-        if !e.data["profile"].is_null() {
-            let Some(tex) = (f.skin)(&e.data["profile"])? else {
-                return Ok(BlockRenderStatus::ProfilePending);
-            };
+        if let Some(tex) = skin {
             (tex, EntityMaterial::EntityTranslucent)
         } else {
             (
@@ -872,24 +1092,45 @@ fn skull(
         * Mat4::from_rotation_y(angle.to_radians())
         * Mat4::from_scale(Vec3::new(-1., -1., 1.));
     let s = &e.animation.source;
-    let animation = s.skull_ticks as f32 + if s.skull_active { f.partial } else { 0. };
+    let animation = s.skull_ticks as f32 + if s.skull_active { partial } else { 0. };
     paint_rig(
         rig(m, key)?,
         root,
         tex,
         [1.; 3],
         layer,
-        f.light,
+        light,
         t,
         out,
-        |name, _, r| match name {
-            "jaw" => r.x = (f64::from(animation * PI * 0.2).sin() + 1.) as f32 * 0.2,
-            "left_ear" => r.z = -(f64::from(animation * PI * 0.2 * 1.2).cos() + 2.5) as f32 * 0.2,
-            "right_ear" => r.z = (f64::from(animation * PI * 0.2).cos() + 2.5) as f32 * 0.2,
-            _ => {}
-        },
+        |name, _, r| skull_pose(name, animation, r),
     )?;
     Ok(BlockRenderStatus::Rendered)
+}
+/// Rig key and texture of each source skull kind (block name without `minecraft:` and
+/// `_wall`). The player head texture is resolved from the profile or default skin by callers.
+pub(super) fn skull_parts(kind: &str) -> Option<(&'static str, &'static str)> {
+    Some(match kind {
+        "skeleton_skull" => ("minecraft:skeleton_skull#main", "entity/skeleton/skeleton"),
+        "wither_skeleton_skull" => (
+            "minecraft:wither_skeleton_skull#main",
+            "entity/skeleton/wither_skeleton",
+        ),
+        "zombie_head" => ("minecraft:zombie_head#main", "entity/zombie/zombie"),
+        "creeper_head" => ("minecraft:creeper_head#main", "entity/creeper/creeper"),
+        "dragon_head" => ("minecraft:dragon_skull#main", "entity/enderdragon/dragon"),
+        "piglin_head" => ("minecraft:piglin_head#main", "entity/piglin/piglin"),
+        "player_head" => ("minecraft:player_head#main", ""),
+        _ => return None,
+    })
+}
+/// Animated dragon jaw and piglin ears for a skull animation position.
+pub(super) fn skull_pose(name: &str, animation: f32, r: &mut Vec3) {
+    match name {
+        "jaw" => r.x = (f64::from(animation * PI * 0.2).sin() + 1.) as f32 * 0.2,
+        "left_ear" => r.z = -(f64::from(animation * PI * 0.2 * 1.2).cos() + 2.5) as f32 * 0.2,
+        "right_ear" => r.z = (f64::from(animation * PI * 0.2).cos() + 2.5) as f32 * 0.2,
+        _ => {}
+    }
 }
 fn book(
     e: &BlockEntity,
@@ -963,7 +1204,7 @@ fn conduit(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    f: &mut BlockFrame,
+    f: &StaticBlockFrame,
     root: Mat4,
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
@@ -1276,9 +1517,11 @@ mod tests {
                     &World::new(0, 256),
                     origin,
                     camera,
+                    [0., 0.],
                     32.,
                     false,
                     false,
+                    0,
                     0.,
                     &|_| Ok(Some([7., 3.])),
                     &mut geometry,
@@ -1367,9 +1610,11 @@ mod tests {
                         &World::new(0, 256),
                         origin,
                         camera,
+                        [0., 0.],
                         32.,
                         false,
                         false,
+                        0,
                         0.,
                         &|_| Ok(Some([7., 3.])),
                         &mut geometry,
@@ -1429,9 +1674,11 @@ mod tests {
                     &World::new(0, 256),
                     origin,
                     camera,
+                    [0., 0.],
                     32.,
                     false,
                     false,
+                    0,
                     0.,
                     &|_| Ok(None),
                     &mut pending,

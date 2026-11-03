@@ -931,7 +931,6 @@ impl Session {
                     let kind = content.placement_metadata(state)?["block_entity_type"].as_str().ok_or("Source block entity type missing")?;
                     self.entities.predict_block_entity_components(position,components,patch,kind)?;
                 }
-                UsePrediction::ComparatorOutput {position,signal} => self.entities.predict_comparator_output(position,signal)?,
                 UsePrediction::EntitySwing {handle,hand} => self.entities.predict_swing(handle,hand,self.client_tick)?,
                 UsePrediction::EntityEffect {handle,effect,duration,amplifier,flags,tick} => self.entities.predict_effect(handle,effect,duration,amplifier,flags,tick)?,
                 UsePrediction::EntityMetadata {handle,key,value} => self.entities.predict_metadata(handle,key,value)?,

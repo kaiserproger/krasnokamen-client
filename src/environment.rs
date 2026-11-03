@@ -626,6 +626,11 @@ impl Environment {
         }
         Ok(values)
     }
+    /// Numeric item properties sample the owner's position, not the camera.
+    pub(crate) fn item_time_attributes(&self, world: &World, position: [f64; 3]) -> Result<(f32, f32)> {
+        let values = self.camera_attributes(world, position)?;
+        Ok((values[A::SunAngle as usize].float(), values[A::MoonPhase as usize].float()))
+    }
     /// Rain-fog target at the camera block. A camera chunk (or its sky light)
     /// that has not arrived yet contributes no rain fog rather than failing the
     /// session; the fog eases toward the real target once the data is received.

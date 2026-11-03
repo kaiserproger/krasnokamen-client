@@ -11,6 +11,7 @@ pub(super) const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_a
 pub(super) struct Pipelines {
     pub world: [wgpu::RenderPipeline; 3],
     pub dynamic: Vec<wgpu::RenderPipeline>,
+    pub first_person: Vec<wgpu::RenderPipeline>,
     pub dynamic_index: [usize; EntityMaterial::COUNT],
     pub dynamic_order: [usize; EntityMaterial::COUNT],
     pub overlay: wgpu::RenderPipeline,
@@ -165,6 +166,7 @@ impl Pipelines {
             )
         });
         let mut dynamic = Vec::new();
+        let mut first_person = Vec::new();
         let mut dynamic_index = [0; EntityMaterial::COUNT];
         for material in 0..EntityMaterial::COUNT {
             if let Some(previous) =
@@ -179,6 +181,10 @@ impl Pipelines {
                     &layout,
                     &world_buffers,
                     MATERIALS[material],
+                    if MATERIALS[material].shader.kind == 11 { COLOR } else { super::post::HDR },
+                ));
+                first_person.push(create_source(
+                    device, &shader, &layout, &world_buffers, MATERIALS[material], COLOR,
                 ));
             }
         }
@@ -326,6 +332,7 @@ impl Pipelines {
         Self {
             world,
             dynamic,
+            first_person,
             dynamic_index,
             dynamic_order,
             overlay,
@@ -396,6 +403,7 @@ fn create_source(
     layout: &wgpu::PipelineLayout,
     buffers: &[wgpu::VertexBufferLayout<'_>],
     descriptor: Descriptor,
+    target: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let constants = descriptor.shader.constants();
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -418,11 +426,7 @@ fn create_source(
                 ..Default::default()
             },
             targets: &[Some(wgpu::ColorTargetState {
-                format: if descriptor.shader.kind == 11 {
-                    COLOR
-                } else {
-                    super::post::HDR
-                },
+                format: target,
                 blend: descriptor.blend_state(),
                 write_mask: if descriptor.color_write {
                     wgpu::ColorWrites::ALL

@@ -3,7 +3,7 @@ use super::*;
 use glam::{Mat4, Vec3};
 use resources::{Bone, BoneRole, Rig};
 
-fn fixture() -> (Models, Entity) {
+pub(super) fn fixture() -> (Models, Entity) {
     let mut models = Models {
         rigs: BTreeMap::new(),
         schemas: BTreeMap::new(),
@@ -185,6 +185,109 @@ fn animation_received_motion_swings_limbs_without_velocity_packets() {
 }
 
 #[test]
+fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
+    let (models, mut entity) = fixture();
+    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    entity.type_name = "minecraft:spider".into();
+    let pose = |entity: &Entity| {
+        let mut matrices = vec![];
+        presentation::evaluate_rig(rig, entity, &models, 2, 1., Mat4::IDENTITY, &mut matrices);
+        matrices
+    };
+    let idle = pose(&entity);
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let moving = pose(&entity);
+    for index in 0..8 {
+        let bone = rig.part_by_name[&format!("leg{index}")];
+        assert_ne!(idle[bone], moving[bone], "leg{index} must move");
+    }
+    for _ in 0..80 {
+        tick_walk(&models, &mut entity, 0.4);
+    }
+    let stopped = pose(&entity);
+    for index in 0..8 {
+        let bone = rig.part_by_name[&format!("leg{index}")];
+        let a = idle[bone].to_cols_array();
+        let b = stopped[bone].to_cols_array();
+        assert!(a.iter().zip(b).all(|(x, y)| (*x - y).abs() < 1e-5), "leg{index}");
+    }
+}
+
+#[test]
+fn animation_zombie_authored_legs_follow_received_motion() {
+    let (models, mut entity) = fixture();
+    let rig = solaris_models::authored("minecraft:zombie#main").unwrap();
+    entity.type_name = "minecraft:zombie".into();
+    let mut idle = vec![];
+    presentation::evaluate_rig(rig, &entity, &models, 0, 1., Mat4::IDENTITY, &mut idle);
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let mut moving = vec![];
+    presentation::evaluate_rig(rig, &entity, &models, 2, 1., Mat4::IDENTITY, &mut moving);
+    for name in ["right_leg", "left_leg"] {
+        let bone = rig.part_by_name[name];
+        assert_ne!(idle[bone], moving[bone], "{name}");
+    }
+}
+
+#[test]
+fn animation_zombie_family_raises_both_arms() {
+    let (mut models, mut entity) = fixture();
+    let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+    schema.accessors.insert("DATA_MOB_FLAGS_ID".into(), [15, 0]);
+    schema.accessors.insert("DATA_BABY_ID".into(), [16, 8]);
+    let rig = rig();
+    for name in ["zombie", "husk", "drowned", "giant", "zombie_villager", "zombified_piglin"] {
+        entity.type_name = format!("minecraft:{name}");
+        models.schemas.insert(entity.type_name.clone(), schema);
+        for (flags, baby, held, min_y, max_y) in [
+            (0, false, false, -0.1, 0.1),
+            (4, false, false, -0.6, -0.4),
+            (0, true, true, 0.99, 1.01),
+            (0, true, false, -0.1, 0.1),
+        ] {
+            entity.metadata.insert(15, Metadata::Byte(flags));
+            entity.metadata.insert(16, Metadata::Bool(baby));
+            entity.equipment[0] = held.then(|| {
+                let mut stack = Stack::default();
+                stack.id = 1;
+                stack.count = 1;
+                stack
+            });
+            let mut pose = vec![];
+            presentation::evaluate_rig(&rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut pose);
+            for arm in [2, 3] {
+                let direction = pose[arm].transform_vector3(Vec3::Y);
+                assert!((min_y..=max_y).contains(&direction.y), "{name} arm {arm}: {direction:?}");
+            }
+        }
+        schema = models.schemas.remove(&entity.type_name).unwrap();
+    }
+}
+
+#[test]
+fn animation_zombie_idle_arms_bob_and_attack_moves_both() {
+    let (models, mut entity) = fixture();
+    entity.type_name = "minecraft:zombie".into();
+    let rig = rig();
+    let pose = |entity: &Entity, tick| {
+        let mut out = vec![];
+        presentation::evaluate_rig(&rig, entity, &models, tick, 0., Mat4::IDENTITY, &mut out);
+        out
+    };
+    let idle = pose(&entity, 0);
+    let bob = pose(&entity, 20);
+    assert_ne!(idle[2], bob[2]);
+    assert_ne!(idle[3], bob[3]);
+    let before_attack = pose(&entity, 2);
+    entity.animation = Some((0, 0));
+    let attack = pose(&entity, 2);
+    assert_ne!(attack[2], before_attack[2]);
+    assert_ne!(attack[3], before_attack[3]);
+}
+
+#[test]
 fn animation_villager_model_family_swings_legs_at_half_amplitude() {
     let (models, mut entity) = fixture();
     let rig = rig();
@@ -316,6 +419,7 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
         rig: "authored:rig".into(),
         texture: crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1 },
         style: presentation::RootStyle::Living, layers: None,
+        anger: None,
     }));
     models.poses.insert(2, "SLEEPING".into());
     models.schemas.get_mut(&entity.type_name).unwrap().dimension_constants.insert(
@@ -332,7 +436,7 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     for direction in [[0, 1], [-1, 0], [0, -1], [1, 0]] {
         let mut geometry = DynamicGeometry::default();
         store.append_geometry(&Content::test_cube(), [0.; 3], [0.; 3], [0.; 2], 32.,
-            0, 0., &|_| Ok(Some([15., 0.])), &|position| {
+            0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|position| {
                 assert_eq!(position, [0, 0, 0]);
                 Some(direction)
             }, &mut geometry).unwrap();
@@ -388,6 +492,8 @@ fn animation_local_render_slot_is_restored_even_when_extraction_fails() {
         32.,
         0,
         0.,
+        0,
+        None,
         &|_| Ok(Some([15., 0.])),
         &|_| None,
         &mut DynamicGeometry::default(),
@@ -486,6 +592,7 @@ fn animation_hurt_flash_is_emitted_and_expires_on_real_rig_vertices() {
         },
         style: presentation::RootStyle::Living,
         layers: None,
+        anger: None,
     }));
     entity.damage_tick = Some(10);
     let mut store = Store::new();
@@ -503,6 +610,8 @@ fn animation_hurt_flash_is_emitted_and_expires_on_real_rig_vertices() {
                 32.,
                 tick,
                 0.5,
+                0,
+                None,
                 &|_| Ok(Some([15., 0.])),
                 &|_| None,
                 &mut geometry,
@@ -553,6 +662,7 @@ fn first_person_arm_uses_baked_geometry_skin_uvs_and_normals() {
         },
         style: presentation::RootStyle::Living,
         layers: None,
+        anger: None,
     }));
     let mut store = Store::new();
     store.models = Some(Arc::new(models));
@@ -593,10 +703,12 @@ fn first_person_arm_uses_baked_geometry_skin_uvs_and_normals() {
             &mut scene,
             1.,
             [15., 0.],
+            &crate::ui::items::ItemContext::default(),
+            None,
         )
         .unwrap();
     let camera = Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y);
-    let tip_normal = camera.transform_vector3(Vec3::from_array(scene.dynamic.vertices[0].normal));
+    let tip_normal = camera.transform_vector3(Vec3::from_array(scene.first_person.vertices[0].normal));
     assert!(
         tip_normal.z < -0.5,
         "the fist points away from the camera; the long arm sides, not its end cap, face the viewer",
@@ -627,9 +739,9 @@ fn first_person_missing_local_profile_uses_uuid_skin_like_remote_players() {
     for index in 0..4 {
         entity.uuid = uuid::Uuid::from_u128(index).to_string();
         store.local_uuid = Some(entity.uuid.clone());
-        let local = presentation::material(&store, &models, &entity, &content).unwrap();
+        let local = presentation::material(&store, &models, &entity, &content, 0).unwrap();
         store.local_uuid = None;
-        let remote = presentation::material(&store, &models, &entity, &content).unwrap();
+        let remote = presentation::material(&store, &models, &entity, &content, 0).unwrap();
         assert_eq!(local.texture.layer, index as u32);
         assert_eq!(local.texture.layer, remote.texture.layer);
         assert_eq!(local.rig, remote.rig);
@@ -765,4 +877,188 @@ fn no_ai_mob_head_never_glances_at_the_local_player() {
         !physical::may_glance(&models, &entity),
         "a summoned NoAI mob keeps its received head yaw like vanilla"
     );
+}
+
+#[test]
+fn armor_stand_renders_feet_on_plate_and_respects_part_flags() {
+    let (mut models, mut entity) = fixture();
+    let mut schema = models.schemas.remove(&entity.type_name).unwrap();
+    schema.accessors.insert("DATA_CLIENT_FLAGS".into(), [15, 0]);
+    schema.dimension_constants.insert(
+        "BABY_DIMENSIONS".into(),
+        resources::DimensionConstant::Dimensions(schema.dimensions.clone()),
+    );
+    entity.type_name = "minecraft:armor_stand".into();
+    entity.source = None;
+    models.schemas.insert(entity.type_name.clone(), schema);
+    entity.binding = Some(Ok(presentation::Binding {
+        rig: "minecraft:armor_stand#renderer_main".into(),
+        texture: crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 64,
+            height: 64,
+        },
+        style: presentation::RootStyle::Living,
+        layers: None,
+        anger: None,
+    }));
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    store.local_avatar = Some(entity);
+    store.set_local_visible(true);
+    let mut render = |flags: i8| {
+        store.local_avatar.as_mut().unwrap().metadata.insert(15, Metadata::Byte(flags));
+        let mut geometry = DynamicGeometry::default();
+        store
+            .append_geometry(
+                &Content::test_cube(),
+                [0.; 3],
+                [0.; 3],
+                [0.; 2],
+                32.,
+                0,
+                0.,
+                0,
+                None,
+                &|_| Ok(Some([15., 0.])),
+                &|_| None,
+                &mut geometry,
+            )
+            .unwrap();
+        geometry
+    };
+    let plate = |v: &crate::api::Vertex| {
+        v.position[0].abs() > 0.3 && v.position[2].abs() > 0.3 && v.position[1] < 0.08
+    };
+    let arm = |v: &crate::api::Vertex| {
+        v.position[0].abs() > 0.25
+            && v.position[2].abs() < 0.1
+            && (0.6..1.2).contains(&v.position[1])
+    };
+    let default = render(0);
+    assert!(default.vertices.iter().any(plate), "plate should be at foot level");
+    assert!(!default.vertices.iter().any(arm), "arms are hidden by default");
+    assert!(render(4).vertices.iter().any(arm), "ShowArms renders the arms");
+    assert!(
+        !render(8).vertices.iter().any(plate),
+        "NoBasePlate hides the plate"
+    );
+    let height = |geometry: &DynamicGeometry| {
+        let (min, max) = geometry.vertices.iter().fold(
+            (f32::INFINITY, f32::NEG_INFINITY),
+            |(min, max), v| (min.min(v.position[1]), max.max(v.position[1])),
+        );
+        max - min
+    };
+    let small = render(1);
+    assert!(
+        (height(&small) - height(&default) * 0.5).abs() < 0.01,
+        "small height {}, normal height {}",
+        height(&small),
+        height(&default)
+    );
+}
+
+#[test]
+fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
+    use crate::ui::item_dynamic::ItemWorldContext;
+    use crate::ui::items::ItemContext;
+    use std::cell::Cell;
+
+    let (mut models, _) = fixture();
+    for kind in ["minecraft:item_frame", "minecraft:item"] {
+        let (mut fixture_models, _) = fixture();
+        let mut schema = fixture_models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_ITEM".into(), [9, 7]);
+        schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+        models.schemas.insert(kind.into(), schema);
+    }
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    let mut content = Content::test_cube();
+    content.item_names.insert(1, "minecraft:clock".into());
+    content.item_names.insert(2, "minecraft:stone".into());
+    for (name, layer) in [("test:early", 11), ("test:late", 22), ("minecraft:stone", 33)] {
+        let mut model = content.models[0].clone();
+        for quad in &mut model.quads { quad.texture_layer = layer; }
+        store.items.insert_test_model(name, model);
+    }
+    let clock_graph = json!({
+        "type":"minecraft:range_dispatch", "property":"minecraft:time", "source":"daytime",
+        "fallback":{"type":"minecraft:model","model":"test:early"},
+        "entries":[{"threshold":0.125,"model":{"type":"minecraft:model","model":"test:late"}}]
+    });
+    store.items.insert_test_graph("minecraft:clock", clock_graph.clone());
+    store.items.insert_test_graph("clock", clock_graph);
+    for (id, kind, item) in [(1, "minecraft:item_frame", 1), (2, "minecraft:item", 1), (3, "minecraft:item", 2)] {
+        let (_, mut entity) = fixture();
+        entity.handle = Handle { network_id: id, generation: id as u64 };
+        entity.type_name = kind.into();
+        entity.spawn_data = 2;
+        entity.binding = Some(Err("item uses item renderer".into()));
+        if id == 2 {
+            entity.transform.position[0] = 2.;
+            entity.previous.position[0] = 2.;
+        }
+        entity.metadata.insert(0, Metadata::Byte(0x20));
+        let mut stack = Stack::default();
+        stack.id = item;
+        stack.count = 1;
+        if id == 1 {
+            Arc::make_mut(&mut stack.components).insert("minecraft:item_model".into(), json!("clock"));
+        }
+        entity.metadata.insert(9, Metadata::Item(stack));
+        store.ids.insert(id, store.slots.len());
+        store.slots.push(entity);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+    }
+    let mut context = ItemContext {
+        world: Some(ItemWorldContext {
+            dimension: "minecraft:overworld".into(), position: [0.; 3], yaw: 0.,
+            game_tick: 0, sun_angle: 0., moon_phase: 0., spawn: None, death: None,
+            needles: Arc::default(),
+        }),
+        ..Default::default()
+    };
+    let frame_angle = Cell::new(0.);
+    let ground_angle = Cell::new(0.);
+    let fail_frame = Cell::new(false);
+    let at = |point: [f64; 3]| {
+        if point[0] == 0. && fail_frame.get() {
+            return Err("test time sample failure".into());
+        }
+        Ok((if point[0] == 0. { frame_angle.get() } else { ground_angle.get() }, 0.))
+    };
+    let mut render = |context: &ItemContext| {
+        let mut geometry = DynamicGeometry::default();
+        let stats = store.append_geometry(&content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
+            Some((context, &at)), &|_| Ok(Some([15., 15.])), &|_| None, &mut geometry).unwrap();
+        let count = |layer| geometry.vertices.iter().filter(|v| v.texture_layer == layer).count();
+        (count(11), count(22), count(33), stats.unrendered.get("minecraft:item_frame").cloned())
+    };
+    let before = render(&context);
+    assert!(before.0 > 0 && before.1 == 0 && before.2 > 0 && before.3.is_none(), "{before:?}");
+    assert_eq!(before.0, before.2 * 2, "clock frame and drop must both render");
+    frame_angle.set(90.);
+    for tick in 1..=100 {
+        context.world.as_mut().unwrap().game_tick = tick;
+        let after = render(&context);
+        if tick == 1 { assert_eq!(after, before, "clock wobble should not jump to its target"); }
+    }
+    let frame_changed = render(&context);
+    assert_eq!((frame_changed.0, frame_changed.1, frame_changed.2), (before.2, before.2, before.2),
+        "unqualified frame clock must change independently of dropped clock");
+    ground_angle.set(90.);
+    for tick in 101..=200 {
+        context.world.as_mut().unwrap().game_tick = tick;
+        render(&context);
+    }
+    let both_changed = render(&context);
+    assert_eq!((both_changed.0, both_changed.1, both_changed.2), (0, before.0, before.2));
+    fail_frame.set(true);
+    context.world.as_mut().unwrap().game_tick = 201;
+    let failed_frame = render(&context);
+    assert_eq!((failed_frame.0, failed_frame.1, failed_frame.2), (0, before.2, before.2));
+    assert!(failed_frame.3.is_some_and(|reason| reason.contains("test time sample failure")));
 }

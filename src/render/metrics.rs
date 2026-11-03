@@ -35,6 +35,28 @@ impl FpsCounter {
 }
 
 impl Renderer {
+    pub(crate) fn terrain_available(&self) -> bool {
+        self.surface.is_some() && !self.gpu_failed.load(Ordering::Acquire)
+    }
+    pub(crate) fn terrain_frame_id(&self) -> u64 {
+        self.frame_id
+    }
+    pub(crate) fn terrain_frame(&self, keys: &[[i32; 3]], revisions: &[u64]) -> Option<(u64, Vec<bool>)> {
+        if self.surface.is_none() || self.gpu_failed.load(Ordering::Acquire) || self.frame_id == 0 {
+            return None;
+        }
+        let selected = keys.iter().zip(revisions).map(|(key, revision)| {
+            let chunk = self.chunks.get(key)?;
+            if chunk.revision != *revision || chunk.uploaded_time_ms.is_none() || chunk.visibility != Some(1.) {
+                return None;
+            }
+            Some(self.visible.iter().any(|visible| visible.key == *key))
+        }).collect::<Option<Vec<_>>>()?;
+        Some((self.frame_id, selected))
+    }
+    pub(crate) fn completed_terrain_frame(&self) -> u64 {
+        self.completed_frame.load(Ordering::Acquire)
+    }
     /// No JSON/snapshot allocation on the frame path. A completed frame must
     /// contain the current nearby uploads after their ordinary terrain fade.
     pub fn spawn_meshes_presented(
@@ -265,15 +287,17 @@ impl Renderer {
         target["terrain_freed_chunks"] = json!(self.stats.terrain_freed_chunks);
         target["texture_upload_bytes"] = json!(self.stats.texture_upload_bytes);
         target["dynamic_upload_bytes"] = json!(self.dynamic.uploaded_bytes);
+        target["first_person_upload_bytes"] = json!(self.first_person.uploaded_bytes);
         target["ui_upload_bytes"] = json!(self.overlay.uploaded_bytes);
         target["upload_bytes"] = json!(
             self.stats.terrain_upload_bytes
                 + self.stats.texture_upload_bytes
                 + self.dynamic.uploaded_bytes
+                + self.first_person.uploaded_bytes
                 + self.overlay.uploaded_bytes
                 + self.sunrise.uploaded_bytes
                 + self.instance_data.len() as u64 * 16
-                + std::mem::size_of::<CameraUniform>() as u64
+                + 2 * std::mem::size_of::<CameraUniform>() as u64
                 + if self.reference_mode {
                     0
                 } else {
@@ -316,12 +340,15 @@ impl Renderer {
         resident["instance_reserved_bytes"] = json!(((mesh::MAX_CHUNKS + 2) * 16) as u64);
         resident["terrain_indirect_reserved_bytes"] =
             json!(self.mdi.as_ref().map_or(0, mdi::Indirect::reserved_bytes));
-        resident["camera_reserved_bytes"] = json!(std::mem::size_of::<CameraUniform>() as u64);
+        resident["camera_reserved_bytes"] = json!(2 * std::mem::size_of::<CameraUniform>() as u64);
         resident["lightmap_revision"] =
             json!(self.lightmap_revision.map(|revision| revision.to_string()));
         resident["texture_retired_bytes"] =
             json!(self.retired_textures.iter().map(|t| t.bytes).sum::<u64>());
         resident["dynamic_reserved_bytes"] = json!(self.dynamic.reserved());
+        resident["first_person_reserved_bytes"] = json!(self.first_person.reserved());
+        resident["first_person_depth_bytes"] =
+            json!(u64::from(self.config.width) * u64::from(self.config.height) * 4);
         resident["ui_reserved_bytes"] = json!(self.overlay.reserved());
         resident["scene_target_active_bytes"] =
             json!(u64::from(self.config.width) * u64::from(self.config.height) * 8);

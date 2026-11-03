@@ -403,6 +403,12 @@ message arrays open the source-default empty side rather than failing Session.
 Escape and Done both submit the four current edit buffers without ContainerClose;
 the selected side is predicted locally while received NBT, decorations and the
 opposite side remain intact until authoritative NBT replaces the prediction.
+Comparator mode clicks predict only the mode and sound; output remains
+server-authoritative. Placement and repeater-lock prediction use the received
+comparator `powered` state and direction rather than inferring a numeric
+output from private container contents. The chest/menu/comparator real-client
+scenario covers empty → one item → empty and compare/subtract mode changes;
+other strengths, rejected actions and packet ordering remain separate checks.
 The native geometry-only block-entity scene pass calls the existing
 standing/wall/hanging-sign body and world-text renderer, chest/trapped/ender
 chest rigs (including double halves), all bed colors and head/foot rigs, bell
@@ -410,6 +416,59 @@ body and lectern book. It uses activated vanilla entity textures, received
 state/facing and light; JSON terrain still supplies bell frames and lectern
 bases. Other block-entity factories requiring real item/entity painters are
 not newly connected by this pass.
+The same native scene pass now routes beacon beam sections through the shared
+beacon renderer; zero-level beacons remain hidden and incomplete world scans
+remain pending. Beacon scene culling uses horizontal source distance so the
+vertical beam remains eligible above its source. The focused static-scene
+regression exercises active, unpowered, pending and near/far culling paths
+with authored fixtures. On the agent-run 26.1.2 native client candidate
+`07d0f9cf`, the scene-shot receipt
+`/run/media/kaiserroman/games/solaris-work/wt/rc2/.analysis/validation/20261102T081938-scene-shot-pyi_7c8g`
+shows a red beam through red glass and a white clear-sky beam from both nearby
+and high spectator views. Its block-entity wire packets were captured; the
+trace also reported a connection reset of unknown timing. This is not
+matched-vanilla or exhaustive beacon coverage.
+The native static pass also routes end portal and gateway geometry through
+the shared surface renderer and binds the required portal shader sprites from
+the active resource atlas. Gateway faces depend on loaded neighbor occlusion;
+their beam uses gateway age and cooldown. The focused authored fixture
+`static_portal_gateway_scene_emits_surfaces_and_respects_world` covers portal
+faces and valid atlas layer, gateway beam and occlusion, unloaded neighbors,
+both dimension-height boundaries and near/far culling;
+`portal_scene_binds_required_atlas_sprites_only_for_portal_geometry` covers
+the shader sprite binding. A previous candidate `b248aff1` passed these
+then-current fixtures but its real scene crashed on a sentinel vertex layer
+(`20261102T104157-scene-shot-zvyvzjy1`).
+
+On the 26.1.2 native client candidate `fec95d38`, scene receipts under
+`/run/media/kaiserroman/games/solaris-work/wt/rc2/.analysis/validation/`
+`20261102T104538-scene-shot-o4xmrk8r` and
+`20261102T104644-scene-shot-rbptkp8e` show the gateway cube and spawning beam
+and the portal surface, respectively. The wire trace records initial entity
+data before each block update; gateway readback initially reports age 0, with
+a later age-200 packet. This does not establish age synchronization or beam
+lifetime. Neither fixtures nor these captures establish vanilla parity or
+exhaustive boundary and occlusion behavior.
+The same scene extractor routes a received vault `shared_data.display_item`
+through the shared item painter. The focused authored fixture
+`static_vault_scene_follows_received_display_item_and_clear` exercises
+empty → received reward → empty so cleared displays do not persist. On
+candidate `fec95d38`, actual key use sent a display item while the native
+scene omitted its block-entity geometry
+(`20261102T115631-scene-shot-oa2oc4bs`); a corrected built candidate still
+needs a real-key graphical replay. This does not establish a pre-key preview
+producer or vanilla parity.
+Trial and ordinary spawner displays use the same single-entity presentation
+path as world entities, scaled and transformed by the spawner renderer.
+The observed spawn entity tag supplies the type; supported visual NBT
+includes age/baby, registered variants, sheep wool, pose, rotation and
+equipment. Unknown fields, unregistered variants, missing rigs and missing
+materials are reported in `entity_extraction.unrendered` rather than
+silently substituting a different preview. The static-scene fixture
+`static_trial_spawner_uses_received_entity_and_rejects_unsupported_data`
+exercises adult, baby, registered variant, unsupported NBT and cooldown.
+This is not universal entity-NBT or graphical parity coverage; the built
+candidate still needs a real spawn-egg/proximity replay.
 Received chunks also project constructor-default block entities from their
 actual block states before applying the optional NBT update entries. A missing
 update tag no longer makes a bell invisible; empty constructor data remains
@@ -553,7 +612,7 @@ Local metadata loading now also needs `SOLARIS_CLIENT_BLOCK_USE_FACTS`, `SOLARIS
 
 ### Swarm-driven MCP behaviour notes (live-server swarm, Oct 2026)
 
-- `minecraft_look` uses the vanilla convention: `pitch_deg` **+90 looks down**, −90 looks up; `yaw_deg` 0 faces +Z (south), −90 faces +X. `minecraft_observe.target` is the ordinary raycast and is `none` when the crosshair points at air (pitch 0 over open ground, or any upward pitch).
+- `minecraft_look` uses the vanilla convention: `pitch_deg` **+90 looks down**, −90 looks up; `yaw_deg` 0 faces +Z (south), −90 faces +X. `minecraft_observe.target` is the ordinary raycast and is `none` when the crosshair points at air (pitch 0 over open ground, or any upward pitch). The world, far-terrain and first-person views share the same yaw-preserving camera basis at both vertical poles; compare exact ±90° to nearby pitches when validating presentation.
 - `minecraft_send_chat`: a leading `/` is a command (as in the Java chat box) unless `command:false` is passed explicitly; the slash is stripped for the wire command packet. Results report `sent_as: "command"|"chat"`. Command feedback arrives as ordinary system chat in `recent_chat` (newest first).
 - `minecraft_interact_entity` / `minecraft_attack_entity_once` search the target's whole bounding box for a ray the ordinary raycast resolves to the entity (centre first), so a villager behind a fence/log/door frame is still targetable from a visible part. Refusals are typed: `target entity is out of interaction reach: … approach first` or `target entity is occluded by <block> at x,y,z; reposition for a clear line`. `minecraft_approach_entity` now reports `in_reach` by eye-to-box distance against `entity_interaction_range` (not feet-to-feet) plus `targetable` and, when false, `blocked_reason`.
 - `minecraft_observe.player` carries `air_supply` (null until the server sends `DATA_AIR_SUPPLY_ID` for the local player), `max_air_supply` (300) and `eye_medium` (`air|water|lava`, derived from received blocks, so submersion is observable without server air data).
@@ -578,6 +637,9 @@ Local metadata loading now also needs `SOLARIS_CLIENT_BLOCK_USE_FACTS`, `SOLARIS
 7. **Capture actual surface/output.** Every visual claim needs the actual render-target capture after required passes with frame ID, relevant scene/state revision and resource epoch, plus GPU completion. Distinguish scene extracted, submitted, GPU completed, captured, present called and actual onscreen presentation; present() alone proves no monitor visibility. State-only headless is not rendering; offscreen GPU is not native window/input/presentation. Record minimized/occluded/stale-frame conditions. Audio command dispatch/routing/decoded bytes are not audible output: capture the configured loopback/device and identify real-device, virtual-device or null-sink. A null-sink does not prove audible hardware. UI semantic-tree assertions supplement screenshot checks, never replace them.
 8. **Assert and preserve evidence.** Compare before/after against fixed predicates and independent vanilla/client/server oracle where required. Use actual pose/correction tracks for navigation (path_found is not arrived); record unknown terrain, blocked/stuck and partial progress distinctly. Pixel tests use representative scenes and approved masks/thresholds, not tolerances that hide missing layers/models/text. Store run.json, exact tree/build/compatibility/dependency locks, hardware/driver/settings, server build/profile, seed, timestamps/clocks, input/packet/applied events, assertions and raw metrics, with capture links. Export only within controlled artifact roots using opaque resource URIs; redact credentials/personal chat before export and do not call redacted data byte-identical signed-chat evidence. Source assets/oracle Java bytes remain local ignored data; receipts contain provenance/hashes, not redistributed content.
 9. **Release.** Release all held inputs, actions/navigation and lease, including on errors, timeout, cancellation, focus/screen/connection change, expiry or manual takeover. Emergency stop always wins. Cleanup only resources owned by this run/test profile; never delete user worlds or change live user-game setup. Already committed server effects are not fictitiously rolled back. Verify released controller/input state in the receipt.
+
+Captured PNGs use opaque alpha to match the opaque presentation surface; raw
+framebuffer alpha is not evidence of visible transparency.
 
 ## Survival example (required behavior, not an acceptance claim)
 
@@ -616,6 +678,18 @@ The shell classes are `TitleScreen`, `multiplayer.JoinMultiplayerScreen`,
 `net.minecraft.client.gui.screens`. GPU captures show the actual native render
 target; capture the isolated X window separately for window evidence. Settings
 are executable-adjacent, so a separate build target also isolates test preferences.
+
+Pointer evidence (hover tooltips, clickable text runs): the native-only tool
+`client_pointer` takes `expected_screen_class`, `expected_title`, `action`
+(`move` or `click`) and window-pixel `x`/`y` in the frame of `ui_nodes` bounds.
+It refuses a mismatched screen like `minecraft_click_screen_button`, then feeds
+the ordinary pointer path a window cursor uses: a move, and for `click` a left
+press and release. The result's `tooltip` is the text of the tooltip the
+pointer then shows (`ui_nodes` id `component/hover/text`), or null. Clickable
+text runs appear in `ui_nodes` with role `link` (dialog body runs as
+`dialog/body/<i>/action/<n>`). It needs a presentation client; an X-server
+pointer (XTest) on an isolated display reaches the same path through window
+events.
 
 Menu proof: `.analysis/clientmenus/receipt.json` records 27 focused passing
 regressions, the failing-before/passing-after Session-level Escape regression,
@@ -1154,3 +1228,149 @@ requires the screen to return to Game after Done. Receipts live in
 These follow-up gates are headless text/state/wire proof; windowed verification
 of the follow-up build remains separate.
 
+## Close-wall first-person composition regression (issue 9)
+
+Camera-held item/arm geometry belongs to `Scene::first_person`, not the
+depth-tested world/entity stream. It is drawn after all world materials with
+independent cleared depth, after world postprocessing/outline and before the
+retained HUD. An unjittered camera keeps it out of world TAA reprojection. Normal
+material depth tests remain enabled between hand surfaces, including offhand,
+translucent faces and foil; held geometry does not enter terrain Hi-Z or world
+shadow-caster draws. World projection, attack/use transforms, input/raycast,
+camera-mode and spyglass eligibility are unchanged by this composition fix.
+Local 26.1.2 `GameRenderer` bytecode is the source for level → cleared depth →
+hand → screen effects ordering; the hand lens uses near 0.05 / far 100 and a
+70-degree base FOV independent of world FOV and sprint zoom. Native wall
+validation found that retaining the world lens made the tool disappear at
+FOV 30 even after fixing depth. `Camera.calculateHudFov` confirms this split.
+This change does not add the separate vanilla death/fluid FOV modifiers; they
+remain outside the existing native camera-FOV implementation.
+
+Focused regressions (integration owner runs the shared gate):
+
+- `first_person_tools_in_both_hands_stay_out_of_world_geometry_during_swing_and_use`
+  exercises real player extraction with authored item models, both hands,
+  swing/use state, rotated cameras and an origin shift.
+- `first_person_depth_isolated_from_close_wall_without_revealing_world_or_covering_hud`
+  renders an opaque close wall, a hidden ordinary world item, a camera-held item
+  behind the wall, and a final crosshair-like HUD patch. Clearing the hand stream
+  must restore the exact wall image.
+- `first_person_preserves_self_depth_and_translucent_sorting` rejects the tempting
+  incorrect fix of disabling all hand depth tests, and checks near-first input
+  for overlapping translucent hand faces.
+- `first_person_bypasses_world_temporal_history_and_tonemapping` compares opaque
+  hand pixels across Low/Medium/High, then removes the hand to reject temporal
+  ghosts in the world history.
+- `first_person_geometry_is_cleared_by_disconnect_command_and_transport_failure`
+  seeds held geometry and traverses the ordinary disconnect command and transport
+  failure reset paths; both must clear its vertices/indices and advance the scene
+  revision so the renderer drops the old hand. Removing only the disconnect
+  cleanup line is the lifecycle negative control.
+
+- `first_person_projection_does_not_follow_world_fov` renders real hand geometry
+  and requires an identical silhouette at world FOV 30, 70, 110 and sprint zoom.
+  Run it on the depth-only candidate before applying the projection fix to
+  retain the failing control.
+These are authored regression cases, not native-window acceptance. For failing
+controls retain the new tests/stream API but route player emission back to the
+world stream (extraction test must fail), or bind world depth/load instead of the
+first-person depth/clear (GPU close-wall test must fail). Record actual failures;
+an unrun negative control is not failing-first evidence.
+
+Required Main-admitted real-client scenario, on the integrated binary:
+
+1. Use the existing wall scene and ordinary input. Record build/tree, instance,
+   profile, graphics/FOV settings, hand, received inventory, camera pose, target,
+   frame and packet/state revisions. If tools/food must be supplied by fixture
+   setup, label that privilege separately. Never use the diagnostic client's
+   scene or input lease.
+2. With a pickaxe/axe/sword visible, walk from two blocks away into collision
+   contact with an opaque full-block wall. Capture rest, advancing attack/recovery
+   frames, and start/active/released use frames (shield or bow, plus food/drink)
+   with main hand, offhand and left-main-arm settings. Capture looking straight,
+   steeply up/down and obliquely into a corner; include crouch/sprint, hurt tilt,
+   FOV 30/70/110, and every graphics preset including the temporal preset.
+   Every normally onscreen hand/tool part must remain visible over the wall,
+   without world texture cutting through it or incorrect hand self-overdraw.
+3. Negative world control: an entity/dropped or remotely held item fully behind
+   that wall must remain invisible; a world item in front remains visible.
+   Crosshair/target and attack/use server effects must remain the ordinary
+   world-raycast results, independent of the overlaid hand. Verify hotbar and
+   crosshair paint above the hand, and translucent/enchanted held items retain
+   their normal material appearance.
+4. Cycle third-person rear/front and back, scope/release a spyglass, and switch
+   spectator/dead/respawn contexts. No stale first-person geometry may persist in
+   contexts where the session suppresses it. Also resize and return to first
+   person to exercise depth-target recreation.
+   While a tool is visible, disconnect manually and separately trigger a
+   controlled server EOF. Neither title/disconnected screen may retain the hand;
+   reconnect must show only the newly equipped hand.
+5. Retain the pre-fix close-wall capture and post-fix frames from the same pose.
+   Repeat changing-motion cases at least three times. Report each exercised
+   case independently; skipped settings/contexts and missing GPU/window
+   evidence remain open, not implied passes.
+
+Implementation patch alone is unverified: tests, strict Clippy and the native
+scenario require integration-owner receipts before promoting this issue.
+
+## Integrated 26.3 native lifecycle smoke
+
+The 26.3 atlas loads palette images from `textures/palettes/`; using the older
+texture root prevented joining when the vanilla item atlas requested `trim_base`.
+An isolated regression failed with the old mapping and passed 2/2 with the 26.3
+mapping. The integrated debug client (`a665db7d9c78d936eff41a28e481ec56b9b1b37970865a71c9e8dfffeff92ae2`)
+then passed an agent-run Xvfb lifecycle against a separately identified historical
+26.3 server (`f9982e549fada1887cd472743ffb677918c9a1209baf8337b58f48f1317d0210`):
+join, disconnect/reconnect, death/respawn and difficulty changes. A marker-ordering
+fix was first exercised in an isolated harness override and then integrated into
+the canonical harness; its focused regression passed. The canonical lifecycle
+receipt is `/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-native263-lifecycle/receipt-FKVUSqeQ`.
+The final 1280×720 window capture was inspected: terrain, HUD, hand and chat
+are visible, with chat obscuring part of the scene. This does not prove complete
+terrain readiness, current-server compatibility, vanilla visual parity, hardware
+graphics, or packaged singleplayer.
+
+## Cold singleplayer composite pre-gate
+
+On Linux Xvfb, the integrated debug client above passed an agent-run cold
+bootstrap and first-play/reentry smoke with the rc.3 package's launcher,
+historical server and plugins. The launcher installed hash-pinned 26.3 facts and
+singleplayer content; both altered-hash negative controls refused installation.
+The test created a world, entered Play, left and reentered it. Captures
+`05-ingame.png` and `06-reentered.png` show terrain, HUD and hand.
+Receipt:
+`/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-cold-singleplayer/receipt-qfTNPTUp`.
+This is a composite pre-gate, not a packaged rc4 build: the launcher, server and
+plugins are historical, the client is debug, and final release pins, Windows,
+macOS, hardware rendering and vanilla visual parity remain unverified.
+
+## 26.3 model shade-direction override
+
+Block elements can specify `shade_direction_override`; terrain meshing uses that
+direction for cardinal shading while retaining the geometric face for light
+sampling. A historical-server native A/B exercised the override and unchanged
+controls; the selected fence crops matched exactly, three of four selected
+wall/floor samples matched exactly and one differed by one RGB level. The
+historical Java torch sample matched the patched native pixel. The scene and
+limitations are recorded under
+`/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-shade-override-next/sandbox/CONTROL-ANALYSIS.md`.
+This is not a complete vanilla parity or Nether-lighting result.
+
+## 26.3 new entity visibility
+
+An isolated candidate resolved rigs for five sulfur cubes, two cushions, a
+poplar boat and a poplar chest boat against a historical 26.3 server; all nine
+were submitted in the scene, whereas the baseline reported their families as
+unrendered. Agent-reviewed frames show sulfur shells and contents, two white
+cushions and boat geometry. The chest boat is mostly occluded, the top-down
+frame misses the entities, and the plain inner cube is outside the useful
+framing. The server rejected the attempted baby and placed lime-cushion cases.
+Receipt:
+`/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-new-entities-next/receipt-lXPpC1HY`.
+After integration with the shade-direction change, the same native scenario ran
+with client SHA-256 `6b25166ce8ab3071909e60f0191be6b6f8bcd4ee7ee9f2fa9d27c4abb29f80af`;
+its nine rigs resolved and all six captures reported no unrendered target.
+Receipt:
+`/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-new-entities-next/receipt-PqJ1VAD0`.
+This visibility smoke does not establish all variants, animation, vanilla parity
+or current-server compatibility.

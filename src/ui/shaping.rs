@@ -82,6 +82,21 @@ impl TextLayout {
         }
         best.1
     }
+    /// Center every line in `width` like vanilla `TextAlignment.CENTER` (integer halves of
+    /// the box and of each line), so paint, hit testing and link regions agree.
+    pub fn center_lines(&mut self, width: f32) {
+        let middle = (width / 2.).floor();
+        let widths = &self.line_widths;
+        let offset = |y: f32| {
+            let line = (y / 9.).round() as usize;
+            middle - (widths.get(line).copied().unwrap_or(0.) / 2.).floor()
+        };
+        for glyph in &mut self.glyphs {
+            glyph.position[0] += offset(glyph.position[1]);
+        }
+        let caret = offset(self.end_caret[1]);
+        self.end_caret[0] += caret;
+    }
 }
 impl TextRenderer {
     pub fn layout(&self, component: &serde_json::Value, width: f32) -> Result<TextLayout> {

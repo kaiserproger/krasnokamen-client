@@ -201,10 +201,11 @@ pub enum EntityMaterial {
     /// Cloud slab depth pre-pass: only the nearest cloud surface is then blended.
     CloudsDepth,
     Clouds,
+    EntityFire,
 }
 
 impl EntityMaterial {
-    pub const COUNT: usize = Self::Clouds as usize + 1;
+    pub const COUNT: usize = Self::EntityFire as usize + 1;
     pub const ALL: [Self; Self::COUNT] = [
         Self::ArmorCutoutNoCull,
         Self::ArmorEntityGlint,
@@ -265,6 +266,7 @@ impl EntityMaterial {
         Self::Precipitation,
         Self::CloudsDepth,
         Self::Clouds,
+        Self::EntityFire,
     ];
 }
 
@@ -451,6 +453,9 @@ pub struct Scene {
     pub texture_patches: Vec<AtlasPatch>,
     pub chunks: BTreeMap<[i32; 3], ChunkDraw>,
     pub dynamic: DynamicGeometry,
+    /// Camera-held arms/items, composed after the world with independent depth.
+    /// Never world occluders or shadow casters; still depth-test against each other.
+    pub first_person: DynamicGeometry,
     pub entity_presentation: crate::entities::PresentationStats,
     /// Physical-pixel UI geometry, composited in painter order without depth.
     pub overlay: MeshGeometry,

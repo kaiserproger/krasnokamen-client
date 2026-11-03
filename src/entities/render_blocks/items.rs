@@ -4,44 +4,126 @@ fn empty(item: &Value) -> bool {
         || item["id"].as_str().is_none_or(|v| v == "minecraft:air")
         || item["count"].as_i64() == Some(0)
 }
-pub(super) fn append(
+pub(super) fn campfire(
+    e: &BlockEntity,
+    c: &Content,
+    root: Mat4,
+    light: [f32; 2],
+    item_painter: &mut ItemPainter<'_>,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let facing = yaw(prop(e, c, "facing").unwrap_or("north")) as i32 / 90;
+    if let Some(items) = e.data_value()["Items"].as_array() {
+        for item in items {
+            let slot = item["Slot"].as_u64().unwrap_or(0);
+            if slot >= 4 {
+                return Err("campfire item slot bound".into());
+            }
+            if empty(item) {
+                continue;
+            }
+            let angle = -((slot as i32 + facing) % 4) as f32 * 90.;
+            let matrix = root
+                * Mat4::from_translation(Vec3::new(0.5, 0.44921875, 0.5))
+                * Mat4::from_rotation_y(angle.to_radians())
+                * Mat4::from_rotation_x(FRAC_PI_2)
+                * Mat4::from_translation(Vec3::new(-0.3125, -0.3125, 0.))
+                * Mat4::from_scale(Vec3::splat(0.375));
+            item_painter(
+                item,
+                "fixed",
+                (crate::protocol::pack_pos(e.position) as i32).wrapping_add(slot as i32),
+                matrix,
+                light,
+                out,
+            )?;
+        }
+    }
+    Ok(())
+}
+pub(super) fn vault(
+    e: &BlockEntity,
+    root: Mat4,
+    light: [f32; 2],
+    partial: f32,
+    item_painter: &mut ItemPainter<'_>,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let item = &e.data_value()["shared_data"]["display_item"];
+    if empty(item) {
+        return Ok(BlockRenderStatus::SourceHidden);
+    }
+    let s = &e.animation.source;
+    let delta = (s.spin - s.previous_spin + 180.).rem_euclid(360.) - 180.;
+    let matrix = root
+        * Mat4::from_translation(Vec3::new(0.5, 0.4, 0.5))
+        * Mat4::from_rotation_y((s.previous_spin + delta * partial).to_radians());
+    item_painter(item, "ground_cluster", 0, matrix, light, out)?;
+    Ok(BlockRenderStatus::Rendered)
+}
+
+pub(super) fn spawner_entity<'a>(
+    e: &'a BlockEntity,
+    c: &Content,
+) -> Result<Option<&'a Value>> {
+    let trial = e.type_name == "minecraft:trial_spawner";
+    if trial && !matches!(prop(e, c, "trial_spawner_state"), Some("waiting_for_players" | "active")) {
+        return Ok(None);
+    }
+    let entity = &e.data_value()[if trial { "spawn_data" } else { "SpawnData" }]["entity"];
+    if entity.is_null() {
+        return Ok(None);
+    }
+    if entity["id"].as_str().is_none() {
+        return Err("spawner display entity has no id".into());
+    }
+    Ok(Some(entity))
+}
+
+// The spawner uses the block frame's existing render inputs.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn spawner(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    f: &mut BlockFrame,
+    root: Mat4,
+    light: [f32; 2],
+    partial: f32,
+    entity_painter: &mut EntityPainter<'_>,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let Some(entity) = spawner_entity(e, c)? else {
+        return Ok(BlockRenderStatus::SourceHidden);
+    };
+    let name = entity["id"].as_str().expect("spawner_entity checked id");
+    if !m.schemas.contains_key(name) {
+        return Err(format!("unknown spawner display entity: {name}"));
+    }
+    let s = &e.animation.source;
+    let spin = (s.previous_spawn_spin
+        + (s.spawn_spin - s.previous_spawn_spin) * f64::from(partial)) as f32 * 10.;
+    let matrix = root
+        * Mat4::from_translation(Vec3::new(0.5, 0.4, 0.5))
+        * Mat4::from_rotation_y(spin.to_radians())
+        * Mat4::from_translation(Vec3::new(0., -0.2, 0.))
+        * Mat4::from_rotation_x(-30f32.to_radians());
+    entity_painter(entity, matrix, light, out)
+}
+
+pub(super) struct DisplayFrame<'a, 'paint> {
+    pub light: [f32; 2],
+    pub sample_light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    pub item: &'a mut ItemPainter<'paint>,
+}
+
+pub(super) fn display(
+    e: &BlockEntity,
+    c: &Content,
+    f: &mut DisplayFrame,
     root: Mat4,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
     match e.type_name.as_str() {
-        "minecraft:campfire" => {
-            let facing = yaw(prop(e, c, "facing").unwrap_or("north")) as i32 / 90;
-            if let Some(items) = e.data_value()["Items"].as_array() {
-                for item in items {
-                    let slot = item["Slot"].as_u64().unwrap_or(0);
-                    if slot >= 4 {
-                        return Err("campfire item slot bound".into());
-                    }
-                    if empty(item) {
-                        continue;
-                    }
-                    let angle = -((slot as i32 + facing) % 4) as f32 * 90.;
-                    let matrix = root
-                        * Mat4::from_translation(Vec3::new(0.5, 0.44921875, 0.5))
-                        * Mat4::from_rotation_y(angle.to_radians())
-                        * Mat4::from_rotation_x(FRAC_PI_2)
-                        * Mat4::from_translation(Vec3::new(-0.3125, -0.3125, 0.))
-                        * Mat4::from_scale(Vec3::splat(0.375));
-                    (f.item)(
-                        item,
-                        "fixed",
-                        (crate::protocol::pack_pos(e.position) as i32).wrapping_add(slot as i32),
-                        matrix,
-                        f.light,
-                        out,
-                    )?;
-                }
-            }
-        }
         "minecraft:brushable_block" => {
             let progress = prop(e, c, "dusted")
                 .unwrap_or("0")
@@ -118,53 +200,33 @@ pub(super) fn append(
                 }
             }
         }
-        "minecraft:vault" => {
-            let item = &e.data_value()["shared_data"]["display_item"];
-            if empty(item) {
-                return Ok(BlockRenderStatus::SourceHidden);
-            }
-            let s = &e.animation.source;
-            let delta = (s.spin - s.previous_spin + 180.).rem_euclid(360.) - 180.;
-            let matrix = root
-                * Mat4::from_translation(Vec3::new(0.5, 0.4, 0.5))
-                * Mat4::from_rotation_y((s.previous_spin + delta * f.partial).to_radians());
-            (f.item)(item, "ground_cluster", 0, matrix, f.light, out)?;
-        }
-        "minecraft:mob_spawner" | "minecraft:trial_spawner" => {
-            let trial = e.type_name == "minecraft:trial_spawner";
-            if trial
-                && !matches!(
-                    prop(e, c, "trial_spawner_state"),
-                    Some("waiting_for_players" | "active")
-                )
-            {
-                return Ok(BlockRenderStatus::SourceHidden);
-            }
-            let entity = &e.data_value()[if trial { "spawn_data" } else { "SpawnData" }]["entity"];
-            let Some(name) = entity["id"].as_str() else {
-                return Ok(BlockRenderStatus::SourceHidden);
-            };
-            if !m.schemas.contains_key(name) {
-                return Err(format!("unknown spawner display entity: {name}"));
-            }
-            let s = &e.animation.source;
-            let spin = (s.previous_spawn_spin
-                + (s.spawn_spin - s.previous_spawn_spin) * f64::from(f.partial))
-                as f32
-                * 10.;
-            let matrix = root
-                * Mat4::from_translation(Vec3::new(0.5, 0.4, 0.5))
-                * Mat4::from_rotation_y(spin.to_radians())
-                * Mat4::from_translation(Vec3::new(0., -0.2, 0.))
-                * Mat4::from_rotation_x(-30f32.to_radians());
-            // The family painter derives the preview's .53125/max(1,width,height)
-            // scale from its actual NBT/metadata physical dimensions.
-            let status = (f.entity)(entity, matrix, f.light, out)?;
-            if status != BlockRenderStatus::Rendered {
-                return Ok(status);
-            }
-        }
         _ => unreachable!(),
     }
     Ok(BlockRenderStatus::Rendered)
+}
+
+pub(super) fn append(
+    e: &BlockEntity,
+    m: &Models,
+    c: &Content,
+    f: &mut BlockFrame,
+    root: Mat4,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    match e.type_name.as_str() {
+        "minecraft:campfire" => campfire(e, c, root, f.light, f.item, out)
+            .map(|()| BlockRenderStatus::Rendered),
+        "minecraft:brushable_block" | "minecraft:shelf" => display(
+            e,
+            c,
+            &mut DisplayFrame { light: f.light, sample_light: f.sample_light, item: f.item },
+            root,
+            out,
+        ),
+        "minecraft:vault" => vault(e, root, f.light, f.partial, f.item, out),
+        "minecraft:mob_spawner" | "minecraft:trial_spawner" => {
+            spawner(e, m, c, root, f.light, f.partial, f.entity, out)
+        }
+        _ => unreachable!(),
+    }
 }

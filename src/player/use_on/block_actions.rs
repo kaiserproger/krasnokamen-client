@@ -75,6 +75,8 @@ impl Player {
         Ok(())
     }
 
+    // Prediction consumes the existing hit, world, and interaction state.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn predict_block_interaction(
         &mut self,
         owner: &str,
@@ -84,8 +86,6 @@ impl Player {
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
-        entities: &EntityStore,
-        tick: u64,
     ) -> Result<()> {
         let state = hit.state;
         let position = hit.position;
@@ -218,7 +218,6 @@ impl Player {
                     true,
                 )?;
                 self.predict_block(world, position, next, 2)?;
-                self.refresh_comparator(position, next, world, content, entities, tick)?;
             }
             "RedstoneWireBlock" => {
                 self.predict_block(

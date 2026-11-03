@@ -379,3 +379,57 @@ fn p1_armor_stand_outer_creative_semantics_restore_held_count() {
         assert!(entities.is_empty());
     }
 }
+
+#[test]
+fn hanging_item_frames_predict_only_valid_server_owned_placements() {
+    for name in ["minecraft:item_frame", "minecraft:glow_item_frame"] {
+        for face in 0..6 {
+            let (mut player, mut world, mut content, inventory, entities) = fixture();
+            content.item_names.insert(2, name.into());
+            content.insert_test_item_interaction(2, "ItemFrameItem", "Item", "HangingEntityItem");
+            content.insert_test_solid_states();
+            world.set([4, 4, 4], 1, |state| Ok(state == 0)).unwrap();
+            assert_eq!(
+                use_on(&mut player, &hit(1, face), &world, &content, &inventory, &entities),
+                Outcome::CLIENT,
+                "{name} face {face}"
+            );
+            assert!(matches!(
+                player.take_use_prediction(),
+                Some(UsePrediction::PlayerSlot { slot: 36, stack: Some(stack), .. })
+                    if stack.count == 2
+            ));
+            assert!(player.take_use_prediction().is_none());
+            assert!(entities.is_empty(), "placement remains server-owned");
+        }
+        let (mut player, world, mut content, inventory, entities) = fixture();
+        content.item_names.insert(2, name.into());
+        content.insert_test_item_interaction(2, "ItemFrameItem", "Item", "HangingEntityItem");
+        content.insert_test_solid_states();
+        assert_eq!(
+            use_on(&mut player, &hit(0, 2), &world, &content, &inventory, &entities),
+            Outcome::CONSUME
+        );
+        assert!(player.take_use_prediction().is_none());
+    }
+}
+
+#[test]
+fn hanging_item_frame_blocks_and_creative_inventory_follow_use_result() {
+    let (mut player, mut world, mut content, inventory, entities) = fixture();
+    content.item_names.insert(2, "minecraft:item_frame".into());
+    content.insert_test_item_interaction(2, "ItemFrameItem", "Item", "HangingEntityItem");
+    content.insert_test_solid_states();
+    world.set([4, 4, 4], 1, |state| Ok(state == 0)).unwrap();
+    world.set([4, 4, 3], 1, |state| Ok(state == 0)).unwrap();
+    assert_eq!(use_on(&mut player, &hit(1, 2), &world, &content, &inventory, &entities), Outcome::CONSUME);
+    assert!(player.take_use_prediction().is_none());
+    world.set([4, 4, 3], 0, |state| Ok(state == 0)).unwrap();
+    player.abilities.instabuild = true;
+    assert_eq!(use_on(&mut player, &hit(1, 2), &world, &content, &inventory, &entities), Outcome::CLIENT);
+    assert!(matches!(
+        player.take_use_prediction(),
+        Some(UsePrediction::PlayerSlot { slot: 36, stack: Some(stack), .. })
+            if stack.count == 3
+    ));
+}

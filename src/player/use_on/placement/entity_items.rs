@@ -357,6 +357,46 @@ mod tests {
     }
 
     #[test]
+    fn frame_pop_box_backs_onto_each_clicked_face() {
+        for face in 0..6 {
+            let bounds = hanging_bounds([4, 4, 4], face, 1, 1, true);
+            let axis = match face { 0 | 1 => 1, 2 | 3 => 2, _ => 0 };
+            for i in 0..3 {
+                assert_eq!(bounds.max[i] - bounds.min[i], if i == axis { 0.0625 } else { 0.75 }, "face {face}");
+            }
+            // Even faces point toward a negative axis, so their support block is at +1.
+            let wall = if face % 2 == 0 { bounds.max[axis] } else { bounds.min[axis] };
+            assert_eq!(wall, if face % 2 == 0 { 5. } else { 4. }, "face {face}");
+        }
+        assert!(!hanging_bounds([4, 4, 4], 2, 1, 1, true)
+            .intersects(hanging_bounds([4, 4, 4], 3, 1, 1, true)));
+    }
+
+    #[test]
+    fn fixed_frame_entity_data_does_not_bypass_client_survival() {
+        // 26.3 HangingEntityItem.useOn applies createDefaultStackConfig before
+        // ItemFrame.survives, but EntityType.updateCustomEntityTag loads ENTITY_DATA
+        // only when level.getServer() is nonnull. ClientLevel inherits Level.getServer(),
+        // which returns null, so the client never sees Fixed: survival is ordinary.
+        let (mut player, world, mut content, mut inventory, entities, mut hit) = fixture(false);
+        content.item_names.insert(1, "minecraft:item_frame".into());
+        hit.face = 2;
+        hit.point = [4.5, 4.5, 4.];
+        let stack = inventory.player.slots[36].as_mut().unwrap();
+        Arc::make_mut(&mut stack.components).insert("minecraft:entity_data".into(),
+            serde_json::json!({"id": "minecraft:item_frame", "Fixed": true}));
+        content.insert_test_placement_solid(1, false);
+        assert_eq!(player.hanging_item_on(&hit, 0, &world, &content, &inventory, &entities, 0).unwrap(),
+            Outcome::CONSUME);
+        assert!(player.take_use_prediction().is_none());
+        content.insert_test_placement_solid(1, true);
+        assert_eq!(player.hanging_item_on(&hit, 0, &world, &content, &inventory, &entities, 0).unwrap(),
+            Outcome::CLIENT);
+        assert!(matches!(player.take_use_prediction(), Some(UsePrediction::PlayerSlot {
+            stack: Some(stack), replacement: false, .. }) if stack.count == 2));
+    }
+
+    #[test]
     fn experimental_cart_adjustment_matches_source_rail_geometry() {
         for (shape, expected) in [
             (None, [4.5, 4.0625, 4.5]),

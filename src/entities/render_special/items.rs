@@ -1,6 +1,6 @@
 use super::*;
 
-fn observed_stack(content: &Content, value: &Value) -> Result<Option<Stack>> {
+pub(in crate::entities) fn observed_stack(content: &Content, value: &Value) -> Result<Option<Stack>> {
     let Some(id) = value.get("id").and_then(Value::as_str) else {
         return if value.is_null() || value.as_object().is_some_and(|o| o.is_empty()) {
             Ok(None)
@@ -81,14 +81,7 @@ pub(crate) fn append_observed_item(
         seed,
         ..Default::default()
     };
-    // A stack whose model cannot be baked is drawn as nothing (logged once), never an error.
-    let (model, bounds) = match items.model_with_bounds(content, stack, &state) {
-        Ok(baked) => baked,
-        Err(error) => {
-            crate::ui::items::report_item_model_failure(content, stack, &error);
-            return Ok(());
-        }
-    };
+    let (model, bounds) = items.model_with_bounds(content, stack, &state)?;
     let matrix = crate::ui::items::display_matrix(model, display);
     if context == "ground_cluster" {
         let damage = stack
@@ -98,10 +91,12 @@ pub(crate) fn append_observed_item(
         let seed = (stack.id as i32).wrapping_add(damage);
         let offsets = kernels::cluster_offsets(seed, stack.count, bounds[5] - bounds[2]);
         for offset in offsets.iter().take(kernels::item_amount(stack.count)) {
-            p::append_baked(
+            p::append_baked_stack(
                 model,
                 root * Mat4::from_translation(*offset) * matrix,
                 light,
+                content,
+                stack,
                 out,
             )?;
         }
@@ -113,10 +108,12 @@ pub(crate) fn append_observed_item(
         } else {
             0.
         };
-        p::append_baked(
+        p::append_baked_stack(
             model,
             root * Mat4::from_translation(Vec3::new(0., offset, 0.)) * matrix,
             light,
+            content,
+            stack,
             out,
         )?;
     }

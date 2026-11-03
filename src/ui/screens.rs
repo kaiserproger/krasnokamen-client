@@ -472,7 +472,11 @@ impl UiState {
             self.recipe_panel(inventory, content, super::catalogue::RECIPE_CATEGORY_WIDTH + 2., y)?;
             return Ok(());
         }
-        let name = format!("gui/container/{}", menu.kind.name());
+        let name = if menu.kind == MenuKind::Lectern {
+            "gui/book".to_owned()
+        } else {
+            format!("gui/container/{}", menu.kind.name())
+        };
         // Themed frame around the (warm-tinted) container texture.
         self.add(
             "menu/frame".into(),
@@ -532,7 +536,14 @@ impl UiState {
         } else {
             8.
         };
-        self.label("menu/title", title, [x + title_x, y + 6., 72., 10.])?;
+        // AbstractContainerScreen.extractLabels draws the title as one unbounded
+        // line (it may overflow the panel). A label wraps at its width, so it
+        // runs to the screen's right edge instead of a fixed caption width.
+        self.label(
+            "menu/title",
+            title,
+            [x + title_x, y + 6., self.width - x - title_x, 10.],
+        )?;
         if menu.kind != MenuKind::Inventory {
             self.label(
                 "menu/inventory_label",
@@ -1180,6 +1191,25 @@ impl UiState {
         })
     }
     fn hud_tree(&mut self, inventory: &InventoryStore, content: &Content) -> Result<()> {
+        if self.hud.scoping {
+            let size = self.width.min(self.height);
+            let x = (self.width - size) / 2.;
+            let y = (self.height - size) / 2.;
+            for (id, rect) in [
+                ("left", [0., 0., x, self.height]),
+                ("right", [x + size, 0., x, self.height]),
+                ("top", [x, 0., size, y]),
+                ("bottom", [x, y + size, size, y]),
+            ] {
+                if rect[2] > 0. && rect[3] > 0. {
+                    self.add(
+                        format!("hud/scope/{id}"), "presentation", String::new(), rect,
+                        true, None, NodeAction::None, Paint::Solid([0.; 3], 1.),
+                    )?;
+                }
+            }
+            self.sprite("hud/scope", "minecraft:misc/spyglass_scope", [x, y, size, size])?;
+        }
         // F3 overlay (vanilla): renders on top even when HUD is hidden.
         if !self.debug_lines.is_empty() {
             let lines: Vec<String> = self.debug_lines.iter().take(16).cloned().collect();

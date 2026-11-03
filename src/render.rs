@@ -39,6 +39,8 @@ mod shader_tests;
 mod wgsl_validation_tests;
 #[cfg(test)]
 mod design_tests;
+#[cfg(test)]
+mod first_person_tests;
 use arena::Arena;
 use mesh::{ResidentMesh, Stream};
 use packed::{TerrainVertex, TileTable};
@@ -46,6 +48,18 @@ use pipelines::Pipelines;
 use visibility::{Frustum, relative};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
+
+/// Camera view used by world, far terrain, and first-person geometry.
+pub(crate) fn camera_view(eye: Vec3, yaw: f32, pitch: f32) -> Mat4 {
+    let yaw = yaw.to_radians();
+    let pitch = pitch.to_radians();
+    let (sy, cy) = yaw.sin_cos();
+    let (sp, cp) = pitch.sin_cos();
+    let forward = Vec3::new(-sy * cp, -sp, cy * cp);
+    // The rotated up vector preserves yaw even when forward is vertical.
+    let up = Vec3::new(-sy * sp, cp, cy * sp);
+    Mat4::look_to_rh(eye, forward, up)
+}
 
 /// Keep test devices and their GPU resources alive exclusively until teardown.
 #[cfg(test)]
@@ -181,6 +195,7 @@ struct Targets {
     color_view: wgpu::TextureView,
     _depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    first_person_depth_view: wgpu::TextureView,
     blit: wgpu::BindGroup,
 }
 
@@ -388,6 +403,7 @@ pub struct Renderer {
     uploaded_meshes: Vec<([i32; 3], u64)>,
     fixture: Option<ResidentMesh>,
     dynamic: Stream<{ EntityMaterial::COUNT }>,
+    first_person: Stream<{ EntityMaterial::COUNT }>,
     overlay: Stream<5>,
     sunrise: Stream,
     sunrise_geometry: crate::api::MeshGeometry,
@@ -410,6 +426,8 @@ pub struct Renderer {
     occlusion_queue: Vec<([i32; 3], u8)>,
     camera: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
+    first_person_camera: wgpu::Buffer,
+    first_person_camera_bind: wgpu::BindGroup,
     mesh_revision: Option<u64>,
     generation: Option<[String; 3]>,
     reference_mode: bool,
@@ -521,7 +539,7 @@ impl Renderer {
             || height == 0
             || width > adapter.limits().max_texture_dimension_2d
             || height > adapter.limits().max_texture_dimension_2d
-            || u64::from(width) * u64::from(height) * 36 + 16 * 1024 * 1024 > 256 * 1024 * 1024
+            || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024 > 256 * 1024 * 1024
         {
             return Err("render_target_dimensions_or_memory_budget_exceeded".into());
         }
@@ -692,6 +710,20 @@ impl Renderer {
                 resource: camera.as_entire_binding(),
             }],
         });
+        let first_person_camera = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("unjittered first person camera"),
+            size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let first_person_camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("first person camera binding"),
+            layout: &pipelines.camera_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: first_person_camera.as_entire_binding(),
+            }],
+        });
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera relative chunk instances"),
             size: ((mesh::MAX_CHUNKS + 2) * 16) as u64,
@@ -718,6 +750,7 @@ impl Renderer {
             &features,
         );
         let dynamic = Stream::new(&device);
+        let first_person = Stream::new(&device);
         let overlay = Stream::new(&device);
         let sunrise = Stream::new(&device);
         let mut mdi = mdi_enabled.then(|| {
@@ -798,6 +831,7 @@ impl Renderer {
             staged_chunks: Vec::new(),
             uploaded_meshes: Vec::new(),
             dynamic,
+            first_person,
             overlay,
             sunrise,
             sunrise_geometry: Default::default(),
@@ -818,6 +852,8 @@ impl Renderer {
             occlusion_queue: Vec::with_capacity(1024),
             camera,
             camera_bind,
+            first_person_camera,
+            first_person_camera_bind,
             mesh_revision: None,
             generation: None,
             reference_mode: false,
@@ -1128,6 +1164,17 @@ impl Renderer {
             view_formats: &[],
         });
         let depth_view = depth.create_view(&Default::default());
+        let first_person_depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("first person depth, independent of world occlusion"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let first_person_depth_view = first_person_depth.create_view(&Default::default());
         let blit = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("actual frame blit"),
             layout: &pipeline.get_bind_group_layout(0),
@@ -1141,6 +1188,7 @@ impl Renderer {
             color_view,
             _depth: depth,
             depth_view,
+            first_person_depth_view,
             blit,
         }
     }
@@ -1589,6 +1637,11 @@ impl Renderer {
                             Vec::with_capacity((capture.width * capture.height * 4) as usize);
                         for row in mapped.chunks(capture.row_bytes as usize) {
                             pixels.extend_from_slice(&row[..(capture.width * 4) as usize]);
+                        }
+                        // The presentation surface is opaque; framebuffer alpha is not
+                        // the transparency of the displayed image.
+                        for pixel in pixels.chunks_exact_mut(4) {
+                            pixel[3] = 255;
                         }
                         drop(mapped);
                         capture.buffer.unmap();

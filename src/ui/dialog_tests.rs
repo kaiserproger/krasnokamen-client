@@ -476,6 +476,24 @@ fn a_new_dialog_replaces_the_shown_one_and_keeps_the_original_return_screen() {
 }
 
 #[test]
+fn a_dialog_over_a_menu_closes_with_that_menu() {
+    let (content, mut inventory, mut ui) = state();
+    inventory.screen_open = true;
+    inventory.screen_instance += 1;
+    ui.synchronize(&inventory, &content).unwrap();
+    assert_eq!(ui.screen(), Screen::Menu);
+    show(&mut ui, &sample(vec![])).unwrap();
+    rebuild(&mut ui, &content, &inventory);
+    assert_eq!(ui.screen(), Screen::ServerDialog);
+    // Vanilla `clientSideCloseContainer`: `setScreen(null)` removes the dialog too
+    // instead of leaving it to return to the closed menu.
+    inventory.close();
+    ui.synchronize(&inventory, &content).unwrap();
+    assert_eq!(ui.screen(), Screen::Game);
+    assert!(ui.dialogs.shown.is_none());
+}
+
+#[test]
 fn dialog_received_while_loading_opens_when_loading_ends() {
     use crate::ui::{HudState, UiPresentation};
     let (_content, _inventory, mut ui) = state();
@@ -744,4 +762,240 @@ fn mcp_button_click_scrolls_an_off_screen_dialog_button_into_view() {
         matches!(&intent, UiIntent::Activate { element_id, .. } if element_id == "dialog/action/0")
     );
     assert!(node(&ui, "dialog/action/0").visible);
+}
+
+#[test]
+fn spyglass_scope_overlay_enters_and_leaves_with_hud_state() {
+    let (content, inventory, mut ui) = state();
+    ui.hud.scoping = true;
+    ui.rebuild_for_test(&inventory, &content).unwrap();
+    assert!(ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope"));
+    assert!(ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope/left"));
+    ui.hud.scoping = false;
+    ui.rebuild_for_test(&inventory, &content).unwrap();
+    assert!(!ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope"));
+}
+
+/// A notice whose `plain_message` is laid out like the settlement map: a clickable run with a
+/// tooltip, a newline, then a hover-only run.
+fn map_notice(after_action: &str, click: Nbt) -> Nbt {
+    let hover = |text: &str| compound(vec![("action", s("show_text")), ("value", s(text))]);
+    compound(vec![
+        ("type", s("minecraft:notice")),
+        ("title", s("Map - test")),
+        ("pause", Nbt::Byte(0)),
+        ("after_action", s(after_action)),
+        (
+            "body",
+            compound(vec![
+                ("type", s("minecraft:plain_message")),
+                (
+                    "contents",
+                    compound(vec![
+                        ("text", s("")),
+                        (
+                            "extra",
+                            list(vec![
+                                compound(vec![
+                                    ("text", s("AB")),
+                                    ("color", s("#9C6B30")),
+                                    ("hover_event", hover("Storage #7 L1")),
+                                    ("click_event", click),
+                                ]),
+                                compound(vec![
+                                    ("text", s("\nCDEF")),
+                                    ("hover_event", hover("Territory, radius 16")),
+                                ]),
+                            ]),
+                        ),
+                    ]),
+                ),
+            ]),
+        ),
+    ])
+}
+
+fn custom_click(id: &str) -> Nbt {
+    compound(vec![
+        ("action", s("custom")),
+        ("id", s(id)),
+        ("payload", map_payload()),
+    ])
+}
+
+fn map_payload() -> Nbt {
+    compound(vec![("s", s("3")), ("b", Nbt::Int(7))])
+}
+
+fn body_click_event(ui: &UiState) -> Value {
+    let BodyItem::Text { contents, .. } = &ui.dialogs.shown.as_ref().unwrap().def.body[0];
+    contents["extra"][0]["click_event"].clone()
+}
+
+#[test]
+fn body_custom_click_payload_keeps_its_nbt_types_in_a_slot() {
+    let notice = map_notice("close", custom_click("solaris:settlement/buildings"));
+    let dialog = ServerDialog::parse(&notice).unwrap().unwrap();
+    let BodyItem::Text { contents, .. } = &dialog.body[0];
+    assert_eq!(
+        contents["extra"][0]["click_event"],
+        json!({"action": "custom", "id": "solaris:settlement/buildings", "payload_slot": 0})
+    );
+    assert_eq!(dialog.click_payloads, vec![map_payload()]);
+    // `Identifier.CODEC` fails the whole dialog on a malformed custom id.
+    assert!(ServerDialog::parse(&map_notice("close", custom_click("Bad Id"))).is_err());
+}
+
+#[test]
+fn body_click_runs_like_a_static_button_then_the_dialog_after_action() {
+    let (_content, _inventory, mut ui) = state();
+    show(&mut ui, &map_notice("close", custom_click("solaris:settlement/buildings"))).unwrap();
+    let mut effects = UiEffects::default();
+    ui.dialog_component_click(&body_click_event(&ui), &mut effects)
+        .unwrap();
+    let (id, payload) = sent(&effects);
+    assert_eq!(id, "solaris:settlement/buildings");
+    assert_eq!(payload, &map_payload(), "typed payload, not its JSON shadow");
+    assert_eq!(ui.screen(), Screen::Game, "after_action close");
+
+    show(&mut ui, &map_notice("wait_for_response", custom_click("solaris:x"))).unwrap();
+    let event = body_click_event(&ui);
+    ui.dialog_component_click(&event, &mut UiEffects::default())
+        .unwrap();
+    assert!(ui.dialogs.shown.as_ref().unwrap().waiting_since.is_some());
+    assert_eq!(
+        ui.dialog_component_click(&event, &mut UiEffects::default())
+            .unwrap_err(),
+        "waiting_for_response"
+    );
+
+    let run = compound(vec![
+        ("action", s("run_command")),
+        ("command", s("/settlement menu map")),
+    ]);
+    show(&mut ui, &map_notice("none", run)).unwrap();
+    let mut effects = UiEffects::default();
+    ui.dialog_component_click(&body_click_event(&ui), &mut effects)
+        .unwrap();
+    assert!(matches!(
+        effects.commands.as_slice(),
+        [UiCommand::Chat { message, command: true }] if message == "settlement menu map"
+    ));
+    assert_eq!(ui.screen(), Screen::ServerDialog, "after_action none");
+
+    let url = compound(vec![("action", s("open_url")), ("url", s("https://example.org"))]);
+    show(&mut ui, &map_notice("none", url)).unwrap();
+    let mut effects = UiEffects::default();
+    ui.dialog_component_click(&body_click_event(&ui), &mut effects)
+        .unwrap();
+    assert!(effects.commands.is_empty());
+    assert_eq!(
+        ui.dialogs.rejected.last().map(String::as_str),
+        Some("action open_url not executed")
+    );
+}
+
+/// UI with real text layout: the authored empty-provider default font draws every glyph as
+/// the 6-pixel-advance missing glyph (no proprietary font bytes).
+fn rendered() -> (Content, InventoryStore, UiState) {
+    let mut content = Content::test_cube();
+    content.creative_tabs_report = Arc::from(br#"{"tabs": []}"#.as_slice());
+    content.insert_test_font("minecraft:default", &json!({"providers": []}));
+    content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");
+    let ui = UiState::new(&content).expect("presentation UI must construct");
+    (content, InventoryStore::default(), ui)
+}
+
+fn pointer(
+    ui: &mut UiState,
+    content: &Content,
+    inventory: &mut InventoryStore,
+    phase: crate::ui::PointerPhase,
+    [x, y]: [f32; 2],
+) -> UiEffects {
+    let scale = ui.scale;
+    ui.execute(
+        UiIntent::Pointer {
+            phase,
+            x: f64::from(x) * scale,
+            y: f64::from(y) * scale,
+            button: (!matches!(phase, crate::ui::PointerPhase::Move))
+                .then_some(crate::ui::PointerButton::Left),
+            modifiers: crate::ui::Modifiers::default(),
+        },
+        inventory,
+        content,
+    )
+    .unwrap()
+}
+
+#[test]
+fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
+    use crate::ui::PointerPhase::{Down, Move, Up};
+    let (content, mut inventory, mut ui) = rendered();
+    // after_action none keeps the dialog for the click; closing is covered state-only above.
+    show(&mut ui, &map_notice("none", custom_click("solaris:settlement/buildings"))).unwrap();
+    rebuild(&mut ui, &content, &inventory);
+    let bounds = |ui: &UiState, id: &str| {
+        ui.nodes
+            .iter()
+            .find(|n| n.id == id && n.visible)
+            .map(|n| n.bounds)
+    };
+    let body = bounds(&ui, "dialog/body/0").expect("body text node");
+    let link = bounds(&ui, "dialog/body/0/action/0").expect("click region of the clickable run");
+    assert!(
+        bounds(&ui, "dialog/body/0/action/1").is_none(),
+        "hover-only runs are not clickable"
+    );
+    // Each line is centered on its own in the 200-wide message: "AB" is 12 wide.
+    let middle = (body[2] / 2.).floor();
+    assert_eq!(link, [body[0] + middle - 6., body[1], 12., 9.]);
+    assert_eq!(ui.tooltip_text(), None);
+
+    pointer(&mut ui, &content, &mut inventory, Move, [link[0] + 1., link[1] + 4.]);
+    assert_eq!(ui.tooltip_text(), Some("Storage #7 L1"));
+    // "CDEF" (24 wide) on the second line.
+    let second = [body[0] + middle - 12. + 1., body[1] + 9. + 4.];
+    pointer(&mut ui, &content, &mut inventory, Move, second);
+    assert_eq!(ui.tooltip_text(), Some("Territory, radius 16"));
+    pointer(&mut ui, &content, &mut inventory, Move, [body[0] + 1., body[1] + 4.]);
+    assert_eq!(ui.tooltip_text(), None, "no glyph under the pointer");
+
+    pointer(&mut ui, &content, &mut inventory, Move, [link[0] + 1., link[1] + 4.]);
+    let effects = pointer(&mut ui, &content, &mut inventory, Down, [link[0] + 1., link[1] + 4.]);
+    let (id, payload) = sent(&effects);
+    assert_eq!(id, "solaris:settlement/buildings");
+    assert_eq!(payload, &map_payload());
+    pointer(&mut ui, &content, &mut inventory, Up, [link[0] + 1., link[1] + 4.]);
+    assert_eq!(ui.screen(), Screen::ServerDialog);
+}
+
+#[test]
+fn client_pointer_gates_on_the_exact_screen_and_emits_cursor_edges() {
+    use crate::ui::{PointerButton::Left, PointerPhase};
+    let (content, inventory, mut ui) = state();
+    show(&mut ui, &map_notice("close", custom_click("solaris:x"))).unwrap();
+    rebuild(&mut ui, &content, &inventory);
+    let class = "net.minecraft.client.gui.screens.dialog.SimpleDialogScreen";
+    assert!(
+        ui.exact_pointer(&inventory, &content, class, "Other", [10., 20.], true)
+            .is_err()
+    );
+    assert!(
+        ui.exact_pointer(&inventory, &content, class, "Map - test", [1280., 20.], false)
+            .is_err(),
+        "outside the 1280-pixel window"
+    );
+    let intents = ui
+        .exact_pointer(&inventory, &content, class, "Map - test", [10., 20.], true)
+        .unwrap();
+    assert!(matches!(
+        intents.as_slice(),
+        [
+            UiIntent::Pointer { phase: PointerPhase::Move, button: None, .. },
+            UiIntent::Pointer { phase: PointerPhase::Down, button: Some(Left), .. },
+            UiIntent::Pointer { phase: PointerPhase::Up, button: Some(Left), x, y, .. },
+        ] if *x == 10. && *y == 20.
+    ));
 }

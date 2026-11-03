@@ -7,10 +7,15 @@
 //!   body `plain_message`; `server_links`/`dialog_list` and `item` bodies are not supported;
 //! * buttons run `dynamic/custom` (additions + one typed entry per input), static `custom`,
 //!   `dynamic/run_command` / `run_command`; other action kinds only apply `after_action`;
+//! * `plain_message` text is a centered `FocusableTextWidget` (`DialogBodyHandlers`): its runs
+//!   show `hover_event` tooltips, and a click on a run with a `click_event` runs it like a
+//!   static button action (`custom`, `run_command`; others only apply `after_action`), then the
+//!   dialog's `after_action` (`DialogScreen.runAction`);
 //! * `after_action` close/none/wait_for_response, Escape runs `on_cancel` (notice: its button,
 //!   confirmation: `no`, multi_action: `exit_action`) and closes only if `can_close_with_escape`;
 //! * a new dialog replaces the shown one and keeps the original screen to return to.
-//! Not implemented (vanilla extras): the "custom screen" warning button and button tooltips.
+//! Not implemented (vanilla extras): the "custom screen" warning button, button tooltips and
+//! title hover tooltips.
 use crate::protocol::packet_ids::play::clientbound as cb;
 use super::state::{NodeAction, Paint, Screen, UiCommand, UiEffects, UiState};
 use crate::protocol::{Reader, Result, nbt::Nbt};
@@ -121,6 +126,8 @@ pub(crate) struct ServerDialog {
     on_cancel: Option<usize>,
     /// Dialog parts this client skipped (reported through observation).
     skipped: Vec<String>,
+    /// Typed payloads of body `custom` click events; the JSON event names its `payload_slot`.
+    click_payloads: Vec<Nbt>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -185,6 +192,49 @@ fn text(tag: &Nbt, key: &str) -> Result<String> {
 
 fn component(tag: &Nbt, key: &str) -> Result<Value> {
     Ok(required(tag, key)?.to_json())
+}
+
+/// A body component as JSON, with each `custom` click event's typed NBT payload moved to
+/// `payloads` (JSON would erase the tag types sent back in `custom_click_action`); the event
+/// keeps its index as `payload_slot`. An invalid custom id fails the dialog like the codec.
+fn body_json(tag: &Nbt, payloads: &mut Vec<Nbt>) -> Result<Value> {
+    Ok(match tag {
+        Nbt::List(_, items) => Value::Array(
+            items
+                .iter()
+                .map(|item| body_json(item, payloads))
+                .collect::<Result<_>>()?,
+        ),
+        Nbt::Compound(entries) => {
+            let mut map = serde_json::Map::new();
+            for (name, value) in entries {
+                let json = match name.as_str() {
+                    "click_event" | "clickEvent" => click_json(value, payloads)?,
+                    _ => body_json(value, payloads)?,
+                };
+                map.insert(name.clone(), json);
+            }
+            Value::Object(map)
+        }
+        scalar => scalar.to_json(),
+    })
+}
+
+fn click_json(tag: &Nbt, payloads: &mut Vec<Nbt>) -> Result<Value> {
+    let mut json = tag.to_json();
+    if field(tag, "action").and_then(Nbt::as_str) != Some("custom") {
+        return Ok(json);
+    }
+    let map = json
+        .as_object_mut()
+        .ok_or("dialog click_event must be a compound")?;
+    map.insert("id".into(), Value::String(identifier(&text(tag, "id")?)?));
+    map.remove("payload");
+    if let Some(payload) = field(tag, "payload") {
+        map.insert("payload_slot".into(), payloads.len().into());
+        payloads.push(payload.clone());
+    }
+    Ok(json)
 }
 
 fn optional_bool(tag: &Nbt, key: &str, default: bool) -> Result<bool> {
@@ -437,10 +487,11 @@ impl ServerDialog {
         }
         let mut skipped = Vec::new();
         let mut body = Vec::new();
+        let mut click_payloads = Vec::new();
         for item in compact_list(field(tag, "body")) {
             match type_name(item)?.as_str() {
                 "plain_message" => body.push(BodyItem::Text {
-                    contents: component(item, "contents")?,
+                    contents: body_json(required(item, "contents")?, &mut click_payloads)?,
                     width: width(item, "width", 200.)?,
                 }),
                 other => skipped.push(format!("body {other}")),
@@ -517,6 +568,7 @@ impl ServerDialog {
             layout,
             on_cancel,
             skipped,
+            click_payloads,
         }))
     }
 }
@@ -839,6 +891,23 @@ impl UiState {
         self.invalidate();
     }
 
+    /// The menu under the shown dialog closed. Vanilla's `clientSideCloseContainer`
+    /// runs `setScreen(null)`, which removes the dialog as well, without its exit
+    /// action. Returns whether a dialog was closed.
+    pub(super) fn close_dialog_over_closed_menu(&mut self) -> bool {
+        if self.screen != Screen::ServerDialog
+            || !matches!(
+                self.dialogs.return_to,
+                Some(Screen::Menu | Screen::Creative | Screen::Sign)
+            )
+        {
+            return false;
+        }
+        self.dialogs.return_to = Some(Screen::Game);
+        self.close_server_dialog();
+        true
+    }
+
     /// Escape: run `on_cancel`, closing only when the dialog allows it
     /// (`DialogScreen.onClose` + `shouldCloseOnEsc`).
     pub(crate) fn dialog_escape(&mut self, e: &mut UiEffects) -> Result<()> {
@@ -1000,17 +1069,63 @@ impl UiState {
 
     fn run_dialog_button(&mut self, index: usize, e: &mut UiEffects) -> Result<()> {
         let shown = self.dialogs.shown.as_ref().ok_or("dialog_not_open")?;
-        if shown.waiting_since.is_some() {
-            return Err("waiting_for_response".into());
-        }
-        let button = shown
+        let action = shown
             .def
             .buttons
             .get(index)
-            .ok_or("dialog_button_missing")?;
+            .ok_or("dialog_button_missing")?
+            .action
+            .clone();
+        self.run_dialog_action(action, e)
+    }
+
+    /// A click on a body text run (`DialogBodyHandlers.runActionOnParent`): its click event runs
+    /// like a static button action, then the dialog's `after_action` applies. Custom payloads come
+    /// from the typed slot recorded at parse time.
+    pub(crate) fn dialog_component_click(
+        &mut self,
+        event: &Value,
+        e: &mut UiEffects,
+    ) -> Result<()> {
+        let shown = self.dialogs.shown.as_ref().ok_or("dialog_not_open")?;
+        let action = match event["action"]
+            .as_str()
+            .ok_or("component_click_action")?
+        {
+            "custom" => DialogAction::Custom {
+                id: identifier(event["id"].as_str().ok_or("component_custom_id_required")?)?,
+                payload: match event.get("payload_slot") {
+                    None => None,
+                    Some(slot) => Some(
+                        slot.as_u64()
+                            .and_then(|slot| shown.def.click_payloads.get(slot as usize))
+                            .ok_or("component_payload_slot")?
+                            .clone(),
+                    ),
+                },
+                dynamic: false,
+            },
+            "run_command" => DialogAction::RunCommand {
+                command: event["command"]
+                    .as_str()
+                    .ok_or("component_command_required")?
+                    .to_owned(),
+                dynamic: false,
+            },
+            other => DialogAction::Unsupported(other.to_owned()),
+        };
+        self.run_dialog_action(Some(action), e)
+    }
+
+    /// `DialogScreen.runAction`: send the action's packet, then apply `after_action`.
+    fn run_dialog_action(&mut self, action: Option<DialogAction>, e: &mut UiEffects) -> Result<()> {
+        let shown = self.dialogs.shown.as_ref().ok_or("dialog_not_open")?;
+        if shown.waiting_since.is_some() {
+            return Err("waiting_for_response".into());
+        }
         let after = shown.def.after_action;
         let values = shown.collected(&self.fields);
-        let command = match button.action.clone() {
+        let command = match action {
             Some(DialogAction::Custom {
                 id,
                 payload,
@@ -1107,6 +1222,30 @@ impl UiState {
         self.label(id, label, rect)?;
         if let Some(node) = self.nodes.last_mut() {
             node.component = Some(Arc::new(component.clone()));
+        }
+        Ok(())
+    }
+
+    /// `plain_message` (`DialogBodyHandlers.PlainMessageHandler`): lines centered in the message
+    /// width (`MultiLineTextWidget.setCentered`), runs with hover tooltips and click regions. The
+    /// root color is the themed dialog text color; styled runs keep their own colors.
+    fn dialog_body_text(&mut self, index: usize, contents: &Value, rect: [f32; 4]) -> Result<()> {
+        let id = format!("dialog/body/{index}");
+        if !self.text.can_render() {
+            // State-only client: no glyph metrics, hence no runs to hover or click.
+            return self.dialog_label(&id, contents, rect);
+        }
+        let themed = json!({
+            "text": "",
+            "color": format!("#{:06X}", super::theme::TEXT & 0xff_ffff),
+            "extra": [contents],
+        });
+        let mut layout = self.text.layout(&themed, rect[2].max(1.))?;
+        layout.center_lines(rect[2]);
+        self.rich_layout_label(&id, Arc::new(themed), Arc::new(layout), rect, true)?;
+        // Observation carries the received component, not the themed wrapper.
+        if let Some(node) = self.nodes.iter_mut().rev().find(|node| node.id == id) {
+            node.component = Some(Arc::new(contents.clone()));
         }
         Ok(())
     }
@@ -1229,8 +1368,8 @@ impl UiState {
                 Element::Text(i, height) => {
                     let BodyItem::Text { contents, width } = &def.body[*i];
                     let width = width.min(content_w);
-                    self.dialog_label(
-                        &format!("dialog/body/{i}"),
+                    self.dialog_body_text(
+                        *i,
                         contents,
                         [((w - width) / 2.).floor(), y, width, *height],
                     )?;

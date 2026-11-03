@@ -104,18 +104,12 @@ impl Player {
                         .and_then(Value::as_f64)
                         .ok_or("invalid instrument range")? as f32
                         / 16.;
-                    self.play_use_entity_sound(
+                    self.play_use_player_sound(
                         world,
                         event,
                         crate::audio::SoundCategory::Records,
-                        Handle {
-                            network_id: self.entity_id,
-                            generation: self.sound_entity_generation()?,
-                        },
-                        self.position,
                         volume,
                         1.,
-                        true,
                     )?;
                     let group = item
                         .component("minecraft:use_cooldown")
@@ -470,6 +464,37 @@ mod p1_helmet_tests {
             .insert(1, "minecraft:golden_helmet".into());
         content.insert_test_item_interaction(1, "Item", "Item", "Item");
         content
+    }
+
+    #[test]
+    fn goat_horn_use_emits_sound_at_local_player_position() {
+        let mut content = Content::test_cube();
+        content.item_names.insert(7, "minecraft:goat_horn".into());
+        content.insert_test_item_interaction(7, "InstrumentItem", "InstrumentItem", "Item");
+        let mut stack = Stack::default();
+        stack.id = 7;
+        stack.count = 1;
+        stack.components = Arc::new(BTreeMap::from([(
+            "minecraft:instrument".into(),
+            json!({"sound_event":"minecraft:item.goat_horn.sound.0","range":256.,"use_duration":7.}),
+        )]));
+        let mut inventory = InventoryStore::default();
+        inventory.player.slots[36] = Some(stack);
+        let mut player = Player::new();
+        player.position = [12.5, 64., -8.25];
+        let result = player.air_result(0, None, &World::new(0, 16), &content,
+            &inventory, &EntityStore::new(), 9).unwrap();
+        assert_eq!(result, Outcome::CONSUME);
+        assert!(player.using.is_some());
+        match player.take_use_prediction() {
+            Some(UsePrediction::Sound(sound)) => {
+                assert_eq!(sound.event, "minecraft:item.goat_horn.sound.0");
+                assert_eq!(sound.category, crate::audio::SoundCategory::Records);
+                assert_eq!(sound.volume, 16.);
+                assert!(matches!(sound.source, crate::audio::SoundOrigin::LocalPlayer { position: p } if p == [12.5, 64., -8.25]));
+            }
+            other => panic!("expected local horn sound, got {other:?}"),
+        }
     }
 
     fn predicted_slot(player: &Player, slot: u16) -> Option<&Option<Stack>> {

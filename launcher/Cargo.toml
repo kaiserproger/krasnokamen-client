@@ -1,6 +1,6 @@
 [package]
 name = "solaris-launcher"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -21,6 +21,13 @@ zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["blocking", "rustls"] }
 tar = "0.4"
 zstd = "0.13"
-eframe = { version = "=0.33.3", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 png = "=0.18.1"
 solaris-paths = { path = "../paths" }
+flate2 = "=1.1.9"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+eframe = { version = "=0.33.3", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+eframe = { version = "=0.33.3", default-features = false, features = ["wgpu", "default_fonts"] }
+wgpu = { version = "=27.0.1", default-features = false, features = ["metal"] }

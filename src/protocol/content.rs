@@ -16,6 +16,7 @@ use std::{
 };
 
 mod loader_resources;
+mod palettes;
 mod placement;
 
 const BLOCK_REPORTS_VERSION: &str = "26.3";
@@ -539,6 +540,7 @@ pub struct ResourceSource {
     roots: Vec<PathBuf>,
     indexed: BTreeMap<String, IndexedResource>,
     loader: BTreeMap<String, Arc<[u8]>>,
+    palette_sprites: BTreeMap<String, palettes::PaletteSprite>,
     pub limits: ResourceLimits,
 }
 impl ResourceSource {
@@ -586,12 +588,15 @@ impl ResourceSource {
                 return Err("indexed asset count bound".into());
             }
         }
-        Ok(Self {
+        let mut source = Self {
             roots,
             indexed,
             loader: BTreeMap::new(),
+            palette_sprites: BTreeMap::new(),
             limits,
-        })
+        };
+        source.palette_sprites = palettes::index(&source)?;
+        Ok(source)
     }
     pub fn resource_root(&self) -> &Path {
         &self.roots[0]
@@ -653,6 +658,11 @@ impl ResourceSource {
         Ok(stack)
     }
     pub(crate) fn texture_metadata(&self, name: &str) -> Result<Value> {
+        let name: &str = match self.palette_sprites.get(name) {
+            Some(palettes::PaletteSprite::Generated { .. }) => return Ok(Value::Null),
+            Some(palettes::PaletteSprite::Physical(resource)) => resource,
+            None => name,
+        };
         let (ns, path) = split_id(name)?;
         let relative = format!("assets/{ns}/textures/{path}.png.mcmeta");
         match self.bytes(&relative) {
@@ -674,6 +684,9 @@ impl ResourceSource {
         let mut out = BTreeSet::new();
         for root in &self.roots {
             let assets = root.join("assets");
+            if !assets.exists() {
+                continue;
+            }
             for ns in fs::read_dir(&assets).map_err(|e| format!("{}: {e}", assets.display()))? {
                 let ns = ns.map_err(|e| e.to_string())?;
                 if !ns.file_type().map_err(|e| e.to_string())?.is_dir() {
@@ -1111,7 +1124,12 @@ impl Content {
             .map(|(id, name)| (name, id))
             .collect::<BTreeMap<_, _>>();
         let mut texture_names = if presentation {
-            source.resource_names("textures", "png")?
+            let mut names = source.resource_names("textures", "png")?;
+            names.extend(source.palette_sprites.keys().cloned());
+            if names.len() > source.limits.max_resources {
+                return Err("resource count bound including palette sprites".into());
+            }
+            names
         } else {
             BTreeSet::new()
         };
@@ -2236,6 +2254,93 @@ impl Content {
         ]));
     }
     #[cfg(test)]
+    pub(crate) fn set_test_signal_owner(&mut self, state: u32, owner: &str) {
+        let facts = &mut self.block_interactions[self.states[state as usize].block];
+        facts.signal = Arc::from(owner);
+        facts.direct_signal = Arc::from(owner);
+    }
+    #[cfg(test)]
+    pub(crate) fn configure_test_comparator(&mut self) {
+        self.names[1] = "minecraft:comparator".into();
+        self.states.push(self.states[1].clone());
+        self.properties[0] = BTreeMap::from([("facing".into(), "north".into())]);
+        self.properties[1] = BTreeMap::from([
+            ("facing".into(), "east".into()),
+            ("mode".into(), "compare".into()),
+            ("powered".into(), "true".into()),
+        ]);
+        let mut subtract = self.properties[1].clone();
+        subtract.insert("mode".into(), "subtract".into());
+        self.properties.push(subtract);
+        self.property_domains.insert(
+            self.names[1].clone(),
+            BTreeMap::from([
+                ("facing".into(), vec!["east".into()]),
+                ("mode".into(), vec!["compare".into(), "subtract".into()]),
+                ("powered".into(), vec!["true".into()]),
+            ]),
+        );
+        self.block_states[1] = vec![1, 2];
+        self.insert_test_block_interaction(0, true);
+        self.insert_test_block_interaction(1, false);
+        self.set_test_signal_owner(1, "DiodeBlock");
+        self.insert_test_placement_metadata(0, serde_json::json!({"hierarchy": []}));
+        self.insert_test_placement_metadata(1, serde_json::json!({
+            "hierarchy": ["net.minecraft.world.level.block.DiodeBlock"]
+        }));
+    }
+    #[cfg(test)]
+    pub(crate) fn configure_test_redstone_lamp(&mut self) {
+        self.names.push("minecraft:redstone_lamp".into());
+        let mut lamp = self.states[1].clone();
+        lamp.block = 2;
+        lamp.registry_id = 2;
+        self.states.extend([lamp.clone(), lamp]);
+        self.properties.push(BTreeMap::from([("lit".into(), "false".into())]));
+        self.properties.push(BTreeMap::from([("lit".into(), "true".into())]));
+        self.property_domains.insert(self.names[2].clone(), BTreeMap::from([
+            ("lit".into(), vec!["false".into(), "true".into()]),
+        ]));
+        self.block_states.push(vec![3, 4]);
+        self.insert_test_block_interaction(2, false);
+        self.block_interactions[2].placement = Arc::from("RedstoneLampBlock");
+        self.block_interactions[2].default_state = 3;
+    }
+    #[cfg(test)]
+    pub(crate) fn configure_test_door(&mut self) {
+        self.names.push("minecraft:oak_door".into());
+        let mut door = self.states[1].clone();
+        door.block = 2;
+        door.registry_id = 2;
+        let mut ids = Vec::new();
+        for hinge in ["left", "right"] {
+            for open in ["false", "true"] {
+                for powered in ["false", "true"] {
+                    ids.push(self.states.len() as u32);
+                    self.states.push(door.clone());
+                    self.properties.push(BTreeMap::from([
+                        ("facing".into(), "north".into()),
+                        ("half".into(), "lower".into()),
+                        ("hinge".into(), hinge.into()),
+                        ("open".into(), open.into()),
+                        ("powered".into(), powered.into()),
+                    ]));
+                }
+            }
+        }
+        self.property_domains.insert(self.names[2].clone(), BTreeMap::from([
+            ("facing".into(), vec!["north".into()]),
+            ("half".into(), vec!["lower".into()]),
+            ("hinge".into(), vec!["left".into(), "right".into()]),
+            ("open".into(), vec!["false".into(), "true".into()]),
+            ("powered".into(), vec!["false".into(), "true".into()]),
+        ]));
+        self.block_states.push(ids);
+        self.insert_test_block_interaction(2, false);
+        self.block_interactions[2].placement = Arc::from("DoorBlock");
+        self.block_interactions[2].default_state = 3;
+    }
+    #[cfg(test)]
     pub(crate) fn test_cube() -> Self {
         let quad = |face| BakedQuad {
             positions: super::models::face_positions(face, [0.; 3], [1.; 3]),
@@ -2245,8 +2350,11 @@ impl Content {
             cullface: Some(face),
             face,
             shade: true,
+            shade_direction: None,
+            gui_light_side: true,
             ambient_occlusion: true,
             layer: RenderLayer::Opaque,
+            entity_material: None,
             alpha: 1.,
             texture_layer: 0,
         };
@@ -2323,6 +2431,7 @@ impl Content {
                 roots: vec![PathBuf::from(".")],
                 indexed: BTreeMap::new(),
                 loader: BTreeMap::new(),
+                palette_sprites: BTreeMap::new(),
                 limits: ResourceLimits::default(),
             },
             textures: BTreeMap::new(),
@@ -2531,6 +2640,13 @@ fn missing_texture() -> Image {
     }
 }
 pub(crate) fn decode_texture(source: &ResourceSource, name: &str) -> Result<Image> {
+    if let Some(sprite) = source.palette_sprites.get(name) {
+        return palettes::decode(source, name, sprite);
+    }
+    decode_physical_texture(source, name)
+}
+
+fn decode_physical_texture(source: &ResourceSource, name: &str) -> Result<Image> {
     let (ns, path) = split_id(name)?;
     let relative = format!("assets/{ns}/textures/{path}.png");
     let bytes = source.bytes(&relative)?;
@@ -2631,6 +2747,43 @@ struct Atlas {
     side: u32,
     layers: u32,
 }
+// Shelf packing in identifier order wastes whole pages when a few tall sprites
+// appear late. Read only each distinct PNG's dimensions before choosing a
+// deterministic frame-height order; full decoding and its budgets remain below.
+fn atlas_packing_order<'a>(source: &'a ResourceSource, names: &'a BTreeSet<String>) -> Result<Vec<&'a str>> {
+    let mut dimensions = BTreeMap::new();
+    let mut order = Vec::with_capacity(names.len());
+    for name in names.iter().map(String::as_str)
+        .filter(|name| *name != "solaris:white" && *name != "minecraft:missingno")
+    {
+        let (physical, generated): (&str, bool) = match source.palette_sprites.get(name) {
+            Some(palettes::PaletteSprite::Generated { base, .. }) => (base, true),
+            Some(palettes::PaletteSprite::Physical(resource)) => (resource, false),
+            None => (name, false),
+        };
+        let size = if let Some(size) = dimensions.get(&(physical, generated)) {
+            *size
+        } else {
+            let (namespace, path) = split_id(physical)?;
+            let bytes = source.bytes(&format!("assets/{namespace}/textures/{path}.png"))?;
+            if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
+                || &bytes[8..16] != b"\0\0\0\rIHDR"
+            {
+                return Err(format!("invalid PNG header {physical}"));
+            }
+            let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+            let metadata = if generated { Value::Null } else { source.texture_metadata(name)? };
+            let size = sprite_dimensions([width, height], &metadata)?;
+            dimensions.insert((physical, generated), size);
+            size
+        };
+        order.push((std::cmp::Reverse(size[1]), std::cmp::Reverse(size[0]), name));
+    }
+    order.sort_unstable();
+    Ok(order.into_iter().map(|(_, _, name)| name).collect())
+}
+
 impl Atlas {
     fn build(source: &ResourceSource, names: &BTreeSet<String>) -> Result<Self> {
         const SIDE: u32 = 2048;
@@ -2650,12 +2803,8 @@ impl Atlas {
         let mut materials = BTreeMap::new();
         let mut animations = Vec::new();
         let mut animation_bytes = 0usize;
-        for name in ["solaris:white", "minecraft:missingno"].into_iter().chain(
-            names
-                .iter()
-                .map(String::as_str)
-                .filter(|name| *name != "solaris:white" && *name != "minecraft:missingno"),
-        ) {
+        let order = atlas_packing_order(source, names)?;
+        for name in ["solaris:white", "minecraft:missingno"].into_iter().chain(order) {
             let image = match name {
                 "solaris:white" => Image {
                     width: 1,

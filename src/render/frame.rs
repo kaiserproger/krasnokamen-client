@@ -271,6 +271,16 @@ impl Renderer {
             }
             range.end = cursor;
         }
+        // First-person translucency sorts within its own material families, never
+        // against world geometry. Reuse the uploaded primitive storage.
+        for primitives in &mut self.first_person.transparent {
+            primitives.sort_unstable_by(|a, b| {
+                let distance = |center| (Vec3::from_array(center) + presentation_origin).length_squared();
+                distance(b.center)
+                    .total_cmp(&distance(a.center))
+                    .then_with(|| a.first.cmp(&b.first))
+            });
+        }
         self.stats.visible_chunks = self.visible.len() as u64;
         if let Some(mdi) = &self.mdi {
             self.stats.terrain_candidates_opaque = mdi.candidates[0].len() as u64;
@@ -324,15 +334,9 @@ impl Renderer {
             - self.stats.block_entity_geometry_indices;
         self.stats.entity_extracted = scene.entity_presentation.submitted as u64;
         self.stats.block_entities_extracted = scene.entity_presentation.block_entities as u64;
-        let yaw = scene.yaw.to_radians();
-        let pitch = scene.pitch.to_radians();
-        let forward = Vec3::new(
-            -yaw.sin() * pitch.cos(),
-            -pitch.sin(),
-            yaw.cos() * pitch.cos(),
-        );
+        let view = camera_view(Vec3::ZERO, scene.yaw, scene.pitch);
         let fov = if scene.fov_deg > 0. {
-            scene.fov_deg.clamp(30., 110.)
+            scene.fov_deg.clamp(1., 110.)
         } else {
             70.
         };
@@ -344,7 +348,7 @@ impl Renderer {
         );
         let view_projection = projection
             * hurt_camera_transform(scene)
-            * Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y);
+            * view;
         self.prepare_visibility(scene, view_projection)?;
         let env = &scene.environment;
         let features = self.graphics.features();
@@ -358,7 +362,7 @@ impl Renderer {
         let far_visible = self.far.prepare(
             &self.queue,
             scene,
-            hurt_camera_transform(scene) * Mat4::look_to_rh(Vec3::ZERO, forward, Vec3::Y),
+            hurt_camera_transform(scene) * view,
             fov.to_radians(),
             self.config.width as f32 / self.config.height as f32,
             fancy,
@@ -543,6 +547,33 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera, 0, bytemuck::bytes_of(&uniform));
+        // First-person presentation is not world-space TAA history. Its own
+        // unjittered display-target pass keeps a nearby wall from determining
+        // hand reprojection or shader shadows.
+        // Camera.calculateHudFov starts at 70 degrees, independently of the
+        // configured world FOV and sprint modifier. GameRenderer's hand lens
+        // uses near 0.05 / far 100; world zoom must not push tools offscreen.
+        let hand_projection = Mat4::perspective_rh(
+            70_f32.to_radians(),
+            self.config.width as f32 / self.config.height as f32,
+            0.05,
+            100.,
+        ) * hurt_camera_transform(scene) * view;
+        let first_person_uniform = CameraUniform {
+            view_projection: hand_projection.to_cols_array(),
+            inverse_view_projection: hand_projection.inverse().to_cols_array(),
+            projection_fog: [
+                -2. * 100. * 0.05 / (100. - 0.05),
+                -(100. + 0.05) / (100. - 0.05),
+                0.,
+                0.,
+            ],
+            fancy: [0., uniform.fancy[1], 0., 0.],
+            ..uniform
+        };
+        self.queue.write_buffer(
+            &self.first_person_camera, 0, bytemuck::bytes_of(&first_person_uniform),
+        );
         for cascade in 0..cascades.count as usize {
             // The shadow vertex stage reads only `shadow_projection`.
             let per_cascade = CameraUniform {
@@ -1077,6 +1108,58 @@ impl Renderer {
             self.outline
                 .post(&mut encoder, &self.targets.color_view, &self.timing);
             self.stats.draw_calls += 5;
+        }
+        if self.first_person.ranges.iter().any(|range| !range.is_empty()) {
+            // Vanilla 26.1.2 GameRenderer renders the hand after the level with
+            // cleared depth. Keep world depth intact for occlusion/post consumers.
+            // Source material raster state still governs hand self-occlusion,
+            // translucent items and depth-equal foil, after world postprocessing.
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("first person, independent world depth"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.targets.color_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.first_person_depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_bind_group(0, &self.first_person_camera_bind, &[]);
+            pass.set_bind_group(1, &self.atlas_bind, &[]);
+            pass.set_bind_group(2, &self.shadow.bind, &[]);
+            pass.set_vertex_buffer(0, self.first_person.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.instances.slice(..));
+            pass.set_index_buffer(self.first_person.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for &family in &self.pipelines.dynamic_order {
+                let range = self.first_person.ranges[family].clone();
+                if range.is_empty() || material::MATERIALS[family].shader.kind == 11 {
+                    continue;
+                }
+                pass.set_pipeline(&self.pipelines.first_person[self.pipelines.dynamic_index[family]]);
+                if material::MATERIALS[family].sort {
+                    for primitive in &self.first_person.transparent[family] {
+                        pass.draw_indexed(primitive.first..primitive.first + primitive.count, 0, 1..2);
+                        self.stats.draw_calls += 1;
+                        self.stats.submitted_indices += u64::from(primitive.count);
+                    }
+                } else {
+                    pass.draw_indexed(range.clone(), 0, 1..2);
+                    self.stats.draw_calls += 1;
+                    self.stats.submitted_indices += u64::from(range.end - range.start);
+                }
+            }
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

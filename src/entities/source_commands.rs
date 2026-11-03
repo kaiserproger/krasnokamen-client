@@ -226,20 +226,4 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn predict_comparator_output(
-        &mut self,
-        position: [i32; 3],
-        signal: i32,
-    ) -> Result<()> {
-        let block = self
-            .block_entities
-            .get_mut(&position)
-            .ok_or("comparator block entity not observed")?;
-        if block.type_name != "minecraft:comparator" {
-            return Err("comparator prediction owner mismatch".into());
-        }
-        block.animation.signals.comparator_output = signal;
-        self.revision += 1;
-        Ok(())
-    }
 }

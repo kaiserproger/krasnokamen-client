@@ -365,6 +365,14 @@ impl UiState {
                 ..Fx::REST
             };
         }
+        if node.id.starts_with("component/hover/") {
+            // Tooltips appear in the frame the pointer reaches the run, like vanilla.
+            return Fx {
+                hover,
+                press,
+                ..Fx::REST
+            };
+        }
         if !self.anim.running {
             return Fx {
                 hover,

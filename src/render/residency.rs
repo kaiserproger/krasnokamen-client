@@ -192,14 +192,11 @@ impl Renderer {
         {
             return Err("missing_required_end_sky_texture".into());
         }
-        let directional = scene
-            .dynamic
-            .indices
-            .iter()
-            .enumerate()
-            .any(|(family, indices)| {
+        let directional = [&scene.dynamic, &scene.first_person].iter().any(|geometry| {
+            geometry.indices.iter().enumerate().any(|(family, indices)| {
                 !indices.is_empty() && material::MATERIALS[family].shader.cardinal
-            });
+            })
+        });
         if directional && env.light_directions.is_none() {
             return Err("missing_required_source_cardinal_light_directions".into());
         }
@@ -209,14 +206,11 @@ impl Renderer {
         {
             return Err("non_finite_source_cardinal_light_directions".into());
         }
-        let portal = scene
-            .dynamic
-            .indices
-            .iter()
-            .enumerate()
-            .any(|(family, indices)| {
+        let portal = [&scene.dynamic, &scene.first_person].iter().any(|geometry| {
+            geometry.indices.iter().enumerate().any(|(family, indices)| {
                 !indices.is_empty() && material::MATERIALS[family].shader.kind == 12
-            });
+            })
+        });
         if portal && (scene.portal_sprites.is_none() || scene.shader_game_time.is_none()) {
             return Err("missing_required_source_portal_sprites_or_game_time".into());
         }
@@ -243,6 +237,11 @@ impl Renderer {
             &scene.dynamic.indices.each_ref().map(Vec::as_slice),
             layers,
         )?;
+        Stream::validate_size(
+            &scene.first_person.vertices,
+            &scene.first_person.indices.each_ref().map(Vec::as_slice),
+            layers,
+        )?;
         let overlay_indices = [
             scene.overlay.indices[0].as_slice(),
             scene.overlay.indices[1].as_slice(),
@@ -256,6 +255,7 @@ impl Renderer {
                 .vertices
                 .iter()
                 .chain(scene.dynamic.vertices.iter())
+                .chain(scene.first_person.vertices.iter())
                 .chain(
                     scene
                         .chunks
@@ -403,6 +403,13 @@ impl Renderer {
             &self.queue,
             &scene.dynamic.vertices,
             &scene.dynamic.indices.each_ref().map(Vec::as_slice),
+            material::MATERIALS.map(|m| m.sort),
+        )?;
+        self.first_person.upload(
+            &self.device,
+            &self.queue,
+            &scene.first_person.vertices,
+            &scene.first_person.indices.each_ref().map(Vec::as_slice),
             material::MATERIALS.map(|m| m.sort),
         )?;
         self.overlay.upload(

@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "id": "armor_baby_zombie_head",
+  "texture": {
+    "path": "entity/equipment/humanoid_baby/iron.png",
+    "size": [
+      64,
+      64
+    ]
+  },
+  "roles": {
+    "head": [
+      "head"
+    ]
+  },
+  "bones": [
+    {
+      "name": "head",
+      "pivot": [
+        0,
+        12,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            -8,
+            -4
+          ],
+          "size": [
+            8,
+            8,
+            8
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "inflate": 1.0,
+          "faces": {
+            "up": [
+              8,
+              0,
+              16,
+              8
+            ],
+            "down": [
+              16,
+              0,
+              24,
+              8
+            ],
+            "right": [
+              0,
+              8,
+              8,
+              16
+            ],
+            "front": [
+              8,
+              8,
+              16,
+              16
+            ],
+            "left": [
+              16,
+              8,
+              24,
+              16
+            ],
+            "back": [
+              24,
+              8,
+              32,
+              16
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

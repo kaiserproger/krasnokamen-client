@@ -128,6 +128,16 @@ pub(crate) fn physical_peek(amount: f32) -> f32 {
 pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
     let position = e.presented_transform(tick, partial).position;
+    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
+        let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
+        let center = super::render_special::item_frame::center(position, face)?;
+        let normal = direction(face)?;
+        let half = normal.map(|axis| if axis == 0. { 0.375 } else { 0.03125 });
+        return Ok(Bounds {
+            min: std::array::from_fn(|i| center[i] - half[i]),
+            max: std::array::from_fn(|i| center[i] + half[i]),
+        });
+    }
     let mut width = dimensions.width * scale;
     let mut height = dimensions.height * scale;
     if e.type_name == "minecraft:interaction" {

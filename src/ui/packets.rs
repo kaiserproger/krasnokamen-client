@@ -774,8 +774,36 @@ impl UiState {
         let map = self.maps.get(&id).ok_or("map_not_observed")?;
         map.append_world_geometry(content, &self.text, transform, [-1.; 2], false, out)
     }
+    /// Render the held background and only map data received for this ID.
+    pub(crate) fn append_held_map(
+        &self,
+        id: i32,
+        content: &Content,
+        transform: glam::Mat4,
+        light: [f32; 2],
+        out: &mut DynamicGeometry,
+    ) -> Result<()> {
+        let map = self.maps.get(&id);
+        let background = if map.is_some() {
+            "minecraft:map/map_background_checkerboard"
+        } else {
+            "minecraft:map/map_background"
+        };
+        let mut painter = WorldPainter::new(content, out, transform, light, EntityMaterial::Text)?;
+        painter.image(background, [-7., -7., 142., 142.], [0., 0., 1., 1.], [1.; 3], 1.)?;
+        if let Some(map) = map {
+            map.append_world_geometry(content, &self.text, transform, light, false, out)?;
+        }
+        Ok(())
+    }
 }
 impl MapState {
+    pub(crate) fn visible_pixel_runs(&self) -> usize {
+        self.runs.len()
+    }
+    pub(crate) fn visible_pixels(&self) -> usize {
+        self.runs.iter().map(|run| run.bounds[2] as usize).sum()
+    }
     /// One source renderer serves held maps, GUI maps, and item-frame maps.
     pub fn append_world_geometry(
         &self,
@@ -965,5 +993,44 @@ mod disconnect_tests {
         ui.open_book(&stack, 0).unwrap();
         assert!(matches!(ui.editor, Some(EditorState::Book { ref pages, writable: true, .. })
             if pages == &[String::new()]));
+    }
+}
+
+#[cfg(test)]
+mod held_map_tests {
+    use super::*;
+    use crate::protocol::{Writer, content::TextureRegion};
+
+    #[test]
+    fn held_map_uses_only_received_pixel_patch() {
+        let mut content = Content::test_cube();
+        content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
+        for (name, layer) in [("minecraft:map/map_background", 5), ("minecraft:map/map_background_checkerboard", 6)] {
+            content.insert_test_texture(name, TextureRegion { layer, uv: [0., 0., 1., 1.], width: 128, height: 128 });
+        }
+        let mut ui = UiState::new_state(&content).unwrap();
+        let mut before = DynamicGeometry::default();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut before).unwrap();
+        assert_eq!(before.vertices.len(), 4);
+        assert_eq!(before.vertices[0].texture_layer, 5);
+        assert!(ui.maps().get(&42).is_none());
+
+        let mut packet = Writer::default();
+        packet.var(42);
+        packet.byte(0);
+        packet.byte(0);
+        packet.byte(0);
+        packet.byte(2); packet.byte(1); packet.byte(0); packet.byte(0);
+        packet.var(2); packet.byte(4); packet.byte(4);
+        ui.read_map(&mut Reader::new(&packet.0), &content).unwrap();
+        let map = ui.maps().get(&42).unwrap();
+        assert_eq!(map.revision, 1);
+        assert_eq!(&map.colors[..2], &[4, 4]);
+        assert_eq!(map.visible_pixel_runs(), 1);
+        assert_eq!(map.visible_pixels(), 2);
+        let mut after = DynamicGeometry::default();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut after).unwrap();
+        assert_eq!(after.vertices.len(), 8);
+        assert_eq!(after.vertices[0].texture_layer, 6);
     }
 }

@@ -68,6 +68,7 @@ impl SoundCategory {
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum SoundOrigin {
     Position([f64; 3]),
+    LocalPlayer { position: [f64; 3] },
     Entity {
         id: i32,
         generation: u64,
@@ -78,12 +79,17 @@ pub enum SoundOrigin {
 impl SoundOrigin {
     fn position(self) -> Option<[f64; 3]> {
         match self {
-            Self::Position(p) | Self::Entity { position: p, .. } => Some(p),
+            Self::Position(p) | Self::Entity { position: p, .. } | Self::LocalPlayer { position: p } => Some(p),
             Self::Relative => None,
         }
     }
     fn matches_entity(self, id: i32, generation: u64) -> bool {
         matches!(self,Self::Entity{id:i,generation:g,..} if i==id && g==generation)
+    }
+    fn follow_local_player(&mut self, position: [f64; 3]) {
+        if let Self::LocalPlayer { position: source } = self {
+            *source = position;
+        }
     }
 }
 #[derive(Clone, Debug)]
@@ -453,6 +459,7 @@ fn validate_vorbis_codebooks(setup: &[u8]) -> Result<()> {
 #[derive(Clone, Copy)]
 struct Listener {
     position: [f64; 3],
+    local_player_position: [f64; 3],
     yaw: f32,
     pitch: f32,
 }
@@ -585,8 +592,8 @@ impl Audio {
         ))?;
         Ok(handle)
     }
-    pub fn listener(&self, position: [f64; 3], yaw: f32, pitch: f32) -> Result<()> {
-        if position.iter().any(|v| !v.is_finite() || v.abs() > 1.0e12)
+    pub fn listener(&self, position: [f64; 3], local_player_position: [f64; 3], yaw: f32, pitch: f32) -> Result<()> {
+        if position.iter().chain(local_player_position.iter()).any(|v| !v.is_finite() || v.abs() > 1.0e12)
             || !yaw.is_finite()
             || !pitch.is_finite()
         {
@@ -596,6 +603,7 @@ impl Audio {
             self.epoch(),
             Listener {
                 position,
+                local_player_position,
                 yaw,
                 pitch,
             },
@@ -828,6 +836,7 @@ fn worker(
     let mut voices: VecDeque<Voice> = VecDeque::with_capacity(64);
     let mut listener = Listener {
         position: [0.; 3],
+        local_player_position: [0.; 3],
         yaw: 0.,
         pitch: 0.,
     };
@@ -846,6 +855,7 @@ fn worker(
             voices.clear();
             listener = Listener {
                 position: [0.; 3],
+                local_player_position: [0.; 3],
                 yaw: 0.,
                 pitch: 0.,
             };
@@ -890,6 +900,9 @@ fn worker(
             }
             Command::Listener(epoch, p) if epoch == active_epoch => {
                 listener = p;
+                for voice in &mut voices {
+                    voice.request.source.follow_local_player(p.local_player_position);
+                }
                 Ok(())
             }
             Command::Entity(epoch, id, generation, p) if epoch == active_epoch => {
@@ -1203,6 +1216,12 @@ fn update_observation(state: &mut Value, voices: &VecDeque<Voice>, listener: Lis
                         .get_mut("source")
                         .and_then(|s| s.get_mut("value"))
                         .expect("positional voice schema"),
+                    p,
+                ),
+                SoundOrigin::LocalPlayer { position: p } => update_vector(
+                    entry.get_mut("source").and_then(|s| s.get_mut("value"))
+                        .and_then(|s| s.get_mut("position"))
+                        .expect("local-player voice schema"),
                     p,
                 ),
                 SoundOrigin::Entity { position: p, .. } => update_vector(

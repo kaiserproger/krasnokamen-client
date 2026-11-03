@@ -107,7 +107,8 @@ pub enum BoneRole {
     LeftArm,
     RightLeg,
     LeftLeg,
-    Wing,
+    WingNegativeX,
+    WingPositiveX,
     /// Villager-family `arms` bone: the main-hand item rests across it (`CrossedArmsItemLayer`).
     CrossedArms,
     /// Witch nose: a held potion hangs from it.
@@ -455,6 +456,13 @@ impl Models {
         {
             return Ok((&schema.dimensions, attribute_scale));
         }
+        // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
+        // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
+        let age_scale = if owner == Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") {
+            1.
+        } else {
+            age_scale
+        };
         let family_scale = match owner {
             Some("net.minecraft.world.entity.animal.fish.Pufferfish") => {
                 match number("PUFF_STATE").unwrap_or(0) {
@@ -533,6 +541,17 @@ pub fn transform(pivot: Vec3, rotation: Vec3, scale: Vec3) -> Mat4 {
 mod tests {
     use super::*;
 
+    /// Textures of the received-render fixture; each has its own atlas layer.
+    const FIXTURE_TEXTURES: [&str; 8] = [
+        "test:painting/canvas", "minecraft:painting/back", "minecraft:test/frame",
+        "minecraft:entity/minecart/minecart", "minecraft:entity/cushion/white_cushion",
+        "minecraft:entity/cushion/lime_cushion", "minecraft:entity/boat/poplar",
+        "minecraft:entity/chest_boat/poplar",
+    ];
+    fn fixture_layer(texture: &str) -> u32 {
+        7 + FIXTURE_TEXTURES.iter().position(|name| *name == texture).unwrap() as u32
+    }
+
     fn render_received_fixture(kind: &str, direction: i32, metadata: &[u8]) -> crate::api::DynamicGeometry {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
@@ -545,9 +564,10 @@ mod tests {
         let region = crate::protocol::content::TextureRegion {
             layer: 7, uv: [0., 0., 1., 1.], width: 16, height: 16,
         };
-        for texture in ["test:painting/canvas", "minecraft:painting/back", "minecraft:test/frame",
-            "minecraft:entity/minecart/minecart"] {
-            content.insert_test_texture(texture, region);
+        for texture in FIXTURE_TEXTURES {
+            content.insert_test_texture(texture, crate::protocol::content::TextureRegion {
+                layer: fixture_layer(texture), ..region
+            });
         }
         // Owned box fixture, not copied vanilla geometry.
         let faces: serde_json::Map<String, Value> = ["north", "south", "east", "west", "up", "down"]
@@ -584,7 +604,7 @@ mod tests {
         }
         let mut out = crate::api::DynamicGeometry::default();
         let stats = store.append_geometry(&content, [4.,4.,3.], [4.,5.,0.], [0.;2], 32.,
-            1, 0., &|point| {
+            1, 0., 0, None, &|point| {
                 // A painting's segment cells are available, but not its generic eye sample.
                 Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
                     .then_some([15.;2]))
@@ -619,6 +639,22 @@ mod tests {
         let top = out.vertices.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
         assert!(bottom >= -0.001, "minecart bottom below received rail position: {bottom}");
         assert!(top > 0.5, "minecart top buried: {top}");
+    }
+
+
+    #[test]
+    fn entity_render_263_poplar_boats_use_boat_hulls_and_poplar_textures() {
+        let boat = render_received_fixture("minecraft:poplar_boat", 0, &[]);
+        let chest_boat = render_received_fixture("minecraft:poplar_chest_boat", 0, &[]);
+        let count = |out: &crate::api::DynamicGeometry, texture: &str| {
+            out.vertices.iter().filter(|v| v.texture_layer == fixture_layer(texture)).count()
+        };
+        let hull = count(&boat, "minecraft:entity/boat/poplar");
+        assert!(hull > 0);
+        assert_eq!(count(&boat, "minecraft:entity/chest_boat/poplar"), 0);
+        // The chest boat model is the boat hull plus its chest parts, on its own texture.
+        assert!(count(&chest_boat, "minecraft:entity/chest_boat/poplar") > hull);
+        assert_eq!(count(&chest_boat, "minecraft:entity/boat/poplar"), 0);
     }
 
     #[test]
@@ -713,7 +749,9 @@ mod tests {
         let doc = Models::parse().unwrap();
         assert_eq!(doc.entities.len(), 161);
         assert_eq!(doc.motion.len(), doc.entities.len());
-        assert_eq!(doc.families.len(), 129);
+        assert_eq!(doc.families.len(), 131);
+        assert!(!doc.families.contains_key("minecraft:cushion"));
+        assert!(!doc.families.contains_key("minecraft:sulfur_cube"));
         assert_eq!(doc.default_skins.len(), 18);
         let zombie = &doc.entities["minecraft:zombie"];
         assert_eq!(zombie.protocol_id, 154);
@@ -763,6 +801,26 @@ mod tests {
         assert!(sulfur.walk_uses_y(store.get(1).unwrap()));
         store.get_mut(1).unwrap().equipment[6] = None;
         assert!(!sulfur.walk_uses_y(store.get(1).unwrap()));
+    }
+
+    #[test]
+    fn regression_263_baby_cube_mob_dimensions_scale_by_size_not_age() {
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let models = Models::load_state(&content).unwrap();
+        let (_, mut cube) = super::super::animation_tests::fixture();
+        cube.type_name = "minecraft:sulfur_cube".into();
+        assert_eq!(models.accessor(&cube.type_name, "DATA_BABY_ID"), Some(16));
+        assert_eq!(models.accessor(&cube.type_name, "ID_SIZE"), Some(18));
+        for baby in [false, true] {
+            cube.metadata.insert(16, super::super::metadata::Metadata::Bool(baby));
+            cube.metadata.insert(18, super::super::metadata::Metadata::Int(2));
+            let (dimensions, scale) = models.dimensions(&cube).unwrap();
+            assert_eq!((dimensions.width, dimensions.height), (0.49, 0.49));
+            assert_eq!(scale, 2., "baby={baby}");
+        }
     }
 
     #[test]

@@ -1,28 +1,142 @@
 {
   "schema": 1,
   "id": "armor_baby_chest",
-  "texture": {"path": "entity/equipment/humanoid_baby/iron.png", "size": [64, 64]},
+  "texture": {
+    "path": "entity/equipment/humanoid_baby/iron.png",
+    "size": [
+      64,
+      64
+    ]
+  },
   "roles": {
-    "right_arm": ["right_arm"],
-    "left_arm": ["left_arm"]
+    "right_arm": [
+      "right_arm"
+    ],
+    "left_arm": [
+      "left_arm"
+    ]
   },
   "bones": [
     {
-      "name": "body", "pivot": [0.0, 16.0, 0.0],
+      "name": "body",
+      "pivot": [
+        0.0,
+        16.0,
+        0.0
+      ],
       "cubes": [
-        {"origin": [-4.0, 0.0, -2.0], "size": [8, 4, 4], "uv": [0, 16], "inflate": 1.0}
+        {
+          "origin": [
+            -4.0,
+            0.0,
+            -2.0
+          ],
+          "size": [
+            8,
+            4,
+            4
+          ],
+          "uv": [
+            0,
+            16
+          ],
+          "inflate": 1.0
+        }
       ]
     },
     {
-      "name": "right_arm", "pivot": [-5.0, 17.0, -1.0],
+      "name": "right_arm",
+      "pivot": [
+        -5.0,
+        17.0,
+        -1.0
+      ],
       "cubes": [
-        {"origin": [-2.0, -2.0, -2.0], "size": [4, 5, 4], "uv": [0, 16], "inflate": 1.0}
+        {
+          "origin": [
+            -2.0,
+            -2.0,
+            -2.0
+          ],
+          "size": [
+            4,
+            5,
+            4
+          ],
+          "uv": [
+            0,
+            16
+          ],
+          "inflate": 1.0,
+          "faces": {
+            "up": [
+              8,
+              21,
+              12,
+              25
+            ],
+            "down": [
+              8,
+              21,
+              12,
+              25
+            ],
+            "front": [
+              4,
+              21,
+              8,
+              26
+            ]
+          }
+        }
       ]
     },
     {
-      "name": "left_arm", "pivot": [5.0, 17.0, -1.0],
+      "name": "left_arm",
+      "pivot": [
+        5.0,
+        17.0,
+        -1.0
+      ],
       "cubes": [
-        {"origin": [-2.0, -2.0, -2.0], "size": [4, 5, 4], "uv": [0, 16], "inflate": 1.0, "mirror": true}
+        {
+          "origin": [
+            -2.0,
+            -2.0,
+            -2.0
+          ],
+          "size": [
+            4,
+            5,
+            4
+          ],
+          "uv": [
+            0,
+            16
+          ],
+          "inflate": 1.0,
+          "mirror": true,
+          "faces": {
+            "up": [
+              8,
+              21,
+              12,
+              25
+            ],
+            "down": [
+              8,
+              21,
+              12,
+              25
+            ],
+            "front": [
+              4,
+              21,
+              8,
+              26
+            ]
+          }
+        }
       ]
     }
   ]

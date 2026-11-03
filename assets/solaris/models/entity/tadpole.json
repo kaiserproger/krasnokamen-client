@@ -1,21 +1,145 @@
 {
   "schema": 1,
   "id": "tadpole",
-  "texture": {"path": "entity/tadpole/tadpole.png", "size": [16, 16]},
+  "texture": {
+    "path": "entity/tadpole/tadpole.png",
+    "size": [
+      16,
+      16
+    ]
+  },
   "roles": {
-    "head": ["head"]
+    "head": [
+      "head"
+    ]
   },
   "bones": [
     {
-      "name": "head", "pivot": [0, 20, -2],
+      "name": "head",
+      "pivot": [
+        0,
+        20,
+        -2
+      ],
       "cubes": [
-        {"origin": [-2, -2, -2], "size": [4, 3, 4], "uv": [0, 0]}
+        {
+          "origin": [
+            -2,
+            -2,
+            -2
+          ],
+          "size": [
+            4,
+            3,
+            4
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "faces": {
+            "up": [
+              3,
+              0,
+              9,
+              5
+            ],
+            "down": [
+              3,
+              0,
+              9,
+              5
+            ],
+            "front": [
+              3,
+              0,
+              9,
+              5
+            ],
+            "back": [
+              3,
+              0,
+              9,
+              5
+            ],
+            "left": [
+              3,
+              0,
+              9,
+              5
+            ],
+            "right": [
+              3,
+              0,
+              9,
+              5
+            ]
+          }
+        }
       ]
     },
     {
-      "name": "tail", "pivot": [0, 21, 2],
+      "name": "tail",
+      "pivot": [
+        0,
+        21,
+        2
+      ],
       "cubes": [
-        {"origin": [-1, -1, 0], "size": [2, 2, 6], "uv": [0, 8]}
+        {
+          "origin": [
+            -1,
+            -1,
+            0
+          ],
+          "size": [
+            2,
+            2,
+            6
+          ],
+          "uv": [
+            0,
+            8
+          ],
+          "faces": {
+            "up": [
+              2,
+              7,
+              7,
+              9
+            ],
+            "down": [
+              2,
+              7,
+              7,
+              9
+            ],
+            "front": [
+              2,
+              7,
+              7,
+              9
+            ],
+            "back": [
+              2,
+              7,
+              7,
+              9
+            ],
+            "left": [
+              2,
+              7,
+              7,
+              9
+            ],
+            "right": [
+              2,
+              7,
+              7,
+              9
+            ]
+          }
+        }
       ]
     }
   ]

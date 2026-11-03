@@ -500,4 +500,27 @@ mod tests {
         assert_eq!(output.next(), None);
         assert_eq!(live.load(Ordering::Relaxed), 0);
     }
+
+    #[test]
+    fn local_player_sound_moves_and_stops_at_dimension_epoch() {
+        use super::super::SoundOrigin;
+        let mut local = SoundOrigin::LocalPlayer { position: [1., 2., 3.] };
+        let mut remote = SoundOrigin::Entity { id: 7, generation: 3, position: [4., 5., 6.] };
+        local.follow_local_player([11., 2., 3.]);
+        remote.follow_local_player([11., 2., 3.]);
+        assert_eq!(local.position(), Some([11., 2., 3.]));
+        assert_eq!(remote.position(), Some([4., 5., 6.]));
+        let (_, listener_offset) = spatial_gains(local.position().unwrap(), [10., 2., 3.], 0., 0., 16.);
+        assert_eq!(listener_offset, [-1., 0., 0.]);
+        let live = Arc::new(AtomicU64::new(0));
+        let epoch = Arc::new(AtomicU64::new(7));
+        let gains = Arc::new(Gains::default());
+        gains.set([1., 1.]);
+        let samples = Box::new(SharedSamples::new(Arc::new(vec![0.25]), 1, 48000, true));
+        let mut output = Positioned::new(samples, gains, true, live.clone(), epoch.clone(), 7);
+        assert_eq!(output.next(), Some(0.25));
+        epoch.store(8, Ordering::Release);
+        assert_eq!(output.next(), None);
+        assert_eq!(live.load(Ordering::Relaxed), 0);
+    }
 }

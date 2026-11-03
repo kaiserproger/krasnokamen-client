@@ -267,6 +267,20 @@ fn terrain_sample(uv: vec2<f32>, layer: u32, du: vec2<f32>, dv: vec2<f32>) -> ve
         + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
     return textureSampleGrad(block_atlas, terrain_sampler, (center + offset) * pixel_size, i32(layer), du, dv);
 }
+// Item foil shares the item's alpha and geometry; the packed atlas rectangle is
+// carried in the otherwise unused item overlay fields.
+fn item_foil(in: SceneOut) -> vec3<f32> {
+    let origin = -in.overlay_uv - vec2<f32>(2.0);
+    let p = in.position.xy * 0.018;
+    let t = camera.material_globals.z * 40.0;
+    let coord = fract(vec2<f32>(p.x + p.y * 0.5 + t, p.y - p.x * 0.5));
+    let inset = vec2<f32>(0.5) / vec2<f32>(textureDimensions(block_atlas, 0));
+    let uv = clamp(origin + coord * in.overlay_tint.xy, origin + inset,
+        origin + in.overlay_tint.xy - inset);
+    let glint = textureSampleLevel(block_atlas, block_sampler, uv, i32(in.overlay_tint.z), 0.0);
+    return glint.rgb * glint.rgb * glint.a;
+}
+
 fn material(in: SceneOut, display_encoded: bool, terrain: bool) -> vec4<f32> {
     // Derivatives precede per-fragment texture-presence branches.
     let du = dpdx(in.uv); let dv = dpdy(in.uv);
@@ -286,7 +300,10 @@ fn material(in: SceneOut, display_encoded: bool, terrain: bool) -> vec4<f32> {
     }
     if !display_encoded { texel = vec4<f32>(srgb_to_linear(texel.rgb), texel.a); }
     var color = in.color * texel.rgb;
-    if !tiled && all(in.overlay_uv >= vec2<f32>(0.0)) {
+    if !terrain && in.overlay_uv.x <= -2.0 {
+        let glint = item_foil(in);
+        color += select(srgb_to_linear(glint), glint, display_encoded);
+    } else if !tiled && all(in.overlay_uv >= vec2<f32>(0.0)) {
         var overlay: vec4<f32>;
         if terrain { overlay = terrain_sample(in.overlay_uv, in.layer, overlay_du, overlay_dv); }
         else { overlay = textureSampleLevel(block_atlas, block_sampler, in.overlay_uv, i32(in.layer), 0.0); }
@@ -624,7 +641,7 @@ fn source_light(light: vec2<f32>) -> f32 {
             out.alpha *= out.light_color.a;
         }
     }
-    if source_overlay { out.entity_overlay = textureLoad(entity_overlay_texture, vec2<i32>(overlay_uv), 0); }
+    if source_overlay && overlay_uv.x > -2.0 { out.entity_overlay = textureLoad(entity_overlay_texture, vec2<i32>(overlay_uv), 0); }
     out.flat_color = vec4<f32>(out.color, out.alpha);
     if source_kind == 17u {
         let shrink = source_view_scale * (1.0 - 1.0 / 256.0);
@@ -696,7 +713,8 @@ fn source_portal_sample(coord: vec2<f32>, rect: vec4<f32>, layer: f32) -> vec3<f
     var texel = vec4<f32>(1.0);
     let textured = source_kind == 0u || source_kind == 1u || source_kind == 2u || source_kind == 5u
         || source_kind == 6u || source_kind == 8u || source_kind == 9u || source_kind == 10u
-        || source_kind == 11u || source_kind == 15u || source_kind == 19u || source_kind == 20u;
+        || source_kind == 11u || source_kind == 15u || source_kind == 19u || source_kind == 20u
+        || source_kind == 21u;
     if textured {
         var coord = in.uv;
         if source_wrap { coord = in.overlay_uv + fract(coord) * in.overlay_tint.xy; }
@@ -710,7 +728,7 @@ fn source_portal_sample(coord: vec2<f32>, rect: vec4<f32>, layer: f32) -> vec3<f
             texel = textureSampleGrad(block_atlas, block_sampler, coord, i32(in.layer), du, dv);
         } else { texel = textureSampleLevel(block_atlas, block_sampler, coord, i32(in.layer), 0.0); }
     }
-    if source_kind == 0u || source_kind == 1u {
+    if source_kind == 0u || source_kind == 1u || source_kind == 21u {
         if texel.a < source_cutoff { discard; }
     }
     if source_dissolve {
@@ -723,6 +741,9 @@ fn source_portal_sample(coord: vec2<f32>, rect: vec4<f32>, layer: f32) -> vec3<f
     if source_kind == 0u {
         if source_overlay { color = vec4<f32>(mix(in.entity_overlay.rgb, color.rgb, in.entity_overlay.a), color.a); }
         if source_lightmap { color *= in.light_color; }
+    }
+    if in.overlay_uv.x <= -2.0 && !source_wrap && !source_dissolve {
+        color = vec4<f32>(color.rgb + item_foil(in), color.a);
     }
     if source_kind == 2u { if color.a < source_cutoff { discard; } }
     if source_kind == 5u || source_kind == 6u || source_kind == 7u || source_kind == 19u {
@@ -745,7 +766,8 @@ fn source_portal_sample(coord: vec2<f32>, rect: vec4<f32>, layer: f32) -> vec3<f
         var beam = in; beam.fog_distance = vec2<f32>(distance); return fogged(beam, color);
     }
     if camera.fancy.x > 0.5 {
-        color = fancy_lighting(in, vec4<f32>(srgb_to_linear(color.rgb), color.a));
+        color = vec4<f32>(srgb_to_linear(color.rgb), color.a);
+        if source_kind != 21u { color = fancy_lighting(in, color); }
     }
     if source_kind == 20u {
         // Clouds extend beyond the loaded terrain; retain environmental fog

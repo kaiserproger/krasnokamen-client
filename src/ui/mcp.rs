@@ -1,7 +1,7 @@
 //! Exact native screen and button identity for the canonical Minecraft tools.
 use super::{
     state::{EditorState, Screen, UiState},
-    UiIntent,
+    Modifiers, PointerButton, PointerPhase, UiIntent,
 };
 use crate::{
     inventory::{InventoryStore, MenuKind},
@@ -250,6 +250,54 @@ impl UiState {
             context: self.context(inventory),
             element_id: button.id.clone(),
         })
+    }
+    /// `client_pointer`: after the same screen class/title gate as the button tools, the
+    /// ordinary pointer intents at window pixel `[x, y]` (the `ui_nodes` bounds frame): a move,
+    /// then for a click a left press and release, as a cursor would deliver them.
+    pub(crate) fn exact_pointer(
+        &mut self,
+        inventory: &InventoryStore,
+        content: &Content,
+        expected_class: &str,
+        expected_title: &str,
+        [x, y]: [f64; 2],
+        click: bool,
+    ) -> Result<Vec<UiIntent>> {
+        self.synchronize(inventory, content)?;
+        let (class, title) = self
+            .source_screen_metadata(inventory)?
+            .ok_or("no client screen is open")?;
+        if class != expected_class {
+            return Err(format!("screen class mismatch: {class}"));
+        }
+        if title != expected_title {
+            return Err(format!("screen title mismatch: {title}"));
+        }
+        // The window itself: the GUI frame (`width` × `scale`) is ceiled past its last pixel.
+        let [window_width, window_height] = self.framebuffer_size;
+        if x >= f64::from(window_width) || y >= f64::from(window_height) {
+            return Err("pointer outside the window".into());
+        }
+        let pointer = |phase, button| UiIntent::Pointer {
+            phase,
+            x,
+            y,
+            button,
+            modifiers: Modifiers::default(),
+        };
+        let mut intents = vec![pointer(PointerPhase::Move, None)];
+        if click {
+            intents.push(pointer(PointerPhase::Down, Some(PointerButton::Left)));
+            intents.push(pointer(PointerPhase::Up, Some(PointerButton::Left)));
+        }
+        Ok(intents)
+    }
+    /// Plain text of the tooltip the pointer currently shows, if any.
+    pub(crate) fn tooltip_text(&self) -> Option<&str> {
+        self.nodes
+            .iter()
+            .find(|node| node.id == "component/hover/text" && node.visible)
+            .map(|node| node.label.as_str())
     }
     fn button_match(&self, label: &str) -> Result<&super::state::SemanticNode> {
         let mut matches = self.nodes.iter().filter(|node| {

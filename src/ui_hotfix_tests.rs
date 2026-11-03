@@ -709,7 +709,14 @@ fn inventory_captions_clear_slots_and_preview_pin_exists() {
     assert!(!nodes
         .iter()
         .any(|node| node["id"] == "menu/inventory_label"));
-    assert!(title[2] <= 72.0, "title label must stay narrow: {title:?}");
+    // Vanilla draws the title as one unbounded line: the label must not wrap
+    // inside the panel. It may extend past it; the slot overlap check below
+    // still holds because the caption stays in its y6..16 row.
+    let panel = rect("menu/background");
+    assert!(
+        title[0] + title[2] >= panel[0] + panel[2],
+        "title {title:?} must not wrap inside the panel {panel:?}"
+    );
     let slots: Vec<Vec<f32>> = nodes
         .iter()
         .filter(|n| {

@@ -3,6 +3,13 @@
 Client setting `graphics_preset` (Options > Video > Graphics, cycles Low → Medium → High; persisted
 client-locally; default `low`, the vanilla look). It replaces the old boolean `fancy_shaders`; a
 persisted `fancy_shaders: false` migrates once to `low`, `true` to `medium`.
+Atlas palette permutations are resolved from the resource-pack atlas source stack. Generated
+sprite IDs share one RGBA resolver between item-model geometry and atlas placement; palette
+and base PNGs use normal pack precedence. As in 26.1.2, generated palette sprites have no
+animation metadata. Trimmed armor GUI rendering still requires integrated real-client visual
+verification; this implementation alone is not a parity receipt.
+Atlas shelf placement orders sprites by frame dimensions to reduce page waste while retaining
+the existing decoded and atlas memory limits; UVs are assigned from the resulting placements.
 
 | Pass / feature | Low | Medium | High |
 | --- | --- | --- | --- |

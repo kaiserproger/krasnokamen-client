@@ -44,8 +44,8 @@ pub(crate) struct TextureSpec {
     pub path: String,
     pub size: [u32; 2],
 }
-/// Bone names driven by the generic locomotion/look animation. Quadrupeds list their
-/// diagonal gait pairs explicitly: `right_leg` and `left_leg` swing in opposite phase.
+/// Bone names driven by generic locomotion/look animation. Wing roles identify the
+/// model-space side of the symmetry plane, independent of the bone's name.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Roles {
@@ -54,7 +54,8 @@ pub(crate) struct Roles {
     pub left_arm: Vec<String>,
     pub right_leg: Vec<String>,
     pub left_leg: Vec<String>,
-    pub wing: Vec<String>,
+    pub wing_negative_x: Vec<String>,
+    pub wing_positive_x: Vec<String>,
     pub crossed_arms: Vec<String>,
     pub nose: Vec<String>,
 }
@@ -175,7 +176,8 @@ impl ModelFile {
             (BoneRole::LeftArm, &self.roles.left_arm),
             (BoneRole::RightLeg, &self.roles.right_leg),
             (BoneRole::LeftLeg, &self.roles.left_leg),
-            (BoneRole::Wing, &self.roles.wing),
+            (BoneRole::WingNegativeX, &self.roles.wing_negative_x),
+            (BoneRole::WingPositiveX, &self.roles.wing_positive_x),
             (BoneRole::CrossedArms, &self.roles.crossed_arms),
             (BoneRole::Nose, &self.roles.nose),
         ] {
@@ -403,6 +405,19 @@ pub(crate) fn model_id(key: &str) -> String {
             || qualifier.contains("/babyModelSet/")
             || name.starts_with("armor_stand")
     }) {
+        if baby_set {
+            let family = match name {
+                "zombie" | "husk" => Some("zombie"),
+                "drowned" => Some("drowned"),
+                "zombie_villager" => Some("zombie_villager"),
+                "piglin" => Some("piglin"),
+                "zombified_piglin" => Some("zombified_piglin"),
+                _ => None,
+            };
+            if let Some(family) = family {
+                return format!("armor_baby_{family}_{slot}");
+            }
+        }
         return format!("armor_{}{slot}", if baby_set { "baby_" } else { "" });
     }
     // The conduit block entity is drawn from several sub-models selected by the qualifier.
@@ -537,3 +552,147 @@ impl Rig {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod baby_armor_alignment_tests {
+    use super::*;
+    use crate::{
+        api::{DynamicGeometry, EntityMaterial},
+        entities::{animation_tests, presentation},
+        protocol::content::TextureRegion,
+    };
+    use glam::{Mat4, Vec3};
+
+    fn emitted_bounds(rig: &Rig, transforms: &[Mat4], name: &str) -> (Vec3, Vec3) {
+        let index = rig.part_by_name[name];
+        let bone = &rig.bones[index];
+        // Only the head box, not a protruding nose or snout, belongs inside the helmet.
+        let count = bone.quads.len().min(6);
+        let part = Bone {
+            parent: None,
+            pivot: bone.pivot,
+            rotation: bone.rotation,
+            scale: bone.scale,
+            role: bone.role,
+            name: bone.name.clone(),
+            quads: bone.quads[..count].to_vec(),
+            normals: bone.normals[..count].to_vec(),
+        };
+        let part = Rig { bones: vec![part], part_by_name: BTreeMap::new() };
+        let mut output = DynamicGeometry::default();
+        presentation::emit_rig(
+            &part, &[transforms[index]],
+            TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 64, height: 64 },
+            [1.; 3], EntityMaterial::EntityCutout, 1., [1.; 2], &mut output,
+        ).unwrap();
+        output.vertices.iter().fold((Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)), |(min, max), vertex| {
+            let point = Vec3::from_array(vertex.position);
+            (min.min(point), max.max(point))
+        })
+    }
+
+    #[test]
+    fn baby_armor_encloses_animated_body_parts() {
+        let (models, mut entity) = animation_tests::fixture();
+        entity.source = None;
+        for family in ["zombie", "husk", "drowned", "zombie_villager", "piglin", "zombified_piglin"] {
+            let body = authored(&format!("minecraft:{family}_baby#main")).unwrap();
+            for pitch in [0., 40.] {
+                entity.transform.pitch = pitch;
+                entity.previous.pitch = pitch;
+                let mut body_transforms = Vec::new();
+                presentation::evaluate_rig(body, &entity, &models, 0, 1., Mat4::IDENTITY, &mut body_transforms);
+                for (slot, parts) in [
+                    ("head", &["head"][..]),
+                    ("chest", &["body", "right_arm", "left_arm"][..]),
+                    ("legs", &["right_leg", "left_leg"][..]),
+                ] {
+                    let armor = authored(&format!("minecraft:{family}#layer3/babyModelSet/{slot}")).unwrap();
+                    let mut armor_transforms = Vec::new();
+                    presentation::evaluate_rig(armor, &entity, &models, 0, 1., Mat4::IDENTITY, &mut armor_transforms);
+                    for name in parts {
+                        let (body_min, body_max) = emitted_bounds(body, &body_transforms, name);
+                        let (armor_min, armor_max) = emitted_bounds(armor, &armor_transforms, name);
+                        assert!((armor_min.cmple(body_min + Vec3::splat(0.0001))).all()
+                            && (armor_max.cmpge(body_max - Vec3::splat(0.0001))).all(),
+                            "{family} {slot} {name} at pitch {pitch}: body {body_min:?}..{body_max:?}, armor {armor_min:?}..{armor_max:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod wing_symmetry_tests {
+    use super::*;
+    use crate::entities::{animation_tests, presentation};
+    use glam::Mat4;
+
+    #[test]
+    fn dragon_and_phantom_animated_wing_vertices_remain_mirrored() {
+        let (models, mut entity) = animation_tests::fixture();
+        entity.source = None;
+        for (kind, pairs) in [
+            ("ender_dragon", &[("wing_left", "wing_right")][..]),
+            ("phantom", &[("right_wing", "left_wing"), ("right_wing_tip", "left_wing_tip")][..]),
+        ] {
+            entity.type_name = format!("minecraft:{kind}");
+            let rig = authored(&format!("minecraft:{kind}#main")).unwrap();
+            let mut rest = Vec::new();
+            let mut animated = Vec::new();
+            presentation::evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut rest);
+            presentation::evaluate_rig(rig, &entity, &models, 3, 0., Mat4::IDENTITY, &mut animated);
+            for &(negative, positive) in pairs {
+                let a = rig.part_by_name[negative];
+                let b = rig.part_by_name[positive];
+                let points = |index: usize| {
+                    rig.bones[index].quads.iter().flatten().map(|v| {
+                        animated[index].transform_point3(Vec3::new(v[0], v[1], v[2]))
+                    }).collect::<Vec<_>>()
+                };
+                let negative_points = points(a);
+                let positive_points = points(b);
+                assert!(!negative_points.is_empty() && !positive_points.is_empty());
+                assert!(negative_points.iter().any(|p| {
+                    let original = rest[a] * animated[a].inverse() * p.extend(1.);
+                    (original.truncate() - *p).length() > 1e-4
+                }), "{kind} {negative} did not animate");
+                for p in negative_points {
+                    let reflected = Vec3::new(-p.x, p.y, p.z);
+                    assert!(positive_points.iter().any(|q| (*q - reflected).length() < 1e-4),
+                        "{kind} {negative}/{positive}: no mirror for {p:?}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod crystal_animation_tests {
+    use super::*;
+    use crate::entities::{animation_tests, presentation};
+    use glam::{Mat4, Vec3};
+
+    #[test]
+    fn crystal_glass_and_core_bob_and_rotate_above_stationary_base() {
+        let (models, mut entity) = animation_tests::fixture();
+        entity.type_name = "minecraft:end_crystal".into();
+        entity.source = None;
+        let rig = authored("minecraft:end_crystal#renderer/model").unwrap();
+        let mut first = Vec::new();
+        let mut later = Vec::new();
+        presentation::evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut first);
+        presentation::evaluate_rig(rig, &entity, &models, 4, 0., Mat4::IDENTITY, &mut later);
+        let base = rig.part_by_name["base"];
+        assert_eq!(first[base], later[base]);
+        for name in ["glass_outer", "glass_inner", "core"] {
+            let index = rig.part_by_name[name];
+            let center = first[index].transform_point3(Vec3::ZERO);
+            let later_center = later[index].transform_point3(Vec3::ZERO);
+            assert!(center.y > 0. && later_center.y > center.y, "{name}");
+            assert_ne!(first[index].transform_vector3(Vec3::X),
+                       later[index].transform_vector3(Vec3::X), "{name}");
+        }
+    }
+}

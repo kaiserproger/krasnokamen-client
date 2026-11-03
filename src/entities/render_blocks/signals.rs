@@ -3,11 +3,9 @@ use crate::{
     protocol::{Result, content::Content},
 };
 use serde_json::Value;
+
 pub(crate) fn parse(kind: &str, data: &Value, content: &Content) -> Result<SignalState> {
     let mut state = SignalState::default();
-    if kind == "minecraft:comparator" {
-        state.comparator_output = data["OutputSignal"].as_i64().unwrap_or(0) as i32;
-    }
     if kind == "minecraft:test_block" {
         state.test_powered = data["powered"]
             .as_bool()

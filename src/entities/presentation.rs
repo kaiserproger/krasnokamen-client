@@ -23,6 +23,7 @@ pub(crate) struct Binding {
     pub texture: TextureRegion,
     pub style: RootStyle,
     pub(super) layers: Option<super::villagers::Layers>,
+    pub(super) anger: Option<bool>,
 }
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RootStyle {
@@ -60,6 +61,30 @@ pub(super) fn boolean(models: &Models, e: &Entity, name: &str) -> bool {
     value(models, e, name)
         .and_then(Metadata::boolean)
         .unwrap_or(false)
+}
+
+fn anger(models: &Models, e: &Entity, game_time: i64) -> Option<bool> {
+    if !matches!(e.type_name.as_str(), "minecraft:bee" | "minecraft:wolf") {
+        return None;
+    }
+    let deadline = match value(models, e, "DATA_ANGER_END_TIME") {
+        Some(Metadata::Long(value)) => value.parse::<i64>().ok(),
+        _ => None,
+    };
+    Some(deadline.is_some_and(|end| end != -1 && end > game_time))
+}
+
+pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool {
+    e.binding.as_ref().and_then(|binding| binding.as_ref().ok())
+        .is_some_and(|binding| binding.anger != anger(models, e, game_time))
+}
+
+fn scale_cube_model(matrix: Mat4, feet: Vec3, size: Option<i32>) -> Mat4 {
+    let size = size.unwrap_or(1).max(1) as f32;
+    Mat4::from_translation(feet)
+        * Mat4::from_scale(Vec3::splat(size))
+        * Mat4::from_translation(-feet)
+        * matrix
 }
 pub(super) fn texture(content: &Content, name: &str) -> Result<TextureRegion> {
     let (namespace, path) = name.split_once(':').unwrap_or(("minecraft", name));
@@ -159,8 +184,8 @@ pub(super) fn entity_light(
         ],
     )
 }
-fn variant<'a>(store: &'a Store, models: &'a Models, e: &Entity) -> Option<&'a Value> {
-    let registry = match e.type_name.as_str() {
+pub(super) fn variant_registry(name: &str) -> Option<&'static str> {
+    Some(match name {
         "minecraft:cat" => "minecraft:cat_variant",
         "minecraft:cow" => "minecraft:cow_variant",
         "minecraft:chicken" => "minecraft:chicken_variant",
@@ -169,16 +194,23 @@ fn variant<'a>(store: &'a Store, models: &'a Models, e: &Entity) -> Option<&'a V
         "minecraft:wolf" => "minecraft:wolf_variant",
         "minecraft:zombie_nautilus" => "minecraft:zombie_nautilus_variant",
         _ => return None,
-    };
+    })
+}
+
+fn variant<'a>(store: &'a Store, models: &'a Models, e: &Entity) -> Option<&'a Value> {
+    let registry = variant_registry(&e.type_name)?;
     let entries = store.registries.get(registry)?;
     let received = value(models, e, "DATA_VARIANT_ID").or_else(|| value(models, e, "DATA_VARIANT"));
     let (name, data) = match received {
         Some(holder) => entries.get(usize::try_from(holder.int()?).ok()?)?,
-        // Cow.defineSynchedData uses VariantUtils.getDefaultOrAny(TEMPERATE).
+        // These entities define their synchronized default as temperate-or-any.
         // Unchanged synchronized defaults need not be sent with entity pairing.
         // Resolve that default only inside the received registry, never by a
         // guessed numeric ID or an unadvertised built-in holder.
-        None if e.type_name == "minecraft:cow" => entries
+        None if matches!(
+            e.type_name.as_str(),
+            "minecraft:chicken" | "minecraft:cow" | "minecraft:pig" | "minecraft:zombie_nautilus"
+        ) => entries
             .iter()
             .find(|(name, _)| name == "minecraft:temperate")
             .or_else(|| entries.first())?,
@@ -195,6 +227,7 @@ pub(super) fn material(
     models: &Models,
     e: &Entity,
     content: &Content,
+    game_time: i64,
 ) -> Result<Binding> {
     if e.type_name == "minecraft:player" {
         let default = models.default_skin(Some(&e.uuid))?;
@@ -216,6 +249,7 @@ pub(super) fn material(
             },
             style: RootStyle::Living,
             layers: None,
+            anger: None,
         });
     }
     let family = models
@@ -229,7 +263,15 @@ pub(super) fn material(
         &family.rig
     }
     .clone();
-    let mut selected = family.texture.clone();
+    let mut selected = if e.type_name == "minecraft:ender_dragon" {
+        family
+            .materials
+            .get("DRAGON_TEXTURE_LOCATION")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    } else {
+        family.texture.clone()
+    };
     if let Some(data) = variant(store, models, e) {
         let model = data["model"].as_str();
         if let Some(model) = model {
@@ -254,11 +296,11 @@ pub(super) fn material(
         }
         if data["assets"].is_object() {
             let tame = number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 4 != 0;
-            let angry = number(models, e, "DATA_REMAINING_ANGER_TIME").unwrap_or(0) > 0;
-            let key = if angry {
-                "angry"
-            } else if tame {
+            let angry = anger(models, e, game_time).unwrap_or(false);
+            let key = if tame {
                 "tame"
+            } else if angry {
+                "angry"
             } else {
                 "wild"
             };
@@ -285,10 +327,25 @@ pub(super) fn material(
             }
         }
     }
+    if e.type_name == "minecraft:mooshroom" {
+        let variant = match number(models, e, "DATA_TYPE").unwrap_or(0) {
+            0 => "RED",
+            1 => "BROWN",
+            other => return Err(format!("unknown mooshroom variant {other}")),
+        };
+        selected = family.materials["TEXTURES"][variant][if baby { "baby" } else { "adult" }]
+            .as_str()
+            .map(str::to_owned);
+    }
+    if e.type_name == "minecraft:sniffer" && baby {
+        selected = family.materials.get("SNIFFLET_LOCATION")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
     // State-specific materials are selected only from the renderer's exported literal inventory.
     if e.type_name == "minecraft:bee" {
         let flags = number(models, e, "DATA_FLAGS_ID").unwrap_or(0);
-        let angry = number(models, e, "DATA_REMAINING_ANGER_TIME").unwrap_or(0) > 0;
+        let angry = anger(models, e, game_time).unwrap_or(false);
         let suffix = format!(
             "bee{}{}{}.png",
             if angry { "_angry" } else { "" },
@@ -308,6 +365,7 @@ pub(super) fn material(
             .find(|t| t.ends_with("ghast_shooting.png"))
             .cloned();
     }
+
     let style = if e.type_name.ends_with("_boat") || e.type_name.ends_with("_raft") {
         RootStyle::Boat
     } else if e.type_name.ends_with("minecart") {
@@ -339,8 +397,94 @@ pub(super) fn material(
         texture,
         style,
         layers: super::villagers::layers(store, models, e, content)?,
+        anger: anger(models, e, game_time),
     })
 }
+// All four Solaris-authored boat/raft rigs share a hull bottom at model Y=18
+// pixels. Anchor that surface to the received entity position, not to water.
+fn boat_root(position: Vec3, yaw: f32) -> Mat4 {
+    Mat4::from_translation(position + Vec3::new(0., 18. / 16., 0.))
+        * Mat4::from_rotation_y((180. - yaw).to_radians())
+        * Mat4::from_scale(Vec3::new(-1., -1., 1.))
+        * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
+}
+fn projectile_root(position: Vec3, yaw: f32, pitch: f32, trident: bool) -> Mat4 {
+    let root = Mat4::from_translation(position)
+        * Mat4::from_rotation_y((yaw - 90.).to_radians())
+        * Mat4::from_rotation_z(pitch.to_radians());
+    // The arrow tip is along +X; the authored trident prongs are along -Y.
+    if trident { root * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2) } else { root }
+}
+
+
+pub(super) struct DrawStore<'a> {
+    pub(super) transforms: &'a mut Vec<Mat4>,
+    pub(super) items: &'a mut crate::ui::items::ItemModels,
+    pub(super) equipment_cache: &'a mut super::equipment::Cache,
+    pub(super) snow_pumpkin_state: &'a mut Option<u32>,
+    pub(super) mooshroom_mushroom_states: &'a mut [Option<u32>; 2],
+    pub(super) clock_context: Option<&'a crate::ui::items::ItemContext>,
+    pub(super) bed_direction: &'a dyn Fn([i32; 3]) -> Option<[i32; 2]>,
+}
+
+// The sprite and value tiers are specified by the 26.1.2 orb renderer.
+#[allow(clippy::too_many_arguments)]
+fn append_experience_orb(
+    entity: &Entity,
+    models: &Models,
+    content: &Content,
+    origin: [f64; 3],
+    camera_rotation: [f32; 2],
+    tick: u64,
+    partial: f32,
+    light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    out: &mut DynamicGeometry,
+) -> Result<bool> {
+    let transform = entity.presented_transform(tick, partial);
+    let (dimensions, scale) = models.dimensions(entity)?;
+    let Some(mut light) = entity_light(entity, models, tick, partial, dimensions, scale, light_source)? else {
+        return Ok(false);
+    };
+    light[1] = (light[1] + 7.).min(15.);
+    let texture = texture(content, "entity/experience/experience_orb")?;
+    let value = number(models, entity, "DATA_VALUE").unwrap_or(0);
+    let icon = [3, 7, 17, 37, 73, 149, 307, 617, 1237, 2477]
+        .into_iter().filter(|threshold| value >= *threshold).count();
+    let u = (icon % 4) as f32 * 0.25;
+    let v = (icon / 4) as f32 * 0.25;
+    let uv = [[u, v + 0.25], [u + 0.25, v + 0.25], [u + 0.25, v], [u, v]]
+        .map(|p| [
+            texture.uv[0] + p[0] * (texture.uv[2] - texture.uv[0]),
+            texture.uv[1] + p[1] * (texture.uv[3] - texture.uv[1]),
+        ]);
+    let [yaw, pitch] = camera_rotation;
+    let rotation = glam::Quat::from_euler(
+        glam::EulerRot::YXZ, -(yaw - 180.).to_radians(), -pitch.to_radians(), 0.,
+    );
+    let position = Vec3::from_array(std::array::from_fn(|i| (transform.position[i] - origin[i]) as f32));
+    let matrix = Mat4::from_translation(position + Vec3::Y * 0.1)
+        * Mat4::from_quat(rotation) * Mat4::from_scale(Vec3::splat(0.3));
+    let positions = [[-0.5, -0.25, 0.], [0.5, -0.25, 0.], [0.5, 0.75, 0.], [-0.5, 0.75, 0.]]
+        .map(|p| matrix.transform_point3(Vec3::from_array(p)).to_array());
+    let age = entity.source.as_ref().map_or(0., |source| source.age as f32) + partial;
+    let phase = age * 0.5;
+    let color = [
+        ((crate::player::math::sin(f64::from(phase)) + 1.) * 0.5 * 255.) as u8 as f32 / 255.,
+        1.,
+        ((crate::player::math::sin(f64::from(phase + 4.1887903)) + 1.) * 0.1 * 255.) as u8 as f32 / 255.,
+    ];
+    let first = out.vertices.len();
+    emit(positions, uv, color, texture.layer, EntityMaterial::EntityTranslucentCullItemTarget,
+        128. / 255., light, out)?;
+    let normal = (rotation * Vec3::Y).to_array();
+    for vertex in &mut out.vertices[first..] {
+        vertex.normal = normal;
+    }
+    Ok(true)
+}
+
+// Rendering passes share the frame inputs without allocating a context.
+#[allow(clippy::too_many_arguments)]
 pub fn append(
     store: &mut Store,
     content: &Content,
@@ -350,6 +494,8 @@ pub fn append(
     radius: f32,
     tick: u64,
     partial: f32,
+    game_time: i64,
+    clock_environment: Option<super::ClockEnvironment<'_>>,
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
     bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
     out: &mut DynamicGeometry,
@@ -405,15 +551,46 @@ pub fn append(
             continue;
         }
         stats.eligible += 1;
+        // Text displays are world text drawn by the nameplate pass.
         if matches!(
             entity.type_name.as_str(),
-            "minecraft:marker" | "minecraft:interaction"
+            "minecraft:marker" | "minecraft:interaction" | "minecraft:text_display"
         ) {
             continue;
         }
+        if entity.type_name == "minecraft:experience_orb" {
+            match append_experience_orb(entity, &models, content, origin, camera_rotation, tick, partial, light_source, out) {
+                Ok(true) => {
+                    stats.animated += 1;
+                    stats.submitted += 1;
+                    store.slots[slot].submitted_revision = Some(store.revision);
+                }
+                Ok(false) => stats.lighting_pending += 1,
+                Err(reason) => { stats.unrendered.insert(entity.type_name.clone(), reason); }
+            }
+            continue;
+        }
+        let clock_context = if matches!(entity.type_name.as_str(), "minecraft:item" | "minecraft:item_frame" | "minecraft:glow_item_frame") {
+            let stack = match value(&models, entity, "DATA_ITEM") {
+                Some(Metadata::Item(stack)) => Some(stack),
+                _ => None,
+            };
+            match store.special_render_cache.clock_context(
+                entity, stack, content, entity.presented_transform(tick, partial).position,
+                clock_environment,
+            ) {
+                Ok(context) => context,
+                Err(reason) => {
+                    stats.unrendered.insert(entity.type_name.clone(), format!("clock context: {reason}"));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let start = out.vertices.len();
         match super::render_special::append(store, slot, &models, content, origin,
-            tick, partial, light_source, out) {
+            tick, partial, clock_context.as_ref(), light_source, out) {
             Ok(super::render_special::Handled::Unhandled) => {}
             Ok(super::render_special::Handled::Rendered | super::render_special::Handled::NoGeometry) => {
                 if out.vertices.len() > start {
@@ -460,11 +637,95 @@ pub fn append(
         {
             stats.profile_textures_pending += 1;
         }
+        if binding_stale(&models, &store.slots[slot], game_time) {
+            store.slots[slot].binding = None;
+        }
         if store.slots[slot].binding.is_none() {
-            let binding = material(store, &models, &store.slots[slot], content);
+            let binding = material(store, &models, &store.slots[slot], content, game_time);
             store.slots[slot].binding = Some(binding);
         }
         let entity = &store.slots[slot];
+        let mut draw_store = DrawStore {
+            transforms: &mut store.transforms,
+            items: &mut store.items,
+            equipment_cache: &mut store.equipment_cache,
+            snow_pumpkin_state: &mut store.snow_pumpkin_state,
+            mooshroom_mushroom_states: &mut store.mooshroom_mushroom_states,
+            clock_context: clock_context.as_ref(),
+            bed_direction,
+        };
+        draw_entity(entity, &models, content, origin, tick, partial, light,
+            None, &mut draw_store, out, &mut stats)?;
+        let flags = number(&models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
+        if flags & 1 != 0
+            && flags & 32 == 0
+            && entity.binding.as_ref().is_some_and(Result::is_ok)
+        {
+            let position = entity.presented_transform(tick, partial).position;
+            let center = Vec3::new(
+                (position[0] - origin[0]) as f32,
+                (position[1] - origin[1]) as f32,
+                (position[2] - origin[2]) as f32,
+            );
+            let facing = Mat4::from_rotation_y((180. - camera_rotation[0]).to_radians());
+            let width = dimensions.width * scale * 1.4;
+            let height = dimensions.height * scale;
+            let textures = [texture(content, "block/fire_0")?, texture(content, "block/fire_1")?];
+            let mut y = 0.;
+            let mut half = width * 0.5;
+            let mut row = 0;
+            while y < height && half > 0.001 {
+                let tex = textures[row % 2];
+                let [u0, v0, u1, v1] = tex.uv;
+                let z = width * 0.5 + 0.02 + row as f32 * 0.001;
+                let positions = [
+                    Vec3::new(-half, y, z),
+                    Vec3::new(half, y, z),
+                    Vec3::new(half, y + width, z),
+                    Vec3::new(-half, y + width, z),
+                ]
+                .map(|p| (center + facing.transform_vector3(p)).to_array());
+                emit(
+                    positions,
+                    [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+                    [1.; 3],
+                    tex.layer,
+                    EntityMaterial::EntityFire,
+                    1.,
+                    [15., 15.],
+                    out,
+                )?;
+                y += width * 0.45;
+                half *= 0.9;
+                row += 1;
+            }
+        }
+        if out.vertices.len() > start {
+            stats.submitted += 1;
+            store.slots[slot].submitted_revision = Some(store.revision);
+        }
+    }
+    visible.clear();
+    store.visible_ids = visible;
+    stats.vertices = out.vertices.len();
+    Ok(stats)
+}
+// Rendering passes share the frame inputs without allocating a context.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_entity(
+    entity: &Entity,
+    models: &Models,
+    content: &Content,
+    origin: [f64; 3],
+    tick: u64,
+    partial: f32,
+    light: [f32; 2],
+    parent: Option<Mat4>,
+    store: &mut DrawStore<'_>,
+    out: &mut DynamicGeometry,
+    stats: &mut PresentationStats,
+) -> Result<()> {
+    let start = out.vertices.len();
         match entity.binding.as_ref().unwrap() {
             Ok(binding) => {
                 let rig = models.rig(&binding.rig);
@@ -487,17 +748,10 @@ pub fn append(
                             * Mat4::from_scale(Vec3::new(-1., -1., 1.))
                             * Mat4::from_translation(Vec3::new(0., -1.501, 0.))
                     }
-                    RootStyle::Arrow => {
-                        Mat4::from_translation(relative)
-                            * Mat4::from_rotation_y((t.yaw - 90.).to_radians())
-                            * Mat4::from_rotation_z(t.pitch.to_radians())
-                    }
-                    RootStyle::Boat => {
-                        Mat4::from_translation(relative + Vec3::new(0., 0.375, 0.))
-                            * Mat4::from_rotation_y((180. - t.yaw).to_radians())
-                            * Mat4::from_scale(Vec3::new(-1., -1., 1.))
-                            * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
-                    }
+                    RootStyle::Arrow => projectile_root(
+                        relative, t.yaw, t.pitch, entity.type_name == "minecraft:trident",
+                    ),
+                    RootStyle::Boat => boat_root(relative, t.yaw),
                     RootStyle::Minecart => {
                         Mat4::from_translation(relative + Vec3::new(0., 0.375, 0.))
                             * Mat4::from_rotation_y((180. - t.yaw).to_radians())
@@ -511,11 +765,11 @@ pub fn append(
                         Mat4::from_translation(relative) * Mat4::from_rotation_y(t.yaw.to_radians())
                     }
                 };
-                let pose = number(&models, entity, "DATA_POSE").unwrap_or(0);
+                let pose = number(models, entity, "DATA_POSE").unwrap_or(0);
                 if pose == 2 && matches!(binding.style, RootStyle::Living) {
                     // Lay the rig along the bed axis, with its head at the received bed head.
-                    let direction = match value(&models, entity, "SLEEPING_POS_ID") {
-                        Some(Metadata::OptionalBlockPosition(Some(position))) => bed_direction(*position),
+                    let direction = match value(models, entity, "SLEEPING_POS_ID") {
+                        Some(Metadata::OptionalBlockPosition(Some(position))) => (store.bed_direction)(*position),
                         _ => None,
                     };
                     let (offset, yaw) = match direction {
@@ -526,7 +780,7 @@ pub fn append(
                                 _ => body_yaw,
                             };
                             let schema = &models.schemas[&entity.type_name];
-                            let eye = match (boolean(&models, entity, "DATA_BABY_ID"), schema.dimension_constants.get("BABY_DIMENSIONS")) {
+                            let eye = match (boolean(models, entity, "DATA_BABY_ID"), schema.dimension_constants.get("BABY_DIMENSIONS")) {
                                 (true, Some(resources::DimensionConstant::Dimensions(d))) => d.eye_height,
                                 _ => schema.dimensions.eye_height,
                             };
@@ -546,6 +800,30 @@ pub fn append(
                         * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
                         * Mat4::from_scale(Vec3::new(-1., -1., 1.))
                         * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
+                }
+                if entity.type_name == "minecraft:giant" {
+                    matrix = Mat4::from_translation(relative)
+                        * Mat4::from_scale(Vec3::splat(6.))
+                        * Mat4::from_translation(-relative)
+                        * matrix;
+                }
+                if matches!(
+                    entity.type_name.as_str(),
+                    "minecraft:slime" | "minecraft:magma_cube"
+                ) {
+                    matrix = scale_cube_model(
+                        matrix,
+                        relative,
+                        number(models, entity, "ID_SIZE"),
+                    );
+                }
+                if entity.type_name == "minecraft:armor_stand"
+                    && number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0
+                {
+                    matrix = Mat4::from_translation(relative)
+                        * Mat4::from_scale(Vec3::splat(0.5))
+                        * Mat4::from_translation(-relative)
+                        * matrix;
                 }
                 if matches!(binding.style, RootStyle::Living)
                     && entity.type_name != "minecraft:armor_stand"
@@ -588,35 +866,94 @@ pub fn append(
                     let a = ((tick.saturating_sub(death) as f32 + partial) / 20.).clamp(0., 1.);
                     matrix *= Mat4::from_rotation_z(a.sqrt() * std::f32::consts::FRAC_PI_2);
                 }
+                if let Some(parent) = parent { matrix = parent * matrix; }
                 let invisible =
-                    number(&models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
+                    number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
                 evaluate_rig(
                     rig,
                     entity,
-                    &models,
+                    models,
                     tick,
                     partial,
                     matrix,
-                    &mut store.transforms,
+                    store.transforms,
                 );
                 if !invisible {
-                    emit_rig(
+                    emit_rig_parts(
                         rig,
-                        &store.transforms,
+                        store.transforms,
                         tex,
                         [1.; 3],
                         EntityMaterial::EntityCutout,
                         1.,
                         light,
+                        (entity.type_name == "minecraft:armor_stand")
+                            .then(|| number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0)),
+                        entity.type_name == "minecraft:end_crystal"
+                            && value(models, entity, "DATA_SHOW_BOTTOM")
+                                .and_then(Metadata::boolean) == Some(false),
                         out,
                     )?;
                     super::villagers::append(
                         binding.layers.as_ref(),
                         rig,
-                        &store.transforms,
+                        store.transforms,
                         light,
                         out,
                     )?;
+                    if entity.type_name == "minecraft:snow_golem"
+                        && number(models, entity, "DATA_PUMPKIN_ID").unwrap_or(16) & 16 != 0
+                    {
+                        let result = (|| {
+                            let state = match *store.snow_pumpkin_state {
+                                Some(state) => state,
+                                None => {
+                                    let state = content.resolve_block_state(
+                                        "minecraft:carved_pumpkin",
+                                        &BTreeMap::new(),
+                                    )?;
+                                    *store.snow_pumpkin_state = Some(state);
+                                    state
+                                }
+                            };
+                            let model = content
+                                .model_for(state)?
+                                .ok_or("carved pumpkin block model unavailable")?;
+                            let head = rig.bones.iter().zip(store.transforms.iter())
+                                .find_map(|(bone, matrix)| (bone.role == BoneRole::Head).then_some(*matrix))
+                                .ok_or("snow golem has no head bone")?;
+                            append_snow_pumpkin(model, head, light, out)
+                        })();
+                        if let Err(reason) = result {
+                            stats.unrendered.insert(entity.type_name.clone(), reason);
+                        }
+                    }
+                    if entity.type_name == "minecraft:mooshroom"
+                        && !boolean(models, entity, "DATA_BABY_ID")
+                    {
+                        let result = (|| {
+                            let brown = number(models, entity, "DATA_TYPE").unwrap_or(0) == 1;
+                            let index = usize::from(brown);
+                            let state = match store.mooshroom_mushroom_states[index] {
+                                Some(state) => state,
+                                None => {
+                                    let block = if brown { "minecraft:brown_mushroom" } else { "minecraft:red_mushroom" };
+                                    let state = content.resolve_block_state(block, &BTreeMap::new())?;
+                                    store.mooshroom_mushroom_states[index] = Some(state);
+                                    state
+                                }
+                            };
+                            let mushroom = content.model_for(state)?
+                                .ok_or("mooshroom mushroom block model unavailable")?;
+                            let head = rig.bones.iter().zip(store.transforms.iter())
+                                .find_map(|(bone, transform)| (bone.role == BoneRole::Head).then_some(*transform))
+                                .ok_or("mooshroom has no head bone")?;
+                            append_mooshroom_mushrooms(mushroom, matrix, head, light, out)
+                        })();
+                        if let Err(reason) = result {
+                            stats.unrendered.insert(entity.type_name.clone(), reason);
+                        }
+                    }
                     if matches!(binding.style, RootStyle::Living)
                         && (entity
                             .damage_tick
@@ -632,46 +969,124 @@ pub fn append(
                 append_equipment(
                     entity,
                     rig,
-                    &store.transforms,
-                    &mut store.items,
-                    &mut store.equipment_cache,
+                    store.transforms,
+                    store.items,
+                    store.equipment_cache,
                     matrix,
                     content,
-                    &models,
+                    models,
                     tick,
                     partial,
                     light,
                     out,
-                    &mut stats,
+                    stats,
                 )?;
+                if entity.type_name == "minecraft:creaking" {
+                    let result = (|| {
+                        let head = rig.bones.iter().zip(store.transforms.iter())
+                            .find_map(|(bone, transform)| (bone.role == BoneRole::Head).then_some(*transform))
+                            .ok_or("creaking has no head bone")?;
+                        super::creaking_eyes::append(
+                            models, content, entity, head, store.transforms, light, out,
+                        )
+                    })();
+                    if let Err(reason) = result {
+                        stats.unrendered.insert(format!("{}:eyes", entity.type_name), reason);
+                    }
+                }
                 if !invisible {
+                    if matches!(entity.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
+                        && number(models, entity, "DATA_FLAGS_ID").unwrap_or(0) & 4 != 0
+                    {
+                        let baby = boolean(models, entity, "DATA_BABY_ID");
+                        let path = match (entity.type_name.as_str(), baby) {
+                            ("minecraft:cat", false) => "minecraft:entity/cat/cat_collar",
+                            ("minecraft:cat", true) => "minecraft:entity/cat/cat_collar_baby",
+                            ("minecraft:wolf", false) => "minecraft:entity/wolf/wolf_collar",
+                            _ => "minecraft:entity/wolf/wolf_collar_baby",
+                        };
+                        let result = content
+                            .texture(path)
+                            .ok_or_else(|| format!("entity texture not activated: {path}"))
+                            .and_then(|collar| {
+                                let color = super::sheep::dye_color(
+                                    number(models, entity, "DATA_COLLAR_COLOR").unwrap_or(14),
+                                );
+                                if baby && entity.type_name == "minecraft:wolf" {
+                                    static PUPPY_COLLAR: std::sync::LazyLock<Option<&'static Rig>> =
+                                        std::sync::LazyLock::new(|| {
+                                            super::solaris_models::authored("minecraft:wolf_baby_collar#main")
+                                        });
+                                    let collar_rig = PUPPY_COLLAR.ok_or("missing puppy collar rig")?;
+                                    let body = rig.bones.iter().position(|bone| bone.name == "body")
+                                        .ok_or("missing puppy body")?;
+                                    let transforms = [Mat4::IDENTITY, store.transforms[body]];
+                                    emit_rig(
+                                        collar_rig, &transforms, collar, color,
+                                        EntityMaterial::EntityCutout, 1., light, out,
+                                    )
+                                } else {
+                                    emit_rig(
+                                        rig, store.transforms, collar, color,
+                                        EntityMaterial::EntityCutout, 1., light, out,
+                                    )
+                                }
+                            });
+                        if let Err(reason) = result {
+                            stats.unrendered.insert(format!("{}:collar", entity.type_name), reason);
+                        }
+                    }
                     super::sheep::append(
                         entity,
-                        &models,
+                        models,
                         content,
-                        boolean(&models, entity, "DATA_BABY_ID"),
+                        boolean(models, entity, "DATA_BABY_ID"),
                         rig,
                         tick,
                         partial,
                         matrix,
-                        &mut store.transforms,
+                        store.transforms,
                         light,
                         out,
                     )?;
+                    if entity.type_name == "minecraft:drowned"
+                        && let Err(reason) = super::drowned_outer::append_drowned_outer(
+                            models, content, entity, tick, partial, matrix,
+                            store.transforms, light, out,
+                        )
+                    {
+                        stats.unrendered.insert(format!("{}:outer", entity.type_name), reason);
+                    }
+                    if entity.type_name == "minecraft:slime" {
+                        let shell = super::solaris_models::authored("minecraft:slime_outer#main")
+                            .ok_or("missing authored slime outer rig")?;
+                        evaluate_rig(shell, entity, models, tick, partial, matrix, store.transforms);
+                        emit_rig(shell, store.transforms, tex, [1.; 3],
+                            EntityMaterial::EntityTranslucent, 1., light, out)?;
+                    }
+                    if entity.type_name == "minecraft:breeze" {
+                        let wind = super::solaris_models::authored("minecraft:breeze_wind#main")
+                            .ok_or("missing authored breeze wind rig")?;
+                        let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
+                        evaluate_rig(wind, entity, models, tick, partial, matrix, store.transforms);
+                        let scroll = ((tick % 2000) as f32 + partial) * 0.01;
+                        emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
+                    }
                 }
             }
             Err(reason) => {
                 if !append_item_entity(
                     entity,
-                    &models,
-                    &mut store.items,
+                    models,
+                    store.items,
                     content,
                     origin,
                     tick,
                     partial,
                     light,
+                    store.clock_context,
                     out,
-                    &mut stats,
+                    stats,
                 )? {
                     stats
                         .unrendered
@@ -679,16 +1094,9 @@ pub fn append(
                 }
             }
         }
-        if out.vertices.len() > start {
-            stats.submitted += 1;
-            store.slots[slot].submitted_revision = Some(store.revision);
-        }
-    }
-    visible.clear();
-    store.visible_ids = visible;
-    stats.vertices = out.vertices.len();
-    Ok(stats)
+    Ok(())
 }
+
 pub(super) fn evaluate_rig(
     rig: &Rig,
     e: &Entity,
@@ -724,6 +1132,17 @@ pub(super) fn evaluate_rig(
         .animation
         .map(|(_, start)| (tick.saturating_sub(start) as f32 + partial) / 6.)
         .filter(|f| *f < 1.);
+    let pet_sitting = matches!(e.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
+        && number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 1 != 0;
+    let pet_baby = pet_sitting && boolean(models, e, "DATA_BABY_ID");
+    let zombie_arms = matches!(
+        e.type_name.as_str(),
+        "minecraft:zombie" | "minecraft:husk" | "minecraft:drowned" | "minecraft:giant"
+            | "minecraft:zombie_villager" | "minecraft:zombified_piglin"
+    );
+    let zombie_arms_raised = zombie_arms && (!boolean(models, e, "DATA_BABY_ID")
+        || e.equipment_value(0).is_none_or(|stack| stack.empty()));
+    let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
     for bone in &rig.bones {
         let mut rotation = bone.rotation;
         let mut pivot = bone.pivot;
@@ -764,13 +1183,73 @@ pub(super) fn evaluate_rig(
                     rotation.x = -1.35;
                 }
             }
-            BoneRole::Wing => rotation.z += (tick as f32 * 0.3 + partial).sin() * 0.3,
+            BoneRole::WingNegativeX => {
+                rotation.z += (tick as f32 * 0.3 + partial).sin() * 0.3;
+            }
+            BoneRole::WingPositiveX => {
+                rotation.z -= (tick as f32 * 0.3 + partial).sin() * 0.3;
+            }
             // Source `WitchModel.setupAnim`: a held item pulls the nose forward and up.
             BoneRole::Nose if e.equipment_value(0).is_some() => {
                 pivot = Vec3::new(0., 1., -1.5) / 16.;
                 rotation.x = -0.9;
             }
             BoneRole::Nose | BoneRole::CrossedArms | BoneRole::Fixed => {}
+        }
+        if zombie_arms && matches!(bone.role, BoneRole::RightArm | BoneRole::LeftArm) {
+            // Oracle observation: arms extend forward. Idle bob and the
+            // steeper aggressive pose are Solaris-authored choices.
+            rotation = Vec3::ZERO;
+            if zombie_arms_raised {
+                let side = if matches!(bone.role, BoneRole::RightArm) { 1. } else { -1. };
+                let bob = ((tick as f32 + partial) * 0.08).sin() * 0.03 * side;
+                rotation.x = if aggressive { -2.1 } else { -std::f32::consts::FRAC_PI_2 } + bob;
+            }
+            if let Some(a) = attack {
+                rotation.x -= (a * std::f32::consts::PI).sin() * 0.8;
+            }
+        }
+        if matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider") {
+            // Solaris-authored alternating leg swing, driven by received
+            // displacement and eased to the authored rest pose when stopped.
+            let leg = match bone.name.as_str() {
+                "leg0" | "leg4" => Some((1., 1.)),
+                "leg1" | "leg5" => Some((-1., -1.)),
+                "leg2" | "leg6" => Some((1., -1.)),
+                "leg3" | "leg7" => Some((-1., 1.)),
+                _ => None,
+            };
+            if let Some((side, phase_sign)) = leg {
+                let swing = phase.sin() * amplitude * phase_sign;
+                rotation.y += side * swing * 0.3;
+                rotation.z += side * swing * 0.15;
+            }
+        }
+        if pet_sitting {
+            // These are Solaris-authored poses for the embedded rigs: lower the
+            // hindquarters and fold the rear legs while the head stays upright.
+            match bone.name.as_str() {
+                "body" => {
+                    rotation.x -= 15_f32.to_radians();
+                    if e.type_name == "minecraft:wolf" && !pet_baby {
+                        pivot.y += 2. / 16.;
+                    }
+                }
+                "mane" if !pet_baby => {
+                    rotation.x -= 15_f32.to_radians();
+                    pivot.y += 1. / 16.;
+                }
+                "left_hind_leg" | "right_hind_leg" => {
+                    pivot.y += if pet_baby { 2. / 16. } else { 6. / 16. };
+                    rotation.x = -std::f32::consts::FRAC_PI_2;
+                }
+                "left_front_leg" | "right_front_leg" => rotation.x = bone.rotation.x,
+                "tail" => {
+                    pivot.y += if pet_baby { 1. / 16. } else { 4. / 16. };
+                    rotation.x += 20_f32.to_radians();
+                }
+                _ => {}
+            }
         }
         if crouch && bone.name == "body" {
             rotation.x += 0.5;
@@ -797,7 +1276,26 @@ pub(super) fn evaluate_rig(
             }
         }
         let parent = bone.parent.map(|i| out[i]).unwrap_or(root);
-        out.push(parent * resources::transform(pivot, rotation, bone.scale));
+        if e.type_name == "minecraft:end_crystal"
+            && matches!(bone.name.as_str(), "glass_outer" | "glass_inner" | "core")
+        {
+            let age = e.source.as_ref().map_or(tick as f32, |source| {
+                (source.age + source.special.crystal_offset) as f32
+            }) + partial;
+            let wave = (age * 0.2).sin() * 0.5 + 0.5;
+            pivot.y += (wave * wave + wave) * 0.2;
+            let turn = Mat4::from_rotation_y((age * 3.).to_radians());
+            let tilt = Mat4::from_axis_angle(Vec3::new(1., 0., 1.).normalize(), std::f32::consts::FRAC_PI_3);
+            let rotation = match bone.name.as_str() {
+                "glass_outer" => turn * tilt,
+                "glass_inner" => turn * tilt * tilt * turn,
+                _ => turn * tilt * tilt * turn * tilt * turn,
+            };
+            out.push(parent * Mat4::from_translation(pivot) * rotation
+                * Mat4::from_scale(bone.scale));
+        } else {
+            out.push(parent * resources::transform(pivot, rotation, bone.scale));
+        }
     }
 }
 pub(super) fn emit_rig(
@@ -810,6 +1308,46 @@ pub(super) fn emit_rig(
     light: [f32; 2],
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    emit_rig_parts(rig, transforms, tex, color, layer, alpha, light, None, false, out)
+}
+
+// BreezeWind repeats within the texture's atlas rectangle rather than the whole atlas page.
+fn emit_breeze_wind(
+    rig: &Rig,
+    transforms: &[Mat4],
+    tex: TextureRegion,
+    scroll: f32,
+    light: [f32; 2],
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let start = out.vertices.len();
+    emit_rig(rig, transforms, tex, [1.; 3], EntityMaterial::BreezeWind, 1., light, out)?;
+    let size = [tex.uv[2] - tex.uv[0], tex.uv[3] - tex.uv[1]];
+    for vertex in &mut out.vertices[start..] {
+        vertex.uv = [
+            (vertex.uv[0] - tex.uv[0]) / size[0] + scroll,
+            (vertex.uv[1] - tex.uv[1]) / size[1],
+        ];
+        vertex.overlay_uv = [tex.uv[0], tex.uv[1]];
+        vertex.overlay_tint = [size[0], size[1], 0.];
+    }
+    Ok(())
+}
+
+// Rig emission needs the independent material and lighting inputs.
+#[allow(clippy::too_many_arguments)]
+fn emit_rig_parts(
+    rig: &Rig,
+    transforms: &[Mat4],
+    tex: TextureRegion,
+    color: [f32; 3],
+    layer: EntityMaterial,
+    alpha: f32,
+    light: [f32; 2],
+    stand_flags: Option<i32>,
+    hide_crystal_base: bool,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
     if rig.bones.len() != transforms.len() {
         return Err("entity rig transform cardinality mismatch".into());
     }
@@ -820,6 +1358,16 @@ pub(super) fn emit_rig(
         color
     };
     for (bone, matrix) in rig.bones.iter().zip(transforms) {
+        if hide_crystal_base && bone.name == "base" {
+            continue;
+        }
+        if stand_flags.is_some_and(|flags| match bone.name.as_str() {
+            "left_arm" | "right_arm" => flags & 4 == 0,
+            "base_plate" => flags & 8 != 0,
+            _ => false,
+        }) {
+            continue;
+        }
         let normal_matrix = matrix.inverse().transpose();
         for (quad, normal) in bone.quads.iter().zip(&bone.normals) {
             let positions = quad.map(|v| {
@@ -899,16 +1447,125 @@ pub(super) fn append_baked(
             q.uv,
             color,
             q.texture_layer,
-            match q.layer {
+            q.entity_material.unwrap_or(match q.layer {
                 RenderLayer::Opaque | RenderLayer::Cutout => EntityMaterial::ItemCutout,
                 RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
-            },
+            }),
             q.alpha,
             light,
             out,
         )?;
     }
     Ok(())
+}
+pub(super) fn append_baked_stack(
+    model: &BakedModel,
+    matrix: Mat4,
+    light: [f32; 2],
+    content: &Content,
+    stack: &crate::inventory::Stack,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let foil = crate::ui::items::foil_texture(content, stack)?;
+    let first = out.vertices.len();
+    append_baked(model, matrix, light, out)?;
+    if let Some(texture) = foil {
+        for (quad, vertices) in model.quads.iter().zip(out.vertices[first..].chunks_exact_mut(4)) {
+            if quad.entity_material.is_none() || matches!(quad.entity_material,
+                Some(EntityMaterial::ItemCutout | EntityMaterial::ItemTranslucent)) {
+                crate::ui::items::mark_foil(vertices, texture);
+            }
+        }
+    }
+    Ok(())
+}
+
+
+fn append_snow_pumpkin(
+    model: &BakedModel,
+    head: Mat4,
+    light: [f32; 2],
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    // The authored head pivot is at the top of its eight-pixel cube.
+    let matrix = head
+        * Mat4::from_translation(Vec3::new(0., 0.25, 0.))
+        * Mat4::from_rotation_y(std::f32::consts::PI)
+        * Mat4::from_scale(Vec3::new(0.625, -0.625, -0.625))
+        * Mat4::from_translation(Vec3::splat(-0.5));
+    append_transformed_block(model, matrix, light, out)
+}
+
+fn append_mooshroom_mushrooms(
+    model: &BakedModel,
+    root: Mat4,
+    head: Mat4,
+    light: [f32; 2],
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let shape = Mat4::from_scale(Vec3::new(-1., -1., 1.))
+        * Mat4::from_translation(Vec3::splat(-0.5));
+    let back = root * Mat4::from_translation(Vec3::new(0.2, -0.35, 0.5));
+    let back_turn = Mat4::from_rotation_y((-48_f32).to_radians());
+    append_transformed_block(model, back * back_turn * shape, light, out)?;
+    append_transformed_block(
+        model,
+        back * Mat4::from_rotation_y(42_f32.to_radians())
+            * Mat4::from_translation(Vec3::new(0.1, 0., -0.6))
+            * back_turn * shape,
+        light,
+        out,
+    )?;
+    append_transformed_block(
+        model,
+        head * Mat4::from_translation(Vec3::new(0., -0.7, -0.2))
+            * Mat4::from_rotation_y((-78_f32).to_radians()) * shape,
+        light,
+        out,
+    )
+}
+
+fn append_transformed_block(
+    model: &BakedModel,
+    matrix: Mat4,
+    light: [f32; 2],
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let seed = crate::protocol::models::position_seed([0; 3]);
+    append_block_quads(model, seed, matrix, light, |quad| Ok(match quad.tint {
+        TintKind::Constant(color) => color,
+        _ => [1.; 3],
+    }), out)
+}
+/// Emits the block model parts chosen by `seed` at `matrix`, colouring each quad by `tint`.
+pub(super) fn append_block_quads(
+    model: &BakedModel,
+    seed: i64,
+    matrix: Mat4,
+    light: [f32; 2],
+    tint: impl Fn(&BakedQuad) -> Result<[f32; 3]>,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let mut result = Ok(());
+    model.for_each_quad_seeded(seed, |quad| {
+        if result.is_err() {
+            return;
+        }
+        result = tint(quad).and_then(|color| emit(
+            quad.positions.map(|p| matrix.transform_point3(Vec3::from_array(p)).to_array()),
+            quad.uv,
+            color,
+            quad.texture_layer,
+            quad.entity_material.unwrap_or(match quad.layer {
+                RenderLayer::Opaque | RenderLayer::Cutout => EntityMaterial::ItemCutout,
+                RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
+            }),
+            quad.alpha,
+            light,
+            out,
+        ));
+    });
+    result
 }
 pub(super) fn item_matrix(model: &BakedModel, context: &str) -> Mat4 {
     crate::ui::items::display_matrix(model, context)
@@ -1007,7 +1664,7 @@ pub(super) fn append_equipment(
                         } else {
                             crossed_arms_attachment(bone)
                         };
-                        append_baked(model, attachment * item_matrix(model, "ground"), light, out)?;
+                        append_baked_stack(model, attachment * item_matrix(model, "ground"), light, content, stack, out)?;
                     }
                     Err(reason) => {
                         stats
@@ -1057,8 +1714,16 @@ pub(super) fn append_equipment(
         state.use_ticks = tick.saturating_sub(e.observed_tick) as f32;
         match items.model_with(content, stack, &state) {
             Ok(model) => {
-                let attachment = held_item_attachment(*matrix, slot);
-                append_baked(model, attachment * item_matrix(model, context), light, out)?;
+                let bone = if e.type_name == "minecraft:vex" && slot < 2 {
+                    let side = if slot == 0 { 0.046875 } else { -0.046875 };
+                    *matrix
+                        * Mat4::from_scale(Vec3::splat(0.55))
+                        * Mat4::from_translation(Vec3::new(side, -0.15625, 0.078125))
+                } else {
+                    *matrix
+                };
+                let attachment = held_item_attachment(bone, slot);
+                append_baked_stack(model, attachment * item_matrix(model, context), light, content, stack, out)?;
             }
             Err(reason) => {
                 stats
@@ -1069,6 +1734,8 @@ pub(super) fn append_equipment(
     }
     Ok(())
 }
+// Item rendering uses the existing frame and cache inputs directly.
+#[allow(clippy::too_many_arguments)]
 fn append_item_entity(
     e: &Entity,
     models: &Models,
@@ -1078,6 +1745,7 @@ fn append_item_entity(
     tick: u64,
     partial: f32,
     light: [f32; 2],
+    clock_context: Option<&crate::ui::items::ItemContext>,
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<bool> {
@@ -1107,7 +1775,14 @@ fn append_item_entity(
     if context == "ground" {
         pos.y += (age / 10.).sin() * 0.1 + 0.1;
     }
-    match items.model(content, stack, context) {
+    let model = if let Some(clock) = clock_context {
+        let mut state = clock.clone();
+        state.display = context.into();
+        items.model_with(content, stack, &state)
+    } else {
+        items.model(content, stack, context)
+    };
+    match model {
         Ok(model) => {
             let matrix = Mat4::from_translation(pos)
                 * Mat4::from_rotation_y(if context == "ground" {
@@ -1115,7 +1790,7 @@ fn append_item_entity(
                 } else {
                     t.yaw.to_radians()
                 });
-            append_baked(model, matrix * item_matrix(model, context), light, out)?;
+            append_baked_stack(model, matrix * item_matrix(model, context), light, content, stack, out)?;
         }
         Err(e) => {
             stats.unrendered.insert(e.clone(), e);
@@ -1126,16 +1801,24 @@ fn append_item_entity(
 pub fn special_item(
     models: &Models,
     content: &Content,
-    _stack: &Stack,
+    stack: &Stack,
     special: &Value,
 ) -> Result<BakedModel> {
     let kind = special["type"]
         .as_str()
         .ok_or("special item missing type")?
         .trim_start_matches("minecraft:");
+    let shield_patterned = kind == "shield"
+        && (stack.component("minecraft:base_color").is_some()
+            || stack.component("minecraft:banner_patterns")
+                .and_then(Value::as_array).is_some_and(|patterns| !patterns.is_empty()));
     let (rig, texture_name) = match kind {
-        "shield" => ("minecraft:shield#main", "entity/shield_base".to_owned()),
-        "trident" => ("minecraft:trident#main", "entity/trident".to_owned()),
+        "shield" => ("minecraft:shield#main", if shield_patterned {
+            "entity/shield/shield_base"
+        } else {
+            "entity/shield/shield_base_nopattern"
+        }.to_owned()),
+        "trident" => ("minecraft:trident#main", "entity/trident/trident".to_owned()),
         "chest" => (
             "minecraft:chest#main",
             format!(
@@ -1166,10 +1849,14 @@ pub fn special_item(
         ),
         "banner" => (
             "minecraft:standing_banner#main",
-            "entity/banner_base".to_owned(),
+            "entity/banner/banner_base".to_owned(),
         ),
         "bed" => (
-            "minecraft:bed_head#main",
+            match special["part"].as_str() {
+                Some("head") => "minecraft:bed_head#main",
+                Some("foot") => "minecraft:bed_foot#main",
+                _ => return Err("bed item part must be head or foot".into()),
+            },
             format!(
                 "entity/bed/{}",
                 special["texture"]
@@ -1214,13 +1901,10 @@ pub fn special_item(
         }
         "copper_golem_statue" => (
             "minecraft:copper_golem#main",
-            format!(
-                "entity/copper_golem/{}",
-                special["texture"]
-                    .as_str()
-                    .unwrap_or("copper_golem")
-                    .trim_start_matches("minecraft:")
-            ),
+            special["texture"]
+                .as_str()
+                .ok_or("copper golem statue item texture missing")?
+                .to_owned(),
         ),
         _ => return Err(format!("unknown special item render family {kind}")),
     };
@@ -1239,35 +1923,1041 @@ pub fn special_item(
     let rig = models.rig(rig);
     let tex = texture(content, &texture_name)?;
     let mut model = BakedModel::default();
+    let mut banner_layers = Vec::new();
+    if kind == "banner" || shield_patterned {
+        let color = if shield_patterned {
+            stack.component("minecraft:base_color").and_then(Value::as_str).unwrap_or("white")
+        } else {
+            special["color"].as_str().unwrap_or("white")
+        };
+        let rgb = |name: &str| {
+            let c = super::render_blocks::dye(name).0;
+            [
+                (c >> 16 & 255) as f32 / 255.,
+                (c >> 8 & 255) as f32 / 255.,
+                (c & 255) as f32 / 255.,
+            ]
+        };
+        let family = if shield_patterned { "shield" } else { "banner" };
+        banner_layers.push((texture(content, &format!("entity/{family}/base"))?, rgb(color)));
+        if let Some(patterns) = stack
+            .component("minecraft:banner_patterns")
+            .and_then(Value::as_array)
+        {
+            for pattern in patterns.iter().take(16) {
+                let holder = &pattern["pattern"];
+                let asset = if let Some(id) = holder.as_str() {
+                    content
+                        .registry_entries("minecraft:banner_pattern")?
+                        .iter()
+                        .find(|(name, _)| name == id)
+                        .and_then(|(_, value)| value["asset_id"].as_str())
+                        .ok_or("banner pattern asset missing")?
+                } else {
+                    holder["asset_id"]
+                        .as_str()
+                        .ok_or("banner pattern asset missing")?
+                };
+                let (namespace, path) = asset.split_once(':').unwrap_or(("minecraft", asset));
+                let name = format!("{namespace}:entity/{family}/{path}");
+                banner_layers.push((
+                    texture(content, &name)?,
+                    rgb(pattern["color"].as_str().unwrap_or("white")),
+                ));
+            }
+        }
+    }
+    // Bed halves already use the half-local frame expected by the item graph.
+    // Banners instead use the standing model's feet-at-24 frame.
+    let item_root = if kind == "banner" {
+        Mat4::from_translation(Vec3::new(0., -1.5, 0.))
+    } else if kind == "chest" {
+        // The rig is centered in X/Z and uses +Y down; item coordinates use +Y up.
+        Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
+            * Mat4::from_scale(Vec3::new(1., -1., 1.))
+    } else {
+        Mat4::IDENTITY
+    };
     let mut matrices = Vec::with_capacity(rig.bones.len());
     for bone in &rig.bones {
-        let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(Mat4::IDENTITY)
+        let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(item_root)
             * resources::transform(bone.pivot, bone.rotation, bone.scale);
         matrices.push(matrix);
+        let reflected = kind == "chest" && matrix.determinant() < 0.;
         for q in &bone.quads {
+            let mut positions = q.map(|v| {
+                matrix
+                    .transform_point3(Vec3::new(v[0], v[1], v[2]))
+                    .to_array()
+            });
+            let mut uv = q.map(|v| {
+                [
+                    tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
+                    tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
+                ]
+            });
+            if reflected {
+                positions.swap(1, 3);
+                uv.swap(1, 3);
+            }
             model.quads.push(BakedQuad {
-                positions: q.map(|v| {
-                    matrix
-                        .transform_point3(Vec3::new(v[0], v[1], v[2]))
-                        .to_array()
-                }),
-                uv: q.map(|v| {
-                    [
-                        tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
-                        tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
-                    ]
-                }),
+                positions,
+                uv,
                 tint: TintKind::None,
                 tint_index: None,
                 cullface: None,
                 face: 1,
                 shade: true,
+                shade_direction: None,
+                gui_light_side: false,
                 ambient_occlusion: false,
                 layer: RenderLayer::Cutout,
+                entity_material: matches!(kind, "banner" | "shield" | "bed" | "chest" | "decorated_pot").then_some(EntityMaterial::EntitySolid),
                 alpha: 1.,
                 texture_layer: tex.layer,
             });
+            if (kind == "banner" && bone.name == "flag")
+                || (shield_patterned && bone.name == "plate")
+            {
+                let p = positions.map(Vec3::from_array);
+                let normal = (p[1] - p[0]).cross(p[2] - p[0]).normalize_or_zero();
+                for (index, (layer, color)) in banner_layers.iter().enumerate() {
+                    model.quads.push(BakedQuad {
+                        positions: p
+                            .map(|v| (v + normal * (index + 1) as f32 * 0.0001).to_array()),
+                        uv: q.map(|v| {
+                            [
+                                layer.uv[0] + v[3] * (layer.uv[2] - layer.uv[0]),
+                                layer.uv[1] + v[4] * (layer.uv[3] - layer.uv[1]),
+                            ]
+                        }),
+                        tint: TintKind::Constant(*color),
+                        tint_index: None,
+                        cullface: None,
+                        face: 1,
+                        shade: true,
+                        shade_direction: None,
+                        gui_light_side: false,
+                        ambient_occlusion: false,
+                        layer: RenderLayer::Translucent,
+                        entity_material: Some(EntityMaterial::BannerPattern),
+                        alpha: 1.,
+                        texture_layer: layer.layer,
+                    });
+                }
+            }
+        }
+    }
+    if kind == "decorated_pot" {
+        let sides = models.rig("minecraft:decorated_pot_sides#main");
+        let decorations = stack.component("minecraft:pot_decorations").and_then(Value::as_array);
+        matrices.clear();
+        for bone in &sides.bones {
+            let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(item_root)
+                * resources::transform(bone.pivot, bone.rotation, bone.scale);
+            matrices.push(matrix);
+            let Some(index) = ["back", "left", "right", "front"].iter()
+                .position(|side| *side == bone.name) else { continue };
+            let item = decorations.and_then(|values| values.get(index))
+                .and_then(Value::as_str).unwrap_or("minecraft:brick");
+            let name = if let Some(pattern) = item.strip_prefix("minecraft:")
+                .and_then(|name| name.strip_suffix("_pottery_sherd"))
+            {
+                format!("entity/decorated_pot/{pattern}_pottery_pattern")
+            } else {
+                "entity/decorated_pot/decorated_pot_side".to_owned()
+            };
+            let tex = texture(content, &name)?;
+            for quad in &bone.quads {
+                model.quads.push(BakedQuad {
+                    positions: quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array()),
+                    uv: quad.map(|v| [
+                        tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
+                        tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
+                    ]),
+                    tint: TintKind::None,
+                    tint_index: None,
+                    cullface: None,
+                    face: 1,
+                    shade: true,
+                    shade_direction: None,
+                    gui_light_side: false,
+                    ambient_occlusion: false,
+                    layer: RenderLayer::Cutout,
+                    entity_material: Some(EntityMaterial::EntitySolid),
+                    alpha: 1.,
+                    texture_layer: tex.layer,
+                });
+            }
         }
     }
     Ok(model)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::animation_tests::fixture;
+    use super::*;
+
+    #[test]
+    fn wolf_tame_material_precedes_unexpired_anger() {
+        use super::super::resources::Family;
+        let (mut models, mut wolf) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_FLAGS_ID".into(), [18, 0]);
+        schema.accessors.insert("DATA_ANGER_END_TIME".into(), [22, 2]);
+        schema.accessors.insert("DATA_VARIANT_ID".into(), [23, 25]);
+        wolf.type_name = "minecraft:wolf".into();
+        wolf.metadata.insert(23, Metadata::Registry { serializer: 25, id: 0 });
+        wolf.metadata.insert(22, Metadata::Long("1051".into()));
+        models.schemas.insert(wolf.type_name.clone(), schema);
+        models.families.insert(wolf.type_name.clone(), Family {
+            rig: "test:wolf#main".into(), baby_rig: None, texture: None, textures: vec![],
+            renderer_class: None, materials: BTreeMap::new(),
+        });
+        let mut store = Store::new();
+        store.registries.insert("minecraft:wolf_variant".into(), vec![("test:wolf".into(),
+            serde_json::json!({"assets":{"wild":"test:wild","angry":"test:angry","tame":"test:tame"}}))]);
+        let mut content = Content::test_cube();
+        for (name, layer) in [("test:wild", 1), ("test:angry", 2), ("test:tame", 3)] {
+            content.insert_test_texture(name, TextureRegion { uv: [0., 0., 1., 1.], layer, width: 1, height: 1 });
+        }
+        assert_eq!(material(&store, &models, &wolf, &content, 1050).unwrap().texture.layer, 2);
+        assert_eq!(material(&store, &models, &wolf, &content, 1051).unwrap().texture.layer, 1);
+        wolf.metadata.insert(18, Metadata::Byte(4));
+        assert_eq!(material(&store, &models, &wolf, &content, 1050).unwrap().texture.layer, 3);
+    }
+
+    #[test]
+    fn received_bee_anger_deadline_changes_cached_rendered_texture() {
+        use super::super::{cb, resources::{Bone, BoneRole, Family, Rig}};
+        use crate::protocol::Reader;
+        use std::sync::Arc;
+
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_BABY_ID".into(), [16, 8]);
+        schema.accessors.insert("DATA_FLAGS_ID".into(), [18, 0]);
+        schema.accessors.insert("DATA_ANGER_END_TIME".into(), [19, 2]);
+        entity.type_name = "minecraft:bee".into();
+        entity.source = None;
+        models.schemas.insert(entity.type_name.clone(), schema);
+        let names = ["bee.png", "bee_angry.png", "bee_nectar.png", "bee_angry_nectar.png",
+            "bee_baby.png", "bee_angry_baby.png", "bee_nectar_baby.png", "bee_angry_nectar_baby.png"];
+        models.families.insert(entity.type_name.clone(), Family {
+            rig: "test:bee#main".into(), baby_rig: Some("test:bee#main".into()),
+            texture: None, textures: names.iter().map(|name| format!("minecraft:entity/bee/{name}")).collect(),
+            renderer_class: None, materials: BTreeMap::new(),
+        });
+        models.rigs.insert("test:bee#main".into(), Rig {
+            bones: vec![Bone {
+                parent: None, pivot: Vec3::ZERO, rotation: Vec3::ZERO, scale: Vec3::ONE, role: BoneRole::Fixed,
+                name: "body".into(), quads: vec![[[0., 0., 0., 0., 0.], [1., 0., 0., 1., 0.],
+                    [1., 1., 0., 1., 1.], [0., 1., 0., 0., 1.]]], normals: vec![[0., 0., 1.]],
+            }], part_by_name: BTreeMap::new(),
+        });
+        let mut content = Content::test_cube();
+        for (index, name) in names.iter().enumerate() {
+            let key = format!("minecraft:entity/bee/{}", name.trim_end_matches(".png"));
+            content.insert_test_texture(&key, TextureRegion { uv: [0., 0., 1., 1.],
+                layer: index as u32 + 1, width: 64, height: 64 });
+        }
+        let mut store = Store::new();
+        store.models = Some(Arc::new(models));
+        store.ids.insert(41, 0);
+        store.spatial.entry([0, 0]).or_default().insert(41);
+        store.slots.push(entity);
+        let update = |store: &mut Store, deadline: i64, flags: u8, baby: bool| {
+            let mut packet = vec![41, 18, 0, flags, 16, 8, u8::from(baby), 19, 2];
+            let mut value = deadline as u64;
+            loop {
+                let byte = (value & 127) as u8;
+                value >>= 7;
+                packet.push(byte | if value == 0 { 0 } else { 128 });
+                if value == 0 { break; }
+            }
+            packet.push(255);
+            store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(&packet), &content, 1).unwrap();
+        };
+        let render = |store: &mut Store, time| {
+            let mut out = DynamicGeometry::default();
+            let stats = append(store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., time,
+                None, &|_| Ok(Some([15., 0.])), &|_| None, &mut out).unwrap();
+            assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
+            assert!(!out.vertices.is_empty());
+            let layer = out.vertices[0].texture_layer;
+            assert!(out.vertices.iter().all(|vertex| vertex.texture_layer == layer));
+            layer
+        };
+        update(&mut store, 1051, 8, false);
+        assert_eq!(render(&mut store, 1050), 4);
+        assert_eq!(render(&mut store, 1051), 3);
+        assert_eq!(render(&mut store, 1052), 3);
+        update(&mut store, 1051, 0, false);
+        assert_eq!(render(&mut store, 1052), 1);
+        update(&mut store, i64::from(i32::MAX) + 100, 8, true);
+        assert_eq!(render(&mut store, 1052), 8);
+        update(&mut store, -1, 8, true);
+        assert_eq!(render(&mut store, 1052), 7);
+        update(&mut store, 2000, 0, false);
+        assert_eq!(render(&mut store, 1052), 2);
+        assert_eq!(render(&mut store, 2000), 1);
+        assert_eq!(render(&mut store, 1999), 2);
+    }
+
+    #[test]
+    fn burning_flag_adds_fire_quads_only_for_visible_entities() {
+        let (mut models, mut entity) = fixture();
+        models.schemas.get_mut("minecraft:pig").unwrap().accessors
+            .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+        entity.binding = Some(Ok(Binding {
+            rig: "minecraft:pig#renderer_main".into(),
+            texture: TextureRegion { uv: [0., 0., 1., 1.], layer: 1, width: 64, height: 32 },
+            style: RootStyle::Living,
+            layers: None,
+            anger: None,
+        }));
+        let id = entity.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(std::sync::Arc::new(models));
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.slots.push(entity);
+        let mut content = Content::test_cube();
+        for (name, layer) in [("minecraft:block/fire_0", 42), ("minecraft:block/fire_1", 43)] {
+            content.insert_test_texture(name, TextureRegion {
+                uv: [0., 0., 1., 1.], layer, width: 16, height: 16,
+            });
+        }
+        for (flags, burning) in [(0, false), (1, true), (32, false), (33, false), (0, false)] {
+            store.slots[0].metadata.insert(0, Metadata::Byte(flags));
+            let mut geometry = DynamicGeometry::default();
+            append(&mut store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
+                None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+            let fire: Vec<_> = geometry.vertices.iter()
+                .filter(|v| v.texture_layer == 42 || v.texture_layer == 43).collect();
+            assert_eq!(!fire.is_empty(), burning, "flags {flags}");
+            assert_eq!(!geometry.indices[EntityMaterial::EntityFire as usize].is_empty(), burning);
+            if burning {
+                assert!(fire.iter().any(|v| v.texture_layer == 42));
+                assert!(fire.iter().any(|v| v.texture_layer == 43));
+                assert!(fire.iter().all(|v| v.light == [15., 15.]));
+            }
+        }
+    }
+
+    #[test]
+    fn received_pet_sitting_flag_poses_and_restores_adult_and_baby_rigs() {
+        for (kind, baby, key) in [
+            ("minecraft:cat", false, "minecraft:cat#renderer_main"),
+            ("minecraft:cat", true, "minecraft:cat_baby#main"),
+            ("minecraft:wolf", false, "minecraft:wolf#renderer_main"),
+            ("minecraft:wolf", true, "minecraft:wolf_baby#main"),
+        ] {
+            let (mut models, mut entity) = fixture();
+            let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+            schema.accessors.insert("DATA_FLAGS_ID".into(), [18, 0]);
+            schema.accessors.insert("DATA_BABY_ID".into(), [16, 8]);
+            entity.type_name = kind.into();
+            models.schemas.insert(kind.into(), schema);
+            entity.metadata.insert(16, Metadata::Bool(baby));
+            entity.metadata.insert(18, Metadata::Byte(4));
+            let rig = super::super::solaris_models::authored(key).unwrap();
+            let mut standing = Vec::new();
+            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut standing);
+            entity.metadata.insert(18, Metadata::Byte(5));
+            let mut sitting = Vec::new();
+            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut sitting);
+            for name in ["body", "left_hind_leg", "right_hind_leg", "tail"] {
+                let i = rig.bones.iter().position(|bone| bone.name == name).unwrap();
+                assert_ne!(standing[i].to_cols_array(), sitting[i].to_cols_array(), "{key} {name}");
+            }
+            let head = rig.bones.iter().position(|bone| bone.name == "head").unwrap();
+            assert_eq!(standing[head].to_cols_array(), sitting[head].to_cols_array(), "{key} head");
+            entity.metadata.insert(18, Metadata::Byte(4));
+            let mut restored = Vec::new();
+            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut restored);
+            assert_eq!(standing.iter().map(|m| m.to_cols_array()).collect::<Vec<_>>(),
+                restored.iter().map(|m| m.to_cols_array()).collect::<Vec<_>>(), "{key}");
+        }
+    }
+
+    #[test]
+    fn goat_and_sheep_rigs_have_no_overlapping_same_facing_coplanar_faces() {
+        use super::super::solaris_models::{BoneSpec, ModelFile};
+        use glam::{Mat4, Vec3};
+        // Rest-pose cube corners in pixels; bit 0/1/2 of the index select the x/y/z maximum.
+        fn corners(bone: &BoneSpec, parent: Mat4, out: &mut Vec<[Vec3; 8]>) {
+            let [rx, ry, rz] = bone.rotation.map(f32::to_radians);
+            let m = parent
+                * Mat4::from_translation(Vec3::from(bone.pivot))
+                * Mat4::from_rotation_x(rx)
+                * Mat4::from_rotation_y(ry)
+                * Mat4::from_rotation_z(rz);
+            for cube in &bone.cubes {
+                let lo = Vec3::from(cube.origin) - Vec3::splat(cube.inflate);
+                let size = Vec3::from(cube.size) + Vec3::splat(2. * cube.inflate);
+                out.push(std::array::from_fn(|k| {
+                    let bit = |b: usize| ((k >> b) & 1) as f32;
+                    m.transform_point3(lo + size * Vec3::new(bit(0), bit(1), bit(2)))
+                }));
+            }
+            for child in &bone.bones {
+                corners(child, m, out);
+            }
+        }
+        // (corner, edge u, edge v, outward normal) of every non-degenerate face.
+        fn faces(c: &[Vec3; 8]) -> Vec<(Vec3, Vec3, Vec3, Vec3)> {
+            let centre = c.iter().sum::<Vec3>() / 8.;
+            [[0, 2, 6, 4], [1, 3, 7, 5], [0, 1, 5, 4], [2, 3, 7, 6], [0, 1, 3, 2], [4, 5, 7, 6]]
+                .iter()
+                .filter_map(|f| {
+                    let (p0, e1, e2) = (c[f[0]], c[f[1]] - c[f[0]], c[f[3]] - c[f[0]]);
+                    if e1.length() < 1e-4 || e2.length() < 1e-4 {
+                        return None;
+                    }
+                    let mut n = e1.cross(e2).normalize();
+                    if n.dot((c[f[0]] + c[f[2]]) / 2. - centre) < 0. {
+                        n = -n;
+                    }
+                    Some((p0, e1, e2, n))
+                })
+                .collect()
+        }
+        for (name, source) in [
+            ("goat", include_str!("../../assets/solaris/models/entity/goat.json")),
+            ("goat_baby", include_str!("../../assets/solaris/models/entity/goat_baby.json")),
+            ("sheep", include_str!("../../assets/solaris/models/entity/sheep.json")),
+            ("sheep_baby", include_str!("../../assets/solaris/models/entity/sheep_baby.json")),
+            ("sheep_wool", include_str!("../../assets/solaris/models/entity/sheep_wool.json")),
+            ("sheep_wool_baby", include_str!("../../assets/solaris/models/entity/sheep_wool_baby.json")),
+        ] {
+            let model = ModelFile::parse(source).unwrap();
+            let mut cubes = Vec::new();
+            for bone in &model.bones {
+                corners(bone, Mat4::IDENTITY, &mut cubes);
+            }
+            for (i, a) in cubes.iter().enumerate() {
+                for (j, b) in cubes.iter().enumerate().skip(i + 1) {
+                    for (a0, a1, a2, an) in faces(a) {
+                        for (b0, b1, b2, bn) in faces(b) {
+                            // Same-facing faces on one plane that overlap z-fight; opposite-facing
+                            // contact faces are occluded by their own cubes.
+                            if an.dot(bn) < 1. - 1e-4 || an.dot(b0 - a0).abs() > 1e-3 {
+                                continue;
+                            }
+                            for u in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                                for v in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                                    let p = a0 + a1 * u + a2 * v - b0;
+                                    let (s, t) = (p.dot(b1) / b1.dot(b1), p.dot(b2) / b2.dot(b2));
+                                    assert!(
+                                        !((1e-4..1. - 1e-4).contains(&s) && (1e-4..1. - 1e-4).contains(&t)),
+                                        "{name}: cubes {i} and {j} share a coplanar face facing {an:?}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn allay_head_face_uv_contains_both_atlas_eyes() {
+        use super::super::solaris_models::Face;
+        let model = super::super::solaris_models::ModelFile::parse(include_str!(
+            "../../assets/solaris/models/entity/allay.json"
+        )).unwrap();
+        let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
+        let cube = &head.cubes[0];
+        assert_eq!(cube.faces.len(), 1, "other head faces retain their box unwrap");
+        let [u0, v0, u1, v1] = cube.faces[&Face::Front];
+        // Pixel centers independently observed in the runtime allay texture.
+        for (u, v) in [(6.5, 7.5), (8.5, 7.5), (6.5, 8.5), (8.5, 8.5)] {
+            assert!(u0 < u && u < u1 && v0 < v && v < v1);
+        }
+    }
+
+    #[test]
+    fn authored_trident_prongs_join_crossbar_at_shaft_tip() {
+        let model = super::super::solaris_models::ModelFile::parse(include_str!(
+            "../../assets/solaris/models/entity/trident.json"
+        )).unwrap();
+        let pole = model.bones.iter().find(|bone| bone.name == "pole").unwrap();
+        let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
+        let bar = &head.cubes[0];
+        let pole_tip = pole.pivot[1] + pole.cubes[0].origin[1];
+        let bar_bottom = head.pivot[1] + bar.origin[1];
+        assert_eq!(head.cubes.len(), 4);
+        assert!(bar_bottom > pole_tip);
+        for prong in &head.cubes[1..] {
+            assert_eq!(head.pivot[1] + prong.origin[1], pole_tip);
+            assert_eq!(head.pivot[1] + prong.origin[1] + prong.size[1], bar_bottom);
+            assert!(prong.origin[0] >= bar.origin[0]);
+            assert!(prong.origin[0] + prong.size[0] <= bar.origin[0] + bar.size[0]);
+        }
+        assert!(bar.origin[0] < 0. && bar.origin[0] + bar.size[0] > 0.);
+        // The default box unwrap samples transparent texels, visually severing the prongs.
+        // This rectangle is opaque in the trident entity texture.
+        use super::super::solaris_models::Face;
+        for face in [Face::Up, Face::Down, Face::Front, Face::Back, Face::Left, Face::Right] {
+            assert_eq!(bar.faces.get(&face), Some(&[0., 8., 4., 10.]), "{face:?}");
+        }
+    }
+
+    #[test]
+    fn trident_and_arrow_authored_axes_follow_same_projectile_orientation() {
+        for (key, bone_name, axis, other) in [
+            ("minecraft:arrow#renderer/model", "shaft", 0, 1),
+            ("minecraft:trident#renderer/model", "pole", 1, 0),
+        ] {
+            let rig = super::super::solaris_models::authored(key).unwrap();
+            let bone = rig.bones.iter().find(|bone| bone.name == bone_name).unwrap();
+            let span = |index: usize| {
+                let (lo, hi) = bone.quads.iter().flatten().map(|vertex| vertex[index])
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                hi - lo
+            };
+            assert!(span(axis) > span(other) * 4., "{key}");
+        }
+        for yaw in [0., 90., 180., 270.] {
+            for pitch in [0., 45., 270.] {
+                let arrow = projectile_root(Vec3::ZERO, yaw, pitch, false).transform_vector3(Vec3::X);
+                let trident = projectile_root(Vec3::ZERO, yaw, pitch, true).transform_vector3(-Vec3::Y);
+                assert!((arrow - trident).length() < 1e-5, "{yaw} {pitch}");
+            }
+        }
+    }
+
+    #[test]
+    fn decorated_pot_item_bakes_all_sides_and_received_sherds() {
+        let (models, _) = fixture();
+        let mut content = Content::test_cube();
+        for (name, layer) in [
+            ("minecraft:entity/decorated_pot/decorated_pot_base", 40),
+            ("minecraft:entity/decorated_pot/decorated_pot_side", 41),
+            ("minecraft:entity/decorated_pot/angler_pottery_pattern", 42),
+        ] {
+            content.insert_test_texture(name, TextureRegion {
+                layer, uv: [0., 0., 1., 1.], width: 32, height: 32,
+            });
+        }
+        let special = serde_json::json!({"type":"minecraft:decorated_pot"});
+        let mut stack = Stack::default();
+        let sides = super::super::solaris_models::authored("minecraft:decorated_pot_sides#main").unwrap();
+        let side_count: usize = sides.bones.iter().map(|bone| bone.quads.len()).sum();
+        let back_count = sides.bones.iter().find(|bone| bone.name == "back").unwrap().quads.len();
+        assert!(back_count > 0 && side_count > back_count);
+        let plain = special_item(&models, &content, &stack, &special).unwrap();
+        assert_eq!(plain.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count);
+        stack.components = std::sync::Arc::new(BTreeMap::from([(
+            "minecraft:pot_decorations".into(),
+            serde_json::json!(["minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:brick", "minecraft:brick"]),
+        )]));
+        let patterned = special_item(&models, &content, &stack, &special).unwrap();
+        assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 42).count(), back_count);
+        assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count - back_count);
+        assert!(patterned.quads.iter().any(|quad| quad.texture_layer == 40));
+        assert!(patterned.quads.iter().all(|quad| quad.entity_material == Some(EntityMaterial::EntitySolid)));
+    }
+
+
+    #[test]
+    fn boat_and_raft_hulls_anchor_to_received_position() {
+        let position = Vec3::new(5.5, 159.8, -3.5);
+        for key in [
+            "minecraft:oak_boat#renderer/model",
+            "minecraft:oak_chest_boat#renderer/model",
+            "minecraft:bamboo_raft#renderer/model",
+            "minecraft:bamboo_chest_raft#renderer/model",
+        ] {
+            let rig = super::super::solaris_models::authored(key).unwrap();
+            let bottom = rig.bones.iter().find(|bone| bone.name == "bottom").unwrap();
+            for yaw in [0., 90., 180., 270.] {
+                let mut matrices = Vec::new();
+                for bone in &rig.bones {
+                    matrices.push(
+                        bone.parent.map(|i| matrices[i]).unwrap_or_else(|| boat_root(position, yaw))
+                            * resources::transform(bone.pivot, bone.rotation, bone.scale),
+                    );
+                }
+                let matrix = matrices[rig.bones.iter().position(|bone| bone.name == "bottom").unwrap()];
+                let (min_y, max_y) = bottom.quads.iter().flatten().fold(
+                    (f32::INFINITY, f32::NEG_INFINITY),
+                    |(min_y, max_y), vertex| {
+                        let y = matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2])).y;
+                        (min_y.min(y), max_y.max(y))
+                    },
+                );
+                assert!((min_y - position.y).abs() < 1e-4, "{key}: {min_y}");
+                assert!((max_y - position.y - 2. / 16.).abs() < 1e-4, "{key}: {max_y}");
+                if key.contains("_boat#") {
+                    for name in ["left_wall", "right_wall", "bow", "stern"] {
+                        let index = rig.bones.iter().position(|bone| bone.name == name).unwrap();
+                        let wall_min = rig.bones[index].quads.iter().flatten()
+                            .map(|vertex| matrices[index].transform_point3(
+                                Vec3::new(vertex[0], vertex[1], vertex[2])
+                            ).y)
+                            .fold(f32::INFINITY, f32::min);
+                        assert!((wall_min - max_y).abs() < 1e-4, "{key} {name}: {wall_min} vs {max_y}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn experience_orb_received_value_emits_camera_facing_textured_geometry() {
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_VALUE".into(), [8, 1]);
+        schema.dimensions.eye_height = 0.425;
+        models.schemas.insert("minecraft:experience_orb".into(), schema);
+        entity.type_name = "minecraft:experience_orb".into();
+        let id = entity.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(std::sync::Arc::new(models));
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.slots.push(entity);
+        let mut content = Content::test_cube();
+        content.insert_test_texture("minecraft:entity/experience/experience_orb",
+            TextureRegion { layer: 42, uv: [0., 0., 1., 1.], width: 64, height: 64 });
+        for (value, u, v) in [(1, 0., 0.), (7, 0.5, 0.), (2477, 0.5, 0.5)] {
+            store.slots[0].metadata.insert(8, Metadata::Int(value));
+            let mut geometry = DynamicGeometry::default();
+            let stats = append(&mut store, &content, [0.; 3], [0.; 3], [180., 0.],
+                32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut geometry).unwrap();
+            assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
+            assert!(stats.unrendered.is_empty());
+            assert_eq!(geometry.vertices.len(), 4);
+            assert_eq!(geometry.indices[EntityMaterial::EntityTranslucentCullItemTarget as usize].len(), 6);
+            assert!(geometry.vertices.iter().all(|p| p.texture_layer == 42 && p.light == [10., 9.]));
+            assert!(geometry.vertices.iter().all(|p| Vec3::from_array(p.normal).dot(Vec3::Y) > 0.999));
+            let vertex = &geometry.vertices[0];
+            assert!((vertex.position[0] + 0.15).abs() < 1e-5);
+            assert!((vertex.position[1] - 0.025).abs() < 1e-5);
+            assert!((vertex.uv[0] - u).abs() < 1e-5 && (vertex.uv[1] - v - 0.25).abs() < 1e-5);
+        }
+        let mut rotated = DynamicGeometry::default();
+        let stats = append(&mut store, &content, [0.; 3], [0.; 3], [90., 0.],
+            32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut rotated).unwrap();
+        assert_eq!(stats.submitted, 1);
+        assert!(rotated.vertices.iter().all(|p| p.position[0].abs() < 1e-5));
+        assert!((rotated.vertices[0].position[2].abs() - 0.15).abs() < 1e-5);
+        let mut pitched = DynamicGeometry::default();
+        append(&mut store, &content, [0.; 3], [0.; 3], [90., 30.],
+            32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut pitched).unwrap();
+        let expected_normal = glam::Quat::from_euler(
+            glam::EulerRot::YXZ, 90f32.to_radians(), -30f32.to_radians(), 0.,
+        ) * Vec3::Y;
+        assert!(pitched.vertices.iter().all(|p| Vec3::from_array(p.normal).dot(expected_normal) > 0.999));
+        let mut geometry = DynamicGeometry::default();
+        let stats = append(&mut store, &content, [0.; 3], [0.; 3], [180., 0.],
+            32., 0, 0., 0, None, &|_| Ok(None), &|_| None, &mut geometry).unwrap();
+        assert_eq!(stats.lighting_pending, 1);
+        assert!(geometry.vertices.is_empty());
+    }
+
+    #[test]
+    fn received_painting_uses_special_renderer_without_family_rig() {
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_PAINTING_VARIANT_ID".into(), [9, 34]);
+        models.schemas.insert("minecraft:painting".into(), schema);
+        entity.type_name = "minecraft:painting".into();
+        entity.spawn_data = 3;
+        entity.metadata.insert(9, Metadata::Registry { serializer: 34, id: 0 });
+        let id = entity.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(std::sync::Arc::new(models));
+        store.registries.insert(
+            "minecraft:painting_variant".into(),
+            vec![("minecraft:test".into(), serde_json::json!({
+                "width": 4, "height": 4, "asset_id": "minecraft:test"
+            }))],
+        );
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.slots.push(entity);
+        let mut content = Content::test_cube();
+        let texture = TextureRegion { layer: 42, uv: [0., 0., 1., 1.], width: 16, height: 16 };
+        content.insert_test_texture("minecraft:painting/test", texture);
+        content.insert_test_texture("minecraft:painting/back", TextureRegion { layer: 43, ..texture });
+        // The add-entity position is the hanging block anchor (vanilla Painting placement):
+        // even sizes shift half a block left and up; the 1/16 mesh backs onto the wall.
+        for (direction, axis, expected, lateral_min) in [(2, 2, 0.9375, -2.), (3, 2, 0.0625, -1.), (4, 0, 0.9375, -1.), (5, 0, 0.0625, -2.)] {
+            store.slots[0].spawn_data = direction;
+            let mut geometry = DynamicGeometry::default();
+            let samples = std::cell::RefCell::new(Vec::new());
+            let stats = append(
+                &mut store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
+                None, &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, &|_| None, &mut geometry,
+            ).unwrap();
+            assert_eq!(stats.submitted, 1);
+            assert!(stats.unrendered.is_empty());
+            assert_eq!(samples.borrow().len(), 16);
+            assert!(samples.borrow().iter().all(|point| point[axis] == 0.));
+            let front: Vec<_> = geometry.vertices.iter().filter(|v| v.texture_layer == 42).collect();
+            assert!(!front.is_empty());
+            assert!(front.iter().all(|v| (v.position[axis] - expected).abs() < 1e-5));
+            let lateral_axis = if axis == 0 { 2 } else { 0 };
+            let min = front.iter().map(|v| v.position[lateral_axis]).fold(f32::INFINITY, f32::min);
+            let max = front.iter().map(|v| v.position[lateral_axis]).fold(f32::NEG_INFINITY, f32::max);
+            assert!((min - lateral_min).abs() < 1e-5 && (max - lateral_min - 4.).abs() < 1e-5);
+            let min_y = front.iter().map(|v| v.position[1]).fold(f32::INFINITY, f32::min);
+            let max_y = front.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
+            assert!((min_y + 1.).abs() < 1e-5 && (max_y - 3.).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn giant_renders_six_times_larger_at_the_same_feet() {
+        use super::super::resources::{Bone, BoneRole, Rig};
+        let (mut models, mut entity) = fixture();
+        let (mut giant_models, _) = fixture();
+        models.schemas.insert("minecraft:giant".into(), giant_models.schemas.remove("minecraft:pig").unwrap());
+        models.rigs.insert("test:rig".into(), Rig {
+            bones: vec![Bone {
+                parent: None, pivot: Vec3::ZERO, rotation: Vec3::ZERO, scale: Vec3::ONE,
+                role: BoneRole::Fixed, name: "body".into(),
+                quads: vec![[[0., 0., 0., 0., 0.], [1., 0., 0., 1., 0.],
+                    [1., 1., 0., 1., 1.], [0., 1., 0., 0., 1.]]],
+                normals: vec![[0., 0., 1.]],
+            }],
+            part_by_name: BTreeMap::new(),
+        });
+        entity.source = None;
+        entity.binding = Some(Ok(Binding {
+            rig: "test:rig".into(),
+            texture: TextureRegion { uv: [0., 0., 1., 1.], layer: 1, width: 64, height: 32 },
+            style: RootStyle::Living, layers: None, anger: None,
+        }));
+        let id = entity.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(std::sync::Arc::new(models));
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.slots.push(entity);
+        let render = |store: &mut Store| {
+            let mut geometry = DynamicGeometry::default();
+            let stats = append(store, &Content::test_cube(), [0.; 3], [0.; 3], [0.; 2],
+                32., 0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+            assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+            geometry.vertices.iter().map(|v| v.position[1]).collect::<Vec<_>>()
+        };
+        let normal = render(&mut store);
+        store.slots[0].type_name = "minecraft:giant".into();
+        let giant = render(&mut store);
+        assert!(!normal.is_empty());
+        assert_eq!(normal.len(), giant.len());
+        for (normal_y, giant_y) in normal.iter().zip(&giant) {
+            assert!((giant_y - 6. * normal_y).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn slime_shell_is_translucent_and_hidden_with_the_entity() {
+        for kind in ["minecraft:slime", "minecraft:magma_cube"] {
+            let (mut models, mut entity) = fixture();
+            let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+            schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+            schema.accessors.insert("ID_SIZE".into(), [1, 1]);
+            models.schemas.insert(kind.into(), schema);
+            entity.type_name = kind.into();
+            entity.binding = Some(Ok(Binding {
+                rig: format!("{kind}#main"),
+                texture: TextureRegion { uv: [0., 0., 1., 1.], layer: 1, width: 64, height: 32 },
+                style: RootStyle::Living,
+                layers: None,
+                anger: None,
+            }));
+            let id = entity.handle.network_id;
+            let mut store = Store::new();
+            store.models = Some(std::sync::Arc::new(models));
+            store.ids.insert(id, 0);
+            store.spatial.entry([0, 0]).or_default().insert(id);
+            store.slots.push(entity);
+            for size in [1, 4] {
+                store.slots[0].metadata.insert(1, Metadata::Int(size));
+                for invisible in [false, true] {
+                    store.slots[0].metadata.insert(0, Metadata::Byte(if invisible { 32 } else { 0 }));
+                    let mut geometry = DynamicGeometry::default();
+                    let stats = append(&mut store, &Content::test_cube(), [0.; 3], [0.; 3],
+                        [0.; 2], 32., 0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+                    assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
+                    let cutout = &geometry.indices[EntityMaterial::EntityCutout as usize];
+                    let translucent = &geometry.indices[EntityMaterial::EntityTranslucent as usize];
+                    assert_eq!(cutout.is_empty(), invisible, "{kind} size {size}");
+                    assert_eq!(translucent.is_empty(), invisible || kind == "minecraft:magma_cube",
+                        "{kind} size {size}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cube_model_size_scales_geometry_about_entity_feet() {
+        let feet = Vec3::new(3., 7., -2.);
+        let root = Mat4::from_translation(feet);
+        let point = Vec3::new(0.25, 0.5, -0.25);
+        for size in [None, Some(1)] {
+            let transformed = scale_cube_model(root, feet, size).transform_point3(point);
+            assert!((transformed - (feet + point)).abs().max_element() < 1e-6);
+        }
+        let large = scale_cube_model(root, feet, Some(4));
+        assert!((large.transform_point3(Vec3::ZERO) - feet).abs().max_element() < 1e-6);
+        assert!((large.transform_point3(point) - (feet + point * 4.)).abs().max_element() < 1e-6);
+    }
+
+    #[test]
+    fn snow_golem_pumpkin_tracks_the_head_and_encloses_it() {
+        let content = Content::test_cube();
+        let model = &content.models[0];
+        let mut normal = DynamicGeometry::default();
+        let mut tilted = DynamicGeometry::default();
+        append_snow_pumpkin(model, Mat4::IDENTITY, [15., 0.], &mut normal).unwrap();
+        let rotation = Mat4::from_rotation_z(0.4);
+        append_snow_pumpkin(model, rotation, [15., 0.], &mut tilted).unwrap();
+        let (min, max) = normal.vertices.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(min, max), vertex| {
+                let point = Vec3::from_array(vertex.position);
+                (min.min(point), max.max(point))
+            },
+        );
+        assert!((min - Vec3::new(-0.3125, -0.0625, -0.3125)).abs().max_element() < 1e-5);
+        assert!((max - Vec3::new(0.3125, 0.5625, 0.3125)).abs().max_element() < 1e-5);
+        assert_eq!(normal.vertices.len(), tilted.vertices.len());
+        for (a, b) in normal.vertices.iter().zip(&tilted.vertices) {
+            let expected = rotation.transform_point3(Vec3::from_array(a.position));
+            assert!((expected - Vec3::from_array(b.position)).abs().max_element() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn chest_item_faces_remain_outward_and_keep_uvs_after_reflection() {
+        let (models, _) = fixture();
+        let mut content = Content::test_cube();
+        content.insert_test_texture("minecraft:entity/chest/normal", TextureRegion {
+            layer: 42, uv: [0., 0., 1., 1.], width: 64, height: 64,
+        });
+        let item = special_item(
+            &models, &content, &Stack::default(),
+            &serde_json::json!({"type":"minecraft:chest","texture":"normal"}),
+        ).unwrap();
+        let rig = models.rig("minecraft:chest#main");
+        let root = Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
+            * Mat4::from_scale(Vec3::new(1., -1., 1.));
+        let mut matrices = Vec::new();
+        let mut emitted = item.quads.iter();
+        for bone in &rig.bones {
+            let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(root)
+                * resources::transform(bone.pivot, bone.rotation, bone.scale);
+            matrices.push(matrix);
+            for source in &bone.quads {
+                let quad = emitted.next().unwrap();
+                let p = quad.positions.map(Vec3::from_array);
+                let actual = (p[1] - p[0]).cross(p[2] - p[0]).normalize();
+                let a = Vec3::new(source[0][0], source[0][1], source[0][2]);
+                let b = Vec3::new(source[1][0], source[1][1], source[1][2]);
+                let c = Vec3::new(source[2][0], source[2][1], source[2][2]);
+                let normal = matrix.inverse().transpose().transform_vector3((b - a).cross(c - a)).normalize();
+                assert!(actual.dot(normal) > 0.99);
+                for vertex in source {
+                    let pos = matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
+                    assert!((0..4).any(|i| {
+                        (p[i] - pos).abs().max_element() < 1e-5
+                            && (quad.uv[i][0] - vertex[3]).abs() < 1e-5
+                            && (quad.uv[i][1] - vertex[4]).abs() < 1e-5
+                    }));
+                }
+            }
+        }
+        assert!(emitted.next().is_none());
+    }
+
+    #[test]
+    fn chest_item_lid_is_above_body_in_item_space() {
+        let (models, _) = fixture();
+        let mut content = Content::test_cube();
+        content.insert_test_texture("minecraft:entity/chest/normal", TextureRegion {
+            layer: 42, uv: [0., 0., 1., 1.], width: 64, height: 64,
+        });
+        let special = serde_json::json!({"type":"minecraft:chest","texture":"normal"});
+        let item = special_item(&models, &content, &Stack::default(), &special).unwrap();
+        let y_bounds = |quads: &[BakedQuad]| {
+            quads.iter().flat_map(|q| q.positions).map(|p| p[1])
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)))
+        };
+        let (body_bottom, body_top) = y_bounds(&item.quads[..6]);
+        let (lid_bottom, lid_top) = y_bounds(&item.quads[6..12]);
+        assert!(body_bottom >= 0. && lid_bottom >= body_top - 1e-6);
+        assert!(lid_top > body_top && lid_top <= 1.);
+    }
+
+    #[test]
+    fn bed_item_graph_joins_both_full_half_models() {
+        let (models, _) = fixture();
+        let mut content = Content::test_cube();
+        content.insert_test_texture(
+            "minecraft:entity/bed/red",
+            TextureRegion {
+                layer: 42,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
+        let stack = Stack::default();
+        let q = std::f32::consts::FRAC_1_SQRT_2;
+        // 26.1.2 red_bed special-node transforms, before the common display transform.
+        let rotation = Mat4::from_quat(glam::Quat::from_xyzw(0., -q, q, 0.));
+        for (part, graph_z, expected_z) in [
+            ("head", 1., [0., 1.]),
+            ("foot", 0., [-1., 0.]),
+        ] {
+            let special = serde_json::json!({"type":"minecraft:bed","part":part,"texture":"red"});
+            let model = special_item(&models, &content, &stack, &special).unwrap();
+            let graph = Mat4::from_translation(Vec3::new(1., 0.5625, graph_z)) * rotation;
+            let mut low = Vec3::splat(f32::INFINITY);
+            let mut high = Vec3::splat(f32::NEG_INFINITY);
+            for quad in &model.quads {
+                for position in quad.positions {
+                    let p = graph.transform_point3(Vec3::from_array(position));
+                    low = low.min(p);
+                    high = high.max(p);
+                }
+            }
+            let expected_low = Vec3::new(0., 0., expected_z[0]);
+            let expected_high = Vec3::new(1., 0.5625, expected_z[1]);
+            assert!((low - expected_low).abs().max_element() < 1e-5, "{part}: {low:?}");
+            assert!((high - expected_high).abs().max_element() < 1e-5, "{part}: {high:?}");
+        }
+    }
+
+    #[test]
+    fn breeze_wind_emits_wrapped_animated_texture_layer() {
+        let rig = super::super::solaris_models::authored("minecraft:breeze_wind#main").unwrap();
+        let transforms = vec![Mat4::IDENTITY; rig.bones.len()];
+        let tex = TextureRegion {
+            layer: 42,
+            uv: [0.25, 0.125, 0.5, 0.375],
+            width: 128,
+            height: 128,
+        };
+        let mut first = DynamicGeometry::default();
+        let mut second = DynamicGeometry::default();
+        emit_breeze_wind(rig, &transforms, tex, 0., [15., 15.], &mut first).unwrap();
+        emit_breeze_wind(rig, &transforms, tex, 0.25, [15., 15.], &mut second).unwrap();
+        assert!(!first.indices[EntityMaterial::BreezeWind as usize].is_empty());
+        assert_eq!(first.vertices.len(), second.vertices.len());
+        for (a, b) in first.vertices.iter().zip(&second.vertices) {
+            assert_eq!(a.texture_layer, 42);
+            assert_eq!(a.overlay_uv, [0.25, 0.125]);
+            assert_eq!(a.overlay_tint[..2], [0.25, 0.25]);
+            assert!((b.uv[0] - a.uv[0] - 0.25).abs() < 0.0001);
+            assert_eq!(a.uv[1], b.uv[1]);
+        }
+    }
+
+    #[test]
+    fn pig_uses_received_default_variant_only_when_metadata_is_absent() {
+        let (mut models, mut pig) = fixture();
+        models.schemas.get_mut("minecraft:pig").unwrap().accessors
+            .insert("DATA_VARIANT_ID".into(), [19, 0]);
+        let mut store = Store::default();
+        let warm = serde_json::json!({"asset_id":"test:warm"});
+        let temperate = serde_json::json!({"asset_id":"test:temperate"});
+        store.registries.insert("minecraft:pig_variant".into(), vec![
+            ("minecraft:warm".into(), warm.clone()),
+            ("minecraft:temperate".into(), temperate.clone()),
+        ]);
+        assert_eq!(variant(&store, &models, &pig), Some(&temperate));
+        pig.metadata.insert(19, Metadata::Int(0));
+        assert_eq!(variant(&store, &models, &pig), Some(&warm));
+        pig.metadata.insert(19, Metadata::Int(99));
+        assert_eq!(variant(&store, &models, &pig), None);
+    }
+
+    #[test]
+    fn zombie_nautilus_uses_received_default_without_masking_explicit_variant() {
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_VARIANT_ID".into(), [19, 0]);
+        entity.type_name = "minecraft:zombie_nautilus".into();
+        models.schemas.insert(entity.type_name.clone(), schema);
+        let mut store = Store::default();
+        assert_eq!(variant(&store, &models, &entity), None);
+        let warm = serde_json::json!({"asset_id":"test:warm"});
+        let temperate = serde_json::json!({"asset_id":"test:temperate"});
+        store.registries.insert(
+            "minecraft:zombie_nautilus_variant".into(),
+            vec![
+                ("minecraft:warm".into(), warm.clone()),
+                ("minecraft:temperate".into(), temperate.clone()),
+            ],
+        );
+        assert_eq!(variant(&store, &models, &entity), Some(&temperate));
+        entity.metadata.insert(19, Metadata::Int(0));
+        assert_eq!(variant(&store, &models, &entity), Some(&warm));
+        entity.metadata.insert(19, Metadata::Int(99));
+        assert_eq!(variant(&store, &models, &entity), None);
+    }
+
+    #[test]
+    fn chicken_uses_received_default_without_masking_explicit_variant() {
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("DATA_VARIANT_ID".into(), [19, 0]);
+        entity.type_name = "minecraft:chicken".into();
+        models.schemas.insert(entity.type_name.clone(), schema);
+        let mut store = Store::default();
+        assert_eq!(variant(&store, &models, &entity), None);
+        let warm = serde_json::json!({"asset_id":"test:warm"});
+        let temperate = serde_json::json!({"asset_id":"test:temperate"});
+        store.registries.insert(
+            "minecraft:chicken_variant".into(),
+            vec![
+                ("minecraft:warm".into(), warm.clone()),
+                ("minecraft:temperate".into(), temperate.clone()),
+            ],
+        );
+        assert_eq!(variant(&store, &models, &entity), Some(&temperate));
+        entity.metadata.insert(19, Metadata::Int(0));
+        assert_eq!(variant(&store, &models, &entity), Some(&warm));
+        entity.metadata.insert(19, Metadata::Int(99));
+        assert_eq!(variant(&store, &models, &entity), None);
+        entity.metadata.insert(19, Metadata::Int(-1));
+        assert_eq!(variant(&store, &models, &entity), None);
+        entity.metadata.remove(&19);
+        store.registries.get_mut("minecraft:chicken_variant").unwrap().pop();
+        assert_eq!(variant(&store, &models, &entity), Some(&warm));
+    }
+
+    #[test]
+    fn dragon_uses_its_base_texture_when_family_has_no_default_texture() {
+        let (mut models, mut dragon) = fixture();
+        dragon.type_name = "minecraft:ender_dragon".into();
+        let facts: Value = serde_json::from_str(include_str!(
+            "../../assets/solaris/entities/entity-facts.json"
+        ))
+        .unwrap();
+        let family = serde_json::from_value(facts["families"]["minecraft:ender_dragon"].clone())
+            .unwrap();
+        models.families.insert(dragon.type_name.clone(), family);
+        let mut content = Content::test_cube();
+        content.insert_test_texture(
+            "minecraft:entity/enderdragon/dragon",
+            TextureRegion {
+                layer: 42,
+                uv: [0., 0., 1., 1.],
+                width: 256,
+                height: 256,
+            },
+        );
+        let binding = material(&Store::default(), &models, &dragon, &content, 0).unwrap();
+        assert_eq!(binding.texture.layer, 42);
+    }
 }

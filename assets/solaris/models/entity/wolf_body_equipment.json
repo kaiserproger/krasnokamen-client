@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "id": "wolf_body_equipment",
+  "texture": {
+    "path": "entity/equipment/wolf_body/armadillo_scute.png",
+    "size": [
+      64,
+      32
+    ]
+  },
+  "roles": {
+    "head": [
+      "head"
+    ]
+  },
+  "bones": [
+    {
+      "name": "head",
+      "pivot": [
+        0,
+        13,
+        -7
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -3,
+            -3,
+            -4
+          ],
+          "size": [
+            6,
+            6,
+            4
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "inflate": 0.2
+        }
+      ]
+    },
+    {
+      "name": "body",
+      "pivot": [
+        0,
+        14,
+        2
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -3,
+            -2,
+            -3
+          ],
+          "size": [
+            6,
+            9,
+            6
+          ],
+          "uv": [
+            18,
+            14
+          ],
+          "inflate": 0.2
+        }
+      ]
+    },
+    {
+      "name": "mane",
+      "pivot": [
+        0,
+        14,
+        -3
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            -3,
+            -3
+          ],
+          "size": [
+            8,
+            6,
+            7
+          ],
+          "uv": [
+            21,
+            0
+          ],
+          "inflate": 0.2
+        }
+      ]
+    }
+  ]
+}

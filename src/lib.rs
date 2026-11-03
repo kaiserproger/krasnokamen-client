@@ -25,6 +25,7 @@ pub mod session;
 mod screenshot;
 mod singleplayer;
 pub mod terrain;
+mod terrain_wait;
 pub mod ui;
 #[cfg(test)]
 mod ui_hotfix_tests;
@@ -278,6 +279,7 @@ struct App {
     screenshot_replies: Vec<(PathBuf, mpsc::Receiver<Result<serde_json::Value, String>>)>,
     screenshot_captures: std::collections::VecDeque<Request>,
     pending_tasks: Vec<(Request, minecraft::Task)>,
+    terrain_wait: Option<terrain_wait::Wait>,
     shutdown: bool,
     error: Option<String>,
 }
@@ -351,6 +353,7 @@ impl App {
             screenshot_replies: Vec::new(),
             screenshot_captures: std::collections::VecDeque::new(),
             pending_tasks: Vec::new(),
+            terrain_wait: None,
             shutdown: false,
             error: None,
         })
@@ -642,6 +645,31 @@ impl App {
                         }
                     }
                 }
+                Command::Minecraft { name, arguments } if name == "minecraft_wait_for_terrain" => {
+                    let result = if self.terrain_wait.is_some() {
+                        Err("terrain_wait_busy".to_owned())
+                    } else if self.session.phase() != "play" {
+                        Err("terrain_wait_not_in_play".to_owned())
+                    } else if self.renderer.as_ref().is_none_or(|r| !r.terrain_available())
+                        || self.window.as_ref().is_none_or(|w| { let size = w.inner_size(); size.width == 0 || size.height == 0 })
+                        || self.occluded {
+                        Err("terrain_wait_renderer_unavailable".to_owned())
+                    } else {
+                        terrain_wait::parse(arguments)
+                    };
+                    match result {
+                        Ok((keys, timeout)) => {
+                            self.terrain_wait = Some(terrain_wait::Wait {
+                                request,
+                                keys,
+                                epochs: self.session.terrain_wait_epochs(),
+                                deadline: Instant::now() + timeout,
+                                candidate: None,
+                            });
+                        }
+                        Err(error) => { let _ = request.reply.send(Err(error)); }
+                    }
+                }
                 Command::Minecraft { name, arguments } => {
                     if request.automation_fence.is_some()
                         && name != "minecraft_disconnect"
@@ -718,6 +746,53 @@ impl App {
         }
         self.publish_session();
     }
+    fn complete_terrain_wait(&mut self) {
+        let Some(mut wait) = self.terrain_wait.take() else { return };
+        let failure = if let Err(error) = self.fence(&wait.request) {
+            Some(error)
+        } else if self.session.terrain_wait_epochs() != wait.epochs {
+            Some("terrain_wait_stale_epoch".into())
+        } else if self.session.phase() != "play" {
+            Some("terrain_wait_disconnected".into())
+        } else if self.renderer.as_ref().is_none_or(|r| !r.terrain_available())
+            || self.window.as_ref().is_none_or(|w| { let size = w.inner_size(); size.width == 0 || size.height == 0 })
+            || self.occluded {
+            Some("terrain_wait_renderer_unavailable".into())
+        } else if Instant::now() >= wait.deadline {
+            Some(format!("terrain_wait_timeout: sections {:?}", wait.keys))
+        } else {
+            None
+        };
+        if let Some(error) = failure {
+            let _ = wait.request.reply.send(Err(error));
+            return;
+        }
+        let scene = self.session.scene();
+        let camera = (scene.camera_position, scene.yaw, scene.pitch);
+        let revisions = self.session.terrain_settled_revisions(&wait.keys);
+        if let Some(candidate) = &wait.candidate
+            && !candidate.matches(revisions.as_deref(), camera)
+        {
+            wait.candidate = None;
+        }
+        if let (Some(candidate), Some(renderer)) = (&wait.candidate, &self.renderer)
+            && candidate.completed(renderer.completed_terrain_frame())
+        {
+            let sections: Vec<_> = wait.keys.iter().zip(&candidate.revisions).zip(&candidate.selected)
+                .map(|((key, revision), selected)| json!({
+                    "section": key, "requested_revision": revision.to_string(),
+                    "mesh_revision": revision.to_string(), "selected_for_draw": selected
+                })).collect();
+            let _ = wait.request.reply.send(Ok(json!({
+                "status": "ready", "connection_epoch": wait.epochs.0.to_string(),
+                "dimension_epoch": wait.epochs.1.to_string(), "resource_epoch": wait.epochs.2.to_string(),
+                "frame_id": candidate.frame.to_string(), "sections": sections
+            })));
+            return;
+        }
+        self.terrain_wait = Some(wait);
+    }
+
 
     fn start_automation(&mut self) -> Result<(), String> {
         if self.options.automation {
@@ -775,7 +850,16 @@ impl App {
             (1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.),
         )?;
         let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.;
+        // Wait for the UI owner's existing redraws to finish its transition.
+        let capture = match capture {
+            Some(request) if self.session.ui.as_ref().is_some_and(|ui| ui.animating()) => {
+                self.pending_capture = Some(request);
+                None
+            }
+            other => other,
+        };
         if let Some(renderer) = &mut self.renderer {
+            let previous_frame = renderer.terrain_frame_id();
             let mut shared = self
                 .shared
                 .observation
@@ -785,6 +869,18 @@ impl App {
                 shared.data["terrain_capture"] = self.session.capture_terrain_metrics();
             }
             renderer.render(self.session.scene(), capture, &shared)?;
+            if renderer.terrain_frame_id() != previous_frame
+                && let Some(wait) = &mut self.terrain_wait
+                && wait.epochs == self.session.terrain_wait_epochs() && wait.candidate.is_none()
+                && let Some(revisions) = self.session.terrain_settled_revisions(&wait.keys)
+                && let Some((frame, selected)) = renderer.terrain_frame(&wait.keys, &revisions)
+            {
+                let scene = self.session.scene();
+                wait.candidate = Some(terrain_wait::Candidate {
+                    frame, revisions, selected,
+                    camera: (scene.camera_position, scene.yaw, scene.pitch),
+                });
+            }
             self.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());
             self.session.far_generated(renderer.far_gpu_generation(), renderer.drain_far_generated());
             renderer.update_metrics(&mut shared.data["render"]);
@@ -886,6 +982,7 @@ impl App {
         if now >= self.next_tick {
             self.next_tick = now + self.tick_interval;
         }
+        self.complete_terrain_wait();
         // No task can have changed state after the publication below when
         // the queue is empty; avoid rebuilding the entire observation twice.
         if self.pending_tasks.is_empty() {
@@ -960,11 +1057,14 @@ impl App {
         self.pending_tasks
             .iter()
             .map(|(_, task)| task.deadline())
-            .fold(frame_deadline(
-                renderable && !self.frame_interval().is_zero(),
-                self.next_tick,
-                self.next_frame,
-            ), Instant::min)
+            .fold({
+                let frame = frame_deadline(
+                    renderable && !self.frame_interval().is_zero(),
+                    self.next_tick,
+                    self.next_frame,
+                );
+                self.terrain_wait.as_ref().map_or(frame, |wait| frame.min(wait.deadline))
+            }, Instant::min)
     }
 }
 

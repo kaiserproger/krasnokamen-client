@@ -204,6 +204,53 @@ fn health(session: &Session, handle: Handle) -> Result<Option<f32>> {
         },
     )
 }
+
+fn received_baby(
+    supported: Option<bool>,
+    metadata: Option<&Metadata>,
+) -> Result<(&'static str, Option<bool>)> {
+    match (supported, metadata) {
+        (None, _) => Ok(("unknown_schema", None)),
+        (Some(false), _) => Ok(("unsupported", None)),
+        (Some(true), None) => Ok(("missing", None)),
+        (Some(true), Some(Metadata::Bool(value))) => Ok(("received", Some(*value))),
+        (Some(true), Some(_)) => Err("received entity baby serializer mismatch".into()),
+    }
+}
+
+// The binding is a cached presentation decision, not evidence of a rendered frame.
+fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
+    let models = session
+        .entities
+        .models_ref()
+        .ok_or("entity models not activated")?;
+    let supported = models
+        .schemas
+        .get(&entity.type_name)
+        .map(|schema| schema.accessors.contains_key("DATA_BABY_ID"));
+    let metadata = session
+        .entities
+        .received_metadata(entity.handle, "DATA_BABY_ID")?;
+    let (baby_status, baby) = received_baby(supported, metadata)?;
+    let (rig_status, rig, rig_error) = match entity.binding.as_ref() {
+        None => ("pending", None, None),
+        Some(Ok(binding)) => ("resolved", Some(binding.rig.as_str()), None),
+        Some(Err(error)) => ("error", None, Some(error.as_str())),
+    };
+    let mut value = entity_value(session, entity)?;
+    extend(
+        value.as_object_mut().unwrap(),
+        json!({
+            "received_metadata": entity.metadata,
+            "received_baby": baby,
+            "received_baby_status": baby_status,
+            "cached_rig": rig,
+            "cached_rig_status": rig_status,
+            "cached_rig_error": rig_error
+        }),
+    );
+    Ok(value)
+}
 fn extend(object: &mut serde_json::Map<String, Value>, value: Value) {
     if let Value::Object(fields) = value {
         object.extend(fields);
@@ -396,7 +443,7 @@ pub(super) fn start(
             }
             let entities = page
                 .iter()
-                .map(|(_, id)| entity_value(session, session.entities.get(*id).unwrap()))
+                .map(|(_, id)| list_entity_value(session, session.entities.get(*id).unwrap()))
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Some(Outcome::Complete(
                 json!({"in_play":true,"radius":radius,"visible_count":total,
@@ -761,5 +808,29 @@ impl Task {
             return Err("entity wait timed out without its received-state predicate".into());
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+
+    #[test]
+    fn received_baby_distinguishes_absent_and_false() {
+        assert_eq!(received_baby(None, None).unwrap(), ("unknown_schema", None));
+        assert_eq!(
+            received_baby(Some(false), None).unwrap(),
+            ("unsupported", None)
+        );
+        assert_eq!(received_baby(Some(true), None).unwrap(), ("missing", None));
+        assert_eq!(
+            received_baby(Some(true), Some(&Metadata::Bool(false))).unwrap(),
+            ("received", Some(false))
+        );
+        assert_eq!(
+            received_baby(Some(true), Some(&Metadata::Bool(true))).unwrap(),
+            ("received", Some(true))
+        );
+        assert!(received_baby(Some(true), Some(&Metadata::Float(1.0))).is_err());
     }
 }

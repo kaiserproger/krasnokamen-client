@@ -286,6 +286,12 @@ impl Session {
             handled = true;
         }
         if let Some(ui) = &mut self.ui {
+            // A dialog takes the current screen as its return screen (vanilla
+            // `previousScreen`), so screen changes of earlier packets in this batch
+            // (a container close runs `setScreen(null)`) must land first.
+            if matches!(id, cb::CLEAR_DIALOG | cb::SHOW_DIALOG) {
+                ui.synchronize(&self.inventory, content)?;
+            }
             if ui.apply(id, &mut Reader::new(r.bytes), content)? {
                 handled = true;
             }
@@ -301,6 +307,18 @@ impl Session {
             return Ok(());
         }
         match id {
+            // 26.3 set_default_spawn_position: LevelData.RespawnData = GlobalPos + yaw/pitch.
+            cb::SET_DEFAULT_SPAWN_POSITION => {
+                let dimension = r.string(32767)?;
+                let pos = protocol::unpack_pos(r.i64()?);
+                let yaw = r.f32()?;
+                let pitch = r.f32()?;
+                r.done()?;
+                if !yaw.is_finite() || !pitch.is_finite() {
+                    return Err("nonfinite default spawn rotation".into());
+                }
+                self.item_spawn = Some(crate::ui::item_dynamic::GlobalPos { dimension, pos });
+            }
             cb::BUNDLE_DELIMITER | cb::CHUNK_BATCH_START | cb::KEEP_ALIVE => {}
             cb::PING => { r.i32()?; r.done()?; } // Pong is sent immediately by the socket owner.
             cb::DISCONNECT => return Err(format!("Play disconnect: {}", r.nbt()?)),
@@ -569,6 +587,9 @@ impl Session {
                 self.received_chunks.clear();
                 self.received_blocks.clear();
                 self.dimension = None;
+                self.item_spawn = None;
+                self.item_death = None;
+                self.item_needles = Arc::default();
                 if let Some(ui) = &mut self.ui {
                     ui.clear_session();
                 }
@@ -622,7 +643,7 @@ impl Session {
             // predictions already emit unsupported_local_particle_presentation).
             cb::ANIMATE | cb::AWARD_STATS | cb::BOSS_EVENT | cb::CHANGE_DIFFICULTY | cb::CHUNKS_BIOMES | cb::CLEAR_TITLES | cb::COMMAND_SUGGESTIONS | cb::COMMANDS | cb::CUSTOM_CHAT_COMPLETIONS | cb::DEBUG_BLOCK_VALUE | cb::DEBUG_CHUNK_VALUE | cb::DEBUG_ENTITY_VALUE | cb::DEBUG_EVENT | cb::DEBUG_SAMPLE | cb::DELETE_CHAT | cb::DISGUISED_CHAT | cb::ENTITY_EVENT
             | cb::INITIALIZE_BORDER | cb::PLAYER_LOOK_AT | cb::RESET_SCORE | cb::ROTATE_HEAD | cb::SELECT_ADVANCEMENTS_TAB | cb::SERVER_DATA | cb::SET_ACTION_BAR_TEXT | cb::SET_BORDER_CENTER | cb::SET_BORDER_LERP_SIZE | cb::SET_BORDER_SIZE | cb::SET_BORDER_WARNING_DELAY | cb::SET_BORDER_WARNING_DISTANCE | cb::SET_CHUNK_CACHE_CENTER
-            | cb::SET_DEFAULT_SPAWN_POSITION | cb::SET_DISPLAY_OBJECTIVE | cb::SET_ENTITY_DATA | cb::SET_ENTITY_LINK | cb::SET_EQUIPMENT | cb::SET_OBJECTIVE | cb::SET_PLAYER_TEAM | cb::SET_SCORE | cb::SET_SIMULATION_DISTANCE | cb::SET_SUBTITLE_TEXT | cb::SET_TITLE_TEXT | cb::SET_TITLES_ANIMATION | cb::SYSTEM_CHAT
+            | cb::SET_DISPLAY_OBJECTIVE | cb::SET_ENTITY_DATA | cb::SET_ENTITY_LINK | cb::SET_EQUIPMENT | cb::SET_OBJECTIVE | cb::SET_PLAYER_TEAM | cb::SET_SCORE | cb::SET_SIMULATION_DISTANCE | cb::SET_SUBTITLE_TEXT | cb::SET_TITLE_TEXT | cb::SET_TITLES_ANIMATION | cb::SYSTEM_CHAT
             | cb::TAB_LIST | cb::TAG_QUERY | cb::TELEPORT_ENTITY | cb::TEST_INSTANCE_BLOCK_STATUS | cb::UPDATE_ADVANCEMENTS | cb::PROJECTILE_POWER | cb::CUSTOM_REPORT_DETAILS | cb::SERVER_LINKS | cb::WAYPOINT | cb::CLEAR_DIALOG | cb::SHOW_DIALOG | cb::ADD_TRANSIENT_BLOCK | cb::GAME_RULE_VALUES | cb::LEVEL_PARTICLES | cb::LOW_DISK_SPACE_WARNING | cb::OPEN_BOOK | cb::PONG_RESPONSE | cb::PLAYER_COMBAT_END | cb::PLAYER_COMBAT_ENTER | cb::RESOURCE_PACK_POP | cb::POST_EFFECTS | cb::SWING_ANIMATION => {
                 *self.ignored_presentation.entry(id).or_default() += 1;
             }
@@ -638,12 +659,18 @@ impl Session {
         r.var()?;
         r.bool()?;
         let flat = r.bool()?;
-        if r.bool()? {
-            r.string(32767)?;
-            r.i64()?;
-        }
+        let death = if r.bool()? {
+            Some(crate::ui::item_dynamic::GlobalPos {
+                dimension: r.string(32767)?,
+                pos: protocol::unpack_pos(r.i64()?),
+            })
+        } else {
+            None
+        };
         r.var()?;
         let sea_level = r.var()?;
+        self.item_death = death;
+        self.item_needles = Arc::default();
         self.loader.clear_view(self.ui.as_mut())?;
         let content = self.content.as_ref().ok_or("content unavailable")?;
         let data = content.registry_entry("minecraft:dimension_type", holder)?;
@@ -900,6 +927,25 @@ mod tests {
         let diagnostic = "Play packet 0x01 sequence 8: malformed data: {\"text\":\"do not strip\"}";
         ui.show_disconnected(diagnostic.into());
         assert_eq!(ui.title_error_text().as_deref(), Some(diagnostic));
+    }
+
+    #[test]
+    fn default_spawn_packet_retains_dimension_and_position_atomically() {
+        let mut session = Session::new_mode("compass-spawn-test".into(), false);
+        session.content = Some(Content::test_cube());
+        let mut writer = Writer::default();
+        writer.string("minecraft:the_nether");
+        writer.i64(protocol::pack_pos([-31, 70, 42]));
+        writer.f32(10.);
+        writer.f32(20.);
+        session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &writer.0).unwrap();
+        let spawn = session.item_spawn.as_ref().unwrap();
+        assert_eq!(spawn.dimension, "minecraft:the_nether");
+        assert_eq!(spawn.pos, [-31, 70, 42]);
+        let mut malformed = writer.0;
+        malformed.push(0);
+        assert!(session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &malformed).is_err());
+        assert_eq!(session.item_spawn.as_ref().unwrap().pos, [-31, 70, 42]);
     }
 
     fn session_with_received_cube(position: [i32; 3]) -> Session {
@@ -1194,6 +1240,23 @@ mod tests {
         session.reconcile_ack(7).unwrap();
         assert_eq!(session.world.block(position), Some(0));
     }
+
+    #[test]
+    fn comparator_mode_prediction_rolls_back_on_no_change_ack() {
+        let position = [4, 4, 4];
+        let mut session = session_with_received_cube(position);
+        let content = session.content.as_mut().unwrap();
+        content.configure_test_comparator();
+        content.insert_test_placement_metadata(1, json!({"block_entity_type": null}));
+        session.predicted_blocks.insert(position, PredictedBlock { received: 1, sequence: 7, block_entity: None });
+        session.world.set(position, 2, |state| Ok(state == 0)).unwrap();
+        session.reconcile_ack(6).unwrap();
+        assert_eq!(session.world.block(position), Some(2));
+        session.reconcile_ack(7).unwrap();
+        assert_eq!(session.world.block(position), Some(1));
+        assert!(session.predicted_blocks.is_empty());
+    }
+
     fn destruction_bytes(breaker: i32, position: [i32; 3], stage: u8) -> Vec<u8> {
         let mut w = Writer::default();
         w.var(breaker);
@@ -1270,6 +1333,48 @@ mod tests {
         writer.i64(protocol::pack_pos(position));
         writer.var(i32::from(front));
         writer.0
+    }
+
+    fn notice_dialog_bytes(title: &str) -> Vec<u8> {
+        use crate::protocol::nbt::Nbt;
+        let dialog = Nbt::Compound(vec![
+            ("type".into(), Nbt::String("minecraft:notice".into())),
+            ("title".into(), Nbt::String(title.into())),
+            ("pause".into(), Nbt::Byte(0)),
+        ]);
+        let mut writer = Writer::default();
+        writer.var(0);
+        dialog.write_root(&mut writer).unwrap();
+        writer.0
+    }
+
+    /// A settlement menu's Back icon: the server closes the menu and shows a dialog
+    /// in one batch. Vanilla's container close runs `setScreen(null)` before the
+    /// dialog takes the current screen as its previous one, so it returns to play.
+    #[test]
+    fn container_close_then_dialog_in_one_batch_returns_to_the_game() {
+        let mut session = sign_session([-1, 3, -1], "minecraft:sign");
+        session.inventory.screen_open = true;
+        session.inventory.screen_instance += 1;
+        session
+            .ui
+            .as_mut()
+            .unwrap()
+            .synchronize(&session.inventory, session.content.as_ref().unwrap())
+            .unwrap();
+        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Menu);
+        let mut close = Writer::default();
+        close.var(0);
+        session.apply(Phase::Play, cb::CONTAINER_CLOSE, &close.0).unwrap();
+        session
+            .apply(Phase::Play, cb::SHOW_DIALOG, &notice_dialog_bytes("Settlement"))
+            .unwrap();
+        assert_eq!(
+            session.ui.as_ref().unwrap().screen(),
+            crate::ui::Screen::ServerDialog
+        );
+        session.apply(Phase::Play, cb::CLEAR_DIALOG, &[]).unwrap();
+        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Game);
     }
 
     #[test]
@@ -1765,7 +1870,6 @@ mod tests {
             assert_eq!(entity.animation.progress, 0.);
             assert_eq!(entity.animation.source.gateway_age, 0);
             assert_eq!(entity.animation.source.spawn_delay, 20);
-            assert_eq!(entity.animation.signals.comparator_output, 0);
             assert!(!entity.animation.signals.test_powered);
             if kind == "minecraft:structure_block" {
                 assert_eq!(entity.data["showboundingbox"], true);
