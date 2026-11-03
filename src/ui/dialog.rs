@@ -14,6 +14,7 @@
 //! * `after_action` close/none/wait_for_response, Escape runs `on_cancel` (notice: its button,
 //!   confirmation: `no`, multi_action: `exit_action`) and closes only if `can_close_with_escape`;
 //! * a new dialog replaces the shown one and keeps the original screen to return to.
+//!
 //! Not implemented (vanilla extras): the "custom screen" warning button, button tooltips and
 //! title hover tooltips.
 use crate::protocol::packet_ids::play::clientbound as cb;

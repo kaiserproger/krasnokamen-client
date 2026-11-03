@@ -1055,15 +1055,15 @@ impl Session {
             self.fail(error);
         }
         self.camera();
-        if let Some(audio) = &self.audio {
-            if let Err(error) = audio.listener(
+        if let Some(audio) = &self.audio
+            && let Err(error) = audio.listener(
                 self.scene.camera_position,
                 self.player.position,
                 self.player.yaw,
                 self.player.pitch,
-            ) {
-                self.event(json!({"type":"audio_listener_error","error":error}));
-            }
+            )
+        {
+            self.event(json!({"type":"audio_listener_error","error":error}));
         }
         changed = true;
         changed

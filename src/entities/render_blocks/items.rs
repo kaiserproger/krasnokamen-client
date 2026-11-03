@@ -205,28 +205,3 @@ pub(super) fn display(
     Ok(BlockRenderStatus::Rendered)
 }
 
-pub(super) fn append(
-    e: &BlockEntity,
-    m: &Models,
-    c: &Content,
-    f: &mut BlockFrame,
-    root: Mat4,
-    out: &mut DynamicGeometry,
-) -> Result<BlockRenderStatus> {
-    match e.type_name.as_str() {
-        "minecraft:campfire" => campfire(e, c, root, f.light, f.item, out)
-            .map(|()| BlockRenderStatus::Rendered),
-        "minecraft:brushable_block" | "minecraft:shelf" => display(
-            e,
-            c,
-            &mut DisplayFrame { light: f.light, sample_light: f.sample_light, item: f.item },
-            root,
-            out,
-        ),
-        "minecraft:vault" => vault(e, root, f.light, f.partial, f.item, out),
-        "minecraft:mob_spawner" | "minecraft:trial_spawner" => {
-            spawner(e, m, c, root, f.light, f.partial, f.entity, out)
-        }
-        _ => unreachable!(),
-    }
-}

@@ -1298,6 +1298,8 @@ pub(super) fn evaluate_rig(
         }
     }
 }
+// Rig emission passes the independent material and lighting inputs directly.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_rig(
     rig: &Rig,
     transforms: &[Mat4],

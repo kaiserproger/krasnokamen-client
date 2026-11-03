@@ -34,13 +34,13 @@ and `.analysis/parity-polish/clippy-summary.json`.
 RC4 comparison (2026-11-03): clean RC3 `b73105c` with debug workspace
 `cargo clippy --workspace --all-targets --message-format=json -- -D warnings`
 reported 863 coded error occurrences across library and library-test targets.
-After addressing the unmatched candidate occurrences, the candidate stopped at
-its library with 382 coded errors. Comparison by lint, file, nearest preceding
-item and message found zero unmatched keys and no candidate key with more
-occurrences than the combined baseline targets. This heuristic does not prove
-changed code has no inherited lint, and strict Clippy remains failing.
-The full lists and method are in `.analysis/rc4-client-release/clippy-final-comparison.json`;
-raw runs are `artifact://284` and `artifact://694`.
+The updated candidate stops at its library with 368 errors (raw run
+`artifact://776`). Comparing each primary span with added lines in
+`git diff --unified=0 b73105c` finds zero overlapping diagnostics. This does not
+cover library-test diagnostics, because compilation stops at the library.
+Strict Clippy remains failing; the changed-line result does not quarantine or
+resolve the remaining debt. Detailed classification is retained at
+`.analysis/rc4-client-release/clippy-changed-spans.json`.
 
 ## CLIENT-TEST-001 — historical graphics-preset assertion (superseded)
 

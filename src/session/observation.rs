@@ -932,24 +932,23 @@ impl Session {
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
                     && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
+                    && let Some(light) = sample_light(self.player.eye_position())?
                 {
-                    if let Some(light) = sample_light(self.player.eye_position())? {
-                        let result = self.player.append_first_person(
-                            content,
-                            &self.inventory,
-                            &mut self.entities,
-                            &mut self.scene,
-                            self.presentation_partial,
-                            light,
-                            &item_context,
-                            self.ui.as_ref(),
+                    let result = self.player.append_first_person(
+                        content,
+                        &self.inventory,
+                        &mut self.entities,
+                        &mut self.scene,
+                        self.presentation_partial,
+                        light,
+                        &item_context,
+                        self.ui.as_ref(),
+                    );
+                    if let Err(reason) = result {
+                        self.scene.entity_presentation.unrendered.insert(
+                            "local:first_person".into(),
+                            reason,
                         );
-                        if let Err(reason) = result {
-                            self.scene.entity_presentation.unrendered.insert(
-                                "local:first_person".into(),
-                                reason,
-                            );
-                        }
                     }
                 }
             }

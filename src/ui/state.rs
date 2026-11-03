@@ -3735,29 +3735,29 @@ impl UiState {
                     } else {
                         &inventory.menu().slots
                     };
-                    if let Some(Some(s)) = slots.get(*index) {
-                        if !s.empty() {
-                            let model = self.models.icon_model(content, s, &self.item_context);
-                            let icon = [x + 1., y + 1., w - 2., h - 2.];
-                            append_stack_item(content, s, model, icon, transform, p.out)?;
-                            if s.count > 1 {
-                                let layout = self
-                                    .text
-                                    .layout(&json!({"text":s.count.to_string(),"shadow_color":0xff3f3f3fu32}), 24.)?;
-                                self.text.append_layout(
-                                    content,
-                                    &layout,
-                                    transform
-                                        * Mat4::from_translation(Vec3::new(
-                                            icon[0] + 17. - layout.width,
-                                            icon[1] + 9.,
-                                            0.,
-                                        )),
-                                    0xffffffff,
-                                    None,
-                                    p.out,
-                                )?;
-                            }
+                    if let Some(Some(s)) = slots.get(*index)
+                        && !s.empty()
+                    {
+                        let model = self.models.icon_model(content, s, &self.item_context);
+                        let icon = [x + 1., y + 1., w - 2., h - 2.];
+                        append_stack_item(content, s, model, icon, transform, p.out)?;
+                        if s.count > 1 {
+                            let layout = self
+                                .text
+                                .layout(&json!({"text":s.count.to_string(),"shadow_color":0xff3f3f3fu32}), 24.)?;
+                            self.text.append_layout(
+                                content,
+                                &layout,
+                                transform
+                                    * Mat4::from_translation(Vec3::new(
+                                        icon[0] + 17. - layout.width,
+                                        icon[1] + 9.,
+                                        0.,
+                                    )),
+                                0xffffffff,
+                                None,
+                                p.out,
+                            )?;
                         }
                     }
                 }
