@@ -461,18 +461,16 @@ impl Renderer {
                 self.stats.terrain_upload_bytes += old.mesh.bytes();
                 self.stats.terrain_uploaded_chunks += 1;
             }
-            if self.mesh_revision == Some(scene.revision) {
-                if let Some(mesh) = &self.fixture {
-                    let packed = packed::pack_vertices(&scene.vertices, &mut self.tiles)?;
-                    mesh.upload_geometry(
-                        &self.queue,
-                        &self.vertex_arena,
-                        &self.index_arena,
-                        &packed,
-                        [&scene.indices, &[], &[]],
-                    );
-                    self.stats.terrain_upload_bytes += mesh.bytes();
-                }
+            if self.mesh_revision == Some(scene.revision) && let Some(mesh) = &self.fixture {
+                let packed = packed::pack_vertices(&scene.vertices, &mut self.tiles)?;
+                mesh.upload_geometry(
+                    &self.queue,
+                    &self.vertex_arena,
+                    &self.index_arena,
+                    &packed,
+                    [&scene.indices, &[], &[]],
+                );
+                self.stats.terrain_upload_bytes += mesh.bytes();
             }
         }
         let mut removed = false;
@@ -647,10 +645,10 @@ impl Renderer {
         }
         self.mesh_revision = Some(scene.revision);
         self.staged_chunks = staged;
-        if scene.vertices.is_empty() && scene.indices.is_empty() {
-            if let Some(mesh) = self.fixture.take() {
-                mesh.retire(&mut self.vertex_arena, &mut self.index_arena, self.frame_id);
-            }
+        if scene.vertices.is_empty() && scene.indices.is_empty()
+            && let Some(mesh) = self.fixture.take()
+        {
+            mesh.retire(&mut self.vertex_arena, &mut self.index_arena, self.frame_id);
         }
         Ok(())
     }

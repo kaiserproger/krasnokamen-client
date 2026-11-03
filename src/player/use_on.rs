@@ -15,6 +15,18 @@ mod sounds;
 mod survival;
 
 pub(crate) use entity_use::EntityUseState;
+
+pub(super) struct AirUse<'a> {
+    pub hand: u8,
+    pub target: Option<&'a Hit>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct BlockUse<'a> {
+    pub hit: &'a BlockHit,
+    pub hand: u8,
+}
+
 #[derive(Clone, Debug)]
 pub enum UiTrigger {
     ItemUsed { hand: u8 },

@@ -603,12 +603,11 @@ mod tests {
             store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1).unwrap();
         }
         let mut out = crate::api::DynamicGeometry::default();
-        let stats = store.append_geometry(&content, [4.,4.,3.], [4.,5.,0.], [0.;2], 32.,
-            1, 0., 0, None, &|point| {
-                // A painting's segment cells are available, but not its generic eye sample.
-                Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
-                    .then_some([15.;2]))
-            }, &|_| None, &mut out).unwrap();
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [4.,4.,3.], camera: [4.,5.,0.], camera_rotation: [0.;2], radius: 32., tick: 1, partial: 0., game_time: 0, clock_environment: None, light: &|point| {
+            // A painting's segment cells are available, but not its generic eye sample.
+            Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
+                .then_some([15.;2]))
+        }, bed_direction: &|_| None }, &mut out).unwrap();
         assert_eq!(stats.submitted, 1, "{kind}: {:?}", stats.unrendered);
         assert!(!out.vertices.is_empty(), "{kind}");
         out

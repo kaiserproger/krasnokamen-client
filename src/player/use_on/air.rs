@@ -33,14 +33,14 @@ impl Player {
 
     pub(in crate::player) fn air_result(
         &mut self,
-        hand: u8,
-        target: Option<&Hit>,
+        action: AirUse<'_>,
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
     ) -> Result<Outcome> {
+        let AirUse { hand, target } = action;
         let Some(item) =
             super::super::interaction::held(inventory, hand).filter(|item| !item.empty())
         else {
@@ -482,7 +482,7 @@ mod p1_helmet_tests {
         inventory.player.slots[36] = Some(stack);
         let mut player = Player::new();
         player.position = [12.5, 64., -8.25];
-        let result = player.air_result(0, None, &World::new(0, 16), &content,
+        let result = player.air_result(AirUse { hand: 0, target: None }, &World::new(0, 16), &content,
             &inventory, &EntityStore::new(), 9).unwrap();
         assert_eq!(result, Outcome::CONSUME);
         assert!(player.using.is_some());
@@ -558,7 +558,7 @@ mod p1_helmet_tests {
             let mut player = Player::new();
             assert_eq!(
                 player
-                    .air_result(0, None, &world, &content, &inventory, &entities, 0)
+                    .air_result(AirUse { hand: 0, target: None }, &world, &content, &inventory, &entities, 0)
                     .unwrap(),
                 expected,
             );
@@ -595,7 +595,7 @@ mod p1_helmet_tests {
                     }
                     assert_eq!(
                         player
-                            .air_result(hand, None, &world, &content, &inventory, &entities, 0)
+                            .air_result(AirUse { hand, target: None }, &world, &content, &inventory, &entities, 0)
                             .unwrap(),
                         Outcome::CLIENT,
                     );
@@ -657,10 +657,7 @@ mod p1_helmet_tests {
                 .execute(
                     InteractionIntent::Use { hand },
                     &context,
-                    &world,
-                    &content,
-                    &inventory,
-                    &entities,
+                    InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities },
                     0,
                     &mut packets,
                 )

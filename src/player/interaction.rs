@@ -237,13 +237,11 @@ impl Player {
         &mut self,
         intent: InteractionIntent,
         context: &InteractionContext,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         if matches!(intent, InteractionIntent::ReleaseAll) {
             return self.release_all(out);
         }
@@ -263,21 +261,17 @@ impl Player {
         if !same_hit(context.target.as_ref(), target.as_ref()) {
             return Err("stale_interaction_target".into());
         }
-        self.perform(
-            intent, target, world, content, inventory, entities, tick, out,
-        )
+        self.perform(intent, target, resources, tick, out)
     }
     fn perform(
         &mut self,
         intent: InteractionIntent,
         target: Option<Hit>,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         match intent {
             InteractionIntent::Attack => {
                 self.attack(target, world, content, inventory, entities, tick, out)
@@ -286,7 +280,7 @@ impl Player {
                 if hand > 1 {
                     return Err("invalid_hand".into());
                 }
-                self.use_target(target, hand, world, content, inventory, entities, tick, out)
+                self.use_target(target, hand, resources, tick, out)
             }
             InteractionIntent::Pick { include_data } => {
                 if include_data && self.game_mode != 1 {
@@ -360,14 +354,12 @@ impl Player {
     }
     pub(super) fn interaction_tick(
         &mut self,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         input: HeldInput,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         if self.break_delay > 0 {
             self.break_delay -= 1;
         }
@@ -396,10 +388,7 @@ impl Player {
             self.perform(
                 InteractionIntent::SwapHands,
                 None,
-                world,
-                content,
-                inventory,
-                entities,
+                resources,
                 tick,
                 out,
             )?;
@@ -408,10 +397,7 @@ impl Player {
             self.perform(
                 InteractionIntent::Drop { whole_stack: false },
                 None,
-                world,
-                content,
-                inventory,
-                entities,
+                resources,
                 tick,
                 out,
             )?;
@@ -423,10 +409,7 @@ impl Player {
                     include_data: false,
                 },
                 target,
-                world,
-                content,
-                inventory,
-                entities,
+                resources,
                 tick,
                 out,
             )?;
@@ -452,7 +435,7 @@ impl Player {
         if input.use_item && self.use_delay == 0 {
             let target = self.raycast(world, content, entities, tick)?;
             let hand = u8::from(input.offhand);
-            self.use_target(target, hand, world, content, inventory, entities, tick, out)?;
+            self.use_target(target, hand, resources, tick, out)?;
             self.use_delay = 4;
         }
         Ok(())
@@ -854,13 +837,11 @@ impl Player {
         &mut self,
         hit: &BlockHit,
         hand: u8,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<super::use_on::Outcome> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         if hand > 1 {
             return Err("invalid_hand".into());
         }
@@ -883,7 +864,7 @@ impl Player {
         let owner = item_id.and_then(|id| content.item_use_owner(id, true).ok())
             .unwrap_or("block interaction");
         let result = self.local_prediction(item_id, owner, |player| {
-            player.use_block_result(hit, hand, world, content, inventory, entities, tick)
+            player.use_block_result(super::use_on::BlockUse { hit, hand }, world, content, inventory, entities, tick)
         }).unwrap_or(super::use_on::Outcome::ServerAuthoritative);
         self.last_interaction_result = Some(result.java_result());
         Ok(result)
@@ -895,15 +876,12 @@ impl Player {
         &mut self,
         hit: &BlockHit,
         hand: u8,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<&'static str> {
         let result =
-            self.use_block_on(hit, hand, world, content, inventory, entities, tick, out)?;
+            self.use_block_on(hit, hand, resources, tick, out)?;
         if result != super::use_on::Outcome::ServerAuthoritative {
             self.swing(hand, out);
             self.visual.use_bump();
@@ -915,13 +893,11 @@ impl Player {
         &mut self,
         target: Option<Hit>,
         first_hand: u8,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         use super::use_on::{Outcome, UiTrigger, UsePrediction};
         self.last_interaction_result = None;
         if self.using.is_some()
@@ -935,14 +911,13 @@ impl Player {
         self.use_delay = 4;
         for hand in first_hand..=1 {
             let item = held(inventory, hand).filter(|item| !item.empty());
-            if let Some(item) = item {
-                if !content
+            if let Some(item) = item
+                && !content
                     .item_required_features(item.id)?
                     .iter()
                     .all(|feature| self.enabled_features.contains(feature))
-                {
-                    return Ok(());
-                }
+            {
+                return Ok(());
             }
             let result = match &target {
                 Some(Hit::Entity { handle, point, .. }) => {
@@ -974,7 +949,7 @@ impl Player {
                     }
                 }
                 Some(Hit::Block(hit)) => {
-                    self.use_block_on(hit, hand, world, content, inventory, entities, tick, out)?
+                    self.use_block_on(hit, hand, resources, tick, out)?
                 }
                 None => Outcome::Pass,
             };
@@ -1034,7 +1009,7 @@ impl Player {
                         Ok(Outcome::Pass)
                     } else {
                         player.air_result(
-                            hand, target.as_ref(), world, content, inventory, entities, tick,
+                            super::use_on::AirUse { hand, target: target.as_ref() }, world, content, inventory, entities, tick,
                         )
                     }
                 }).unwrap_or(Outcome::ServerAuthoritative);
@@ -1249,7 +1224,7 @@ mod tests {
             duration: 32, remaining: 4, crossbow_charge_ticks: 0., crossbow_components: None,
             movement_factor: 1., can_sprint: true });
         let mut packets = Vec::new();
-        player.tick(&world, &content, &inventory, &entities,
+        player.tick(InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities },
             &BTreeSet::from(["use".into()]), 1, &mut packets).unwrap();
         assert!(packets.iter().any(|packet| packet.id == sb::CLIENT_TICK_END));
         assert!(packets.iter().any(|packet|
@@ -1290,8 +1265,7 @@ mod tests {
         ]));
         inventory.player.slots[6] = Some(elytra);
         let mut packets = Vec::new();
-        player.perform(InteractionIntent::StartGliding, None, &world, &content,
-            &inventory, &entities, 0, &mut packets).unwrap();
+        player.perform(InteractionIntent::StartGliding, None, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut packets).unwrap();
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].id, sb::PLAYER_COMMAND);
         assert_eq!(packets[0].payload.0, [0, 6, 0]);
@@ -1336,7 +1310,7 @@ mod tests {
     fn disconnects_bone_meal_real_dispatch_is_server_authoritative() {
         let (mut player, world, content, inventory, entities, hit) =
             disconnects_item_fixture("BoneMealItem");
-        let result = player.use_block_on(&hit, 0, &world, &content, &inventory, &entities, 0, &mut Vec::new()).unwrap();
+        let result = player.use_block_on(&hit, 0, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut Vec::new()).unwrap();
         assert_eq!(result, super::super::use_on::Outcome::CLIENT);
         assert!(player.take_use_prediction().is_none());
         assert_eq!(inventory.player.slots[36].as_ref().unwrap().count, 3);
@@ -1348,8 +1322,7 @@ mod tests {
             disconnects_item_fixture("UnmappedItem");
         let mut packets = Vec::new();
         for _ in 0..2 {
-            player.minecraft_use_item_on(&hit, 0, &world, &content, &inventory, &entities,
-                0, &mut packets).unwrap();
+            player.minecraft_use_item_on(&hit, 0, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut packets).unwrap();
         }
         assert_eq!(packets.iter().filter(|packet| packet.id == sb::USE_ITEM_ON).count(), 2);
         assert!(player.take_use_prediction().is_none());
@@ -1362,8 +1335,7 @@ mod tests {
         let (mut player, world, content, inventory, entities, hit) =
             disconnects_item_fixture("UnmappedItem");
         let mut packets = Vec::new();
-        player.use_target(Some(Hit::Block(hit)), 0, &world, &content, &inventory,
-            &entities, 0, &mut packets).unwrap();
+        player.use_target(Some(Hit::Block(hit)), 0, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut packets).unwrap();
         assert_eq!(packets.iter().filter(|packet| packet.id == sb::USE_ITEM_ON).count(), 2);
         assert_eq!(packets.iter().filter(|packet| packet.id == sb::USE_ITEM).count(), 1);
     }
@@ -1373,8 +1345,7 @@ mod tests {
             disconnects_item_fixture(owner);
         content.item_names.insert(1, item.into());
         hit.face = face;
-        let result = player.use_block_on(&hit, 0, &world, &content, &inventory, &entities,
-            0, &mut Vec::new()).unwrap();
+        let result = player.use_block_on(&hit, 0, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut Vec::new()).unwrap();
         assert_eq!(result, super::super::use_on::Outcome::Fail, "{owner}");
         assert!(player.local_prediction_warnings.is_empty(), "{owner}");
     }
@@ -1393,8 +1364,7 @@ mod tests {
             let (mut player, world, content, inventory, entities, hit) =
                 disconnects_item_fixture(owner);
             let mut packets = Vec::new();
-            let result = player.minecraft_use_item_on(&hit, 0, &world, &content,
-                &inventory, &entities, 0, &mut packets).unwrap();
+            let result = player.minecraft_use_item_on(&hit, 0, InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities }, 0, &mut packets).unwrap();
             assert_eq!(result, "ServerAuthoritative[]", "{owner}");
             assert_eq!(packets.len(), 1, "{owner}");
             assert_eq!(packets[0].id, sb::USE_ITEM_ON, "{owner}");

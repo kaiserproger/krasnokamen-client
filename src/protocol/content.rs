@@ -712,19 +712,17 @@ impl ResourceSource {
             }
         }
         for name in self.indexed.keys().chain(self.loader.keys()) {
-            if let Some(rest) = name.strip_prefix("assets/") {
-                if let Some((ns, path)) = rest.split_once('/') {
-                    if let Some(path) = path
-                        .strip_prefix(kind)
-                        .and_then(|path| path.strip_prefix('/'))
-                        .and_then(|path| path.strip_suffix(extension))
-                        .and_then(|path| path.strip_suffix('.'))
-                    {
-                        out.insert(normalize_id(&format!("{ns}:{path}"))?);
-                        if out.len() > self.limits.max_resources {
-                            return Err("resource count bound".into());
-                        }
-                    }
+            if let Some(rest) = name.strip_prefix("assets/")
+                && let Some((ns, path)) = rest.split_once('/')
+                && let Some(path) = path
+                    .strip_prefix(kind)
+                    .and_then(|path| path.strip_prefix('/'))
+                    .and_then(|path| path.strip_suffix(extension))
+                    .and_then(|path| path.strip_suffix('.'))
+            {
+                out.insert(normalize_id(&format!("{ns}:{path}"))?);
+                if out.len() > self.limits.max_resources {
+                    return Err("resource count bound".into());
                 }
             }
         }

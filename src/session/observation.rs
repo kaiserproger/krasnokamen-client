@@ -816,32 +816,19 @@ impl Session {
                         .map(|(sky, block)| [f32::from(sky), f32::from(block)]))
                 };
                 let item_time_at = |point| self.environment.item_time_attributes(world, point);
-                self.scene.entity_presentation = self.entities.append_geometry(
-                    content,
-                    self.scene.origin,
-                    self.scene.camera_position,
-                    [self.scene.yaw, self.scene.pitch],
-                    self.render_distance as f32 * 16.,
-                    self.client_tick,
-                    self.presentation_partial,
-                    self.environment.game_time(),
-                    Some((&item_context, &item_time_at)),
-                    &sample_light,
-                    &|position| {
-                        let state = world.block(position)?;
-                        if !content.name(state)?.ends_with("_bed") {
-                            return None;
-                        }
-                        match content.state_properties(state)?.get("facing")?.as_str() {
-                            "north" => Some([0, -1]),
-                            "south" => Some([0, 1]),
-                            "west" => Some([-1, 0]),
-                            "east" => Some([1, 0]),
-                            _ => None,
-                        }
-                    },
-                    &mut self.scene.dynamic,
-                )?;
+                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.client_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), light: &sample_light, bed_direction: &|position| {
+                    let state = world.block(position)?;
+                    if !content.name(state)?.ends_with("_bed") {
+                        return None;
+                    }
+                    match content.state_properties(state)?.get("facing")?.as_str() {
+                        "north" => Some([0, -1]),
+                        "south" => Some([0, 1]),
+                        "west" => Some([-1, 0]),
+                        "east" => Some([1, 0]),
+                        _ => None,
+                    }
+                } }, &mut self.scene.dynamic)?;
                 self.entities.append_shadow_geometry(
                     content,
                     world,
@@ -854,18 +841,20 @@ impl Session {
                 let entity_indices = self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>();
                 self.scene.entity_presentation.entity_indices = entity_indices;
                 let blocks = self.entities.append_static_block_geometry(
-                    content,
-                    world,
-                    self.scene.origin,
-                    self.scene.camera_position,
-                    [self.scene.yaw, self.scene.pitch],
-                    self.render_distance as f32 * 16.,
-                    self.player.is_scoping(content),
-                    // Match the filtering preference sent by client_information.
-                    false,
-                    self.environment.game_time(),
-                    self.presentation_partial,
-                    &sample_light,
+                    crate::entities::StaticBlockSceneFrame {
+                        content,
+                        world,
+                        origin: self.scene.origin,
+                        camera: self.scene.camera_position,
+                        camera_rotation: [self.scene.yaw, self.scene.pitch],
+                        radius: self.render_distance as f32 * 16.,
+                        scoping: self.player.is_scoping(content),
+                        // Match the filtering preference sent by client_information.
+                        text_filtering: false,
+                        game_time: self.environment.game_time(),
+                        partial: self.presentation_partial,
+                        sample_light: &sample_light,
+                    },
                     &mut self.scene.dynamic,
                 )?;
                 self.scene.portal_sprites = portal_sprites(content, &self.scene.dynamic)?;
@@ -934,16 +923,7 @@ impl Session {
                     && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
                     && let Some(light) = sample_light(self.player.eye_position())?
                 {
-                    let result = self.player.append_first_person(
-                        content,
-                        &self.inventory,
-                        &mut self.entities,
-                        &mut self.scene,
-                        self.presentation_partial,
-                        light,
-                        &item_context,
-                        self.ui.as_ref(),
-                    );
+                    let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.presentation_partial, light, item_context: &item_context, ui: self.ui.as_ref() });
                     if let Err(reason) = result {
                         self.scene.entity_presentation.unrendered.insert(
                             "local:first_person".into(),

@@ -301,10 +301,7 @@ impl Session {
         self.player.execute(
             intent,
             &context,
-            &self.world,
-            content,
-            &self.inventory,
-            &self.entities,
+            crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
             self.client_tick,
             &mut self.commands,
         )?;
@@ -369,10 +366,7 @@ impl Session {
         let result = self.player.minecraft_use_item_on(
             &hit,
             hand,
-            &self.world,
-            content,
-            &self.inventory,
-            &self.entities,
+            crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
             self.client_tick,
             &mut self.commands,
         )?;

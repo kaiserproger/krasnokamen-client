@@ -6,20 +6,24 @@ use crate::{
 };
 use glam::Mat4;
 
+pub(super) struct Pose {
+    pub tick: u64,
+    pub partial: f32,
+    pub root: Mat4,
+}
+
 /// Append the visible drowned clothing after its body. The caller handles invisibility.
 /// `transforms` is scratch space and is replaced with the clothing rig's transforms.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn append_drowned_outer(
     models: &Models,
     content: &Content,
     entity: &Entity,
-    tick: u64,
-    partial: f32,
-    root: Mat4,
+    pose: Pose,
     transforms: &mut Vec<Mat4>,
     light: [f32; 2],
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    let Pose { tick, partial, root } = pose;
     let (key, texture) = if p::boolean(models, entity, "DATA_BABY_ID") {
         ("minecraft:drowned_outer_baby#main", "entity/zombie/drowned_outer_layer_baby")
     } else {
@@ -31,16 +35,7 @@ pub(super) fn append_drowned_outer(
     let texture = p::texture(content, texture)?;
     let rig = models.rig(key);
     p::evaluate_rig(rig, entity, models, tick, partial, root, transforms);
-    p::emit_rig(
-        rig,
-        transforms,
-        texture,
-        [1.; 3],
-        EntityMaterial::EntityTranslucent,
-        1.,
-        light,
-        out,
-    )
+    p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)
 }
 
 #[cfg(test)]
@@ -99,8 +94,9 @@ mod tests {
     fn missing_clothing_texture_is_an_error() {
         let (models, entity, _) = fixture();
         let mut out = DynamicGeometry::default();
-        let error = append_drowned_outer(&models, &Content::test_cube(), &entity, 0, 0.,
-            Mat4::IDENTITY, &mut Vec::new(), [0.; 2], &mut out).unwrap_err();
+        let error = append_drowned_outer(&models, &Content::test_cube(), &entity,
+            Pose { tick: 0, partial: 0., root: Mat4::IDENTITY },
+            &mut Vec::new(), [0.; 2], &mut out).unwrap_err();
         assert!(error.contains("entity/zombie/drowned_outer_layer"));
         assert!(out.vertices.is_empty());
     }

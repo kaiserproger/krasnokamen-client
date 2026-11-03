@@ -42,6 +42,16 @@ Strict Clippy remains failing; the changed-line result does not quarantine or
 resolve the remaining debt. Detailed classification is retained at
 `.analysis/rc4-client-release/clippy-changed-spans.json`.
 
+The later changed-function audit uses `-D clippy::all --cap-lints warn` to
+reach both library and test targets despite the remaining debt. It found 533
+Clippy diagnostic occurrences, including repeated diagnostics across targets,
+and no diagnostics in functions or impl items changed since `b73105c`
+(`.analysis/rc4-client-release/clippy-touched-functions.json`; raw
+`.analysis/rc4-client-release/clippy-all-targets-capped.jsonl`). The cap is for
+collecting findings, not a passing strict
+Clippy gate: the uncapped command still fails. No new Clippy suppressions were
+introduced.
+
 ## CLIENT-TEST-001 — historical graphics-preset assertion (superseded)
 
 The earlier `65a7f76` receipt recorded

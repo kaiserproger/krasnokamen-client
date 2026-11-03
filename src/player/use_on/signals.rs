@@ -30,6 +30,13 @@ fn direction_name(value: u8) -> &'static str {
     ["down", "up", "north", "south", "west", "east"][usize::from(value)]
 }
 
+pub(super) struct SignalQuery {
+    pub position: [i32; 3],
+    pub state: u32,
+    pub face: u8,
+    pub direct: bool,
+}
+
 impl Player {
     pub(super) fn neighbor_signal(
         &self,
@@ -41,7 +48,7 @@ impl Player {
         for face in 0..6 {
             let neighbor = shifted(position, face);
             let state = self.use_block(world, neighbor)?;
-            if self.block_has_signal(neighbor, state, face, false, world, content, entities)? {
+            if self.block_has_signal(SignalQuery { position: neighbor, state, face, direct: false }, world, content, entities)? {
                 return Ok(true);
             }
             if content.block_redstone_conductor(state)? {
@@ -49,10 +56,7 @@ impl Player {
                     let direct_neighbor = shifted(neighbor, direct_face);
                     let direct_state = self.use_block(world, direct_neighbor)?;
                     if self.block_has_signal(
-                        direct_neighbor,
-                        direct_state,
-                        direct_face,
-                        true,
+                        SignalQuery { position: direct_neighbor, state: direct_state, face: direct_face, direct: true },
                         world,
                         content,
                         entities,
@@ -65,18 +69,14 @@ impl Player {
         Ok(false)
     }
 
-    // Signal evaluation needs the existing position and world context.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn block_has_signal(
         &self,
-        position: [i32; 3],
-        state: u32,
-        face: u8,
-        direct: bool,
+        query: SignalQuery,
         world: &World,
         content: &Content,
         entities: &EntityStore,
     ) -> Result<bool> {
+        let SignalQuery { position, state, face, direct } = query;
         let owners = content.block_signal_owners(state)?;
         let owner = short_class(if direct { owners.1 } else { owners.0 });
         let facing = || direction(property(content, state, "facing")?);

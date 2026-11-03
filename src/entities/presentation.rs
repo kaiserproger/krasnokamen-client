@@ -274,16 +274,14 @@ pub(super) fn material(
     };
     if let Some(data) = variant(store, models, e) {
         let model = data["model"].as_str();
-        if let Some(model) = model {
-            if model != "normal" && model != "temperate" {
-                let candidate = format!(
-                    "minecraft:{model}_{}{}#main",
-                    e.type_name.split(':').nth(1).unwrap_or(""),
-                    if baby { "_baby" } else { "" }
-                );
-                if models.has_authored_rig(&candidate) {
-                    rig = candidate;
-                }
+        if let Some(model) = model && model != "normal" && model != "temperate" {
+            let candidate = format!(
+                "minecraft:{model}_{}{}#main",
+                e.type_name.split(':').nth(1).unwrap_or(""),
+                if baby { "_baby" } else { "" }
+            );
+            if models.has_authored_rig(&candidate) {
+                rig = candidate;
             }
         }
         let asset = if baby {
@@ -312,20 +310,19 @@ pub(super) fn material(
             selected = object[key].as_str().map(str::to_owned);
         }
     }
-    if baby {
-        if let Some(base) = selected.as_ref() {
-            if let Some(candidate) = family.textures.iter().find(|t| {
-                t.ends_with(&format!(
-                    "{}_baby.png",
-                    base.rsplit('/')
-                        .next()
-                        .unwrap_or("")
-                        .trim_end_matches(".png")
-                ))
-            }) {
-                selected = Some(candidate.clone());
-            }
-        }
+    if baby
+        && let Some(base) = selected.as_ref()
+        && let Some(candidate) = family.textures.iter().find(|t| {
+            t.ends_with(&format!(
+                "{}_baby.png",
+                base.rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches(".png")
+            ))
+        })
+    {
+        selected = Some(candidate.clone());
     }
     if e.type_name == "minecraft:mooshroom" {
         let variant = match number(models, e, "DATA_TYPE").unwrap_or(0) {
@@ -427,19 +424,32 @@ pub(super) struct DrawStore<'a> {
     pub(super) bed_direction: &'a dyn Fn([i32; 3]) -> Option<[i32; 2]>,
 }
 
-// The sprite and value tiers are specified by the 26.1.2 orb renderer.
-#[allow(clippy::too_many_arguments)]
-fn append_experience_orb(
-    entity: &Entity,
-    models: &Models,
-    content: &Content,
+#[derive(Clone, Copy)]
+pub(super) struct EntityDrawFrame {
+    pub origin: [f64; 3],
+    pub tick: u64,
+    pub partial: f32,
+    pub light: [f32; 2],
+    pub parent: Option<Mat4>,
+}
+
+struct OrbFrame<'a> {
     origin: [f64; 3],
     camera_rotation: [f32; 2],
     tick: u64,
     partial: f32,
-    light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    light_source: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+}
+
+// The sprite and value tiers are specified by the 26.1.2 orb renderer.
+fn append_experience_orb(
+    entity: &Entity,
+    models: &Models,
+    content: &Content,
+    frame: OrbFrame<'_>,
     out: &mut DynamicGeometry,
 ) -> Result<bool> {
+    let OrbFrame { origin, camera_rotation, tick, partial, light_source } = frame;
     let transform = entity.presented_transform(tick, partial);
     let (dimensions, scale) = models.dimensions(entity)?;
     let Some(mut light) = entity_light(entity, models, tick, partial, dimensions, scale, light_source)? else {
@@ -483,23 +493,15 @@ fn append_experience_orb(
     Ok(true)
 }
 
-// Rendering passes share the frame inputs without allocating a context.
-#[allow(clippy::too_many_arguments)]
 pub fn append(
     store: &mut Store,
-    content: &Content,
-    origin: [f64; 3],
-    camera: [f64; 3],
-    camera_rotation: [f32; 2],
-    radius: f32,
-    tick: u64,
-    partial: f32,
-    game_time: i64,
-    clock_environment: Option<super::ClockEnvironment<'_>>,
-    light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
-    bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
+    frame: super::EntityRenderFrame<'_>,
     out: &mut DynamicGeometry,
 ) -> Result<PresentationStats> {
+    let super::EntityRenderFrame {
+        content, origin, camera, camera_rotation, radius, tick, partial, game_time,
+        clock_environment, light: light_source, bed_direction,
+    } = frame;
     if !radius.is_finite() || radius <= 0. || radius > 4096. {
         return Err("entity presentation radius bound".into());
     }
@@ -559,7 +561,7 @@ pub fn append(
             continue;
         }
         if entity.type_name == "minecraft:experience_orb" {
-            match append_experience_orb(entity, &models, content, origin, camera_rotation, tick, partial, light_source, out) {
+            match append_experience_orb(entity, &models, content, OrbFrame { origin, camera_rotation, tick, partial, light_source }, out) {
                 Ok(true) => {
                     stats.animated += 1;
                     stats.submitted += 1;
@@ -654,8 +656,8 @@ pub fn append(
             clock_context: clock_context.as_ref(),
             bed_direction,
         };
-        draw_entity(entity, &models, content, origin, tick, partial, light,
-            None, &mut draw_store, out, &mut stats)?;
+        draw_entity(entity, &models, content, EntityDrawFrame { origin, tick, partial, light, parent: None },
+            &mut draw_store, out, &mut stats)?;
         let flags = number(&models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
         if flags & 1 != 0
             && flags & 32 == 0
@@ -710,21 +712,16 @@ pub fn append(
     stats.vertices = out.vertices.len();
     Ok(stats)
 }
-// Rendering passes share the frame inputs without allocating a context.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_entity(
     entity: &Entity,
     models: &Models,
     content: &Content,
-    origin: [f64; 3],
-    tick: u64,
-    partial: f32,
-    light: [f32; 2],
-    parent: Option<Mat4>,
+    frame: EntityDrawFrame,
     store: &mut DrawStore<'_>,
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
+    let EntityDrawFrame { origin, tick, partial, light, parent } = frame;
     let start = out.vertices.len();
         match entity.binding.as_ref().unwrap() {
             Ok(binding) => {
@@ -882,11 +879,7 @@ pub(super) fn draw_entity(
                     emit_rig_parts(
                         rig,
                         store.transforms,
-                        tex,
-                        [1.; 3],
-                        EntityMaterial::EntityCutout,
-                        1.,
-                        light,
+                        RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light },
                         (entity.type_name == "minecraft:armor_stand")
                             .then(|| number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0)),
                         entity.type_name == "minecraft:end_crystal"
@@ -967,17 +960,10 @@ pub(super) fn draw_entity(
                 }
                 stats.animated += 1;
                 append_equipment(
-                    entity,
-                    rig,
-                    store.transforms,
+                    EquipmentPose { entity, rig, transforms: store.transforms },
                     store.items,
                     store.equipment_cache,
-                    matrix,
-                    content,
-                    models,
-                    tick,
-                    partial,
-                    light,
+                    super::equipment::Frame { models, content, root: matrix, tick, partial, light },
                     out,
                     stats,
                 )?;
@@ -1021,15 +1007,9 @@ pub(super) fn draw_entity(
                                     let body = rig.bones.iter().position(|bone| bone.name == "body")
                                         .ok_or("missing puppy body")?;
                                     let transforms = [Mat4::IDENTITY, store.transforms[body]];
-                                    emit_rig(
-                                        collar_rig, &transforms, collar, color,
-                                        EntityMaterial::EntityCutout, 1., light, out,
-                                    )
+                                    emit_rig(collar_rig, &transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
                                 } else {
-                                    emit_rig(
-                                        rig, store.transforms, collar, color,
-                                        EntityMaterial::EntityCutout, 1., light, out,
-                                    )
+                                    emit_rig(rig, store.transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
                                 }
                             });
                         if let Err(reason) = result {
@@ -1040,18 +1020,16 @@ pub(super) fn draw_entity(
                         entity,
                         models,
                         content,
-                        boolean(models, entity, "DATA_BABY_ID"),
-                        rig,
-                        tick,
-                        partial,
-                        matrix,
+                        super::sheep::CoatFrame {
+                            baby: boolean(models, entity, "DATA_BABY_ID"),
+                            base_rig: rig, tick, partial, root: matrix, light,
+                        },
                         store.transforms,
-                        light,
                         out,
                     )?;
                     if entity.type_name == "minecraft:drowned"
                         && let Err(reason) = super::drowned_outer::append_drowned_outer(
-                            models, content, entity, tick, partial, matrix,
+                            models, content, entity, super::drowned_outer::Pose { tick, partial, root: matrix },
                             store.transforms, light, out,
                         )
                     {
@@ -1061,8 +1039,7 @@ pub(super) fn draw_entity(
                         let shell = super::solaris_models::authored("minecraft:slime_outer#main")
                             .ok_or("missing authored slime outer rig")?;
                         evaluate_rig(shell, entity, models, tick, partial, matrix, store.transforms);
-                        emit_rig(shell, store.transforms, tex, [1.; 3],
-                            EntityMaterial::EntityTranslucent, 1., light, out)?;
+                        emit_rig(shell, store.transforms, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)?;
                     }
                     if entity.type_name == "minecraft:breeze" {
                         let wind = super::solaris_models::authored("minecraft:breeze_wind#main")
@@ -1078,13 +1055,9 @@ pub(super) fn draw_entity(
                 if !append_item_entity(
                     entity,
                     models,
-                    store.items,
+                    store,
                     content,
-                    origin,
-                    tick,
-                    partial,
-                    light,
-                    store.clock_context,
+                    frame,
                     out,
                     stats,
                 )? {
@@ -1298,19 +1271,21 @@ pub(super) fn evaluate_rig(
         }
     }
 }
-// Rig emission passes the independent material and lighting inputs directly.
-#[allow(clippy::too_many_arguments)]
+pub(super) struct RigStyle {
+    pub tex: TextureRegion,
+    pub color: [f32; 3],
+    pub layer: EntityMaterial,
+    pub alpha: f32,
+    pub light: [f32; 2],
+}
+
 pub(super) fn emit_rig(
     rig: &Rig,
     transforms: &[Mat4],
-    tex: TextureRegion,
-    color: [f32; 3],
-    layer: EntityMaterial,
-    alpha: f32,
-    light: [f32; 2],
+    style: RigStyle,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    emit_rig_parts(rig, transforms, tex, color, layer, alpha, light, None, false, out)
+    emit_rig_parts(rig, transforms, style, None, false, out)
 }
 
 // BreezeWind repeats within the texture's atlas rectangle rather than the whole atlas page.
@@ -1323,7 +1298,7 @@ fn emit_breeze_wind(
     out: &mut DynamicGeometry,
 ) -> Result<()> {
     let start = out.vertices.len();
-    emit_rig(rig, transforms, tex, [1.; 3], EntityMaterial::BreezeWind, 1., light, out)?;
+    emit_rig(rig, transforms, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer: EntityMaterial::BreezeWind, alpha: 1., light }, out)?;
     let size = [tex.uv[2] - tex.uv[0], tex.uv[3] - tex.uv[1]];
     for vertex in &mut out.vertices[start..] {
         vertex.uv = [
@@ -1336,20 +1311,15 @@ fn emit_breeze_wind(
     Ok(())
 }
 
-// Rig emission needs the independent material and lighting inputs.
-#[allow(clippy::too_many_arguments)]
 fn emit_rig_parts(
     rig: &Rig,
     transforms: &[Mat4],
-    tex: TextureRegion,
-    color: [f32; 3],
-    layer: EntityMaterial,
-    alpha: f32,
-    light: [f32; 2],
+    style: RigStyle,
     stand_flags: Option<i32>,
     hide_crystal_base: bool,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    let RigStyle { tex, color, layer, alpha, light } = style;
     if rig.bones.len() != transforms.len() {
         return Err("entity rig transform cardinality mismatch".into());
     }
@@ -1602,28 +1572,27 @@ pub(super) fn witch_potion_attachment(nose: Mat4) -> Mat4 {
         * Mat4::from_rotation_z(10f32.to_radians())
         * Mat4::from_rotation_x(std::f32::consts::PI)
 }
+pub(super) struct EquipmentPose<'a> {
+    pub entity: &'a Entity,
+    pub rig: &'a Rig,
+    pub transforms: &'a [Mat4],
+}
+
 pub(super) fn append_equipment(
-    e: &Entity,
-    rig: &Rig,
-    transforms: &[Mat4],
+    pose: EquipmentPose<'_>,
     items: &mut crate::ui::items::ItemModels,
     equipment: &mut super::equipment::Cache,
-    root: Mat4,
-    content: &Content,
-    models: &Models,
-    tick: u64,
-    partial: f32,
-    light: [f32; 2],
+    frame: super::equipment::Frame<'_>,
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
+    let EquipmentPose { entity: e, rig, transforms } = pose;
+    let super::equipment::Frame { models, content, tick, light, .. } = frame;
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
         let Some(stack) = e.equipment_value(slot) else {
             continue;
         };
-        match equipment.append(
-            e, slot, stack, models, content, root, tick, partial, light, out,
-        ) {
+        match equipment.append(e, slot, stack, frame, out) {
             Ok(true) => continue,
             Ok(false) => {}
             Err(reason) => {
@@ -1657,8 +1626,10 @@ pub(super) fn append_equipment(
                     );
                     continue;
                 };
-                let mut state = crate::ui::items::ItemContext::default();
-                state.display = "ground".into();
+                let state = crate::ui::items::ItemContext {
+                    display: "ground".into(),
+                    ..Default::default()
+                };
                 match items.model_with(content, stack, &state) {
                     Ok(model) => {
                         let attachment = if potion {
@@ -1709,11 +1680,13 @@ pub(super) fn append_equipment(
         } else {
             "head"
         };
-        let mut state = crate::ui::items::ItemContext::default();
-        state.display = context.into();
         let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
-        state.using_item = flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1));
-        state.use_ticks = tick.saturating_sub(e.observed_tick) as f32;
+        let state = crate::ui::items::ItemContext {
+            display: context.into(),
+            using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
+            use_ticks: tick.saturating_sub(e.observed_tick) as f32,
+            ..Default::default()
+        };
         match items.model_with(content, stack, &state) {
             Ok(model) => {
                 let bone = if e.type_name == "minecraft:vex" && slot < 2 {
@@ -1736,21 +1709,18 @@ pub(super) fn append_equipment(
     }
     Ok(())
 }
-// Item rendering uses the existing frame and cache inputs directly.
-#[allow(clippy::too_many_arguments)]
 fn append_item_entity(
     e: &Entity,
     models: &Models,
-    items: &mut crate::ui::items::ItemModels,
+    store: &mut DrawStore<'_>,
     content: &Content,
-    origin: [f64; 3],
-    tick: u64,
-    partial: f32,
-    light: [f32; 2],
-    clock_context: Option<&crate::ui::items::ItemContext>,
+    frame: EntityDrawFrame,
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<bool> {
+    let EntityDrawFrame { origin, tick, partial, light, .. } = frame;
+    let items = &mut *store.items;
+    let clock_context = store.clock_context;
     let accessor = match e.type_name.as_str() {
         "minecraft:item" => "DATA_ITEM",
         "minecraft:item_display" => "DATA_ITEM_STACK_ID",
@@ -2183,8 +2153,7 @@ mod tests {
         };
         let render = |store: &mut Store, time| {
             let mut out = DynamicGeometry::default();
-            let stats = append(store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., time,
-                None, &|_| Ok(Some([15., 0.])), &|_| None, &mut out).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: time, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut out).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(!out.vertices.is_empty());
             let layer = out.vertices[0].texture_layer;
@@ -2234,8 +2203,7 @@ mod tests {
         for (flags, burning) in [(0, false), (1, true), (32, false), (33, false), (0, false)] {
             store.slots[0].metadata.insert(0, Metadata::Byte(flags));
             let mut geometry = DynamicGeometry::default();
-            append(&mut store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
-                None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+            append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             let fire: Vec<_> = geometry.vertices.iter()
                 .filter(|v| v.texture_layer == 42 || v.texture_layer == 43).collect();
             assert_eq!(!fire.is_empty(), burning, "flags {flags}");
@@ -2529,8 +2497,7 @@ mod tests {
         for (value, u, v) in [(1, 0., 0.), (7, 0.5, 0.), (2477, 0.5, 0.5)] {
             store.slots[0].metadata.insert(8, Metadata::Int(value));
             let mut geometry = DynamicGeometry::default();
-            let stats = append(&mut store, &content, [0.; 3], [0.; 3], [180., 0.],
-                32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut geometry).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(stats.unrendered.is_empty());
             assert_eq!(geometry.vertices.len(), 4);
@@ -2543,21 +2510,18 @@ mod tests {
             assert!((vertex.uv[0] - u).abs() < 1e-5 && (vertex.uv[1] - v - 0.25).abs() < 1e-5);
         }
         let mut rotated = DynamicGeometry::default();
-        let stats = append(&mut store, &content, [0.; 3], [0.; 3], [90., 0.],
-            32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut rotated).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut rotated).unwrap();
         assert_eq!(stats.submitted, 1);
         assert!(rotated.vertices.iter().all(|p| p.position[0].abs() < 1e-5));
         assert!((rotated.vertices[0].position[2].abs() - 0.15).abs() < 1e-5);
         let mut pitched = DynamicGeometry::default();
-        append(&mut store, &content, [0.; 3], [0.; 3], [90., 30.],
-            32., 0, 0., 0, None, &|_| Ok(Some([10., 2.])), &|_| None, &mut pitched).unwrap();
+        append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 30.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut pitched).unwrap();
         let expected_normal = glam::Quat::from_euler(
             glam::EulerRot::YXZ, 90f32.to_radians(), -30f32.to_radians(), 0.,
         ) * Vec3::Y;
         assert!(pitched.vertices.iter().all(|p| Vec3::from_array(p.normal).dot(expected_normal) > 0.999));
         let mut geometry = DynamicGeometry::default();
-        let stats = append(&mut store, &content, [0.; 3], [0.; 3], [180., 0.],
-            32., 0, 0., 0, None, &|_| Ok(None), &|_| None, &mut geometry).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(None), bed_direction: &|_| None }, &mut geometry).unwrap();
         assert_eq!(stats.lighting_pending, 1);
         assert!(geometry.vertices.is_empty());
     }
@@ -2593,10 +2557,7 @@ mod tests {
             store.slots[0].spawn_data = direction;
             let mut geometry = DynamicGeometry::default();
             let samples = std::cell::RefCell::new(Vec::new());
-            let stats = append(
-                &mut store, &content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
-                None, &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, &|_| None, &mut geometry,
-            ).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1);
             assert!(stats.unrendered.is_empty());
             assert_eq!(samples.borrow().len(), 16);
@@ -2644,8 +2605,7 @@ mod tests {
         store.slots.push(entity);
         let render = |store: &mut Store| {
             let mut geometry = DynamicGeometry::default();
-            let stats = append(store, &Content::test_cube(), [0.; 3], [0.; 3], [0.; 2],
-                32., 0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
             geometry.vertices.iter().map(|v| v.position[1]).collect::<Vec<_>>()
         };
@@ -2686,8 +2646,7 @@ mod tests {
                 for invisible in [false, true] {
                     store.slots[0].metadata.insert(0, Metadata::Byte(if invisible { 32 } else { 0 }));
                     let mut geometry = DynamicGeometry::default();
-                    let stats = append(&mut store, &Content::test_cube(), [0.; 3], [0.; 3],
-                        [0.; 2], 32., 0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|_| None, &mut geometry).unwrap();
+                    let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
                     assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
                     let cutout = &geometry.indices[EntityMaterial::EntityCutout as usize];
                     let translucent = &geometry.indices[EntityMaterial::EntityTranslucent as usize];

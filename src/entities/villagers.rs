@@ -138,16 +138,7 @@ pub(super) fn append(
             continue;
         };
         if layer_index != 0 || layers.type_hat_visible {
-            p::emit_rig(
-                rig,
-                transforms,
-                *texture,
-                [1.; 3],
-                EntityMaterial::EntityCutout,
-                1.,
-                light,
-                out,
-            )?;
+            p::emit_rig(rig, transforms, p::RigStyle { tex: *texture, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)?;
             continue;
         }
         // Reuse the animated parent transforms. Only the biome hat subtree is hidden;

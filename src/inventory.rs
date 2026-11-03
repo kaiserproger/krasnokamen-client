@@ -1249,8 +1249,7 @@ mod tests {
             (MenuKind::Inventory, 0, 4, 0),
             (MenuKind::Furnace, 2, 2, 2),
         ] {
-            let mut store = InventoryStore::default();
-            store.screen_open = true;
+            let mut store = InventoryStore { screen_open: true, ..Default::default() };
             store.player.slots.fill(Some(Stack::default()));
             store.cursor = Some(Stack::default());
             if kind == MenuKind::Inventory {

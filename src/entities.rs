@@ -46,7 +46,7 @@ pub use profiles::{
     RemoteChatKey,
 };
 pub(crate) use render_blocks::{
-    BlockPresentation, BlockRenderStatus, EntityPainter, MovingBlockPainter,
+    BlockPresentation, BlockRenderStatus, EntityPainter, MovingBlockPainter, StaticBlockSceneFrame,
 };
 pub use resources::Models;
 use serde::Serialize;
@@ -54,6 +54,7 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::Path,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -62,6 +63,20 @@ pub type ClockEnvironment<'a> = (
     &'a crate::ui::items::ItemContext,
     &'a dyn Fn([f64; 3]) -> Result<(f32, f32)>,
 );
+
+pub struct EntityRenderFrame<'a> {
+    pub content: &'a Content,
+    pub origin: [f64; 3],
+    pub camera: [f64; 3],
+    pub camera_rotation: [f32; 2],
+    pub radius: f32,
+    pub tick: u64,
+    pub partial: f32,
+    pub game_time: i64,
+    pub clock_environment: Option<ClockEnvironment<'a>>,
+    pub light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    pub bed_direction: &'a dyn Fn([i32; 3]) -> Option<[i32; 2]>,
+}
 
 const MAX_ENTITIES: usize = 100_000;
 const MAX_BLOCK_ENTITIES: usize = 65_536;
@@ -264,7 +279,7 @@ pub struct Store {
     pub(crate) snow_pumpkin_state: Option<u32>,
     pub(crate) mooshroom_mushroom_states: [Option<u32>; 2],
     equipment_cache: equipment::Cache,
-    pub(crate) text: Option<Arc<crate::ui::render::TextRenderer>>,
+    pub(crate) text: Option<Rc<crate::ui::render::TextRenderer>>,
     pub(crate) nameplate_cache: render_nameplates::Cache,
     pub(crate) block_render_cache: render_blocks::Cache,
     preview_cache: BTreeMap<[i32; 3], preview::Entry>,
@@ -281,7 +296,7 @@ impl Store {
             ..Self::default()
         }
     }
-    pub fn set_text_renderer(&mut self, text: Arc<crate::ui::render::TextRenderer>) {
+    pub fn set_text_renderer(&mut self, text: Rc<crate::ui::render::TextRenderer>) {
         self.nameplate_cache = render_nameplates::Cache::default();
         self.text = Some(text);
     }
@@ -1556,21 +1571,9 @@ impl Store {
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.revision += 1;
     }
-    // The scene pass receives its existing frame inputs directly.
-    #[allow(clippy::too_many_arguments)]
     pub fn append_geometry(
         &mut self,
-        content: &Content,
-        origin: [f64; 3],
-        camera: [f64; 3],
-        camera_rotation: [f32; 2],
-        radius: f32,
-        tick: u64,
-        partial: f32,
-        game_time: i64,
-        clock_environment: Option<ClockEnvironment<'_>>,
-        light: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
-        bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
+        frame: EntityRenderFrame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<PresentationStats> {
         // A temporary render slot reuses the ordinary rig/equipment path without
@@ -1579,21 +1582,7 @@ impl Store {
             self.local_render_slot = Some(self.slots.len());
             self.slots.push(avatar);
         }
-        let result = presentation::append(
-            self,
-            content,
-            origin,
-            camera,
-            camera_rotation,
-            radius,
-            tick,
-            partial,
-            game_time,
-            clock_environment,
-            light,
-            bed_direction,
-            out,
-        );
+        let result = presentation::append(self, frame, out);
         if self.local_render_slot.take().is_some() {
             self.local_avatar = self.slots.pop();
         }

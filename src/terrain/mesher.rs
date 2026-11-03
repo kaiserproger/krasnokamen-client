@@ -263,17 +263,15 @@ fn model_quad(
     cull: bool,
     mut emit: impl FnMut([Vertex; 4], RenderLayer) -> Result<()>,
 ) -> Result<()> {
-    if cull {
-        if let Some(face) = quad.cullface {
-            let neighbor = samples.state(add(position, NORMALS[face as usize]))?;
-            if !samples.catalog.face_visible(state, neighbor, face)? {
-                return Ok(());
-            }
-            if samples.catalog.state(state)?.shader == ShaderClass::Leaves
-                && buried_leaf_face(samples, position, face)?
-            {
-                return Ok(());
-            }
+    if cull && let Some(face) = quad.cullface {
+        let neighbor = samples.state(add(position, NORMALS[face as usize]))?;
+        if !samples.catalog.face_visible(state, neighbor, face)? {
+            return Ok(());
+        }
+        if samples.catalog.state(state)?.shader == ShaderClass::Leaves
+            && buried_leaf_face(samples, position, face)?
+        {
+            return Ok(());
         }
     }
     let light = quad_lighting(

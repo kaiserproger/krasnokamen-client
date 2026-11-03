@@ -28,20 +28,22 @@ pub(in crate::entities) fn center(position: [f64; 3], direction: i32) -> Result<
     Ok(std::array::from_fn(|i| position[i].floor() + 0.5 - face[i] * (15. / 32.)))
 }
 
-#[expect(clippy::too_many_arguments, reason = "Matches the entity extraction inputs without copying render state")]
+pub(super) struct ItemFrameResources<'a> {
+    pub cache: &'a mut Cache,
+    pub items: &'a mut ItemModels,
+}
+
 pub(super) fn append(
     entity: &Entity,
     models: &Models,
-    cache: &mut Cache,
-    items: &mut ItemModels,
+    resources: ItemFrameResources<'_>,
     content: &Content,
-    origin: [f64; 3],
-    tick: u64,
-    partial: f32,
+    frame: p::EntityDrawFrame,
     clock_context: Option<&ItemContext>,
-    light: [f32; 2],
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
+    let p::EntityDrawFrame { origin, tick, partial, light, .. } = frame;
+    let ItemFrameResources { cache, items } = resources;
     let direction = match p::value(models, entity, "DATA_DIRECTION") {
         Some(value) => value.int().ok_or("item frame direction metadata invalid")?,
         None => entity.spawn_data,
@@ -173,8 +175,9 @@ mod tests {
         cache.models.insert("minecraft:block/item_frame".into(), cube);
         let render = |entity: &Entity, cache: &mut Cache, items: &mut ItemModels| {
             let mut out = DynamicGeometry::default();
-            let handled = append(entity, &models, cache, items, &content, [0.; 3], 0, 0., None,
-                [8., 12.], &mut out).unwrap();
+            let handled = append(entity, &models, ItemFrameResources { cache, items }, &content,
+                p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 12.], parent: None },
+                None, &mut out).unwrap();
             (handled, out)
         };
         let (handled, empty) = render(&entity, &mut cache, &mut items);
@@ -218,8 +221,9 @@ mod tests {
         for (stack, map) in [(held(1), false), (held(2), true)] {
             entity.metadata.insert(9, Metadata::Item(stack));
             let mut out = DynamicGeometry::default();
-            append(&entity, &models, &mut cache, &mut items, &content, [0.; 3], 0, 0., None,
-                [8., 2.], &mut out).unwrap();
+            append(&entity, &models, ItemFrameResources { cache: &mut cache, items: &mut items }, &content,
+                p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 2.], parent: None },
+                None, &mut out).unwrap();
             assert!(out.vertices[..body].iter().all(|v| v.light == [8., 5.]));
             assert_eq!(out.vertices[..body].iter().all(|v| v.texture_layer == 77), map);
             assert!(out.vertices[body..].iter().all(|v| v.light == [15., 15.]));

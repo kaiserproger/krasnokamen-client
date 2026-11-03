@@ -9,6 +9,13 @@ use crate::{
 use glam::{Mat4, Vec3};
 use std::cell::Cell;
 
+pub(crate) struct FirstPersonFrame<'a> {
+    pub partial: f32,
+    pub light: [f32; 2],
+    pub item_context: &'a ItemContext,
+    pub ui: Option<&'a crate::ui::UiState>,
+}
+
 fn held(inventory: &InventoryStore, hand: u8) -> Option<&Stack> {
     interaction::held(inventory, hand).filter(|stack| !stack.empty())
 }
@@ -325,19 +332,15 @@ impl Player {
         self.visual.items.set_entity_models(models);
     }
 
-    // First-person rendering shares the existing scene and player state.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_first_person(
         &mut self,
         content: &Content,
         inventory: &InventoryStore,
         entities: &mut EntityStore,
         scene: &mut crate::api::Scene,
-        partial: f32,
-        light: [f32; 2],
-        item_context: &ItemContext,
-        ui: Option<&crate::ui::UiState>,
+        frame: FirstPersonFrame<'_>,
     ) -> Result<()> {
+        let FirstPersonFrame { partial, light, item_context, ui } = frame;
         if self.game_mode == 3 || !self.pose_known || self.health.is_some_and(|h| h <= 0.) {
             return Ok(());
         }
@@ -798,10 +801,7 @@ mod tests {
                 camera_position: [4096.5, 65.62, -4095.5],
                 ..Default::default()
             };
-            player.append_first_person(
-                &content, &inventory, &mut EntityStore::new(), &mut scene, 0.5, [15., 0.], &ItemContext::default(),
-                None,
-            ).unwrap();
+            player.append_first_person(&content, &inventory, &mut EntityStore::new(), &mut scene, crate::player::FirstPersonFrame { partial: 0.5, light: [15., 0.], item_context: &ItemContext::default(), ui: None }).unwrap();
             assert_eq!(scene.first_person.vertices.len(), 48);
             assert_eq!(scene.first_person.indices.iter().map(Vec::len).sum::<usize>(), 72);
             assert!(scene.first_person.vertices.iter().flat_map(|v| v.position).all(f32::is_finite));

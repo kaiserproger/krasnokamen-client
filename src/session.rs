@@ -1000,10 +1000,7 @@ impl Session {
             self.tick_detail_ms[4] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
             self.player.tick(
-                &self.world,
-                content,
-                &self.inventory,
-                &self.entities,
+                crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
                 &self.keys,
                 self.client_tick,
                 &mut self.commands,

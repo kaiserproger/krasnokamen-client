@@ -435,11 +435,10 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     let mut axes = Vec::new();
     for direction in [[0, 1], [-1, 0], [0, -1], [1, 0]] {
         let mut geometry = DynamicGeometry::default();
-        store.append_geometry(&Content::test_cube(), [0.; 3], [0.; 3], [0.; 2], 32.,
-            0, 0., 0, None, &|_| Ok(Some([15., 0.])), &|position| {
-                assert_eq!(position, [0, 0, 0]);
-                Some(direction)
-            }, &mut geometry).unwrap();
+        store.append_geometry(crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|position| {
+            assert_eq!(position, [0, 0, 0]);
+            Some(direction)
+        } }, &mut geometry).unwrap();
         assert_eq!(geometry.vertices.len(), 4);
         assert!(geometry.vertices[0].normal[1] < -0.99, "the model back must face downward");
         let a = Vec3::from_array(geometry.vertices[0].position);
@@ -484,20 +483,7 @@ fn animation_local_render_slot_is_restored_even_when_extraction_fails() {
     let mut store = Store::new();
     store.local_avatar = Some(entity);
     store.set_local_visible(true);
-    let result = store.append_geometry(
-        &Content::test_cube(),
-        [0.; 3],
-        [0.; 3],
-        [0.; 2],
-        32.,
-        0,
-        0.,
-        0,
-        None,
-        &|_| Ok(Some([15., 0.])),
-        &|_| None,
-        &mut DynamicGeometry::default(),
-    );
+    let result = store.append_geometry(crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut DynamicGeometry::default());
     assert!(result.is_err());
     assert!(store.local_avatar.is_some());
     assert!(store.local_render_slot.is_none());
@@ -601,21 +587,7 @@ fn animation_hurt_flash_is_emitted_and_expires_on_real_rig_vertices() {
     store.set_local_visible(true);
     for (tick, expected) in [(10, [0., 3.]), (19, [0., 3.]), (20, [0., 10.])] {
         let mut geometry = DynamicGeometry::default();
-        let stats = store
-            .append_geometry(
-                &Content::test_cube(),
-                [0.; 3],
-                [0.; 3],
-                [0.; 2],
-                32.,
-                tick,
-                0.5,
-                0,
-                None,
-                &|_| Ok(Some([15., 0.])),
-                &|_| None,
-                &mut geometry,
-            )
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick, partial: 0.5, game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
             .unwrap();
         assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
         assert_eq!(geometry.vertices.len(), 4);
@@ -695,17 +667,7 @@ fn first_person_arm_uses_baked_geometry_skin_uvs_and_normals() {
     let mut player = crate::player::Player::new();
     player.pose_known = true;
     let mut scene = crate::api::Scene::default();
-    player
-        .append_first_person(
-            &Content::test_cube(),
-            &crate::inventory::InventoryStore::default(),
-            &mut store,
-            &mut scene,
-            1.,
-            [15., 0.],
-            &crate::ui::items::ItemContext::default(),
-            None,
-        )
+    player.append_first_person(&Content::test_cube(), &crate::inventory::InventoryStore::default(), &mut store, &mut scene, crate::player::FirstPersonFrame { partial: 1., light: [15., 0.], item_context: &crate::ui::items::ItemContext::default(), ui: None })
         .unwrap();
     let camera = Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y);
     let tip_normal = camera.transform_vector3(Vec3::from_array(scene.first_person.vertices[0].normal));
@@ -832,17 +794,10 @@ fn crossed_arms_rigs_emit_the_held_item_at_the_source_anchor() {
         let mut out = DynamicGeometry::default();
         let mut stats = presentation::PresentationStats::default();
         presentation::append_equipment(
-            &entity,
-            rig,
-            &transforms,
+            presentation::EquipmentPose { entity: &entity, rig, transforms: &transforms },
             &mut items,
             &mut equipment::Cache::default(),
-            Mat4::IDENTITY,
-            &content,
-            &models,
-            0,
-            0.,
-            [15., 0.],
+            equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 0, partial: 0., light: [15., 0.] },
             &mut out,
             &mut stats,
         )
@@ -910,21 +865,7 @@ fn armor_stand_renders_feet_on_plate_and_respects_part_flags() {
     let mut render = |flags: i8| {
         store.local_avatar.as_mut().unwrap().metadata.insert(15, Metadata::Byte(flags));
         let mut geometry = DynamicGeometry::default();
-        store
-            .append_geometry(
-                &Content::test_cube(),
-                [0.; 3],
-                [0.; 3],
-                [0.; 2],
-                32.,
-                0,
-                0.,
-                0,
-                None,
-                &|_| Ok(Some([15., 0.])),
-                &|_| None,
-                &mut geometry,
-            )
+        store.append_geometry(crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
             .unwrap();
         geometry
     };
@@ -1032,8 +973,7 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
     };
     let mut render = |context: &ItemContext| {
         let mut geometry = DynamicGeometry::default();
-        let stats = store.append_geometry(&content, [0.; 3], [0.; 3], [0.; 2], 32., 0, 0., 0,
-            Some((context, &at)), &|_| Ok(Some([15., 15.])), &|_| None, &mut geometry).unwrap();
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: Some((context, &at)), light: &|_| Ok(Some([15., 15.])), bed_direction: &|_| None }, &mut geometry).unwrap();
         let count = |layer| geometry.vertices.iter().filter(|v| v.texture_layer == layer).count();
         (count(11), count(22), count(33), stats.unrendered.get("minecraft:item_frame").cloned())
     };

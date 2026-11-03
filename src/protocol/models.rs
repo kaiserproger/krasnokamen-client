@@ -669,9 +669,7 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
                     .to_owned(),
             )?;
             let index = face["tintindex"].as_i64().unwrap_or(-1);
-            let tint = if index < 0 {
-                TintKind::None
-            } else if index == 0 && matches!(tint, TintKind::None) {
+            let tint = if index < 0 || index == 0 && matches!(tint, TintKind::None) {
                 TintKind::None
             } else if matches!(index, 0 | 1) {
                 tint

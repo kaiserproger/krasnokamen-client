@@ -650,7 +650,7 @@ impl Renderer {
             // One depth pass per cascade (slot 12, then the cascade-1/2 slots).
             const CASCADE_SLOTS: [usize; graphics::MAX_CASCADES] = [12, 23, 24];
             let shadow_mdi = !self.reference_mode && self.mdi.is_some() && self.shadow.batch.is_some();
-            for cascade in 0..cascades.count as usize {
+            for (cascade, &slot) in CASCADE_SLOTS.iter().enumerate().take(cascades.count as usize) {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Fancy sun moon directional shadow cascade"),
                     color_attachments: &[],
@@ -662,7 +662,7 @@ impl Renderer {
                         }),
                         stencil_ops: None,
                     }),
-                    timestamp_writes: self.timing.writes(CASCADE_SLOTS[cascade]),
+                    timestamp_writes: self.timing.writes(slot),
                     occlusion_query_set: None,
                 });
                 pass.set_pipeline(&self.shadow.terrain_pipeline);

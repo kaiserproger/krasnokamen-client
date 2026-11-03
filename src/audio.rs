@@ -1063,19 +1063,17 @@ fn worker(
                     )
                     .0 != [0., 0.]
                 });
-                if in_range {
-                    if let Some(key) = resources.catalog.subtitle(&request.event) {
-                        let mut subtitles = shared.subtitles.lock();
-                        if subtitles.len() == 64 {
-                            subtitles.pop_front();
-                        }
-                        subtitles.push_back(SoundSubtitle {
-                            handle: SoundHandle { epoch, id },
-                            translation_key: key.to_owned(),
-                            position: request.source.position(),
-                            created: Instant::now(),
-                        });
+                if in_range && let Some(key) = resources.catalog.subtitle(&request.event) {
+                    let mut subtitles = shared.subtitles.lock();
+                    if subtitles.len() == 64 {
+                        subtitles.pop_front();
                     }
+                    subtitles.push_back(SoundSubtitle {
+                        handle: SoundHandle { epoch, id },
+                        translation_key: key.to_owned(),
+                        position: request.source.position(),
+                        created: Instant::now(),
+                    });
                 }
                 if request.volume == 0.
                     || (!request.looping

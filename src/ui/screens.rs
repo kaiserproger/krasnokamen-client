@@ -1164,31 +1164,18 @@ impl UiState {
     /// 1280x720) magnifies these to physical pixels; logical sizes here must
     /// stay vanilla so Auto scale does not balloon the strip.
     /// `ui_hotfix_tests::hud_minimum_sizes` pins these.
+    #[cfg(test)]
     pub(crate) const HUD_HOTBAR: [f32; 2] = [182., 22.];
+    #[cfg(test)]
     pub(crate) const HUD_HEART: f32 = 9.;
+    #[cfg(test)]
     pub(crate) const HUD_CROSSHAIR: f32 = 15.;
+    #[cfg(test)]
     pub(crate) const HUD_BUTTON_MIN: [f32; 2] = [200., 20.];
     /// Survival and adventure show health, armour, hunger and air; creative
     /// and spectator hide those rows.
     pub(crate) fn hud_shows_vitals(game_mode: u8) -> bool {
         matches!(game_mode, 0 | 2)
-    }
-    /// Fail-closed clickability gate shared by tests and the windowed proof driver:
-    /// a dialog button must be enabled, fully inside the viewport, and at least
-    /// 200x20 logical px (vanilla-scale) to count as playable at 1280x720.
-    pub(crate) fn dialog_button_clickable(&self, id: &str) -> bool {
-        self.nodes.iter().any(|n| {
-            n.id == id
-                && n.role == "button"
-                && n.enabled
-                && n.visible
-                && n.bounds[2] >= Self::HUD_BUTTON_MIN[0]
-                && n.bounds[3] >= Self::HUD_BUTTON_MIN[1]
-                && n.bounds[0] >= 0.
-                && n.bounds[1] >= 0.
-                && n.bounds[0] + n.bounds[2] <= self.width
-                && n.bounds[1] + n.bounds[3] <= self.height
-        })
     }
     fn hud_tree(&mut self, inventory: &InventoryStore, content: &Content) -> Result<()> {
         if self.hud.scoping {
@@ -1309,19 +1296,19 @@ impl UiState {
         // keeps it for 100 ticks here so state-only tests can observe it).
         if self.tick.saturating_sub(self.selected_name_tick) < 100 {
             let slot = 36 + usize::from(inventory.selected_slot);
-            if let Some(stack) = inventory.player.slots.get(slot).and_then(Option::as_ref) {
-                if !stack.empty() {
-                    let name = self
-                        .text
-                        .language
-                        .plain(super::text::item_name_component(content, stack)?.as_ref())?;
-                    if !name.is_empty() {
-                        self.label(
-                            "hud/selected_name",
-                            name,
-                            [cx - 91., bottom - 25., 182., 10.],
-                        )?;
-                    }
+            if let Some(stack) = inventory.player.slots.get(slot).and_then(Option::as_ref)
+                && !stack.empty()
+            {
+                let name = self
+                    .text
+                    .language
+                    .plain(super::text::item_name_component(content, stack)?.as_ref())?;
+                if !name.is_empty() {
+                    self.label(
+                        "hud/selected_name",
+                        name,
+                        [cx - 91., bottom - 25., 182., 10.],
+                    )?;
                 }
             }
         }

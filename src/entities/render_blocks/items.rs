@@ -80,18 +80,15 @@ pub(super) fn spawner_entity<'a>(
     Ok(Some(entity))
 }
 
-// The spawner uses the block frame's existing render inputs.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn spawner(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    root: Mat4,
-    light: [f32; 2],
-    partial: f32,
+    pose: BlockPose,
     entity_painter: &mut EntityPainter<'_>,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
+    let BlockPose { root, partial, light } = pose;
     let Some(entity) = spawner_entity(e, c)? else {
         return Ok(BlockRenderStatus::SourceHidden);
     };

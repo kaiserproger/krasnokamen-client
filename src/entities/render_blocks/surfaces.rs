@@ -12,20 +12,16 @@ fn registry_asset<'a>(c: &'a Content, registry: &str, name: &str) -> Result<&'a 
         .map(|(_, v)| v)
         .ok_or_else(|| format!("source registry asset not observed: {registry}/{name}"))
 }
-// Banner layers share the block frame's material and lighting inputs.
-#[allow(clippy::too_many_arguments)]
 fn paint_banner_part(
     rig: &Rig,
     root: Mat4,
-    tex: TextureRegion,
-    color: [f32; 3],
-    layer: EntityMaterial,
-    light: [f32; 2],
+    style: crate::entities::presentation::RigStyle,
     flag_angle: f32,
     flag_only: bool,
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    let crate::entities::presentation::RigStyle { tex, color, layer, light, .. } = style;
     transforms.clear();
     transforms.reserve(rig.bones.len());
     for bone in &rig.bones {
@@ -90,48 +86,15 @@ pub(super) fn banner(
     let phase = ((i64::from(e.position[0]) * 7
         + i64::from(e.position[1]) * 9
         + i64::from(e.position[2]) * 13
-        + f.game_time as i64)
+        + f.game_time)
         .rem_euclid(100) as f32
         + f.partial)
         / 100.;
     let flag_angle = math::banner_angle(phase);
     let banner = rig(m, &format!("{key}#main"))?;
-    paint_banner_part(
-        banner,
-        root,
-        texture(c, "entity/banner/banner_base")?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        f.light,
-        flag_angle,
-        false,
-        t,
-        out,
-    )?;
-    paint_banner_part(
-        banner,
-        root,
-        texture(c, "entity/banner/banner_base")?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        f.light,
-        flag_angle,
-        true,
-        t,
-        out,
-    )?;
-    paint_banner_part(
-        banner,
-        root,
-        texture(c, "entity/banner/base")?,
-        rgb(dye(color).0),
-        EntityMaterial::BannerPattern,
-        f.light,
-        flag_angle,
-        true,
-        t,
-        out,
-    )?;
+    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, false, t, out)?;
+    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
+    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/base")?, color: rgb(dye(color).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
     if let Some(patterns) = e.data_value()["patterns"].as_array() {
         for pattern in patterns.iter().take(16) {
             let id = pattern["pattern"].as_str().ok_or("banner pattern holder")?;
@@ -140,18 +103,7 @@ pub(super) fn banner(
                 .ok_or("banner pattern asset id")?;
             let (namespace, path) = identifier_path(asset);
             let material = format!("{namespace}:entity/banner/{path}");
-            paint_banner_part(
-                banner,
-                root,
-                texture(c, &material)?,
-                rgb(dye(pattern["color"].as_str().unwrap_or("white")).0),
-                EntityMaterial::BannerPattern,
-                f.light,
-                flag_angle,
-                true,
-                t,
-                out,
-            )?;
+            paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, &material)?, color: rgb(dye(pattern["color"].as_str().unwrap_or("white")).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
         }
     }
     Ok(BlockRenderStatus::Rendered)
@@ -185,17 +137,7 @@ pub(super) fn pot(
                 * Mat4::from_rotation_y(angles[1]),
         );
     }
-    paint_rig(
-        rig(m, "minecraft:decorated_pot_base#main")?,
-        root,
-        texture(c, "entity/decorated_pot/decorated_pot_base")?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        f.light,
-        t,
-        out,
-        |_, _, _| {},
-    )?;
+    paint_rig(rig(m, "minecraft:decorated_pot_base#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/decorated_pot/decorated_pot_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
     let sides = rig(m, "minecraft:decorated_pot_sides#main")?;
     for side in ["back", "left", "right", "front"] {
         let item = e.data_value()["sherds"]
@@ -584,122 +526,3 @@ pub(super) fn portal(
     Ok(BlockRenderStatus::Rendered)
 }
 
-fn flag(value: &Value) -> bool {
-    value.as_bool().unwrap_or_else(|| value.as_i64() == Some(1))
-}
-fn test(
-    e: &BlockEntity,
-    c: &Content,
-    f: &mut BlockFrame,
-    root: Mat4,
-    time: f32,
-    out: &mut DynamicGeometry,
-) -> Result<()> {
-    let data = &e.data_value()["data"];
-    let test = data["test"]
-        .as_str()
-        .map(|n| registry_asset(c, "minecraft:test_instance", n))
-        .transpose()?;
-    let status = data["status"].as_str().unwrap_or("cleared");
-    let failed = !data["error_message"].is_null();
-    let color = match status {
-        "running" => Some(0x808080),
-        "finished" => Some(if !failed {
-            0x00ff00
-        } else if test.is_some_and(|v| v["required"].as_bool() == Some(false)) {
-            0xff8000
-        } else {
-            0xff0000
-        }),
-        _ => None,
-    };
-    if let Some(color) = color {
-        beam(
-            c,
-            root,
-            time,
-            0,
-            2048,
-            color,
-            1.,
-            0.2,
-            0.25,
-            "entity/beacon/beacon_beam",
-            out,
-        )?;
-    }
-    if f.game_master || f.spectator {
-        let padding = test.and_then(|v| v["padding"].as_i64()).unwrap_or(0) as i32;
-        let mut size = vector(&data["size"])?;
-        let a = data["rotation"].as_str().unwrap_or("none");
-        let b = test.and_then(|v| v["rotation"].as_str()).unwrap_or("none");
-        let quarter = |v: &str| match v {
-            "clockwise_90" => 1,
-            "clockwise_180" => 2,
-            "counterclockwise_90" => 3,
-            _ => 0,
-        };
-        if (quarter(a) + quarter(b)) % 2 == 1 {
-            size.swap(0, 2);
-        }
-        if size.iter().all(|v| *v > 0) {
-            let pos = [padding, padding + 1, padding + 1];
-            wire(
-                root,
-                pos.map(|v| v as f32),
-                std::array::from_fn(|i| (pos[i] + size[i]) as f32),
-                [0.9; 3],
-                out,
-            )?;
-        }
-    }
-    if let Some(errors) = e.data_value()["errors"].as_array() {
-        let layouts = if errors.is_empty() {
-            None
-        } else {
-            let text = f
-                .text
-                .ok_or("source error marker font painter not activated")?;
-            Some(f.cache.errors(e, text)?)
-        };
-        for (index, error) in errors.iter().enumerate() {
-            let p = vector(&error["pos"])?;
-            let matrix = Mat4::from_translation(Vec3::from_array(std::array::from_fn(|i| {
-                (f64::from(p[i]) - f.origin[i] - 0.02) as f32
-            }))) * Mat4::from_scale(Vec3::splat(1.04));
-            cube(
-                matrix,
-                [1., 0., 0.],
-                0.375,
-                EntityMaterial::DebugFilledBox,
-                out,
-            )?;
-            if let Some(text) = f.text {
-                let layout = layouts
-                    .and_then(|v| v.get(index))
-                    .ok_or("source error marker layout missing")?;
-                let matrix = Mat4::from_translation(Vec3::new(
-                    (f64::from(p[0]) + 0.5 - f.origin[0]) as f32,
-                    (f64::from(p[1]) + 1.2 - f.origin[1]) as f32,
-                    (f64::from(p[2]) + 0.5 - f.origin[2]) as f32,
-                )) * Mat4::from_rotation_y(-f.camera_rotation[0].to_radians())
-                    * Mat4::from_rotation_x(f.camera_rotation[1].to_radians())
-                    * Mat4::from_scale(Vec3::new(-0.16, -0.16, 0.16))
-                    * Mat4::from_translation(Vec3::new(-layout.width / 2., 0., 0.));
-                text.append_world_layout(
-                    c,
-                    &layout,
-                    matrix,
-                    0xffffffff,
-                    &WorldTextOptions {
-                        alignment: TextAlignment::Center,
-                        layer: EntityMaterial::TextSeeThrough,
-                        ..Default::default()
-                    },
-                    out,
-                )?;
-            }
-        }
-    }
-    Ok(())
-}

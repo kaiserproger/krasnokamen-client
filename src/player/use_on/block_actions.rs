@@ -75,18 +75,16 @@ impl Player {
         Ok(())
     }
 
-    // Prediction consumes the existing hit, world, and interaction state.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn predict_block_interaction(
         &mut self,
         owner: &str,
-        hit: &BlockHit,
-        hand: u8,
+        action: BlockUse<'_>,
         empty: bool,
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
     ) -> Result<()> {
+        let BlockUse { hit, hand } = action;
         let state = hit.state;
         let position = hit.position;
         let item = super::super::interaction::held(inventory, hand);

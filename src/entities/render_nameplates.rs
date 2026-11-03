@@ -568,7 +568,7 @@ mod tests {
         }))
         .unwrap();
         let mut store = Store::new();
-        store.set_text_renderer(Arc::new(TextRenderer::load(&content).unwrap()));
+        store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
         store.activate_models(Arc::new(Models {
             rigs: BTreeMap::new(),
             schemas: BTreeMap::from([
@@ -1085,7 +1085,7 @@ mod tests {
             "assets/minecraft/lang/en_us.json",
             br#"{"entity.minecraft.marker":"Reloaded marker"}"#,
         );
-        store.set_text_renderer(Arc::new(TextRenderer::load(&content).unwrap()));
+        store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
         assert!(store.nameplate_cache.layouts.is_empty());
         assert!(store.nameplate_cache.candidates.is_empty());
         let reloaded = draw(&mut store, &content, &board, 0.25);

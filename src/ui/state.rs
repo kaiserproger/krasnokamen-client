@@ -16,6 +16,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -403,7 +404,7 @@ struct PlayerPreview {
     order: Vec<(usize, f32)>,
 }
 pub struct UiState {
-    pub(crate) text: Arc<TextRenderer>,
+    pub(crate) text: Rc<TextRenderer>,
     pub(crate) models: ItemModels,
     entity_models: Option<Arc<crate::entities::Models>>,
     player_preview: Option<PlayerPreview>,
@@ -525,7 +526,7 @@ impl UiState {
     }
     fn new_mode(content: &Content, presentation: bool) -> Result<Self> {
         Ok(Self {
-            text: Arc::new(if presentation {
+            text: Rc::new(if presentation {
                 TextRenderer::load(content)?
             } else {
                 TextRenderer::load_state(content)?
@@ -882,8 +883,8 @@ impl UiState {
             self.invalidate();
         }
     }
-    pub fn text_renderer(&self) -> Arc<TextRenderer> {
-        Arc::clone(&self.text)
+    pub fn text_renderer(&self) -> Rc<TextRenderer> {
+        Rc::clone(&self.text)
     }
     pub fn set_entity_models(&mut self, models: Arc<crate::entities::Models>) {
         self.models.set_entity_models(models.clone());
@@ -1076,7 +1077,7 @@ impl UiState {
     pub fn reset_resources(&mut self, content: &Content) -> Result<()> {
         let text = TextRenderer::load(content)?;
         let labels = self.prepare_map_labels(&text)?;
-        self.text = Arc::new(text);
+        self.text = Rc::new(text);
         self.commit_map_labels(labels);
         self.models.clear();
         if let Some(view) = &mut self.loader {
@@ -1105,7 +1106,7 @@ impl UiState {
     ) -> Result<()> {
         let text = TextRenderer::load_language(content, language, uniform, japanese)?;
         let labels = self.prepare_map_labels(&text)?;
-        self.text = Arc::new(text);
+        self.text = Rc::new(text);
         self.commit_map_labels(labels);
         self.hud_sidebar = None;
         self.hud_level = None;
@@ -2029,14 +2030,12 @@ impl UiState {
                     })
                     .map(|n| (n.id.clone(), n.action.clone(), n.enabled));
                 let bundle = target.as_ref().and_then(|(_, action, enabled)| {
-                    if let NodeAction::Slot(slot) = action {
-                        if *enabled
-                            && self
-                                .bundle_stack(inventory, *slot)
-                                .is_some_and(|stack| stack.bundle_visible_items() > 0)
-                        {
-                            return Some(*slot);
-                        }
+                    if let NodeAction::Slot(slot) = action
+                        && *enabled
+                        && self.bundle_stack(inventory, *slot)
+                            .is_some_and(|stack| stack.bundle_visible_items() > 0)
+                    {
+                        return Some(*slot);
                     }
                     None
                 });
@@ -2197,25 +2196,20 @@ impl UiState {
                                         _ => None,
                                     }
                                 })
+                                && let Some(pos) = super::options::pos_at(key, bounds, self.pointer[0])
                             {
-                                if let Some(pos) =
-                                    super::options::pos_at(key, bounds, self.pointer[0])
-                                {
-                                    self.slide_to(key, pos, effects);
-                                }
+                                self.slide_to(key, pos, effects);
                             }
                         } else if self.drag.is_some() {
-                            if let Some(id) = self.focus.clone() {
-                                if self.fields.contains_key(&id) {
-                                    let pos = self.text_hit(&id, self.pointer)?;
-                                    self.fields.get_mut(&id).unwrap().cursor = pos;
-                                    self.invalidate();
-                                }
+                            if let Some(id) = self.focus.clone() && self.fields.contains_key(&id) {
+                                let pos = self.text_hit(&id, self.pointer)?;
+                                self.fields.get_mut(&id).unwrap().cursor = pos;
+                                self.invalidate();
                             }
-                            if let Some((_, NodeAction::Slot(slot), true)) = target {
-                                if !self.drag_slots.contains(&slot) {
-                                    self.drag_slots.push(slot);
-                                }
+                            if let Some((_, NodeAction::Slot(slot), true)) = target
+                                && !self.drag_slots.contains(&slot)
+                            {
+                                self.drag_slots.push(slot);
                             }
                         }
                     }
@@ -3669,24 +3663,22 @@ impl UiState {
                     let layout = self
                         .text
                         .layout(&json!({"text":f.display()}), (w - 8.).max(1.))?;
-                    if node.focused {
-                        if let Some([start, end]) = f.display_selection() {
-                            for glyph in layout
-                                .glyphs
-                                .iter()
-                                .filter(|g| g.bytes[0] < end && g.bytes[1] > start)
-                            {
-                                p.solid(
-                                    [
-                                        x + 6. + glyph.position[0],
-                                        ty + glyph.position[1],
-                                        glyph.advance,
-                                        9.,
-                                    ],
-                                    [0.75, 0.42, 0.10],
-                                    0.7,
-                                );
-                            }
+                    if node.focused && let Some([start, end]) = f.display_selection() {
+                        for glyph in layout
+                            .glyphs
+                            .iter()
+                            .filter(|g| g.bytes[0] < end && g.bytes[1] > start)
+                        {
+                            p.solid(
+                                [
+                                    x + 6. + glyph.position[0],
+                                    ty + glyph.position[1],
+                                    glyph.advance,
+                                    9.,
+                                ],
+                                [0.75, 0.42, 0.10],
+                                0.7,
+                            );
                         }
                     }
                     self.text.append_layout(

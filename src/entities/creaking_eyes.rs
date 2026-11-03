@@ -9,7 +9,6 @@ use glam::Mat4;
 /// `head` is the final base head-bone matrix, including its animated pivot and rotation.
 /// The caller must invoke this independently of base-model invisibility. `transforms`
 /// is scratch space and is replaced only when the eye layer is visible.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn append(
     models: &Models,
     content: &Content,
@@ -41,7 +40,7 @@ pub(super) fn append(
     // Both eye rig bones are identity transforms in the animated head frame.
     // Evaluating the Head role would apply its look rotation a second time.
     transforms.resize(rig.bones.len(), head);
-    p::emit_rig(rig, transforms, texture, [1.; 3], EntityMaterial::Eyes, 1., light, out)
+    p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::Eyes, alpha: 1., light }, out)
 }
 
 #[cfg(test)]

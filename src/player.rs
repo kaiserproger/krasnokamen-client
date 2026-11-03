@@ -32,7 +32,15 @@ use std::{
 };
 pub(crate) use use_on::EntityUseState;
 pub use use_on::{UiTrigger, UsePrediction};
-pub(crate) use visual::camera_distance;
+pub(crate) use visual::{camera_distance, FirstPersonFrame};
+
+#[derive(Clone, Copy)]
+pub struct InteractionWorld<'a> {
+    pub world: &'a World,
+    pub content: &'a Content,
+    pub inventory: &'a InventoryStore,
+    pub entities: &'a EntityStore,
+}
 
 static EMPTY_FEATURES: LazyLock<Arc<BTreeSet<String>>> =
     LazyLock::new(|| Arc::new(BTreeSet::new()));
@@ -946,14 +954,12 @@ impl Player {
     }
     pub fn tick(
         &mut self,
-        world: &World,
-        content: &Content,
-        inventory: &InventoryStore,
-        entities: &EntityStore,
+        resources: InteractionWorld<'_>,
         keys: &BTreeSet<String>,
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
+        let InteractionWorld { world, content, inventory, entities } = resources;
         self.drain_commands(out);
         if !self.pose_known {
             return Ok(());
@@ -975,7 +981,7 @@ impl Player {
         let owner = item_id.and_then(|id| content.item_use_owner(id, false).ok())
             .unwrap_or("interaction tick");
         if self.local_prediction(item_id, owner, |player| {
-            player.interaction_tick(world, content, inventory, entities, input, tick, out)
+            player.interaction_tick(resources, input, tick, out)
         }).is_none() {
             self.stop_using(out)?;
             self.pending_use_release = None;

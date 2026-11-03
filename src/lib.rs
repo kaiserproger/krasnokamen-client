@@ -935,12 +935,12 @@ impl App {
         self.drain_requests();
         self.drain_cpu_ms += drain_start.elapsed().as_secs_f64() * 1000.;
         let mut changed = false;
-        if let Some(renderer) = &mut self.renderer {
-            if let Some(frame) = renderer.poll_capture() {
-                self.captured_frame = Some(frame.to_string());
-                // A fresh GPU frame id mutates the published observation.
-                changed = true;
-            }
+        if let Some(renderer) = &mut self.renderer
+            && let Some(frame) = renderer.poll_capture()
+        {
+            self.captured_frame = Some(frame.to_string());
+            // A fresh GPU frame id mutates the published observation.
+            changed = true;
         }
         let mut index = 0;
         while index < self.screenshot_replies.len() {

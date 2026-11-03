@@ -1881,10 +1881,7 @@ impl Player {
                 .iter()
                 .any(|class| class.as_str() == Some("net.minecraft.world.level.block.DiodeBlock"))
                 && self.block_has_signal(
-                    neighbor_position,
-                    neighbor,
-                    direction,
-                    true,
+                    super::signals::SignalQuery { position: neighbor_position, state: neighbor, face: direction, direct: true },
                     world,
                     content,
                     entities,
@@ -2906,7 +2903,7 @@ mod comparator_privacy_tests {
         // Strengths 1 and 14 have the same public powered state; no BE is available.
         assert!(player.neighbor_signal(target, &world, &content, &entities).unwrap());
         assert!(player.placement_repeater_locked(0, target, &world, &content, &entities).unwrap());
-        assert!(!player.block_has_signal([5, 4, 4], 1, 4, true, &world, &content, &entities).unwrap());
+        assert!(!player.block_has_signal(crate::player::use_on::signals::SignalQuery { position: [5, 4, 4], state: 1, face: 4, direct: true }, &world, &content, &entities).unwrap());
         content.insert_test_state_properties(1, BTreeMap::from([
             ("facing".into(), "east".into()),
             ("mode".into(), "compare".into()),
@@ -3012,7 +3009,7 @@ mod comparator_privacy_tests {
             point: [5.5, 5., 4.5], distance: 2., inside: false,
         };
         player.predict_block_interaction(
-            "ComparatorBlock", &hit, 0, true, &world, &content,
+            "ComparatorBlock", BlockUse { hit: &hit, hand: 0 }, true, &world, &content,
             &InventoryStore::default(),
         ).unwrap();
         assert_eq!(player.use_predictions.len(), 2);
@@ -3024,7 +3021,7 @@ mod comparator_privacy_tests {
         assert_eq!(property(&content, 2, "mode").unwrap(), "subtract");
         let second_hit = BlockHit { state: 2, ..hit };
         player.predict_block_interaction(
-            "ComparatorBlock", &second_hit, 0, true, &world, &content,
+            "ComparatorBlock", BlockUse { hit: &second_hit, hand: 0 }, true, &world, &content,
             &InventoryStore::default(),
         ).unwrap();
         assert_eq!(player.use_predictions.len(), 4);

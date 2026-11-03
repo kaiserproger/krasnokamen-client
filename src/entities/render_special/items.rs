@@ -57,17 +57,22 @@ impl Cache {
         Ok(self.observed_items[&key].stack.as_ref())
     }
 }
+pub(crate) struct ObservedItemFrame<'a> {
+    pub context: &'a str,
+    pub seed: i32,
+    pub root: Mat4,
+    pub light: [f32; 2],
+}
+
 pub(crate) fn append_observed_item(
     content: &Content,
     observed: &Value,
-    context: &str,
-    seed: i32,
-    root: Mat4,
-    light: [f32; 2],
+    frame: ObservedItemFrame<'_>,
     items: &mut ItemModels,
     cache: &mut Cache,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    let ObservedItemFrame { context, seed, root, light } = frame;
     let Some(stack) = cache.observed_stack(content, observed)? else {
         return Ok(());
     };

@@ -131,7 +131,7 @@ fn textured_quad(
         out,
     )
 }
-pub(crate) use items::append_observed_item;
+pub(crate) use items::{append_observed_item, ObservedItemFrame};
 
 #[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs without a second render-state owner")]
 pub(crate) fn append(
@@ -163,8 +163,9 @@ pub(crate) fn append(
             dimensions, scale, light_source)? else {
             return Ok(Handled::PendingLighting);
         };
-        item_frame::append(entity, models, &mut store.special_render_cache,
-            &mut store.items, content, origin, tick, partial, clock_context, light, out)
+        item_frame::append(entity, models, item_frame::ItemFrameResources {
+            cache: &mut store.special_render_cache, items: &mut store.items,
+        }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);

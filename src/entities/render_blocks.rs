@@ -98,6 +98,12 @@ impl<'a> From<&BlockFrame<'a, '_>> for StaticBlockFrame<'a> {
         }
     }
 }
+struct BlockPose {
+    root: Mat4,
+    partial: f32,
+    light: [f32; 2],
+}
+
 pub(crate) struct BlockPresentation {
     pub origin: [f64; 3],
     pub camera: [f64; 3],
@@ -111,6 +117,20 @@ pub(crate) struct BlockPresentation {
     pub text_filtering: bool,
     pub christmas: bool,
 }
+pub(crate) struct StaticBlockSceneFrame<'a> {
+    pub content: &'a Content,
+    pub world: &'a World,
+    pub origin: [f64; 3],
+    pub camera: [f64; 3],
+    pub camera_rotation: [f32; 2],
+    pub radius: f32,
+    pub scoping: bool,
+    pub text_filtering: bool,
+    pub game_time: i64,
+    pub partial: f32,
+    pub sample_light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+}
+
 impl super::Store {
     pub(crate) fn tick_block_sources(
         &mut self,
@@ -129,23 +149,15 @@ impl super::Store {
         Ok(())
     }
     /// Native scene factories using received block state and the shared item painter.
-    // The scene pass receives its existing frame inputs directly.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_static_block_geometry(
         &mut self,
-        content: &Content,
-        world: &World,
-        origin: [f64; 3],
-        camera: [f64; 3],
-        camera_rotation: [f32; 2],
-        radius: f32,
-        scoping: bool,
-        text_filtering: bool,
-        game_time: i64,
-        partial: f32,
-        sample_light: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+        frame: StaticBlockSceneFrame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<super::PresentationStats> {
+        let StaticBlockSceneFrame {
+            content, world, origin, camera, camera_rotation, radius, scoping, text_filtering,
+            game_time, partial, sample_light,
+        } = frame;
         if !radius.is_finite() || !(0. ..=4096.).contains(&radius) {
             return Err("block presentation radius bound".into());
         }
@@ -266,15 +278,16 @@ impl super::Store {
                     };
                     let mut painter = |_: &Value, matrix: Mat4, light: [f32; 2], out: &mut DynamicGeometry| {
                         let mut diagnostics = super::PresentationStats::default();
-                        super::presentation::draw_entity(entity, models, content, [0.; 3], tick, partial,
-                            light, Some(matrix * Mat4::from_scale(Vec3::splat(preview_scale))),
+                        super::presentation::draw_entity(entity, models, content,
+                            super::presentation::EntityDrawFrame { origin: [0.; 3], tick, partial, light,
+                                parent: Some(matrix * Mat4::from_scale(Vec3::splat(preview_scale))) },
                             &mut draw_store, out, &mut diagnostics)?;
                         if let Some((key, error)) = diagnostics.unrendered.into_iter().next() {
                             return Err(format!("{key}: {error}"));
                         }
                         Ok(BlockRenderStatus::Rendered)
                     };
-                    items::spawner(block, models, content, root, light, partial, &mut painter, out)
+                    items::spawner(block, models, content, BlockPose { root, partial, light }, &mut painter, out)
                 })(),
                 "minecraft:campfire" | "minecraft:vault" | "minecraft:brushable_block" | "minecraft:shelf" => {
                     let mut item = |observed: &Value,
@@ -286,10 +299,7 @@ impl super::Store {
                         super::render_special::append_observed_item(
                             content,
                             observed,
-                            context,
-                            seed,
-                            root,
-                            light,
+                            super::render_special::ObservedItemFrame { context, seed, root, light },
                             &mut self.items,
                             &mut self.special_render_cache,
                             out,
@@ -429,9 +439,7 @@ impl super::Store {
                         block,
                         models,
                         content,
-                        root,
-                        partial,
-                        light,
+                        BlockPose { root, partial, light },
                         None,
                         &mut self.transforms,
                         out,
@@ -551,15 +559,10 @@ fn around(point: Vec3, rotation: Mat4) -> Mat4 {
 fn rig<'a>(m: &'a Models, key: &str) -> Result<&'a Rig> {
     Ok(m.rig(key))
 }
-// Rig emission needs the independent material and lighting inputs.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn paint_rig(
     r: &Rig,
     root: Mat4,
-    tex: TextureRegion,
-    color: [f32; 3],
-    layer: EntityMaterial,
-    light: [f32; 2],
+    style: super::presentation::RigStyle,
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
     mut pose: impl FnMut(&str, &mut Vec3, &mut Vec3),
@@ -573,7 +576,7 @@ pub(super) fn paint_rig(
         let parent = bone.parent.map(|i| transforms[i]).unwrap_or(root);
         transforms.push(parent * resources::transform(p, rotation, bone.scale));
     }
-    emit_rig(r, transforms, tex, color, layer, 1., light, out)
+    emit_rig(r, transforms, style, out)
 }
 pub(super) fn rgb(color: u32) -> [f32; 3] {
     [
@@ -637,22 +640,12 @@ fn copper_statue(
     let root = root
         * Mat4::from_translation(Vec3::new(0.5, 1.5, 0.5))
         * Mat4::from_rotation_y((180. - yaw(facing)).to_radians());
-    paint_rig(
-        rig(m, key)?,
-        root,
-        texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?,
-        [1.; 3],
-        EntityMaterial::EntityCutout,
-        light,
-        transforms,
-        out,
-        |name, pivot, rotation| {
-            if name == "root" {
-                pivot.y = 0.;
-                rotation.z = PI;
-            }
-        },
-    )?;
+    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light }, transforms, out, |name, pivot, rotation| {
+        if name == "root" {
+            pivot.y = 0.;
+            rotation.z = PI;
+        }
+    })?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn bell(
@@ -673,22 +666,12 @@ fn bell(
     let root = root
         * Mat4::from_translation(Vec3::new(0.5, 1., 0.5))
         * Mat4::from_scale(Vec3::new(1., -1., -1.));
-    paint_rig(
-        rig(m, "minecraft:bell#main")?,
-        root,
-        texture(c, "entity/bell/bell_body")?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        f.light,
-        transforms,
-        out,
-        |name, _, rotation| {
-            if name == "bell_body" {
-                rotation.x = angle[0];
-                rotation.z = angle[1];
-            }
-        },
-    )?;
+    paint_rig(rig(m, "minecraft:bell#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/bell/bell_body")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, transforms, out, |name, _, rotation| {
+        if name == "bell_body" {
+            rotation.x = angle[0];
+            rotation.z = angle[1];
+        }
+    })?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn chest(
@@ -743,17 +726,16 @@ fn chest(
             _ => [0, 0, -1],
         };
         let position = std::array::from_fn(|i| e.position[i] + connected[i]);
-        if let Some(neighbor) = f.blocks.get(&position) {
-            if prop(neighbor, c, "facing") == Some(facing)
-                && prop(neighbor, c, "type") == Some(if part == "left" { "right" } else { "left" })
-                && block_name(neighbor, c)? == name
-            {
-                progress = progress.max(neighbor.progress(f.partial));
-                let Some(other) = (f.sample_light)(position.map(|v| f64::from(v) + 0.5))? else {
-                    return Ok(BlockRenderStatus::WorldPending);
-                };
-                light = std::array::from_fn(|i| light[i].max(other[i]));
-            }
+        if let Some(neighbor) = f.blocks.get(&position)
+            && prop(neighbor, c, "facing") == Some(facing)
+            && prop(neighbor, c, "type") == Some(if part == "left" { "right" } else { "left" })
+            && block_name(neighbor, c)? == name
+        {
+            progress = progress.max(neighbor.progress(f.partial));
+            let Some(other) = (f.sample_light)(position.map(|v| f64::from(v) + 0.5))? else {
+                return Ok(BlockRenderStatus::WorldPending);
+            };
+            light = std::array::from_fn(|i| light[i].max(other[i]));
         }
     }
     let angle = math::lid_angle(progress);
@@ -761,21 +743,11 @@ fn chest(
         * Mat4::from_translation(Vec3::new(0.5, 18. / 16., 0.5))
         * Mat4::from_rotation_y(-yaw(prop(e, c, "facing").unwrap_or("north")).to_radians())
         * Mat4::from_scale(Vec3::new(1., -1., -1.));
-    paint_rig(
-        rig(m, key)?,
-        root,
-        texture(c, &format!("entity/chest/{material}{suffix}"))?,
-        [1.; 3],
-        EntityMaterial::EntityCutoutCull,
-        light,
-        t,
-        out,
-        |name, _, r| {
-            if name == "lid" || name == "lock" {
-                r.x = angle;
-            }
-        },
-    )?;
+    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/chest/{material}{suffix}"))?, color: [1.; 3], layer: EntityMaterial::EntityCutoutCull, alpha: 1., light }, t, out, |name, _, r| {
+        if name == "lid" || name == "lock" {
+            r.x = angle;
+        }
+    })?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn shulker(
@@ -813,57 +785,24 @@ fn shulker(
         * Mat4::from_scale(Vec3::new(1., -1., -1.))
         * Mat4::from_translation(Vec3::new(0., -1., 0.));
     let progress = e.progress(f.partial);
-    paint_rig(
-        rig(m, "minecraft:shulker_box#main")?,
-        root,
-        texture(c, &material)?,
-        [1.; 3],
-        EntityMaterial::EntityCutout,
-        f.light,
-        t,
-        out,
-        |name, p, r| {
-            if name == "lid" {
-                p.y = 1.5 - progress * 0.5;
-                r.y = progress * 1.5 * PI;
-            }
-        },
-    )?;
+    paint_rig(rig(m, "minecraft:shulker_box#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, &material)?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |name, p, r| {
+        if name == "lid" {
+            p.y = 1.5 - progress * 0.5;
+            r.y = progress * 1.5 * PI;
+        }
+    })?;
     Ok(BlockRenderStatus::Rendered)
 }
-fn skull(
-    e: &BlockEntity,
-    m: &Models,
-    c: &Content,
-    f: &mut BlockFrame,
-    root: Mat4,
-    t: &mut Vec<Mat4>,
-    out: &mut DynamicGeometry,
-) -> Result<BlockRenderStatus> {
-    let name = block_name(e, c)?.replace("_wall", "");
-    let skin = if name == "minecraft:player_head" && !e.data["profile"].is_null() {
-        let Some(skin) = (f.skin)(&e.data["profile"])? else {
-            return Ok(BlockRenderStatus::ProfilePending);
-        };
-        Some(skin)
-    } else {
-        None
-    };
-    skull_geometry(e, m, c, root, f.partial, f.light, skin, t, out)
-}
-// Skull geometry shares the block frame's existing render inputs.
-#[allow(clippy::too_many_arguments)]
 fn skull_geometry(
     e: &BlockEntity,
     m: &Models,
     c: &Content,
-    root: Mat4,
-    partial: f32,
-    light: [f32; 2],
+    pose: BlockPose,
     skin: Option<TextureRegion>,
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
+    let BlockPose { root, partial, light } = pose;
     let name = block_name(e, c)?.trim_start_matches("minecraft:");
     let kind = name.replace("_wall", "");
     let (key, material) = skull_parts(&kind).ok_or("unknown source skull block")?;
@@ -908,17 +847,7 @@ fn skull_geometry(
         * Mat4::from_scale(Vec3::new(-1., -1., 1.));
     let s = &e.animation.source;
     let animation = s.skull_ticks as f32 + if s.skull_active { partial } else { 0. };
-    paint_rig(
-        rig(m, key)?,
-        root,
-        tex,
-        [1.; 3],
-        layer,
-        light,
-        t,
-        out,
-        |name, _, r| skull_pose(name, animation, r),
-    )?;
+    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer, alpha: 1., light }, t, out, |name, _, r| skull_pose(name, animation, r))?;
     Ok(BlockRenderStatus::Rendered)
 }
 /// Rig key and texture of each source skull kind (block name without `minecraft:` and
@@ -986,33 +915,23 @@ fn book(
             ),
         )
     };
-    paint_rig(
-        rig(m, "minecraft:book#main")?,
-        root,
-        texture(c, "entity/enchantment/enchanting_table_book")?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        f.light,
-        t,
-        out,
-        |name, p, r| {
-            match name {
-                "left_lid" => r.y = PI + angles[0],
-                "right_lid" => r.y = -angles[0],
-                "left_pages" => r.y = angles[0],
-                "right_pages" => r.y = -angles[0],
-                "flip_page1" => r.y = angles[0] * (1. - 2. * angles[1]),
-                "flip_page2" => r.y = angles[0] * (1. - 2. * angles[2]),
-                _ => {}
-            }
-            if matches!(
-                name,
-                "left_pages" | "right_pages" | "flip_page1" | "flip_page2"
-            ) {
-                p.x = math::sin(angles[0]) / 16.;
-            }
-        },
-    )?;
+    paint_rig(rig(m, "minecraft:book#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/enchantment/enchanting_table_book")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |name, p, r| {
+        match name {
+            "left_lid" => r.y = PI + angles[0],
+            "right_lid" => r.y = -angles[0],
+            "left_pages" => r.y = angles[0],
+            "right_pages" => r.y = -angles[0],
+            "flip_page1" => r.y = angles[0] * (1. - 2. * angles[1]),
+            "flip_page2" => r.y = angles[0] * (1. - 2. * angles[2]),
+            _ => {}
+        }
+        if matches!(
+            name,
+            "left_pages" | "right_pages" | "flip_page1" | "flip_page2"
+        ) {
+            p.x = math::sin(angles[0]) / 16.;
+        }
+    })?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn conduit(
@@ -1028,36 +947,16 @@ fn conduit(
     let time = s.ticks as f32 + f.partial;
     let rotation = (s.conduit_rotation + if s.conduit_active { f.partial } else { 0. }) * -0.0375;
     if !s.conduit_active {
-        paint_rig(
-            rig(m, "minecraft:conduit#shell")?,
-            root * Mat4::from_translation(Vec3::splat(0.5))
-                * Mat4::from_rotation_y(rotation.to_radians()),
-            texture(c, "entity/conduit/base")?,
-            [1.; 3],
-            EntityMaterial::EntitySolid,
-            f.light,
-            t,
-            out,
-            |_, _, _| {},
-        )?;
+        paint_rig(rig(m, "minecraft:conduit#shell")?, root * Mat4::from_translation(Vec3::splat(0.5))
+            * Mat4::from_rotation_y(rotation.to_radians()), crate::entities::presentation::RigStyle { tex: texture(c, "entity/conduit/base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
     } else {
         let bob = math::sin(time * 0.1) / 2. + 0.5;
         let y = 0.3 + (bob * bob + bob) * 0.2;
-        paint_rig(
-            rig(m, "minecraft:conduit#cage")?,
-            root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
-                * Mat4::from_quat(Quat::from_axis_angle(
-                    Vec3::new(0.5, 1., 0.5).normalize(),
-                    rotation,
-                )),
-            texture(c, "entity/conduit/cage")?,
-            [1.; 3],
-            EntityMaterial::EntityCutout,
-            f.light,
-            t,
-            out,
-            |_, _, _| {},
-        )?;
+        paint_rig(rig(m, "minecraft:conduit#cage")?, root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
+            * Mat4::from_quat(Quat::from_axis_angle(
+                Vec3::new(0.5, 1., 0.5).normalize(),
+                rotation,
+            )), crate::entities::presentation::RigStyle { tex: texture(c, "entity/conduit/cage")?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
         let phase = s.ticks / 66 % 3;
         let rotate = match phase {
             1 => Mat4::from_rotation_x(FRAC_PI_2),
@@ -1073,55 +972,25 @@ fn conduit(
             },
         )?;
         let windroot = root * Mat4::from_translation(Vec3::splat(0.5));
-        paint_rig(
-            rig(m, "minecraft:conduit#wind")?,
-            windroot * rotate,
-            wind,
-            [1.; 3],
-            EntityMaterial::EntityCutout,
-            f.light,
-            t,
-            out,
-            |_, _, _| {},
-        )?;
-        paint_rig(
-            rig(m, "minecraft:conduit#wind")?,
-            windroot
-                * Mat4::from_scale(Vec3::splat(0.875))
-                * Mat4::from_rotation_x(PI)
-                * Mat4::from_rotation_z(PI),
-            wind,
-            [1.; 3],
-            EntityMaterial::EntityCutout,
-            f.light,
-            t,
-            out,
-            |_, _, _| {},
-        )?;
+        paint_rig(rig(m, "minecraft:conduit#wind")?, windroot * rotate, crate::entities::presentation::RigStyle { tex: wind, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+        paint_rig(rig(m, "minecraft:conduit#wind")?, windroot
+            * Mat4::from_scale(Vec3::splat(0.875))
+            * Mat4::from_rotation_x(PI)
+            * Mat4::from_rotation_z(PI), crate::entities::presentation::RigStyle { tex: wind, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
         let billboard = Mat4::from_rotation_y(-f.camera_rotation[0].to_radians())
             * Mat4::from_rotation_x(f.camera_rotation[1].to_radians());
-        paint_rig(
-            rig(m, "minecraft:conduit#eye")?,
-            root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
-                * Mat4::from_scale(Vec3::splat(2. / 3.))
-                * billboard
-                * Mat4::from_rotation_z(PI)
-                * Mat4::from_rotation_y(PI),
-            texture(
-                c,
-                if s.conduit_hunting {
-                    "entity/conduit/open_eye"
-                } else {
-                    "entity/conduit/closed_eye"
-                },
-            )?,
-            [1.; 3],
-            EntityMaterial::EntityCutout,
-            f.light,
-            t,
-            out,
-            |_, _, _| {},
-        )?;
+        paint_rig(rig(m, "minecraft:conduit#eye")?, root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
+            * Mat4::from_scale(Vec3::splat(2. / 3.))
+            * billboard
+            * Mat4::from_rotation_z(PI)
+            * Mat4::from_rotation_y(PI), crate::entities::presentation::RigStyle { tex: texture(
+            c,
+            if s.conduit_hunting {
+                "entity/conduit/open_eye"
+            } else {
+                "entity/conduit/closed_eye"
+            },
+        )?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
     }
     Ok(BlockRenderStatus::Rendered)
 }
@@ -1182,17 +1051,7 @@ fn bed(
                 (180. + yaw(prop(e, c, "facing").unwrap_or("north"))).to_radians(),
             ),
         );
-    paint_rig(
-        rig(m, key)?,
-        root,
-        texture(c, &format!("entity/bed/{color}"))?,
-        [1.; 3],
-        EntityMaterial::EntitySolid,
-        light,
-        t,
-        out,
-        |_, _, _| {},
-    )?;
+    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/bed/{color}"))?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light }, t, out, |_, _, _| {})?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn piston(
@@ -1304,7 +1163,7 @@ mod tests {
             content.insert_test_font("minecraft:default", &serde_json::json!({"providers":[]}));
             content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");
             let mut store = super::super::Store::new();
-            store.set_text_renderer(Arc::new(TextRenderer::load(&content).unwrap()));
+            store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
             store.activate_models(Arc::new(Models {
                 rigs: BTreeMap::new(),
                 schemas: BTreeMap::new(),
@@ -1326,21 +1185,7 @@ mod tests {
                 .ensure_sign_block_entity(position, 1, &content, 1)
                 .unwrap();
             let mut geometry = DynamicGeometry::default();
-            let defaults = store
-                .append_static_block_geometry(
-                    &content,
-                    &World::new(0, 256),
-                    origin,
-                    camera,
-                    [0., 0.],
-                    32.,
-                    false,
-                    false,
-                    0,
-                    0.,
-                    &|_| Ok(Some([7., 3.])),
-                    &mut geometry,
-                )
+            let defaults = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
                 .unwrap();
             assert_eq!(defaults.block_entities, 1);
             assert!(defaults.unrendered.is_empty());
@@ -1419,21 +1264,7 @@ mod tests {
                 assert_eq!(store.block_entities[&position].state, Some(1));
                 let initial_text_indices =
                     geometry.indices[EntityMaterial::TextPolygonOffset as usize].len();
-                let submitted = store
-                    .append_static_block_geometry(
-                        &content,
-                        &World::new(0, 256),
-                        origin,
-                        camera,
-                        [0., 0.],
-                        32.,
-                        false,
-                        false,
-                        0,
-                        0.,
-                        &|_| Ok(Some([7., 3.])),
-                        &mut geometry,
-                    )
+                let submitted = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
                     .unwrap();
                 assert_eq!(submitted.block_entities, 1);
                 assert!(submitted.unrendered.is_empty());
@@ -1483,21 +1314,7 @@ mod tests {
                 }
             }
             let mut pending = DynamicGeometry::default();
-            let unavailable_light = store
-                .append_static_block_geometry(
-                    &content,
-                    &World::new(0, 256),
-                    origin,
-                    camera,
-                    [0., 0.],
-                    32.,
-                    false,
-                    false,
-                    0,
-                    0.,
-                    &|_| Ok(None),
-                    &mut pending,
-                )
+            let unavailable_light = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(None) }, &mut pending)
                 .unwrap();
             assert_eq!(unavailable_light.lighting_pending, 1);
             assert_eq!(unavailable_light.block_entities, 0);

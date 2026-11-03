@@ -92,21 +92,7 @@ fn render_static(
     partial: f32,
     out: &mut DynamicGeometry,
 ) -> super::super::PresentationStats {
-    store
-        .append_static_block_geometry(
-            content,
-            world,
-            origin,
-            camera,
-            [0., 0.],
-            32.,
-            false,
-            false,
-            0,
-            partial,
-            &|_| Ok(Some([7., 3.])),
-            out,
-        )
+    store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content, world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial, sample_light: &|_| Ok(Some([7., 3.])) }, out)
         .unwrap()
 }
 
@@ -798,11 +784,7 @@ fn static_banner_renders_standing_and_wall_with_patterns_and_world_time() {
             assert_ne!(first.vertices[i].position, first.vertices[8 + i].position);
         }
         let mut later = DynamicGeometry::default();
-        let stats = store
-            .append_static_block_geometry(
-                &content, &world, origin, camera, [0., 0.], 32., false, false, 25, 0.,
-                &|_| Ok(Some([7., 3.])), &mut later,
-            )
+        let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 25, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut later)
             .unwrap();
         assert_eq!(stats.block_entities, 1);
         assert_ne!(first.vertices[6].position, later.vertices[6].position);
@@ -977,10 +959,7 @@ fn static_conduit_switches_shell_to_active_eye_and_faces_camera() {
     assert_eq!(active.vertices.len(), 16);
     assert!(active.vertices[12..].iter().all(|vertex| vertex.texture_layer == 5));
     let mut turned = DynamicGeometry::default();
-    let stats = store.append_static_block_geometry(
-        &content, &world, origin, camera, [90., 0.], 32., false, false, 0, 0.,
-        &|_| Ok(Some([7., 3.])), &mut turned,
-    ).unwrap();
+    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [90., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut turned).unwrap();
     assert_eq!(stats.block_entities, 1);
     assert_ne!(active.vertices[13].position, turned.vertices[13].position);
 }
@@ -1200,12 +1179,7 @@ fn static_brushable_renders_received_item_with_adjacent_light_and_clears() {
         "hit_direction": 1, "item": {"id": "test:food", "count": 1}
     })), Arc::from(&[10, 0][..]), None, &content, 2).unwrap();
     let mut out = DynamicGeometry::default();
-    let stats = store.append_static_block_geometry(
-        &content, &world, origin, camera, [0., 0.], 32.,
-        false, false, 0, 0.,
-        &|point| Ok(Some(if point == [8., 65., -12.] { [11., 4.] } else { [7., 3.] })),
-        &mut out,
-    ).unwrap();
+    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|point| Ok(Some(if point == [8., 65., -12.] { [11., 4.] } else { [7., 3.] })) }, &mut out).unwrap();
     assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
     assert_eq!(out.vertices.len(), content.models[0].quads.len() * 4);
     assert!(out.vertices.iter().all(|vertex| vertex.light == [11., 4.]));

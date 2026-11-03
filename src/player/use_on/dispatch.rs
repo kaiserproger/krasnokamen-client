@@ -11,14 +11,14 @@ impl Player {
 
     pub(in crate::player) fn use_block_result(
         &mut self,
-        hit: &BlockHit,
-        hand: u8,
+        action: BlockUse<'_>,
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
     ) -> Result<Outcome> {
+        let BlockUse { hit, hand } = action;
         if self.game_mode == 3 {
             return Ok(Outcome::CONSUME);
         }
@@ -42,7 +42,7 @@ impl Player {
                 self.block_item_result(item_owner, hit, hand, world, content, inventory, entities)?;
             if result.consumes() {
                 self.predict_block_interaction(
-                    item_owner, hit, hand, false, world, content, inventory,
+                    item_owner, BlockUse { hit, hand }, false, world, content, inventory,
                 )?;
                 return Ok(result);
             }
@@ -52,8 +52,7 @@ impl Player {
                 if result.consumes() {
                     self.predict_block_interaction(
                         empty_owner,
-                        hit,
-                        hand,
+                        BlockUse { hit, hand },
                         true,
                         world,
                         content,
@@ -81,19 +80,19 @@ impl Player {
         {
             return Ok(Outcome::Pass);
         }
-        self.item_on_result(hit, hand, world, content, inventory, entities, tick)
+        self.item_on_result(action, world, content, inventory, entities, tick)
     }
 
     pub(super) fn item_on_result(
         &mut self,
-        hit: &BlockHit,
-        hand: u8,
+        action: BlockUse<'_>,
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
     ) -> Result<Outcome> {
+        let BlockUse { hit, hand } = action;
         let Some(item) =
             super::super::interaction::held(inventory, hand).filter(|item| !item.empty())
         else {
@@ -115,13 +114,12 @@ impl Player {
                     stack,
                     replacement: false,
                 } = prediction
+                    && *changed == slot
                 {
-                    if *changed == slot {
-                        if let Some(stack) = stack {
-                            stack.count = item.count;
-                        } else {
-                            *stack = Some(item.clone());
-                        }
+                    if let Some(stack) = stack {
+                        stack.count = item.count;
+                    } else {
+                        *stack = Some(item.clone());
                     }
                 }
             }

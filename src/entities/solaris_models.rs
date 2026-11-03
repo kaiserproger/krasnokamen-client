@@ -580,11 +580,7 @@ mod baby_armor_alignment_tests {
         };
         let part = Rig { bones: vec![part], part_by_name: BTreeMap::new() };
         let mut output = DynamicGeometry::default();
-        presentation::emit_rig(
-            &part, &[transforms[index]],
-            TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 64, height: 64 },
-            [1.; 3], EntityMaterial::EntityCutout, 1., [1.; 2], &mut output,
-        ).unwrap();
+        presentation::emit_rig(&part, &[transforms[index]], presentation::RigStyle { tex: TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 64, height: 64 }, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: [1.; 2] }, &mut output).unwrap();
         output.vertices.iter().fold((Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)), |(min, max), vertex| {
             let point = Vec3::from_array(vertex.position);
             (min.min(point), max.max(point))

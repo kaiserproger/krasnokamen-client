@@ -50,6 +50,16 @@ impl Layer {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Frame<'a> {
+    pub models: &'a Models,
+    pub content: &'a Content,
+    pub root: Mat4,
+    pub tick: u64,
+    pub partial: f32,
+    pub light: [f32; 2],
+}
+
 type EquipmentAssets = BTreeMap<String, BTreeMap<String, Result<Option<Vec<Layer>>>>>;
 
 #[derive(Default)]
@@ -74,14 +84,10 @@ impl Cache {
         e: &Entity,
         slot: usize,
         stack: &Stack,
-        models: &Models,
-        content: &Content,
-        root: Mat4,
-        tick: u64,
-        partial: f32,
-        light: [f32; 2],
+        frame: Frame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<bool> {
+        let Frame { models, content, root, tick, partial, light } = frame;
         let Some(asset) = armor_asset(stack, slot) else {
             return Ok(false);
         };
@@ -152,31 +158,13 @@ impl Cache {
             let Some(color) = layer.color(dyed) else {
                 continue;
             };
-            p::emit_rig(
-                rig,
-                &self.transforms,
-                layer.texture,
-                color,
-                EntityMaterial::ArmorCutoutNoCull,
-                1.,
-                light,
-                out,
-            )?;
+            p::emit_rig(rig, &self.transforms, p::RigStyle { tex: layer.texture, color, layer: EntityMaterial::ArmorCutoutNoCull, alpha: 1., light }, out)?;
             if glint_pending {
                 let texture = content
                     .texture("minecraft:misc/enchanted_glint_armor")
                     .ok_or("armor glint texture not activated")?;
                 let start = out.vertices.len();
-                p::emit_rig(
-                    rig,
-                    &self.transforms,
-                    texture,
-                    color,
-                    EntityMaterial::ArmorEntityGlint,
-                    1.,
-                    light,
-                    out,
-                )?;
+                p::emit_rig(rig, &self.transforms, p::RigStyle { tex: texture, color, layer: EntityMaterial::ArmorEntityGlint, alpha: 1., light }, out)?;
                 // The wrapped material expects local coordinates and an atlas rectangle,
                 // not the atlas-space UV and NO_OVERLAY values emitted by the rig.
                 let size = [texture.uv[2] - texture.uv[0], texture.uv[3] - texture.uv[1]];
@@ -197,20 +185,11 @@ impl Cache {
             && let Some(trim) = stack.component("minecraft:trim")
         {
             let (texture, decal) = trim_texture(content, trim, asset, kind)?;
-            p::emit_rig(
-                rig,
-                &self.transforms,
-                texture,
-                [1.; 3],
-                if decal {
-                    EntityMaterial::ArmorDecalCutoutNoCull
-                } else {
-                    EntityMaterial::ArmorCutoutNoCull
-                },
-                1.,
-                light,
-                out,
-            )?;
+            p::emit_rig(rig, &self.transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: if decal {
+                EntityMaterial::ArmorDecalCutoutNoCull
+            } else {
+                EntityMaterial::ArmorCutoutNoCull
+            }, alpha: 1., light }, out)?;
         }
         Ok(true)
     }
@@ -493,8 +472,8 @@ mod tests {
         let entity = store.get(4).unwrap();
         for (slot, expected_layer) in [(6, 10), (7, 11)] {
             let mut out = DynamicGeometry::default();
-            assert!(cache.append(entity, slot, entity.equipment_value(slot).unwrap(), &models,
-                &content, Mat4::IDENTITY, 2, 0., [15.; 2], &mut out).unwrap());
+            assert!(cache.append(entity, slot, entity.equipment_value(slot).unwrap(),
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap());
             assert!(!out.vertices.is_empty());
             assert!(out.vertices.iter().all(|v| v.texture_layer == expected_layer));
         }
@@ -503,23 +482,23 @@ mod tests {
         components.insert("minecraft:dyed_color".into(), json!(0xff0000));
         components.insert("minecraft:enchantment_glint_override".into(), json!(true));
         let mut tinted = DynamicGeometry::default();
-        assert!(cache.append(entity, 6, &dyed, &models, &content, Mat4::IDENTITY,
-            2, 0., [15.; 2], &mut tinted).unwrap());
+        assert!(cache.append(entity, 6, &dyed,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut tinted).unwrap());
         assert!(!tinted.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
         assert!(tinted.vertices.iter().any(|v| v.texture_layer == 10 && v.color == [1., 0., 0.]));
         let mut invalid = entity.equipment_value(6).unwrap().clone();
         Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
             json!({"slot":"body","asset_id":"test:missing"}));
-        assert!(cache.append(entity, 6, &invalid, &models, &content, Mat4::IDENTITY,
-            2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        assert!(cache.append(entity, 6, &invalid,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
         Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
             json!({"slot":"body","asset_id":"test:horse_saddle"}));
-        assert!(cache.append(entity, 6, &invalid, &models, &content, Mat4::IDENTITY,
-            2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        assert!(cache.append(entity, 6, &invalid,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
         store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
         let baby = store.get(4).unwrap();
-        assert!(cache.append(baby, 7, baby.equipment_value(7).unwrap(), &models, &content,
-            Mat4::IDENTITY, 2, 0., [15.; 2], &mut DynamicGeometry::default()).is_err());
+        assert!(cache.append(baby, 7, baby.equipment_value(7).unwrap(),
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
         store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(false));
 
         let mut stripped = Writer::default();
@@ -530,13 +509,13 @@ mod tests {
         let entity = store.get(4).unwrap();
         assert!(entity.equipment_value(6).is_none());
         let mut saddle = DynamicGeometry::default();
-        assert!(cache.append(entity, 7, entity.equipment_value(7).unwrap(), &models,
-            &content, Mat4::IDENTITY, 3, 0., [15.; 2], &mut saddle).unwrap());
+        assert!(cache.append(entity, 7, entity.equipment_value(7).unwrap(),
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 3, partial: 0., light: [15.; 2] }, &mut saddle).unwrap());
         assert!(!saddle.vertices.is_empty());
         store.get_mut(4).unwrap().type_name = "minecraft:cow".into();
         let entity = store.get(4).unwrap();
-        assert!(!cache.append(entity, 7, entity.equipment_value(7).unwrap(), &models,
-            &content, Mat4::IDENTITY, 3, 0., [15.; 2], &mut DynamicGeometry::default()).unwrap());
+        assert!(!cache.append(entity, 7, entity.equipment_value(7).unwrap(),
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 3, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).unwrap());
     }
 
     #[test]
@@ -608,16 +587,16 @@ mod tests {
         let mut out = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
         let mut items = crate::ui::items::ItemModels::new();
-        p::append_equipment(entity, rig, &transforms, &mut items, &mut cache, Mat4::IDENTITY,
-            &content, &models, 4, 0., [15.; 2], &mut out, &mut stats).unwrap();
+        p::append_equipment(p::EquipmentPose { entity, rig, transforms: &transforms }, &mut items, &mut cache,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 4, partial: 0., light: [15.; 2] }, &mut out, &mut stats).unwrap();
         assert!(out.vertices.iter().any(|vertex| vertex.texture_layer == 10));
         assert!(!out.vertices.iter().any(|vertex| vertex.texture_layer == 11));
         assert!(stats.unrendered.is_empty());
         let mut dyed = entity.equipment_value(6).unwrap().clone();
         Arc::make_mut(&mut dyed.components).insert("minecraft:dyed_color".into(), json!(0xff0000));
         let mut colored = DynamicGeometry::default();
-        assert!(cache.append(entity, 6, &dyed, &models, &content, Mat4::IDENTITY,
-            4, 0., [15.; 2], &mut colored).unwrap());
+        assert!(cache.append(entity, 6, &dyed,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 4, partial: 0., light: [15.; 2] }, &mut colored).unwrap());
         assert!(colored.vertices.iter().any(|v| v.texture_layer == 11 && v.color == [1., 0., 0.]));
 
         store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&[4, 6, 0]), &content, 5).unwrap();
@@ -625,8 +604,8 @@ mod tests {
         assert!(entity.equipment_value(6).is_none());
         let mut stripped = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
-        p::append_equipment(entity, rig, &transforms, &mut items, &mut cache, Mat4::IDENTITY,
-            &content, &models, 5, 0., [15.; 2], &mut stripped, &mut stats).unwrap();
+        p::append_equipment(p::EquipmentPose { entity, rig, transforms: &transforms }, &mut items, &mut cache,
+            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 5, partial: 0., light: [15.; 2] }, &mut stripped, &mut stats).unwrap();
         assert!(stripped.vertices.is_empty());
         assert!(stats.unrendered.is_empty());
     }
@@ -660,8 +639,8 @@ mod tests {
                 json!({"material":"test:metal","pattern":"test:pattern"}),
             );
             let mut out = DynamicGeometry::default();
-            assert!(cache.append(entity, slot, &stack, &models, &content, Mat4::IDENTITY,
-                2, 0., [15.; 2], &mut out).unwrap());
+            assert!(cache.append(entity, slot, &stack,
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap());
             assert_eq!(out.vertices.len(), 8);
             assert!(out.vertices[4..].iter().all(|v| v.texture_layer == expected));
         }
@@ -672,8 +651,7 @@ mod tests {
             "minecraft:trim".into(), json!({"material":material,"pattern":decal}),
         );
         let mut out = DynamicGeometry::default();
-        cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
-            2, 0., [15.; 2], &mut out).unwrap();
+        cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap();
         assert_eq!(out.indices[EntityMaterial::ArmorDecalCutoutNoCull as usize].len(), 6);
         assert!(out.vertices[4..].iter().all(|v| v.texture_layer == 12));
         let byte_decal = json!({"material":{"asset_name":"gold"},
@@ -684,8 +662,7 @@ mod tests {
         assert!(trim_texture(&content, &invalid_decal, "test:cloth", "humanoid").is_err());
         store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
         let mut baby_out = DynamicGeometry::default();
-        cache.append(store.get(4).unwrap(), 4, &stack, &models, &content, Mat4::IDENTITY,
-            2, 0., [15.; 2], &mut baby_out).unwrap();
+        cache.append(store.get(4).unwrap(), 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut baby_out).unwrap();
         assert_eq!(baby_out.vertices.len(), 4);
     }
 
@@ -720,12 +697,7 @@ mod tests {
                             entity,
                             slot,
                             entity.equipment_value(slot).unwrap(),
-                            &models,
-                            &content,
-                            Mat4::IDENTITY,
-                            2,
-                            0.,
-                            [3., 7.],
+                            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [3., 7.] },
                             &mut out,
                         )
                         .unwrap(),
@@ -781,12 +753,7 @@ mod tests {
                         entity,
                         slot,
                         entity.equipment_value(slot).unwrap(),
-                        &models,
-                        &content,
-                        Mat4::IDENTITY,
-                        2,
-                        0.,
-                        [15.; 2],
+                        Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                         &mut out,
                     )
                     .unwrap());
@@ -815,8 +782,7 @@ mod tests {
         let mut first = DynamicGeometry::default();
         let mut later = DynamicGeometry::default();
         for (tick, out) in [(0, &mut first), (120, &mut later)] {
-            cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
-                tick, 0., [15.; 2], out).unwrap();
+            cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick, partial: 0., light: [15.; 2] }, out).unwrap();
         }
         let indices = &first.indices[EntityMaterial::ArmorEntityGlint as usize];
         assert_eq!(indices.len(), 6);
@@ -834,8 +800,7 @@ mod tests {
             serde_json::json!(false),
         );
         let mut disabled = DynamicGeometry::default();
-        cache.append(entity, 4, &stack, &models, &content, Mat4::IDENTITY,
-            0, 0., [15.; 2], &mut disabled).unwrap();
+        cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 0, partial: 0., light: [15.; 2] }, &mut disabled).unwrap();
         assert!(disabled.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
     }
 
@@ -871,12 +836,7 @@ mod tests {
                 entity,
                 4,
                 &stack,
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                 &mut out
             )
             .unwrap());
@@ -898,36 +858,12 @@ mod tests {
         let (mut store, mut models, content, mut cache) = humanoid_fixture("minecraft:zombie");
         let entity = store.get(4).unwrap();
         let mut before = DynamicGeometry::default();
-        cache
-            .append(
-                entity,
-                5,
-                entity.equipment_value(5).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut before,
-            )
+        cache.append(entity, 5, entity.equipment_value(5).unwrap(), crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut before)
             .unwrap();
         store.get_mut(4).unwrap().transform.pitch = 45.;
         let entity = store.get(4).unwrap();
         let mut after = DynamicGeometry::default();
-        cache
-            .append(
-                entity,
-                5,
-                entity.equipment_value(5).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut after,
-            )
+        cache.append(entity, 5, entity.equipment_value(5).unwrap(), crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut after)
             .unwrap();
         assert_ne!(before.vertices[2].position, after.vertices[2].position);
         let mut fallback = DynamicGeometry::default();
@@ -936,12 +872,7 @@ mod tests {
                 entity,
                 3,
                 entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                 &mut fallback
             )
             .unwrap());
@@ -951,12 +882,7 @@ mod tests {
                 entity,
                 4,
                 entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                 &mut fallback
             )
             .unwrap());
@@ -1107,12 +1033,7 @@ mod tests {
                 entity,
                 4,
                 entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                 &mut out
             )
             .unwrap());
@@ -1147,12 +1068,7 @@ mod tests {
                 entity,
                 4,
                 &glinted,
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
+                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
                 &mut out
             )
             .unwrap());
