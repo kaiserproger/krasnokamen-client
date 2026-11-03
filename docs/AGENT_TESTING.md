@@ -49,12 +49,6 @@ to report EOF and is not evidence of a client-initiated network failure.
 Normal transport/packet failures still log `session failed` and retain their
 reason. A legitimate terrain-loading interval is not such a failure.
 
-Server status replies have a 30-second overall deadline, with cancellable reads;
-slow status is not treated as an immediate disconnect. The focused
-`reconnect_waits_for_delayed_status_before_login` and
-`disconnect_cancels_pending_status_read` TCP tests cover delayed reconnect
-and cancellation, not a real server restart gate.
-
 ### Local interaction failures versus wire failures
 
 Local item/block/entity prediction and local editor opening are not connection

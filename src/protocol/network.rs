@@ -10,7 +10,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 /// Java's `UUID.nameUUIDFromBytes("OfflinePlayer:" + name)`: the identity an
 /// offline-mode server derives from the login name.
@@ -269,28 +269,14 @@ fn run(
     let mut status =
         TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|e| e.to_string())?;
     status
-        .set_read_timeout(Some(Duration::from_millis(250)))
+        .set_read_timeout(Some(Duration::from_secs(3)))
         .map_err(|e| e.to_string())?;
     write(&mut status, 0, &handshake(&endpoint, addr.port(), 1), None)?;
     write(&mut status, 0, &[], None)?;
     let mut bytes = Vec::new();
     let mut tmp = [0; 8192];
-    // A listening server may still be initializing; bound the whole response,
-    // while allowing cancellation without leaving a blocked I/O worker.
-    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if state.cancelled.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err("timed out waiting for server status after 30 seconds".into());
-        }
-        let n = match status.read(&mut tmp) {
-            Ok(n) => n,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock
-                | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => continue,
-            Err(e) => return Err(e.to_string()),
-        };
+        let n = status.read(&mut tmp).map_err(|e| e.to_string())?;
         if n == 0 {
             return Err("status peer closed".into());
         }
@@ -532,65 +518,6 @@ mod tests {
                 "view-distance byte must echo the configured radius"
             );
         }
-    }
-
-    #[test]
-    fn reconnect_waits_for_delayed_status_before_login() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let (ready, received) = mpsc::channel();
-        let peer = thread::spawn(move || {
-            for attempt in 0..2 {
-                let (mut login, _) = listener.accept().unwrap();
-                let (mut status, _) = listener.accept().unwrap();
-                login.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
-                assert_eq!(read_packet(&mut status).0, 0);
-                assert_eq!(read_packet(&mut status), (0, Vec::new()));
-                if attempt == 1 {
-                    // Model a server listening before startup finishes, without
-                    // introducing a scheduler-dependent polling loop.
-                    let (_keep_open, wait) = mpsc::channel::<()>();
-                    assert!(matches!(wait.recv_timeout(Duration::from_millis(3500)), Err(mpsc::RecvTimeoutError::Timeout)));
-                }
-                let mut response = Writer::default();
-                response.string(r#"{"version":{"protocol":777}}"#);
-                write(&mut status, 0, &response.0, None).unwrap();
-                assert_eq!(read_packet(&mut login).0, 0);
-                assert_eq!(read_packet(&mut login).0, 0);
-                ready.send(()).unwrap();
-            }
-        });
-        for _ in 0..2 {
-            let network = Network::connect(address.to_string(), "ReconnectTest".into(), 8, Arc::new(|| {})).unwrap();
-            received.recv_timeout(Duration::from_secs(8)).expect("login did not follow status");
-            drop(network);
-        }
-        peer.join().unwrap();
-    }
-
-    #[test]
-    fn disconnect_cancels_pending_status_read() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let (ready, received) = mpsc::channel();
-        let (release, released) = mpsc::channel();
-        let address = listener.local_addr().unwrap();
-        let peer = thread::spawn(move || {
-            let (_login, _) = listener.accept().unwrap();
-            let (mut status, _) = listener.accept().unwrap();
-            read_packet(&mut status);
-            read_packet(&mut status);
-            ready.send(()).unwrap();
-            released.recv_timeout(Duration::from_secs(5)).unwrap();
-        });
-        let mut network = Network::connect(address.to_string(), "CancelTest".into(), 8, Arc::new(|| {})).unwrap();
-        received.recv_timeout(Duration::from_secs(5)).unwrap();
-        let worker = network.worker.take().unwrap();
-        drop(network);
-        let (done, finished) = mpsc::channel();
-        thread::spawn(move || { let _ = done.send(worker.join()); });
-        assert!(finished.recv_timeout(Duration::from_secs(2)).unwrap().is_ok());
-        release.send(()).unwrap();
-        peer.join().unwrap();
     }
 
     #[test]
