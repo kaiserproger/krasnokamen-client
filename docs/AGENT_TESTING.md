@@ -4,6 +4,15 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### Held-map decorations
+
+`received_map_decorations_face_the_map_and_use_their_atlas_regions` sends a
+map-data packet through the UI dispatcher and checks marker positions,
+rotation, atlas regions and front-facing geometry on the held-map path. It
+also checks the shared renderer's item-frame visibility predicate, not a live
+item-frame render. This geometry regression does not replace the original
+windowed graphical waypoint scenario.
+
 ### Mount inventory quick-move
 
 The session associates an opened mount screen with the already received entity
