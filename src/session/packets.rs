@@ -282,6 +282,11 @@ impl Session {
             .inventory
             .apply(id, &mut Reader::new(r.bytes), content)?
         {
+            if id == cb::MOUNT_SCREEN_OPEN {
+                let entity_id = self.inventory.menu().entity_id.ok_or("mount screen entity ID missing")?;
+                let entity = self.entities.get(entity_id).ok_or("mount screen entity not received")?;
+                self.inventory.configure_mount(entity_id, &entity.type_name)?;
+            }
             self.container_packet_version += 1;
             handled = true;
         }
@@ -897,6 +902,64 @@ fn chunk_key(p: [i32; 3]) -> [i32; 2] {
 mod tests {
     use super::*;
     use crate::protocol::world::{Palette, Section, SurfaceHeightmap};
+
+    #[test]
+    fn received_mount_screen_quick_moves_player_cargo() {
+        use crate::ui::{ClickMode, UiIntent};
+        for (kind, columns) in [
+            ("minecraft:horse", 0),
+            ("minecraft:donkey", 5),
+            ("minecraft:mule", 5),
+            ("minecraft:llama", 3),
+            ("minecraft:trader_llama", 2),
+            ("minecraft:camel", 0),
+            ("minecraft:nautilus", 0),
+        ] {
+            let mut session = Session::new_mode("mount-menu-test".into(), false);
+            let mut content = Content::test_cube();
+            content.entity_names.insert(1, kind.into());
+            content.item_names.insert(1, "minecraft:iron_ingot".into());
+            content.insert_test_item_components(1, BTreeMap::from([
+                ("minecraft:max_stack_size".into(), json!(64)),
+            ]));
+            content.set_registries(BTreeMap::from([(
+                "minecraft:item".into(),
+                vec![("minecraft:air".into(), json!({})), ("minecraft:iron_ingot".into(), json!({}))],
+            )]));
+            content.set_tags(BTreeMap::from([(
+                "minecraft:item".into(),
+                BTreeMap::from([("minecraft:bundles".into(), vec![])]),
+            )])).unwrap();
+            session.content = Some(content);
+            let mut spawn = Writer::default();
+            spawn.var(42);
+            spawn.0.extend([0; 16]);
+            spawn.var(1);
+            for _ in 0..3 { spawn.f64(0.); }
+            spawn.0.extend([0; 5]);
+            session.apply(Phase::Play, cb::ADD_ENTITY, &spawn.0).unwrap();
+            session.apply(Phase::Play, cb::MOUNT_SCREEN_OPEN, &[1, columns, 0, 0, 0, 42]).unwrap();
+            let start = 2 + 3 * usize::from(columns);
+            let mut image = vec![1, 0, (start + 36) as u8];
+            image.extend(vec![0; start]);
+            image.extend([1, 1, 0, 0]);
+            image.extend(vec![0; 35]);
+            image.push(0);
+            session.apply(Phase::Play, cb::CONTAINER_SET_CONTENT, &image).unwrap();
+            let intent = UiIntent::ClickSlot {
+                context: session.inventory.context(),
+                slot: start as i16,
+                button: 0,
+                mode: ClickMode::QuickMove,
+            };
+            let packets = session.inventory.execute(&intent, session.content.as_ref().unwrap())
+                .unwrap_or_else(|error| panic!("{kind}: {error}"));
+            assert_eq!(packets.len(), 1, "{kind}");
+            let target = if columns == 0 { start + 27 } else { 2 };
+            assert_eq!(session.inventory.menu().slots[target].as_ref().unwrap().id, 1, "{kind}");
+            assert!(session.inventory.menu().slots[start].as_ref().unwrap().empty(), "{kind}");
+        }
+    }
 
     #[test]
     fn resource_pack_push_declined_in_both_phases() {

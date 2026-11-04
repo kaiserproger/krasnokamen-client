@@ -4,6 +4,13 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### Mount inventory quick-move
+
+The session associates an opened mount screen with the already received entity
+type before predicting quick-moves. `received_mount_screen_quick_moves_player_cargo`
+exercises packet dispatch and slot prediction for mount variants; it does not
+replace the original graphical custody/mount scenario or server confirmation.
+
 ### Server resource-pack offers
 
 The client does not install server-provided packs. It declines each offer by
