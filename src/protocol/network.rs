@@ -268,11 +268,11 @@ fn write(socket: &mut TcpStream, id: i32, body: &[u8], threshold: Option<usize>)
         .map_err(|e| e.to_string())
 }
 /// One bounded handoff, with no socket timeout or idle polling. Dropping the
-/// receiver releases a reader blocked on backpressure; shutdown releases recv.
+/// receiver releases backpressure; shutdown plus cancellation releases recv.
 #[cfg(any(windows, test))]
 struct BlockingReader {
     incoming: Option<Receiver<std::io::Result<ReadChunk>>>,
-    socket: TcpStream,
+    socket: Arc<TcpStream>,
     worker: Option<thread::JoinHandle<()>>,
 }
 #[cfg(any(windows, test))]
@@ -283,10 +283,11 @@ struct ReadChunk {
 #[cfg(any(windows, test))]
 impl BlockingReader {
     fn start(socket: &TcpStream, owner: thread::Thread) -> std::io::Result<Self> {
-        let mut input = socket.try_clone()?;
-        let control = socket.try_clone()?;
+        let control = Arc::new(socket.try_clone()?);
+        let input = control.clone();
         let (send, incoming) = mpsc::sync_channel(1);
         let worker = thread::Builder::new().name("minecraft-read".into()).spawn(move || {
+            let mut input = input.as_ref();
             loop {
                 let mut chunk = ReadChunk { bytes: [0; 8192], len: 0 };
                 let result = loop {
@@ -309,6 +310,26 @@ impl BlockingReader {
         Ok(Self { incoming: Some(incoming), socket: control, worker: Some(worker) })
     }
 
+    fn shutdown(&self) {
+        let _ = self.socket.shutdown(Shutdown::Both);
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawSocket;
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn CancelIoEx(socket: *mut std::ffi::c_void, overlapped: *mut std::ffi::c_void) -> i32;
+            }
+            // Winsock shutdown prevents new reads but does not release a recv
+            // already blocked on another thread. Cancel its pending I/O on the
+            // exact reader handle, not a duplicated socket or the writer.
+            // SAFETY: the Arc keeps this socket handle alive through cancellation
+            // and reader join; null OVERLAPPED cancels all I/O on that handle.
+            unsafe {
+                CancelIoEx(self.socket.as_raw_socket() as *mut _, std::ptr::null_mut());
+            }
+        }
+    }
+
     fn try_read(&self, buffer: &mut Vec<u8>) -> Result<()> {
         match self.incoming.as_ref().expect("reader alive").try_recv() {
             Ok(Ok(chunk)) if chunk.len > 0 => {
@@ -327,7 +348,7 @@ impl BlockingReader {
 #[cfg(any(windows, test))]
 impl Drop for BlockingReader {
     fn drop(&mut self) {
-        let _ = self.socket.shutdown(Shutdown::Both);
+        self.shutdown();
         drop(self.incoming.take());
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -591,13 +612,19 @@ mod tests {
                 Err(mpsc::RecvTimeoutError::Timeout)
             ));
             if shutdown {
-                socket.shutdown(Shutdown::Both).unwrap();
+                reader.shutdown();
             } else {
                 peer.shutdown(Shutdown::Write).unwrap();
             }
-            let chunk = reader.incoming.as_ref().unwrap()
-                .recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
-            assert_eq!(chunk.len, 0);
+            let result = reader.incoming.as_ref().unwrap()
+                .recv_timeout(Duration::from_secs(5)).unwrap();
+            match result {
+                Ok(chunk) => assert_eq!(chunk.len, 0),
+                Err(error) => {
+                    assert!(cfg!(windows) && shutdown, "{error}");
+                    assert_eq!(error.raw_os_error(), Some(10004), "{error}");
+                }
+            }
             assert!(matches!(
                 reader.incoming.as_ref().unwrap().recv_timeout(Duration::from_secs(5)),
                 Err(mpsc::RecvTimeoutError::Disconnected)

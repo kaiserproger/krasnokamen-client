@@ -35,9 +35,13 @@ cloud extent is our coverage choice against the oracle's horizon cloud band.
 Windows uses a dedicated plain blocking TCP reader, with one bounded 8 KiB
 handoff to the existing protocol owner. Read arrivals, outbound commands, radius
 changes and disconnect wake that owner with `unpark`; idle connections do not
-poll. Dropping the reader shuts down the socket, drops its bounded receiver and
-joins the reader, including when it is blocked on backpressure. Linux retains
-its existing 10 ms read timeout and protocol loop.
+poll. Dropping the reader shuts down the socket, cancels pending Winsock I/O
+with `CancelIoEx` on the exact reader handle, drops its bounded receiver and
+joins the reader, including when it is blocked on backpressure. Shutdown alone
+does not release a Windows recv already blocked while the peer stays open;
+the native idle/shutdown regression covers this boundary. The reader retains
+that handle until cancellation and join finish. Linux retains its existing
+10 ms read timeout and protocol loop.
 
 Do not reinstate Windows `SO_RCVTIMEO` polling: [Winsock documents that a timed-out
 blocking receive leaves the connection in an indeterminate state and it should
