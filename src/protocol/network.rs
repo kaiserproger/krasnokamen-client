@@ -83,6 +83,8 @@ pub struct Network {
     outgoing: mpsc::Sender<(i32, Vec<u8>)>,
     state: Arc<ConnectionState>,
     socket: Option<TcpStream>,
+    #[cfg(windows)]
+    worker_wake: thread::Thread,
     #[cfg(test)]
     worker: Option<thread::JoinHandle<()>>,
 }
@@ -114,6 +116,10 @@ impl Network {
         let addr = *addresses.first().ok_or("address resolved no targets")?;
         let socket =
             TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(|e| e.to_string())?;
+        // Winsock says a timed-out blocking recv leaves the connection in an
+        // indeterminate state. Windows uses a blocking reader instead of polling
+        // SO_RCVTIMEO; the Linux I/O path is unchanged.
+        #[cfg(not(windows))]
         socket
             .set_read_timeout(Some(Duration::from_millis(10)))
             .map_err(|e| e.to_string())?;
@@ -140,6 +146,8 @@ impl Network {
                 }
             })
             .map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        let worker_wake = worker.thread().clone();
         #[cfg(not(test))]
         drop(worker);
         Ok(Self {
@@ -147,6 +155,8 @@ impl Network {
             outgoing,
             state,
             socket: Some(control),
+            #[cfg(windows)]
+            worker_wake,
             #[cfg(test)]
             worker: Some(worker),
         })
@@ -182,7 +192,10 @@ impl Network {
         self.outgoing.send((id, body)).map_err(|_| {
             state.outbound_backlog.fetch_sub(1, Ordering::AcqRel);
             "outbound queue closed: network thread ended".to_string()
-        })
+        })?;
+        #[cfg(windows)]
+        self.worker_wake.unpark();
+        Ok(())
     }
 
     /// Publish a setting; the I/O owner sends the proper Configuration/Play form.
@@ -190,6 +203,8 @@ impl Network {
         self.state
             .view_distance
             .store(view_distance, Ordering::Release);
+        #[cfg(windows)]
+        self.worker_wake.unpark();
     }
 }
 impl Drop for Network {
@@ -197,6 +212,8 @@ impl Drop for Network {
         self.state.cancelled.store(true, Ordering::Release);
         if let Some(socket) = self.socket.take() {
             let _ = socket.shutdown(Shutdown::Both);
+            #[cfg(windows)]
+            self.worker_wake.unpark();
         }
     }
 }
@@ -250,6 +267,74 @@ fn write(socket: &mut TcpStream, id: i32, body: &[u8], threshold: Option<usize>)
         .write_all(&frame(id, body, threshold)?)
         .map_err(|e| e.to_string())
 }
+/// One bounded handoff, with no socket timeout or idle polling. Dropping the
+/// receiver releases a reader blocked on backpressure; shutdown releases recv.
+#[cfg(any(windows, test))]
+struct BlockingReader {
+    incoming: Option<Receiver<std::io::Result<ReadChunk>>>,
+    socket: TcpStream,
+    worker: Option<thread::JoinHandle<()>>,
+}
+#[cfg(any(windows, test))]
+struct ReadChunk {
+    bytes: [u8; 8192],
+    len: usize,
+}
+#[cfg(any(windows, test))]
+impl BlockingReader {
+    fn start(socket: &TcpStream, owner: thread::Thread) -> std::io::Result<Self> {
+        let mut input = socket.try_clone()?;
+        let control = socket.try_clone()?;
+        let (send, incoming) = mpsc::sync_channel(1);
+        let worker = thread::Builder::new().name("minecraft-read".into()).spawn(move || {
+            loop {
+                let mut chunk = ReadChunk { bytes: [0; 8192], len: 0 };
+                let result = loop {
+                    match input.read(&mut chunk.bytes) {
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        result => break result,
+                    }
+                };
+                let terminal = !matches!(result, Ok(n) if n > 0);
+                let message = result.map(|len| { chunk.len = len; chunk });
+                if send.send(message).is_err() {
+                    break;
+                }
+                owner.unpark();
+                if terminal {
+                    break;
+                }
+            }
+        })?;
+        Ok(Self { incoming: Some(incoming), socket: control, worker: Some(worker) })
+    }
+
+    fn try_read(&self, buffer: &mut Vec<u8>) -> Result<()> {
+        match self.incoming.as_ref().expect("reader alive").try_recv() {
+            Ok(Ok(chunk)) if chunk.len > 0 => {
+                if buffer.len() + chunk.len > MAX_FRAME + 5 {
+                    return Err("network buffer bound".into());
+                }
+                buffer.extend_from_slice(&chunk.bytes[..chunk.len]);
+                Ok(())
+            }
+            Ok(Ok(_)) | Err(mpsc::TryRecvError::Disconnected) => Err("server closed connection".into()),
+            Ok(Err(error)) => Err(format!("server read: {error}")),
+            Err(mpsc::TryRecvError::Empty) => Ok(()),
+        }
+    }
+}
+#[cfg(any(windows, test))]
+impl Drop for BlockingReader {
+    fn drop(&mut self) {
+        let _ = self.socket.shutdown(Shutdown::Both);
+        drop(self.incoming.take());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 struct ServerEndpoint {
     addr: std::net::SocketAddr,
     endpoint: String,
@@ -313,6 +398,8 @@ fn run(
     let mut compression = None;
     let mut buffer = Vec::with_capacity(65536);
     let mut advertised_radius = None;
+    #[cfg(windows)]
+    let reader = BlockingReader::start(&socket, thread::current()).map_err(|e| e.to_string())?;
     while !state.cancelled.load(Ordering::Acquire) {
         flush_outbound(&mut socket, &commands, state, compression)?;
         let radius = state.view_distance.load(Ordering::Acquire);
@@ -443,6 +530,14 @@ fn run(
                 wake();
             }
         }
+        #[cfg(windows)]
+        {
+            // park retains an unpark token: an arrival between draining commands
+            // and parking cannot be lost. Reads, sends, settings and Drop wake us.
+            thread::park();
+            reader.try_read(&mut buffer)?;
+        }
+        #[cfg(not(windows))]
         match socket.read(&mut tmp) {
             Ok(0) => return Err("server closed connection".into()),
             Ok(n) => {
@@ -482,6 +577,73 @@ fn client_information(view_distance: u8) -> Vec<u8> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+    #[test]
+    fn blocking_reader_idle_shutdown_and_eof_are_terminal() {
+        for shutdown in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (peer, _) = listener.accept().unwrap();
+            assert_eq!(socket.read_timeout().unwrap(), None);
+            let reader = BlockingReader::start(&socket, thread::current()).unwrap();
+            // An idle reader neither produces timeout events nor spins on them.
+            assert!(matches!(
+                reader.incoming.as_ref().unwrap().recv_timeout(Duration::from_millis(30)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ));
+            if shutdown {
+                socket.shutdown(Shutdown::Both).unwrap();
+            } else {
+                peer.shutdown(Shutdown::Write).unwrap();
+            }
+            let chunk = reader.incoming.as_ref().unwrap()
+                .recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(chunk.len, 0);
+            assert!(matches!(
+                reader.incoming.as_ref().unwrap().recv_timeout(Duration::from_secs(5)),
+                Err(mpsc::RecvTimeoutError::Disconnected)
+            ));
+            assert_eq!(reader.try_read(&mut Vec::new()).unwrap_err(), "server closed connection");
+        }
+    }
+
+    #[test]
+    fn blocking_reader_reassembles_partial_frames_and_drop_releases_backpressure() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        let reader = BlockingReader::start(&socket, thread::current()).unwrap();
+        let encoded = frame(42, &[7; 256], None).unwrap();
+        let mut buffer = Vec::new();
+        let mut received = 0;
+        for fragment in [&encoded[..1], &encoded[1..3], &encoded[3..]] {
+            peer.write_all(fragment).unwrap();
+            received += fragment.len();
+            while buffer.len() < received {
+                let chunk = reader.incoming.as_ref().unwrap()
+                    .recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                assert!(chunk.len > 0);
+                buffer.extend_from_slice(&chunk.bytes[..chunk.len]);
+            }
+            if buffer.len() < encoded.len() {
+                assert!(extract(&mut buffer, None).unwrap().is_none());
+            }
+        }
+        assert_eq!(extract(&mut buffer, None).unwrap(), Some((42, vec![7; 256])));
+        assert!(buffer.is_empty());
+        // No consumer drains these bytes: Drop must release both recv and send.
+        peer.write_all(&[0; 32768]).unwrap();
+        drop(reader);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_play_socket_never_uses_a_read_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let network = Network::connect(
+            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, Arc::new(|| {})
+        ).unwrap();
+        assert_eq!(network.socket.as_ref().unwrap().read_timeout().unwrap(), None);
+    }
 
     fn read_packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
         let mut header = Vec::new();
@@ -737,6 +899,8 @@ mod tests {
                 view_distance: AtomicU8::new(8),
             }),
             socket: None,
+            #[cfg(windows)]
+            worker_wake: thread::current(),
             worker: None,
         };
         for index in 0..7 {

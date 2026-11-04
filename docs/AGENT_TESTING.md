@@ -30,6 +30,28 @@ clouds draw before those text layers. GPU regressions cover that composition.
 Clouds ignore the terrain-edge fog but keep environmental fog. The 60-cell
 cloud extent is our coverage choice against the oracle's horizon cloud band.
 
+### Windows play transport
+
+Windows uses a dedicated plain blocking TCP reader, with one bounded 8 KiB
+handoff to the existing protocol owner. Read arrivals, outbound commands, radius
+changes and disconnect wake that owner with `unpark`; idle connections do not
+poll. Dropping the reader shuts down the socket, drops its bounded receiver and
+joins the reader, including when it is blocked on backpressure. Linux retains
+its existing 10 ms read timeout and protocol loop.
+
+Do not reinstate Windows `SO_RCVTIMEO` polling: [Winsock documents that a timed-out
+blocking receive leaves the connection in an indeterminate state and it should
+be closed](https://learn.microsoft.com/en-us/windows/win32/winsock/sol-socket-socket-options).
+The separate status socket's three-second timeout and the play write timeout
+remain fatal to the attempt, not retried operations on an indeterminate socket.
+
+`cargo test -p solaris-client --lib protocol::network` covers partial-frame
+handoff, idle/EOF/shutdown termination and dropping a backpressured reader.
+Windows additionally checks that the real `Network::connect` play socket has
+no read timeout; existing phase/radius and terminal-event tests exercise the
+Windows wake path when run on Windows. These unit tests do not replace the
+Windows multiplayer soak, voluntary disconnect and authenticated rejoin gate.
+
 ### Teleport loading versus disconnect
 
 `minecraft_observe.in_play` means the current world is ready for interaction,

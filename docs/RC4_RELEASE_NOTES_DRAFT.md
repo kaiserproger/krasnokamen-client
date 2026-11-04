@@ -8,6 +8,10 @@ Changes in the current RC4 candidate since RC3 (not a release approval):
   authoring rule; those entities are not visually accepted in this candidate.
 - Graphics preset and rendering changes, including water, lighting and atmospheric effects.
 - Client automation, interface and audio changes, plus launcher and packaging updates.
+- Windows multiplayer no longer polls blocking reads with a socket timeout:
+  a bounded blocking reader wakes the protocol owner on data or shutdown.
+  Linux transport behavior is unchanged; platform acceptance still requires
+  the Windows long-session and reconnect receipts.
 
 The client targets Minecraft 26.3, protocol 777. Singleplayer uses the launcher's
 pinned 26.3 server-content bundle in `servers/content/26.3`.
