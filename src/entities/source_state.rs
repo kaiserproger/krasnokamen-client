@@ -263,6 +263,35 @@ fn water_contact(
     }
     Ok(Some(contact))
 }
+/// Whether received block collision lies directly under the feet (`bounds` is the
+/// entity box). Spawned or idle mobs may never receive a grounded move packet, so the
+/// received world answers instead. `None` while a probed block is not received.
+fn resting_on_block(world: &World, content: &Content, bounds: Bounds) -> Option<bool> {
+    let probe = Bounds {
+        min: [bounds.min[0], bounds.min[1] - 1. / 16., bounds.min[2]],
+        max: [bounds.max[0], bounds.min[1], bounds.max[2]],
+    };
+    for x in probe.min[0].floor() as i32..probe.max[0].ceil() as i32 {
+        for y in probe.min[1].floor() as i32..probe.max[1].ceil() as i32 {
+            for z in probe.min[2].floor() as i32..probe.max[2].ceil() as i32 {
+                let cell = [x, y, z];
+                let state = world.block(cell)?;
+                let offset = content.block_offset(state, cell);
+                let resting = content.collision_boxes(state).is_some_and(|shapes| {
+                    shapes.iter().any(|shape| {
+                        Bounds::new(*shape)
+                            .moved(std::array::from_fn(|i| f64::from(cell[i]) + offset[i]))
+                            .intersects(probe)
+                    })
+                });
+                if resting {
+                    return Some(true);
+                }
+            }
+        }
+    }
+    Some(false)
+}
 pub(crate) fn tick(
     entity: &mut Entity,
     models: &Models,
@@ -401,6 +430,11 @@ pub(crate) fn tick(
                 },
             );
             living.avatar.tick(transform.position, entity.velocity);
+            if render_living::folds_wings(&entity.type_name)
+                && let Some(resting) = resting_on_block(world, content, bounds)
+            {
+                living.tick_wings(entity.on_ground || resting);
+            }
             source.previous_yaw = transform.yaw;
         }
         Ok(source

@@ -278,6 +278,10 @@ pub(crate) struct State {
     pub walk: Walk,
     swim: f32,
     swim_old: f32,
+    wings: f32,
+    wings_old: f32,
+    swell: i32,
+    swell_old: i32,
     pub modern: Modern,
     pub avatar: Avatar,
     random: Rc<RefCell<JavaRandom>>,
@@ -308,6 +312,10 @@ impl State {
             walk: Walk::default(),
             swim: 0.,
             swim_old: 0.,
+            wings: 0.,
+            wings_old: 0.,
+            swell: 0,
+            swell_old: 0,
             modern,
             avatar: Avatar::default(),
             random,
@@ -315,6 +323,37 @@ impl State {
     }
     pub fn swim(&self, partial: f32) -> f32 {
         self.swim_old + partial * (self.swim - self.swim_old)
+    }
+    /// Updates the wing beat of mobs that fold their wings while standing.
+    /// minecraft.wiki: chickens flap their wings while in midair. The beat eases in
+    /// and out by a quarter per tick (a Solaris choice), so landing settles in four ticks.
+    pub fn tick_wings(&mut self, supported: bool) {
+        const EASE: f32 = 0.25;
+        self.wings_old = self.wings;
+        self.wings = if supported {
+            (self.wings - EASE).max(0.)
+        } else {
+            (self.wings + EASE).min(1.)
+        };
+    }
+    /// Wing beat strength: 0 folded at rest, 1 fully beating.
+    pub fn wings(&self, partial: f32) -> f32 {
+        self.wings_old + partial * (self.wings - self.wings_old)
+    }
+    /// Creeper fuse progress, 0 idle .. 1 about to explode. The client counts the
+    /// received swell direction (or ignition) itself, one step per tick, over the
+    /// 30-tick (1.5 s) fuse minecraft.wiki gives for a creeper.
+    pub fn swell(&self, partial: f32) -> f32 {
+        (self.swell_old as f32 + partial * (self.swell - self.swell_old) as f32) / CREEPER_FUSE as f32
+    }
+    fn tick_swell(&mut self, models: &Models, entity: &Entity) {
+        self.swell_old = self.swell;
+        let direction = if p::boolean(models, entity, "DATA_IS_IGNITED") {
+            1
+        } else {
+            p::number(models, entity, "DATA_SWELL_DIR").unwrap_or(-1).signum()
+        };
+        self.swell = (self.swell + direction).clamp(0, CREEPER_FUSE);
     }
     pub fn body(&self, partial: f32) -> f32 {
         self.body_yaw_old + partial * wrap(self.body_yaw - self.body_yaw_old)
@@ -464,6 +503,9 @@ impl State {
         self.on_head_rotation(entity.presented_transform(0, 0.).head_yaw);
         if self.hurt_time > 0 {
             self.hurt_time -= 1;
+        }
+        if entity.type_name == "minecraft:creeper" {
+            self.tick_swell(models, entity);
         }
         if !input.alive {
             self.death_time = self.death_time.wrapping_add(1);
@@ -812,6 +854,14 @@ impl State {
         }
         self.position_old = input.position;
     }
+}
+/// minecraft.wiki: a creeper explodes 30 ticks after it starts to swell.
+const CREEPER_FUSE: i32 = 30;
+/// Mobs that walk with folded wings and flap only in midair (minecraft.wiki: chickens
+/// "flap their wings when they are in midair"; parrots flap to fly and slow their falls).
+/// Other winged mobs fly and keep beating.
+pub(crate) fn folds_wings(kind: &str) -> bool {
+    matches!(kind, "minecraft:chicken" | "minecraft:parrot")
 }
 pub(crate) fn wrap(angle: f32) -> f32 {
     let angle = angle % 360.;

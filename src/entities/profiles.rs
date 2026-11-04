@@ -168,6 +168,35 @@ fn decode(r: &mut Reader<'_>) -> Result<Vec<Update>> {
     r.done()?;
     Ok(out)
 }
+/// Skin of a placed player head: the head's profile (UUID as four ints, else its name)
+/// must name a listed player whose textures the client already verified and published.
+/// Other profiles stay unresolved; their textures are never fetched for a head here.
+pub(super) fn head_skin(
+    profiles: &std::collections::BTreeMap<String, PlayerProfile>,
+    profile: &Value,
+) -> Result<TextureRegion> {
+    let player = match &profile["id"] {
+        Value::Null => {
+            let name = profile["name"].as_str().or(profile.as_str())
+                .ok_or("player head profile has neither id nor name")?;
+            profiles.values().find(|candidate| candidate.name == name)
+        }
+        Value::Array(words) if words.len() == 4 => {
+            let mut bits = 0u128;
+            for word in words {
+                let word = word.as_i64().and_then(|v| i32::try_from(v).ok())
+                    .ok_or("player head profile id is not four ints")?;
+                bits = bits << 32 | u128::from(word as u32);
+            }
+            profiles.get(&uuid::Uuid::from_u128(bits).to_string())
+        }
+        _ => return Err("player head profile id is not four ints".into()),
+    };
+    player
+        .and_then(|player| player.textures)
+        .and_then(|textures| textures.skin)
+        .ok_or_else(|| "player head profile is not a listed player with a published skin".into())
+}
 impl Store {
     pub fn set_local_player(&mut self, network_id: i32, uuid: &str) -> Result<()> {
         uuid::Uuid::parse_str(uuid).map_err(|_| "invalid local player UUID")?;

@@ -4,6 +4,7 @@ use crate::protocol::packet_ids::play::clientbound as cb;
 mod block_components;
 mod blocks;
 mod creaking_eyes;
+mod creeper;
 mod display;
 mod dragon;
 mod drowned_outer;

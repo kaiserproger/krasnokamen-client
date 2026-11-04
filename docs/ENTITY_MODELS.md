@@ -40,6 +40,14 @@ explicitly unrendered. The candidate's native equip/strip replay and movement re
 Adult wolf body armor uses an independently authored overlay rig and the received equippable
 asset's `wolf_body` layers, including dyeable layers. A natural equip/strip candidate replay,
 armor damage crack overlays, and matched vanilla visuals remain unverified.
+Other adult animals select their species' runtime equippable layer (pig, strider, camel and
+camel husk, donkey, mule, skeleton and zombie horse saddles; llama and trader llama carpets;
+the happy ghast harness; nautilus and zombie nautilus saddles and armor) and draw it with an
+independently authored overlay rig sharing the animal's root and joints. Baby animals and other
+species stay explicitly unrendered. Players draw elytra panels from the worn `wings` layer
+(published profile elytra or cape textures take priority), spread while fall-flying; a published
+profile cape hangs from the shoulders with a small movement sway and is hidden under elytra.
+Native equip/strip, gliding and matched-vanilla visuals remain unverified.
 
 The ender dragon uses its named base material from the family facts. Copper golem statues use
 the block state's pose and oxidation stage when selecting their authored rig and texture.
@@ -94,8 +102,18 @@ Enchanting tables render their animated book and conduits render their inactive 
 active cage, wind and camera-facing eye in the native scene. A dry inactive conduit and an
 enchanting table were visually exercised; active conduit and matched-vanilla parity were not.
 Bed item graphs select the authored head and foot geometry separately before their graph transforms.
-Placed skulls render in the native scene; player heads with a custom profile are reported as
-unrendered until the scene connects profile resolution and atlas publication.
+Placed skulls render in the native scene. A player head whose profile (UUID, else name) is a
+listed player with a published skin renders that skin with its hat layer; other profiles stay
+reported unrendered, because the scene does not fetch textures for arbitrary head profiles.
+
+Creepers count the received swell direction (or ignition) through a 30-tick fuse: the model
+widens and grows about its feet while blinking white at a quickening rate, and returns to normal
+when defused. Charged creepers draw a scrolling `creeper_armor` swirl on an enlarged copy of
+their pose (`creeper_charge`), also while invisible. Primed TNT and falling blocks draw their
+received block model (TNT flashes white and swells in its last ticks); lightning bolts draw
+independently authored seeded jagged geometry while the strike flashes; leashed mobs draw a
+sagging brown rope from the neck to the holder's hand or knot. Sizes, rates and colours of these
+effects are Solaris approximations of the minecraft.wiki descriptions, not game constants.
 
 ## File format (schema 1)
 
@@ -125,7 +143,8 @@ unrendered until the scene connects profile resolution and atlas publication.
   (swapped corners flip) for flat planes.
 * `roles` lists the bones the generic animation drives: `head` (look pitch/yaw), `right_leg` /
   `left_leg` (opposite swing phase; quadrupeds list diagonal pairs), `right_arm` / `left_arm`,
-  `wing_negative_x` / `wing_positive_x` (opposed flap), `crossed_arms` (villager-family arms bone:
+  `wing_negative_x` / `wing_positive_x` (opposed flap; chickens and parrots fold their wings
+  while received collision lies under their feet and flap only in midair), `crossed_arms` (villager-family arms bone:
   held-item anchor of the source `CrossedArmsItemLayer`; not animated) and `nose` (witch nose: the potion anchor, tilts forward
   while the main hand holds an item). Bone names must be unique; code also special-cases `body` (sneak) and the
   humanoid names for armor stands and first-person arms.
@@ -230,11 +249,9 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   Received sitting flags select Solaris-authored sitting poses for adult and baby cats and
   wolves; red-collar static standing/sitting views were exercised. Transition animation
   and matched-vanilla poses remain unverified.
-  The allay head's front face samples an independently selected rectangle of the runtime
-  texture containing both eyes; the other head faces retain the authored box unwrap.
-  Four-direction real-client replay on candidate `bcc6dda36cd017d8085e1d1365c12c5f31783f56583a8b1ab3cd7a181d51a940`
-  (`20261102T081517-scene-shot-ur5d50bb`) showed both eyes from the face side; the
-  earlier same-view candidate showed only one. No matched-vanilla comparison was made.
+  The allay head's faces sample explicit rectangles of the runtime texture; the front one
+  contains both eyes. An earlier real-client replay (`20261102T081517-scene-shot-ur5d50bb`)
+  showed both eyes on the previous, larger allay rig; the re-authored rig is unverified natively.
   Adult and baby goat and the four sheep rigs (base and coat, adult and lamb) size every cube from the
   net it samples in the runtime atlas and place it by fitting orthographic silhouettes against the stored
   reference pictures (`refsheet.py sheet`; author-static mean IoU 0.92 adult goat, 0.98 baby goat,
@@ -259,7 +276,14 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   native-client summon showed the larger model and a 12-block hitbox.
   Equipment and matched-vanilla appearance remain unverified.
   Adult and baby pigs use independently authored texture-sized head, snout, torso and leg
-  geometry without separate ears or tail. The cold pig's extra texture layer is not modelled.
+  geometry without separate ears or tail: the adult head sits in front of the body with the
+  snout just below the eyes, and the piglet head rises a pixel above its back. The cold pig's
+  extra texture layer is not modelled.
+  Allay, vex, baby bee, ghastling, rabbit, fox, panda, hoglin, zoglin, strider, guardian, elder
+  guardian, cod, salmon and axolotl rigs (with their babies where listed) and the vindicator's
+  clothing UVs were re-authored by eye from public minecraft.wiki renders; receipts list the
+  references. `post_rc4_reauthored_rigs_keep_their_reference_silhouettes` pins the reported
+  defects (legs, wings, gills, fins, spikes, tusks, proportions); native appearance is unverified.
   Slime and magma cube geometry scales about the feet using the received size; the default
   remains one. Slime's face and inner body use cutout rendering, with a separate translucent
   outer shell. The magma cube's orange and yellow eye rows use adjacent texture slices;
@@ -308,10 +332,9 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   visible exterior faces and a solid decorated pot. The dragon head is too dark
   for fine-detail assessment; first-person captures are cropped, and vanilla
   parity is not established.
-* Several creatures are simplified silhouettes (ender dragon, wither, warden, guardian,
+* Several creatures are simplified silhouettes (ender dragon, wither, warden,
   nautilus, sniffer, parrot...). Drowned have adult and baby outer clothing layers.
-  Other overlay-only PNG layers (stray/bogged overlays, horse markings/saddles)
-  are not modelled.
+  Other overlay-only PNG layers (stray/bogged overlays, horse markings) are not modelled.
 * `python3 tools/entity_models.py check` reports texture-texel coverage and structural validity.
   Neither establishes that a rig is selected, that its parts connect in motion, or that it
   looks correct in the client; those require a rendered scene with the relevant entity state.

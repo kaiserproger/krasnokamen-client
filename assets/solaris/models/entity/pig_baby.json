@@ -1,197 +1,48 @@
 {
   "schema": 1,
   "id": "pig_baby",
-  "texture": {
-    "path": "entity/pig/pig_temperate_baby.png",
-    "size": [
-      32,
-      32
-    ]
-  },
+  "texture": {"path": "entity/pig/pig_temperate_baby.png", "size": [32, 32]},
   "roles": {
-    "head": [
-      "head"
-    ],
-    "right_leg": [
-      "right_hind_leg",
-      "left_front_leg"
-    ],
-    "left_leg": [
-      "left_hind_leg",
-      "right_front_leg"
-    ]
+    "head": ["head"],
+    "right_leg": ["right_hind_leg", "left_front_leg"],
+    "left_leg": ["left_hind_leg", "right_front_leg"]
   },
   "bones": [
     {
-      "name": "head",
-      "pivot": [
-        0,
-        22,
-        -4
-      ],
+      "name": "head", "pivot": [0, 21, -4],
       "cubes": [
-        {
-          "origin": [
-            -3.5,
-            -6,
-            -6
-          ],
-          "size": [
-            7,
-            6,
-            6
-          ],
-          "uv": [
-            0,
-            15
-          ]
-        },
-        {
-          "origin": [
-            -1.5,
-            -2,
-            -7
-          ],
-          "size": [
-            3,
-            2,
-            1
-          ],
-          "uv": [
-            6,
-            27
-          ]
-        }
+        {"origin": [-3.5, -6, -6], "size": [7, 6, 6], "uv": [0, 15]},
+        {"origin": [-1.5, -3, -7], "size": [3, 2, 1], "uv": [6, 27]}
       ]
     },
     {
-      "name": "body",
-      "pivot": [
-        0,
-        16,
-        0
-      ],
+      "name": "body", "pivot": [0, 16, 0],
       "cubes": [
-        {
-          "origin": [
-            -3.5,
-            0,
-            -4.5
-          ],
-          "size": [
-            7,
-            6,
-            9
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        }
+        {"origin": [-3.5, 0, -4.5], "size": [7, 6, 9], "uv": [0, 0]}
       ]
     },
     {
-      "name": "right_hind_leg",
-      "pivot": [
-        -2,
-        22,
-        3
-      ],
+      "name": "right_hind_leg", "pivot": [-2, 22, 3],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            0,
-            -1
-          ],
-          "size": [
-            2,
-            2,
-            2
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        }
+        {"origin": [-1, 0, -1], "size": [2, 2, 2], "uv": [0, 0]}
       ]
     },
     {
-      "name": "left_hind_leg",
-      "pivot": [
-        2,
-        22,
-        3
-      ],
+      "name": "left_hind_leg", "pivot": [2, 22, 3],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            0,
-            -1
-          ],
-          "size": [
-            2,
-            2,
-            2
-          ],
-          "uv": [
-            23,
-            0
-          ]
-        }
+        {"origin": [-1, 0, -1], "size": [2, 2, 2], "uv": [23, 0]}
       ]
     },
     {
-      "name": "right_front_leg",
-      "pivot": [
-        -2,
-        22,
-        -3
-      ],
+      "name": "right_front_leg", "pivot": [-2, 22, -3],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            0,
-            -1
-          ],
-          "size": [
-            2,
-            2,
-            2
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        }
+        {"origin": [-1, 0, -1], "size": [2, 2, 2], "uv": [0, 0]}
       ]
     },
     {
-      "name": "left_front_leg",
-      "pivot": [
-        2,
-        22,
-        -3
-      ],
+      "name": "left_front_leg", "pivot": [2, 22, -3],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            0,
-            -1
-          ],
-          "size": [
-            2,
-            2,
-            2
-          ],
-          "uv": [
-            23,
-            0
-          ]
-        }
+        {"origin": [-1, 0, -1], "size": [2, 2, 2], "uv": [23, 0]}
       ]
     }
   ]
