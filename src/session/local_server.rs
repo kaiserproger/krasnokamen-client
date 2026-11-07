@@ -168,8 +168,11 @@ impl Session {
             changed = true;
             match msg {
                 Msg::Progress(text) => {
-                    if let Some(ui) = &mut self.ui {
+                    if let Some(ui) = &mut self.ui
+                        && ui.local_status != text
+                    {
                         ui.set_local_status(text);
+                        self.changed_state();
                     }
                 }
                 Msg::Done(result) => {
@@ -277,6 +280,41 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solaris-sp-session-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn startup_progress_publishes_one_state_event_for_each_visible_change() {
+        let mut content = Content::test_cube();
+        content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
+        let mut session = Session::new_mode("startup-progress".into(), false);
+        let mut ui = UiState::new_state(&content).unwrap();
+        ui.begin_local_start("Starting world server");
+        session.ui = Some(ui);
+        let (tx, rx) = mpsc::channel();
+        let (cancel, _events) = singleplayer::start_channel();
+        session.local_start = Some(Start {
+            rx,
+            cancel,
+            dir_name: "world".into(),
+            username: "Player".into(),
+        });
+        let before = session.state_version;
+        tx.send(Msg::Progress("Loading game registries".into()))
+            .unwrap();
+        assert!(session.poll_local_server());
+        assert_eq!(
+            session.ui.as_ref().unwrap().local_status,
+            "Loading game registries"
+        );
+        assert_eq!(session.state_version, before + 1);
+        tx.send(Msg::Progress("Loading game registries".into()))
+            .unwrap();
+        session.poll_local_server();
+        assert_eq!(
+            session.state_version,
+            before + 1,
+            "identical progress is not a new state"
+        );
     }
 
     #[test]

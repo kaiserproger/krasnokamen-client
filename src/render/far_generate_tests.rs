@@ -4,6 +4,24 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[test]
+fn software_compute_does_not_take_the_render_queue_for_distant_terrain() {
+    for device in [
+        wgpu::DeviceType::Cpu,
+        wgpu::DeviceType::IntegratedGpu,
+        wgpu::DeviceType::DiscreteGpu,
+        wgpu::DeviceType::VirtualGpu,
+        wgpu::DeviceType::Other,
+    ] {
+        assert_eq!(
+            supported(device, true, true),
+            device != wgpu::DeviceType::Cpu
+        );
+        assert!(!supported(device, false, true));
+        assert!(!supported(device, true, false));
+    }
+}
+
 /// The compute pass against the CPU reference (itself bit-exact with the
 /// server, `far/program_tests.rs`) on tiles near and 8 km from the origin, in
 /// every quadrant and at fine and coarse levels. The GPU works in f32, so
