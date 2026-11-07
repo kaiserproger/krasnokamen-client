@@ -54,11 +54,17 @@ impl Session {
         // `in_play` means a visible playable world, not just received bytes:
         // the spawn-neighborhood GPU latch (epoch tuple, bypassed headless/dead)
         // must also hold, else automation acts behind the Loading overlay.
-        let in_play = self.phase == "play"
-            && self.play_world_presentation_ready()
-            && self.spawn_meshes_presented();
+        let world_ready = self.play_world_presentation_ready();
+        let presented = self.spawn_meshes_presented();
+        let in_play = self.phase == "play" && world_ready && presented;
         let mut value = json!({"in_play":in_play,"screen":screen,"overlay":{"open":false,"class":"none"},"recent_chat":recent_chat,
             "debug_overlay":self.debug_overlay_pending,"state_version":self.state_version,"client_tick":self.client_tick,"origin":"received_state_and_explicit_local_player_prediction"});
+        value["loading_readiness"] = json!({
+            "phase": self.phase,
+            "world_ready": world_ready,
+            "spawn_meshes_ready": self.spawn_meshes_ready(),
+            "spawn_meshes_presented": presented,
+        });
         value["inputs"] = json!({"held": self.keys});
         value["using"] = self.player.using_observation(self.client_tick).unwrap_or(Value::Null);
         value["loader"] = self.loader.observation();
@@ -75,6 +81,16 @@ impl Session {
                 value["title_server"] = json!(ui.title_field("title/server"));
                 value["title_username"] = json!(ui.title_field("title/username"));
                 value["title_error"] = json!(ui.title_error_text());
+            }
+            if matches!(ui.screen(), crate::ui::Screen::Singleplayer | crate::ui::Screen::SingleplayerStarting) {
+                value["singleplayer"] = json!({
+                    "status": if ui.screen() == crate::ui::Screen::SingleplayerStarting {
+                        Some(ui.local_status.as_str())
+                    } else {
+                        None
+                    },
+                    "error": ui.title_error_text(),
+                });
             }
         }
         if let (Some(ui), Some(content)) = (&self.ui, &self.content) {
@@ -1213,6 +1229,22 @@ mod debug_tests {
         assert_eq!(session.ui.as_ref().unwrap().hud.players.len(), 1);
     }
     #[test]
+    fn singleplayer_start_observation_reports_progress_and_failure() {
+        let mut session = Session::new_mode("local-start-observation".into(), false);
+        let mut content = crate::protocol::content::Content::test_cube();
+        content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
+        let mut ui = crate::ui::UiState::new_state(&content).unwrap();
+        ui.begin_local_start("Loading spawn");
+        session.ui = Some(ui);
+        assert_eq!(session.minecraft_observation()["singleplayer"], json!({
+            "status": "Loading spawn", "error": null
+        }));
+        session.ui.as_mut().unwrap().local_start_ended(Some("failed".into()));
+        assert_eq!(session.minecraft_observation()["singleplayer"], json!({
+            "status": null, "error": "failed"
+        }));
+    }
+    #[test]
     fn play_observation_waits_for_received_spawn_world() {
         let mut session = Session::new_mode("world-readiness-test".into(), false);
         session.phase = "play".into();
@@ -1231,16 +1263,24 @@ mod debug_tests {
             session.minecraft_observation()["in_play"].as_bool(),
             Some(false)
         );
+        assert_eq!(session.minecraft_observation()["loading_readiness"], json!({
+            "phase": "play",
+            "world_ready": false,
+            "spawn_meshes_ready": false,
+            "spawn_meshes_presented": true,
+        }));
     }
     #[test]
     fn renderer_confirmation_is_required_and_invalidated_by_epochs() {
         let mut session = Session::new_mode("mesh-readiness-test".into(), true);
         assert!(!session.spawn_meshes_presented());
+        assert_eq!(session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"], false);
         let epochs = session.context_epochs();
         session.note_renderer_scene_confirmation(epochs.0 + 1, epochs.1, 1);
         assert!(!session.spawn_meshes_presented(), "stale renderer receipt must not release loading");
         session.note_renderer_scene_confirmation(epochs.0, epochs.1, 1);
         assert!(session.spawn_meshes_presented());
+        assert_eq!(session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"], true);
         session.scene.revision += 1;
         assert!(session.spawn_meshes_presented(), "later UI frames must not relock loading");
         session.dimension_epoch += 1;

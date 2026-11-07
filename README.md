@@ -100,6 +100,11 @@ Render distance and fullscreen in the launcher's Settings use the same `client-s
 
 In Multiplayer, select a saved row, then use **Join Server**, **Edit**, or **Delete**. Delete asks for confirmation; Edit and confirmed Delete rewrite the local `servers.json`. F2 reports screenshot success or failure in chat; it never replaces an earlier capture. Creative tabs and recipe controls adapt to the logical GUI width; on narrow windows the open recipe book temporarily covers the container, and its book button returns to the slots.
 
+In an inventory, an initial press on an item picks it up; releasing that
+gesture over another slot keeps it on the cursor. Click the destination slot
+to place it. A drag that begins with an already-carried stack can still
+distribute items over multiple slots.
+
 Hold **Tab** while playing to show the server's listed online players and its
 player-list header/footer; release it to hide the list. In chat, **Tab** completes
 commands from the server's advertised command tree and requests server-provided

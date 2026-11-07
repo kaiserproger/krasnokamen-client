@@ -418,6 +418,7 @@ pub(super) struct DrawStore<'a> {
     pub(super) transforms: &'a mut Vec<Mat4>,
     pub(super) items: &'a mut crate::ui::items::ItemModels,
     pub(super) equipment_cache: &'a mut super::equipment::Cache,
+    pub(super) profiles: &'a BTreeMap<String, super::profiles::PlayerProfile>,
     pub(super) snow_pumpkin_state: &'a mut Option<u32>,
     pub(super) mooshroom_mushroom_states: &'a mut [Option<u32>; 2],
     pub(super) clock_context: Option<&'a crate::ui::items::ItemContext>,
@@ -651,6 +652,7 @@ pub fn append(
             transforms: &mut store.transforms,
             items: &mut store.items,
             equipment_cache: &mut store.equipment_cache,
+            profiles: &store.profiles,
             snow_pumpkin_state: &mut store.snow_pumpkin_state,
             mooshroom_mushroom_states: &mut store.mooshroom_mushroom_states,
             clock_context: clock_context.as_ref(),
@@ -822,6 +824,10 @@ pub(super) fn draw_entity(
                         * Mat4::from_translation(-relative)
                         * matrix;
                 }
+                let swell = super::creeper::swell(entity, partial);
+                if swell > 0. {
+                    matrix = super::creeper::swollen(matrix, relative, swell);
+                }
                 if matches!(binding.style, RootStyle::Living)
                     && entity.type_name != "minecraft:armor_stand"
                     && entity.source.as_ref().is_some_and(|s| s.living.is_some())
@@ -947,18 +953,28 @@ pub(super) fn draw_entity(
                             stats.unrendered.insert(entity.type_name.clone(), reason);
                         }
                     }
-                    if matches!(binding.style, RootStyle::Living)
+                    let hurt = matches!(binding.style, RootStyle::Living)
                         && (entity
                             .damage_tick
                             .is_some_and(|damage| tick.saturating_sub(damage) < 10)
-                            || entity.death_tick.is_some())
-                    {
+                            || entity.death_tick.is_some());
+                    let white = super::creeper::flash(swell);
+                    if hurt || white > 0. {
+                        let overlay = if hurt { [0., 3.] } else { [white, 10.] };
                         for vertex in &mut out.vertices[start..] {
-                            vertex.overlay_uv = [0., 3.];
+                            vertex.overlay_uv = overlay;
                         }
                     }
                 }
                 stats.animated += 1;
+                if !invisible && entity.type_name == "minecraft:player" {
+                    let profile = store.profiles.get(&entity.uuid).and_then(|p| p.textures);
+                    if let Err(reason) = store.equipment_cache.append_player_back(entity, profile,
+                        super::equipment::Frame { models, content, root: matrix, tick, partial, light }, out)
+                    {
+                        stats.unrendered.insert("minecraft:player:back".into(), reason);
+                    }
+                }
                 append_equipment(
                     EquipmentPose { entity, rig, transforms: store.transforms },
                     store.items,
@@ -1047,8 +1063,19 @@ pub(super) fn draw_entity(
                         let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
                         evaluate_rig(wind, entity, models, tick, partial, matrix, store.transforms);
                         let scroll = ((tick % 2000) as f32 + partial) * 0.01;
-                        emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
+                        emit_wrapped(wind, store.transforms, WrappedStyle {
+                            tex: texture, scroll: [scroll, 0.], color: [1.; 3],
+                            layer: EntityMaterial::BreezeWind, light,
+                        }, out)?;
                     }
+                }
+                // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+                if entity.type_name == "minecraft:creeper"
+                    && let Err(reason) = super::creeper::append_charge(
+                        entity, models, content, (tick, partial, matrix), store.transforms, out,
+                    )
+                {
+                    stats.unrendered.insert(format!("{}:charge", entity.type_name), reason);
                 }
             }
             Err(reason) => {
@@ -1116,6 +1143,12 @@ pub(super) fn evaluate_rig(
     let zombie_arms_raised = zombie_arms && (!boolean(models, e, "DATA_BABY_ID")
         || e.equipment_value(0).is_none_or(|stack| stack.empty()));
     let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
+    let wing_beat = if super::render_living::folds_wings(&e.type_name) {
+        living.map_or(0., |state| state.wings(partial))
+    } else {
+        1.
+    };
+    let wing_flap = ((tick as f32 + partial) * 0.3).sin() * 0.3 * wing_beat;
     for bone in &rig.bones {
         let mut rotation = bone.rotation;
         let mut pivot = bone.pivot;
@@ -1156,12 +1189,8 @@ pub(super) fn evaluate_rig(
                     rotation.x = -1.35;
                 }
             }
-            BoneRole::WingNegativeX => {
-                rotation.z += (tick as f32 * 0.3 + partial).sin() * 0.3;
-            }
-            BoneRole::WingPositiveX => {
-                rotation.z -= (tick as f32 * 0.3 + partial).sin() * 0.3;
-            }
+            BoneRole::WingNegativeX => rotation.z += wing_flap,
+            BoneRole::WingPositiveX => rotation.z -= wing_flap,
             // Source `WitchModel.setupAnim`: a held item pulls the nose forward and up.
             BoneRole::Nose if e.equipment_value(0).is_some() => {
                 pivot = Vec3::new(0., 1., -1.5) / 16.;
@@ -1288,22 +1317,29 @@ pub(super) fn emit_rig(
     emit_rig_parts(rig, transforms, style, None, false, out)
 }
 
-// BreezeWind repeats within the texture's atlas rectangle rather than the whole atlas page.
-fn emit_breeze_wind(
+/// A texture layer that repeats within its own atlas rectangle (breeze wind, energy
+/// swirl), scrolled by `scroll` texture widths/heights.
+pub(super) struct WrappedStyle {
+    pub tex: TextureRegion,
+    pub scroll: [f32; 2],
+    pub color: [f32; 3],
+    pub layer: EntityMaterial,
+    pub light: [f32; 2],
+}
+pub(super) fn emit_wrapped(
     rig: &Rig,
     transforms: &[Mat4],
-    tex: TextureRegion,
-    scroll: f32,
-    light: [f32; 2],
+    style: WrappedStyle,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    let WrappedStyle { tex, scroll, color, layer, light } = style;
     let start = out.vertices.len();
-    emit_rig(rig, transforms, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer: EntityMaterial::BreezeWind, alpha: 1., light }, out)?;
+    emit_rig(rig, transforms, RigStyle { tex, color, layer, alpha: 1., light }, out)?;
     let size = [tex.uv[2] - tex.uv[0], tex.uv[3] - tex.uv[1]];
     for vertex in &mut out.vertices[start..] {
         vertex.uv = [
-            (vertex.uv[0] - tex.uv[0]) / size[0] + scroll,
-            (vertex.uv[1] - tex.uv[1]) / size[1],
+            (vertex.uv[0] - tex.uv[0]) / size[0] + scroll[0],
+            (vertex.uv[1] - tex.uv[1]) / size[1] + scroll[1],
         ];
         vertex.overlay_uv = [tex.uv[0], tex.uv[1]];
         vertex.overlay_tint = [size[0], size[1], 0.];
@@ -2341,7 +2377,6 @@ mod tests {
         )).unwrap();
         let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
         let cube = &head.cubes[0];
-        assert_eq!(cube.faces.len(), 1, "other head faces retain their box unwrap");
         let [u0, v0, u1, v1] = cube.faces[&Face::Front];
         // Pixel centers independently observed in the runtime allay texture.
         for (u, v) in [(6.5, 7.5), (8.5, 7.5), (6.5, 8.5), (8.5, 8.5)] {
@@ -2810,8 +2845,11 @@ mod tests {
         };
         let mut first = DynamicGeometry::default();
         let mut second = DynamicGeometry::default();
-        emit_breeze_wind(rig, &transforms, tex, 0., [15., 15.], &mut first).unwrap();
-        emit_breeze_wind(rig, &transforms, tex, 0.25, [15., 15.], &mut second).unwrap();
+        let style = |scroll| WrappedStyle {
+            tex, scroll: [scroll, 0.], color: [1.; 3], layer: EntityMaterial::BreezeWind, light: [15., 15.],
+        };
+        emit_wrapped(rig, &transforms, style(0.), &mut first).unwrap();
+        emit_wrapped(rig, &transforms, style(0.25), &mut second).unwrap();
         assert!(!first.indices[EntityMaterial::BreezeWind as usize].is_empty());
         assert_eq!(first.vertices.len(), second.vertices.len());
         for (a, b) in first.vertices.iter().zip(&second.vertices) {

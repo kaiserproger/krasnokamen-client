@@ -6,6 +6,7 @@ mod kernels;
 mod painting;
 mod projectiles;
 mod timeline;
+mod world_fx;
 use super::{Entity, Handle, Metadata, Models, Store, presentation as p, resources};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
@@ -54,6 +55,7 @@ pub(crate) struct Cache {
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
     clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    tnt_state: Option<u32>,
 }
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
@@ -146,13 +148,26 @@ pub(crate) fn append(
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    if !matches!(store.slots[slot].type_name.as_str(),
-        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    let entity = &store.slots[slot];
+    if !matches!(entity.type_name.as_str(),
+        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
+        | "minecraft:tnt" | "minecraft:falling_block" | "minecraft:lightning_bolt")
+        && entity.leash_value().is_none() && entity.leash_holder_id.is_none()
+    {
         return Ok(Handled::Unhandled);
     }
     let vertex_start = out.vertices.len();
     let index_starts = out.indices.each_ref().map(Vec::len);
     let result = (|| {
+        let entity = &store.slots[slot];
+        if entity.type_name == "minecraft:lightning_bolt" {
+            return world_fx::append_bolt(entity, origin, tick, partial, out);
+        }
+        if !matches!(entity.type_name.as_str(),
+            "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
+            | "minecraft:tnt" | "minecraft:falling_block") {
+            return world_fx::append_leash(entity, store, models, origin, tick, partial, light_source, out);
+        }
         if store.slots[slot].type_name == "minecraft:painting" {
             return painting::append(&store.slots[slot], store, models,
                 content, origin, tick, partial, light_source, out);
@@ -163,6 +178,10 @@ pub(crate) fn append(
             dimensions, scale, light_source)? else {
             return Ok(Handled::PendingLighting);
         };
+        if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
+            return world_fx::append_block(store, slot, content,
+                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, out);
+        }
         item_frame::append(entity, models, item_frame::ItemFrameResources {
             cache: &mut store.special_render_cache, items: &mut store.items,
         }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)

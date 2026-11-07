@@ -1,7 +1,7 @@
 [
  {
   "name": "minecraft_observe",
-  "description": "Read the current client-visible player, inventory, target, screen, overlay, time, and recent chat state.",
+  "description": "Read client-visible player, inventory, target, screen, loading readiness, singleplayer startup status, time, and recent chat state.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -228,7 +228,7 @@
  },
  {
   "name": "minecraft_list_entities",
-  "description": "List bounded client-visible entities near the player with stable ids, types, and positions.",
+  "description": "List bounded client-visible entities near the player with stable ids, types, positions, and the same-thread client game_time.",
   "inputSchema": {
    "type": "object",
    "properties": {

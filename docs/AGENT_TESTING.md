@@ -4,6 +4,33 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### Held-map decorations
+
+`received_map_decorations_face_the_map_and_use_their_atlas_regions` sends a
+map-data packet through the UI dispatcher and checks marker positions,
+rotation, atlas regions and front-facing geometry on the held-map path. It
+also checks the shared renderer's item-frame visibility predicate, not a live
+item-frame render. This geometry regression does not replace the original
+windowed graphical waypoint scenario.
+
+### Mount inventory quick-move
+
+The session associates an opened mount screen with the already received entity
+type before predicting quick-moves. `received_mount_screen_quick_moves_player_cargo`
+exercises packet dispatch and slot prediction for mount variants; it does not
+replace the original graphical custody/mount scenario or server confirmation.
+
+### Server resource-pack offers
+
+The client does not install server-provided packs. It declines each offer by
+UUID in Configuration or Play and leaves the server to enforce required packs;
+the server's disconnect reason is displayed normally. The focused
+`session::packets::tests::resource_pack_push_declined_in_both_phases` test checks
+both response packets and subsequent packet handling. The ignored
+`resource_pack_live_optional_join` test requires pinned local client content and
+`SOLARIS_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
+optional pack; it waits for the real headless session to reach a ready world.
+
 ### Death-screen respawn and controller leases
 
 Clicking the exact `DeathScreen` `Respawn` button through
@@ -74,6 +101,14 @@ Terminating a client after a premature readiness assertion causes the server
 to report EOF and is not evidence of a client-initiated network failure.
 Normal transport/packet failures still log `session failed` and retain their
 reason. A legitimate terrain-loading interval is not such a failure.
+For diagnosing a loading screen, `minecraft_observe.loading_readiness` reports
+the session phase and the independent world, spawn-mesh and presented-frame
+predicates even before `in_play`. These are observations, not permission to
+interact before `in_play` or evidence of a completed graphical frame by themselves.
+During singleplayer startup and on its world list, `minecraft_observe.singleplayer`
+exposes the displayed startup status or failure text so graphical probes can
+distinguish a live wait from an actual failure.
+
 
 ### Local interaction failures versus wire failures
 

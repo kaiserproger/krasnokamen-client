@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "id": "strider_saddle_equipment",
+  "texture": {"path": "entity/equipment/strider_saddle/saddle.png", "size": [64, 128]},
+  "roles": {
+    "head": ["head"]
+  },
+  "bones": [
+    {
+      "name": "body", "pivot": [0, 4, 0]
+    },
+    {
+      "name": "head", "pivot": [0, 4, 0],
+      "cubes": [
+        {"origin": [-5, -7.6, -5], "size": [10, 0.35, 10], "faces": {"up": [18, 2, 28, 12], "down": [18, 2, 28, 12], "right": [18, 2, 28, 12], "front": [18, 2, 28, 12], "left": [18, 2, 28, 12], "back": [18, 2, 28, 12]}},
+        {"origin": [-7.7, -7.3, -1], "size": [0.3, 12, 2], "faces": {"up": [6, 16, 9, 20], "down": [6, 16, 9, 20], "right": [6, 16, 9, 20], "front": [6, 16, 9, 20], "left": [6, 16, 9, 20], "back": [6, 16, 9, 20]}},
+        {"origin": [7.4, -7.3, -1], "size": [0.3, 12, 2], "faces": {"up": [36, 16, 39, 20], "down": [36, 16, 39, 20], "right": [36, 16, 39, 20], "front": [36, 16, 39, 20], "left": [36, 16, 39, 20], "back": [36, 16, 39, 20]}}
+      ]
+    }
+  ]
+}

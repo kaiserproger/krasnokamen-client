@@ -192,9 +192,13 @@ def _world_boxes(model):
 
 
 def symmetry_errors(model):
-    """left_*/right_* pairs must mirror about x=0 (catches mirrored cubes left at the right limb's origin)."""
+    """Mirror paired parts about the shared model root, not necessarily world x=0."""
     errs = []
     boxes = _world_boxes(model)
+    roots = model["bones"]
+    centre = roots[0].get("pivot", [0, 0, 0])[0] if (
+        len(roots) == 1 and roots[0].get("bones") and not roots[0].get("cubes")
+    ) else 0
     for name, bx in boxes.items():
         if not name.startswith("left_"):
             continue
@@ -202,8 +206,8 @@ def symmetry_errors(model):
         if not other:
             continue
         cl, cr = (bx[0] + bx[1]) / 2, (other[0] + other[1]) / 2
-        if abs(cl + cr) > 0.6:
-            errs.append(f"{name}/right_{name[5:]} not mirror-symmetric about x=0 (centres {cl:g} vs {cr:g}) - mirror flips texture only, move the origin")
+        if abs(cl + cr - 2 * centre) > 0.6:
+            errs.append(f"{name}/right_{name[5:]} not mirror-symmetric about x={centre:g} (centres {cl:g} vs {cr:g}) - mirror flips texture only, move the origin")
     return errs
 
 
@@ -326,6 +330,9 @@ def preview(path, out, texture_override=None):
         for c in b.get("cubes", []):
             k += 1
             for f, (a, bb, cc, dd) in face_rects(c).items():
+                # Flat planes have zero-width faces; there is no rectangle to outline.
+                if a == cc or bb == dd:
+                    continue
                 d.rectangle([min(a, cc) * ts, min(bb, dd) * ts, max(a, cc) * ts - 1, max(bb, dd) * ts - 1], outline=palette[k % 6] + (255,))
     pct = 100.0 * (opaque & mapped).sum() / max(opaque.sum(), 1)
     W = cell * len(tiles) + 0

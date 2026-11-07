@@ -724,6 +724,56 @@ fn static_skulls_render_and_report_unresolved_player_profiles() {
 }
 
 #[test]
+fn listed_player_head_profile_renders_skin_with_hat_layer() {
+    use super::super::profiles::{PlayerProfile, ProfileTextures};
+    let content = village_content(
+        "minecraft:player_head",
+        "minecraft:skull",
+        BTreeMap::from([("rotation".into(), "0".into())]),
+        vec![],
+    );
+    let mut store = super::super::Store::new();
+    store.activate_models(Arc::new(models_with(Vec::new())));
+    let uuid = "00000001-0000-0002-0000-000300000004";
+    store.profiles.insert(uuid.into(), PlayerProfile {
+        uuid: uuid.into(), name: "Hatted".into(), properties: Vec::new(), generation: 1,
+        listed: true, latency: 0, game_mode: 0, display_name: None, list_order: 0,
+        show_hat: true, chat_key: None,
+        textures: Some(ProfileTextures {
+            skin: Some(test_region(9)), cape: None, elytra: None, model: None, secure: true,
+        }),
+    });
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    let (origin, camera) = camera_for(position);
+    let world = World::new(0, 256);
+    for profile in [serde_json::json!({"id": [1, 2, 3, 4]}), serde_json::json!({"name": "Hatted"})] {
+        store.block_entities.get_mut(&position).unwrap().data = Arc::new(serde_json::json!({"profile": profile}));
+        let mut geometry = DynamicGeometry::default();
+        let stats = render_static(&mut store, &content, &world, origin, camera, 0., &mut geometry);
+        assert!(stats.unrendered.is_empty(), "{profile}: {:?}", stats.unrendered);
+        assert_eq!(stats.block_entities, 1);
+        assert!(geometry.vertices.iter().all(|vertex| vertex.texture_layer == 9), "{profile}");
+        // Head and hat shells: 12 faces of 4 vertices and 6 indices, head first.
+        assert_eq!(geometry.indices[EntityMaterial::EntityTranslucent as usize].len(), 12 * 6, "{profile}");
+        let (head, hat) = geometry.vertices.split_at(24);
+        assert!(hat.iter().all(|v| (0.5..=1.).contains(&v.uv[0]) && (0. ..=0.25).contains(&v.uv[1])),
+            "the hat samples the skin overlay region");
+        let width = |vertices: &[crate::api::Vertex]| {
+            let xs = vertices.iter().map(|v| v.position[0]);
+            xs.clone().fold(f32::MIN, f32::max) - xs.fold(f32::MAX, f32::min)
+        };
+        assert!(width(hat) > width(head), "the hat encloses the head");
+    }
+    store.block_entities.get_mut(&position).unwrap().data =
+        Arc::new(serde_json::json!({"profile": {"name": "Offline"}}));
+    let mut offline = DynamicGeometry::default();
+    let stats = render_static(&mut store, &content, &world, origin, camera, 0., &mut offline);
+    assert!(stats.unrendered.contains_key("minecraft:skull"));
+    assert!(offline.vertices.is_empty());
+}
+
+#[test]
 fn static_banner_renders_standing_and_wall_with_patterns_and_world_time() {
     for (block, key, props) in [
         (
