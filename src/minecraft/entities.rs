@@ -447,7 +447,7 @@ pub(super) fn start(
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Some(Outcome::Complete(
                 json!({"in_play":true,"radius":radius,"visible_count":total,
-                "entities":entities,"truncated":total > limit}),
+                "game_time":session.game_time(),"entities":entities,"truncated":total > limit}),
             )));
         }
         "minecraft_wait_for_visible_entity" => Wait::Visible {

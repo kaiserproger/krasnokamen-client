@@ -192,9 +192,13 @@ def _world_boxes(model):
 
 
 def symmetry_errors(model):
-    """left_*/right_* pairs must mirror about x=0 (catches mirrored cubes left at the right limb's origin)."""
+    """Mirror paired parts about the shared model root, not necessarily world x=0."""
     errs = []
     boxes = _world_boxes(model)
+    roots = model["bones"]
+    centre = roots[0].get("pivot", [0, 0, 0])[0] if (
+        len(roots) == 1 and roots[0].get("bones") and not roots[0].get("cubes")
+    ) else 0
     for name, bx in boxes.items():
         if not name.startswith("left_"):
             continue
@@ -202,8 +206,8 @@ def symmetry_errors(model):
         if not other:
             continue
         cl, cr = (bx[0] + bx[1]) / 2, (other[0] + other[1]) / 2
-        if abs(cl + cr) > 0.6:
-            errs.append(f"{name}/right_{name[5:]} not mirror-symmetric about x=0 (centres {cl:g} vs {cr:g}) - mirror flips texture only, move the origin")
+        if abs(cl + cr - 2 * centre) > 0.6:
+            errs.append(f"{name}/right_{name[5:]} not mirror-symmetric about x={centre:g} (centres {cl:g} vs {cr:g}) - mirror flips texture only, move the origin")
     return errs
 
 

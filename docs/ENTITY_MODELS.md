@@ -254,16 +254,22 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   showed both eyes on the previous, larger allay rig; the re-authored rig is unverified natively.
   Adult and baby goat and the four sheep rigs (base and coat, adult and lamb) size every cube from the
   net it samples in the runtime atlas and place it by fitting orthographic silhouettes against the stored
-  reference pictures (`refsheet.py sheet`; author-static mean IoU 0.92 adult goat, 0.98 baby goat,
-  1.00 adult sheep and coat, 0.99 lamb, 0.97 lamb coat). The adult goat head is a tilted `face`
-  bone (nose box, ears, beard plane) under the animated `head` bone, with the horns beside it;
-  the baby goat's second body net is hidden inside the first and is unused. Vanilla's half-pixel
-  sideways offset of the adult goat is not reproduced because `check` requires x-mirrored legs.
+  reference pictures (`refsheet.py sheet`; before the later goat correction, author-static mean IoU was
+  0.92 adult goat, 0.98 baby goat, 1.00 adult sheep and coat, 0.99 lamb, 0.97 lamb coat).
+  The adult goat head is a tilted `face` bone (nose box, ears, beard plane) under the
+  animated `head` bone, with the horns beside it; the baby goat's second body net is
+  hidden inside the first and is unused. A shared half-model-pixel adult goat root
+  offset corrects the measured front body edge in the matched graphical scene while
+  preserving left/right symmetry about that root.
   The lamb coat is the base shape with a 0.05 px inflate against coplanar depth fights.
   `goat_and_sheep_rigs_have_no_overlapping_same_facing_coplanar_faces` keeps the earlier goat
   stripe fix (coplanar horn/head and leg/torso faces) true for all six rigs. Adult
-  goat horn spacing was fitted from matched 26.3 Java/native front captures;
-  motion and complete matched-vanilla parity remain unverified.
+  goat horn spacing was fitted from matched 26.3 Java/native front captures. A later
+  matched front and side comparison showed rear-leaning native horns against upright
+  Java horns, so the adult horn rest axes are now upright; this is an oracle-derived
+  silhouette fit, not copied model data. The ears and beard counter-rotate the face
+  tilt; the ear spacing also matches the bounded front-view pixel check. Static
+  front/side captures were reviewed, but motion and complete parity remain unverified.
   The snifflet rig includes a middle leg pair as well as front and hind legs; its
   gait remains simplified and has not been validated against vanilla motion.
   Baby zombie villager body and arms sample the baby clothing area instead of the
@@ -356,5 +362,7 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
   the launcher needs no JDK and nothing is derived from the client jar for entities.
 * Spider legs use a Solaris-authored alternating swing driven by received displacement;
-  they ease back to their authored resting pose when movement stops. This is not a
-  claim of vanilla gait parity.
+  they ease back to their authored resting pose when movement stops. The adult spider rig
+  now uses single sloped leg bars rather than added vertical feet, based on a Java
+  capture. A post-build native screenshot was inspected, but movement phase was not
+  matched to Java; this is not a claim of vanilla gait parity.

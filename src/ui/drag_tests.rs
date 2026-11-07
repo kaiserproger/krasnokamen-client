@@ -88,6 +88,10 @@ fn drag_from_inventory_into_grid_and_reconcile_rejection() {
     assert_eq!(inventory.cursor.as_ref().unwrap().count, 1);
     pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, 65.);
     let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 65.);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 65.);
+    assert_eq!(deliver(down, &mut inventory, &content), 0);
+    let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 65.);
     assert_eq!(deliver(up, &mut inventory, &content), 1);
     assert_eq!(inventory.player.slots[1].as_ref().unwrap().count, 1);
     assert!(inventory.cursor.as_ref().unwrap().empty());
@@ -122,7 +126,11 @@ fn delayed_pickup_image_temporarily_overwrites_later_drop_prediction() {
     let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 25.);
     deliver(down, &mut inventory, &content);
     let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 65.);
-    deliver(up, &mut inventory, &content);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 65.);
+    assert_eq!(deliver(down, &mut inventory, &content), 0);
+    let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 65.);
+    assert_eq!(deliver(up, &mut inventory, &content), 1);
     assert_eq!(inventory.player.slots[1].as_ref().unwrap().count, 1);
     assert!(inventory.cursor.as_ref().unwrap().empty());
     // Server processes the two clicks in order; its pickup image can arrive
@@ -144,6 +152,10 @@ fn right_drag_whole_virtual_result_then_place_one() {
     let down = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Down, 105., PointerButton::Right);
     assert_eq!(deliver(down, &mut inventory, &content), 1);
     assert_eq!(inventory.cursor.as_ref().unwrap().count, 4);
+    let up = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Up, 65., PointerButton::Right);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    let down = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Down, 65., PointerButton::Right);
+    assert_eq!(deliver(down, &mut inventory, &content), 0);
     let up = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Up, 65., PointerButton::Right);
     assert_eq!(deliver(up, &mut inventory, &content), 1);
     assert_eq!(inventory.player.slots[1].as_ref().unwrap().count, 1);
@@ -168,18 +180,18 @@ fn modified_click_does_not_issue_a_second_release_action() {
 }
 
 #[test]
-fn direct_release_transfers_without_intermediate_move() {
+fn initial_pickup_release_over_another_slot_keeps_cursor() {
     let (content, mut inventory, mut ui) = fixture();
     let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 25.);
-    deliver(down, &mut inventory, &content);
+    assert_eq!(deliver(down, &mut inventory, &content), 1);
     let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 65.);
-    assert_eq!(deliver(up, &mut inventory, &content), 1);
-    assert_eq!(inventory.player.slots[1].as_ref().unwrap().count, 1);
-    assert!(inventory.cursor.as_ref().unwrap().empty());
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    assert!(inventory.player.slots[1].as_ref().unwrap().empty());
+    assert_eq!(inventory.cursor.as_ref().unwrap().count, 1);
 }
 
 #[test]
-fn initial_click_stays_on_cursor_but_release_outside_drops() {
+fn initial_pickup_release_outside_keeps_cursor_until_outside_click() {
     let (content, mut inventory, mut ui) = fixture();
     let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 25.);
     deliver(down, &mut inventory, &content);
@@ -187,13 +199,16 @@ fn initial_click_stays_on_cursor_but_release_outside_drops() {
     assert_eq!(deliver(up, &mut inventory, &content), 0);
     assert_eq!(inventory.cursor.as_ref().unwrap().count, 1);
 
-    // Start with a fresh pickup; releasing outside sends the normal outside
-    // PICKUP packet, which is the server's authoritative drop path.
+    // A release outside after initial pickup keeps the item. A separate
+    // outside click sends the normal server-authoritative drop packet.
     let (content, mut inventory, mut ui) = fixture();
     let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 25.);
     deliver(down, &mut inventory, &content);
     let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 290.);
-    assert_eq!(deliver(up, &mut inventory, &content), 1);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    assert_eq!(inventory.cursor.as_ref().unwrap().count, 1);
+    let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 290.);
+    assert_eq!(deliver(down, &mut inventory, &content), 1);
     assert!(inventory.cursor.as_ref().unwrap().empty());
 }
 
@@ -245,6 +260,10 @@ fn drag_to_output_keeps_carried_item() {
     let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 25.);
     deliver(down, &mut inventory, &content);
     pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, 105.);
+    let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 105.);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+    let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, 105.);
+    assert_eq!(deliver(down, &mut inventory, &content), 0);
     let up = pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, 105.);
     assert_eq!(deliver(up, &mut inventory, &content), 1);
     assert!(inventory.player.slots[0].as_ref().unwrap().empty());

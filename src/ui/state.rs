@@ -450,7 +450,6 @@ pub struct UiState {
     pub(crate) drag: Option<PointerButton>,
     pub(crate) drag_slots: Vec<i16>,
     pub(crate) drag_carrying: bool,
-    pub(crate) drag_pickup: bool,
     pub(crate) drag_origin: Option<i16>,
     pub(crate) drag_expected: Option<crate::inventory::Stack>,
     pub(crate) drag_fence: Option<UiContext>,
@@ -576,7 +575,6 @@ impl UiState {
             drag: None,
             drag_slots: Vec::new(),
             drag_carrying: false,
-            drag_pickup: false,
             drag_origin: None,
             drag_expected: None,
             drag_fence: None,
@@ -1161,7 +1159,6 @@ impl UiState {
         self.drag = None;
         self.drag_slots.clear();
         self.drag_carrying = false;
-        self.drag_pickup = false;
         self.drag_origin = None;
         self.drag_expected = None;
         self.drag_fence = None;
@@ -2050,7 +2047,6 @@ impl UiState {
                         self.drag = button;
                         self.drag_slots.clear();
                         self.drag_carrying = inventory.cursor.as_ref().is_some_and(|s| !s.empty());
-                        self.drag_pickup = false;
                         self.drag_origin = None;
                         self.drag_expected = inventory.cursor.clone().filter(|stack| !stack.empty());
                         self.drag_fence = Some(self.context(inventory));
@@ -2093,22 +2089,6 @@ impl UiState {
                                     ClickMode::Pickup
                                 };
                                 if !self.drag_carrying || modifiers.shift || button == 2 {
-                                    self.drag_pickup = !self.drag_carrying
-                                        && !modifiers.shift
-                                        && button != 2;
-                                    if self.drag_pickup {
-                                        self.drag_expected = inventory.menu().slots
-                                            .get(slot as usize)
-                                            .and_then(Option::as_ref)
-                                            .filter(|stack| !stack.empty())
-                                            .cloned()
-                                            .map(|mut stack| {
-                                                if button == 1 && !inventory.menu().kind.virtual_result(slot as usize) {
-                                                    stack.count = (stack.count + 1) / 2;
-                                                }
-                                                stack
-                                            });
-                                    }
                                     self.execute_inner(
                                         UiIntent::ClickSlot {
                                             context: self.context(inventory),
@@ -2250,7 +2230,7 @@ impl UiState {
                                     });
                                 }
                                 effects.commands.push(UiCommand::InventoryGesture(gesture));
-                            } else if self.drag_carrying || self.drag_pickup {
+                            } else if self.drag_carrying {
                                 let layout = super::layout::Layout::menu(inventory.menu())?;
                                 let bounds = [
                                     (self.width - layout.width) / 2.,
@@ -2263,11 +2243,7 @@ impl UiState {
                                     None if !contains(bounds, self.pointer) => Some(-999),
                                     _ => None,
                                 };
-                                // A plain initial click picks up on down and must not
-                                // put the stack back on release over its source.
-                                if let Some(slot) = destination.filter(|slot| {
-                                    self.drag_carrying || Some(*slot) != self.drag_origin
-                                }) {
+                                if let Some(slot) = destination {
                                     self.execute_inner(
                                         UiIntent::ClickSlot {
                                             context: fence,
@@ -2291,7 +2267,6 @@ impl UiState {
                         self.slider_drag = None;
                         self.drag = None;
                         self.drag_slots.clear();
-                        self.drag_pickup = false;
                         self.drag_origin = None;
                         self.drag_expected = None;
                         self.drag_fence = None;

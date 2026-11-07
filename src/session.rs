@@ -297,6 +297,9 @@ impl Session {
             _ => "disconnected",
         }
     }
+    pub(crate) fn game_time(&self) -> i64 {
+        self.environment.game_time()
+    }
     pub fn screen(&self) -> &'static str {
         if let Some(ui) = &self.ui {
             match ui.screen() {
@@ -1303,6 +1306,20 @@ fn fixture_cube(scene: &mut Scene, position: [i32; 3], color: [f32; 3]) {
 #[cfg(test)]
 mod title_connection_tests {
     use super::*;
+    #[test]
+    fn entity_listing_reports_the_owner_tick_game_time() {
+        let mut session = Session::new_mode("entity-list-time".into(), false);
+        session.content = Some(Content::test_cube());
+        session.phase = "play".into();
+        session.player.pose_known = true;
+        session.environment.advance(42, 0.);
+        let result = crate::minecraft::start(&mut session, "minecraft_list_entities", &json!({})).unwrap();
+        let crate::minecraft::Outcome::Complete(value) = result else {
+            panic!("entity listing must complete on the owner tick");
+        };
+        assert_eq!(value["game_time"], json!(42));
+        assert!(value["entities"].is_array());
+    }
     #[test]
     fn game_escape_reaches_pause_and_second_escape_resumes() {
         let mut session = Session::new_mode("escape-routing".into(), false);

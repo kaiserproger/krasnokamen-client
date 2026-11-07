@@ -101,6 +101,14 @@ Terminating a client after a premature readiness assertion causes the server
 to report EOF and is not evidence of a client-initiated network failure.
 Normal transport/packet failures still log `session failed` and retain their
 reason. A legitimate terrain-loading interval is not such a failure.
+For diagnosing a loading screen, `minecraft_observe.loading_readiness` reports
+the session phase and the independent world, spawn-mesh and presented-frame
+predicates even before `in_play`. These are observations, not permission to
+interact before `in_play` or evidence of a completed graphical frame by themselves.
+During singleplayer startup and on its world list, `minecraft_observe.singleplayer`
+exposes the displayed startup status or failure text so graphical probes can
+distinguish a live wait from an actual failure.
+
 
 ### Local interaction failures versus wire failures
 

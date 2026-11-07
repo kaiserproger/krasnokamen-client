@@ -61,6 +61,60 @@ fn goat_horn_spacing_tracks_observed_front_silhouette() {
 }
 
 #[test]
+fn goat_rest_horns_are_vertical_in_the_oracle_side_view() {
+    let rig = authored("minecraft:goat#main").unwrap();
+    for name in ["right_horn", "left_horn"] {
+        let bone = &rig.bones[rig.part_by_name[name]];
+        let axis = crate::entities::resources::transform(bone.pivot, bone.rotation, bone.scale)
+            .transform_vector3(Vec3::Y)
+            .normalize();
+        // The matched 26.3 side screenshot shows upright, not rear-leaning, horns.
+        assert!(axis.z.abs() < 0.02, "{name} horn axis: {axis:?}");
+    }
+}
+
+#[test]
+fn goat_body_origin_tracks_observed_front_silhouette() {
+    let rig = authored("minecraft:goat#main").unwrap();
+    let body = &rig.bones[rig.part_by_name["body"]];
+    let parent = &rig.bones[body.parent.unwrap()];
+    // The fixed-distance 26.3 front capture places the body four screen pixels
+    // to the right of the former centered rig; this is the fitted model-space offset.
+    assert!((parent.pivot.x * 16. - 0.5).abs() < 0.01, "goat body parent: {:?}", parent.pivot);
+}
+
+#[test]
+fn goat_ears_and_beard_stay_upright_at_rest() {
+    let rig = authored("minecraft:goat#main").unwrap();
+    let face = &rig.bones[rig.part_by_name["face"]];
+    let face_transform = crate::entities::resources::transform(face.pivot, face.rotation, face.scale);
+    for name in ["right_ear", "left_ear", "beard"] {
+        let bone = &rig.bones[rig.part_by_name[name]];
+        let part_transform = crate::entities::resources::transform(bone.pivot, bone.rotation, bone.scale);
+        let axis = (face_transform * part_transform).transform_vector3(Vec3::Y).normalize();
+        // Java 26.3 front capture: ears are full-height and the beard hangs vertically.
+        assert!(axis.z.abs() < 0.02, "{name} vertical axis: {axis:?}");
+    }
+    let left = rig.bones[rig.part_by_name["left_ear"]].pivot.x;
+    let right = rig.bones[rig.part_by_name["right_ear"]].pivot.x;
+    assert!(((left - right).abs() * 16. - 8.).abs() < 0.01, "ear spacing");
+}
+
+#[test]
+fn spider_legs_form_single_sloped_oracle_silhouettes() {
+    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "spider.json").unwrap();
+    let model = ModelFile::parse(source).unwrap();
+    for index in 0..8 {
+        let name = format!("leg{index}");
+        let leg = model.bones.iter().find(|bone| bone.name == name).unwrap();
+        // Java 26.3 reference: the visible legs are straight, sloped bars,
+        // not horizontal bars with vertical downward extensions at their ends.
+        assert_eq!(leg.cubes.len(), 1, "{name} must not have an extra vertical foot");
+        assert!((28. ..=40.).contains(&leg.rotation[2].abs()), "{name} slope");
+    }
+}
+
+#[test]
 fn quads_wind_counter_clockwise_and_face_outward() {
     for mirror in [false, true] {
         for inflate in [0., 0.5] {
