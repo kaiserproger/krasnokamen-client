@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "elytra",
+  "texture": {"path": "entity/equipment/wings/elytra.png", "size": [64, 32]},
+  "bones": [
+    {
+      "name": "body", "pivot": [0, 0, 0],
+      "bones": [
+        {
+          "name": "wing_right", "pivot": [-1, 1, 2.6],
+          "cubes": [
+            {"origin": [-6, 0, 0], "size": [6, 18, 0.15], "faces": {"up": [35, 2, 45, 20], "down": [35, 2, 45, 20], "right": [35, 2, 45, 20], "front": [35, 2, 45, 20], "left": [35, 2, 45, 20], "back": [35, 2, 45, 20]}}
+          ]
+        },
+        {
+          "name": "wing_left", "pivot": [1, 1, 2.6],
+          "cubes": [
+            {"origin": [0, 0, 0], "size": [6, 18, 0.15], "faces": {"up": [45, 2, 35, 20], "down": [45, 2, 35, 20], "right": [45, 2, 35, 20], "front": [45, 2, 35, 20], "left": [45, 2, 35, 20], "back": [45, 2, 35, 20]}}
+          ]
+        }
+      ]
+    }
+  ]
+}

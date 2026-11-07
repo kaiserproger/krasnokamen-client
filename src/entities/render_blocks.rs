@@ -270,6 +270,7 @@ impl super::Store {
                         transforms: &mut self.transforms,
                         items: &mut self.items,
                         equipment_cache: &mut self.equipment_cache,
+                        profiles: &self.profiles,
                         snow_pumpkin_state: &mut self.snow_pumpkin_state,
                         mooshroom_mushroom_states: &mut self.mooshroom_mushroom_states,
                         // A spawner preview has no bed in the world to lie along.
@@ -430,17 +431,20 @@ impl super::Store {
                 }
                 "minecraft:skull" => (|| {
                     let name = block_name(block, content)?;
-                    if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
-                        && !block.data["profile"].is_null()
+                    let profile = &block.data["profile"];
+                    let skin = if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
+                        && !profile.is_null()
                     {
-                        return Err("player head profile texture resolution is not connected to the native scene".into());
-                    }
+                        Some(super::profiles::head_skin(&self.profiles, profile)?)
+                    } else {
+                        None
+                    };
                     skull_geometry(
                         block,
                         models,
                         content,
                         BlockPose { root, partial, light },
-                        None,
+                        skin,
                         &mut self.transforms,
                         out,
                     )

@@ -470,3 +470,125 @@ fn baked_limbs_sample_visible_texels_of_the_default_skin() {
         }
     }
 }
+
+/// Rest-pose `(min, max)` of every bone that has geometry, in model blocks
+/// (+Y down, front -Z), from the baked embedded rig.
+fn rest_bounds(key: &str) -> BTreeMap<String, (Vec3, Vec3)> {
+    let rig = authored(key).unwrap_or_else(|| panic!("{key} has no authored rig"));
+    let mut matrices = Vec::with_capacity(rig.bones.len());
+    let mut bounds = BTreeMap::new();
+    for bone in &rig.bones {
+        let matrix = bone.parent.map_or(glam::Mat4::IDENTITY, |parent| matrices[parent])
+            * super::super::resources::transform(bone.pivot, bone.rotation, bone.scale);
+        matrices.push(matrix);
+        if bone.quads.is_empty() {
+            continue;
+        }
+        let corners = bone.quads.iter().flatten().map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])));
+        bounds.insert(bone.name.clone(), corners.fold((Vec3::MAX, Vec3::MIN), |(low, high), p| (low.min(p), high.max(p))));
+    }
+    bounds
+}
+fn overall_size(bounds: &BTreeMap<String, (Vec3, Vec3)>) -> Vec3 {
+    let (low, high) = bounds.values().fold((Vec3::MAX, Vec3::MIN), |(l, h), (a, b)| (l.min(*a), h.max(*b)));
+    high - low
+}
+/// How far `part` reaches outside `of` on its farthest side.
+fn protrusion(part: (Vec3, Vec3), of: (Vec3, Vec3)) -> f32 {
+    (of.0 - part.0).max(part.1 - of.1).max_element()
+}
+fn spec_bone<'a>(bones: &'a [BoneSpec], name: &str) -> Option<&'a BoneSpec> {
+    bones.iter().find_map(|bone| (bone.name == name).then_some(bone).or_else(|| spec_bone(&bone.bones, name)))
+}
+/// Texture rectangle `[u0, v0, u1, v1]` (pixels) of a cube's front face.
+fn front_face(cube: &CubeSpec) -> [f32; 4] {
+    let [u, v] = cube.uv;
+    let [w, h, d] = cube.size;
+    cube.faces.get(&Face::Front).copied().unwrap_or([u + d, v + d, u + d + w, v + d + h])
+}
+
+/// Post-RC4 rows MODEL-OPUS-2/9/10/11/12/16: silhouettes re-authored by eye from public
+/// minecraft.wiki renders. Each assertion is the visible defect the row reported.
+#[test]
+fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
+    let px = 1. / 16.;
+    let names = |bounds: &BTreeMap<String, (Vec3, Vec3)>| bounds.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+
+    let pig = rest_bounds("minecraft:pig#main");
+    assert!(pig["head"].0.z < pig["body"].0.z - 6.5 * px, "pig head sits in front of its body, not on a neck");
+    let piglet = rest_bounds("minecraft:pig_baby#main");
+    assert!(piglet["head"].0.y < piglet["body"].0.y, "piglet head rises above its back");
+
+    let allay = rest_bounds("minecraft:allay#main");
+    assert!(!allay.contains_key("legs") && overall_size(&allay).y <= 11. * px, "allay is a small legless sprite");
+    let vex = rest_bounds("minecraft:vex#main");
+    assert!(names(&vex).iter().all(|name| !name.contains("leg") && !name.contains("ear")), "vex has no humanoid legs or ears");
+    assert!((vex["head"].1 - vex["head"].0).max_element() < 7. * px, "vex head is small");
+    let bee = rest_bounds("minecraft:bee_baby#main");
+    assert_eq!(names(&bee).iter().filter(|name| name.ends_with("_leg")).count(), 6, "baby bee legs");
+    assert!(bee.contains_key("stinger") && bee.contains_key("left_wing") && bee.contains_key("right_wing"));
+    let ghastling = embedded("happy_ghast_baby");
+    assert!(spec_bone(&ghastling.bones, "body").unwrap().cubes.iter().any(|cube| front_face(cube) == [16., 16., 32., 32.]),
+        "ghastling's outer front face samples the white shell, not the pink interior");
+
+    for key in ["minecraft:rabbit#main", "minecraft:rabbit_baby#main"] {
+        let rabbit = rest_bounds(key);
+        let leg = rabbit["right_hind_leg"].1.y - rabbit["right_hind_leg"].0.y;
+        assert!(leg < rabbit["body"].1.y - rabbit["body"].0.y, "{key}: haunches fold below the body, not deer legs");
+    }
+    let fox = overall_size(&rest_bounds("minecraft:fox#main"));
+    assert!(fox.z > 1.8 * fox.y, "fox is long and low: {fox}");
+    for key in ["minecraft:panda#main", "minecraft:panda_baby#main"] {
+        let body = rest_bounds(key)["body"];
+        assert!(body.1.x - body.0.x > body.1.y - body.0.y, "{key}: broad torso");
+    }
+    for key in ["minecraft:hoglin#main", "minecraft:hoglin_baby#main", "minecraft:zoglin#main", "minecraft:zoglin_baby#main"] {
+        let boar = rest_bounds(key);
+        assert!(boar.contains_key("mane") && boar.contains_key("left_ear") && boar.contains_key("right_ear"), "{key}");
+        for tusk in ["left_tusk", "right_tusk"] {
+            assert!(protrusion(boar[tusk], boar["head"]) > px, "{key}: {tusk} sticks out of the head");
+        }
+    }
+    for key in ["minecraft:strider#main", "minecraft:strider_baby#main"] {
+        let strider = rest_bounds(key);
+        assert_eq!(names(&strider).iter().filter(|name| name.starts_with("leg")).count(), 2, "{key}: two legs");
+        let head = strider["head"].1 - strider["head"].0;
+        assert!(head.z > 0.8 * head.x && names(&strider).iter().any(|name| name.contains("bristle")), "{key}: deep body with bristles");
+    }
+
+    for key in ["minecraft:guardian#main", "minecraft:elder_guardian#main"] {
+        let guardian = rest_bounds(key);
+        let body = guardian["body"];
+        let spikes: Vec<f32> = guardian.iter().filter(|(name, _)| name.starts_with("spike"))
+            .map(|(_, spike)| protrusion(*spike, body)).collect();
+        assert_eq!(spikes.len(), 12, "{key}");
+        let width = body.1.x - body.0.x;
+        assert!(spikes.iter().all(|&out| out > 0.12 * width), "{key}: every spike protrudes: {spikes:?}");
+    }
+    for key in ["minecraft:cod#main", "minecraft:salmon#main"] {
+        let fish = rest_bounds(key);
+        let size = overall_size(&fish);
+        assert!(size.z > 2.4 * size.y, "{key}: long swimming body: {size}");
+        assert!(["left_fin", "right_fin", "dorsal"].iter().all(|fin| fish.contains_key(*fin)), "{key}: fins");
+        assert!(fish["head"].0.z < fish["tail"].0.z, "{key}: head leads, tail trails");
+    }
+    for key in ["minecraft:axolotl#main", "minecraft:axolotl_baby#main"] {
+        let axolotl = rest_bounds(key);
+        let head = axolotl["head"];
+        assert!(axolotl["top_gills"].0.y < head.0.y, "{key}: top gills rise above the head");
+        assert!(axolotl["right_gills"].0.x < head.0.x && axolotl["left_gills"].1.x > head.1.x, "{key}: side gills");
+    }
+    let vindicator = embedded("vindicator");
+    let cube = |bone: &str| &spec_bone(&vindicator.bones, bone).unwrap().cubes;
+    for leg in ["right_leg", "left_leg"] {
+        let [u0, v0, _, v1] = front_face(&cube(leg)[0]);
+        assert!(u0 < 16. && (26. ..38.).contains(&v0) && v1 <= 38., "{leg} samples the teal trousers");
+    }
+    assert!(front_face(&cube("body")[0])[1] >= 46., "torso samples the buttoned coat");
+    for arm in ["right_arm", "left_arm"] {
+        for sleeve in &cube(arm)[..2] {
+            let [u0, v0, _, v1] = front_face(sleeve);
+            assert!(u0 >= 44. && (46. ..62.).contains(&v0) && v1 <= 62., "{arm} samples the dark coat sleeve");
+        }
+    }
+}

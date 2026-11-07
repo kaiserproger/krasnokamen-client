@@ -232,6 +232,156 @@ fn animation_zombie_authored_legs_follow_received_motion() {
 }
 
 #[test]
+fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
+    use crate::protocol::{
+        content::Content,
+        world::{Chunk, Palette, Section, SurfaceHeightmap, World},
+    };
+    use std::sync::Arc;
+    let (mut models, mut entity) = fixture();
+    let schema = models.schemas.remove("minecraft:pig").unwrap();
+    let motion = models.motion.remove("minecraft:pig").unwrap();
+    entity.type_name = "minecraft:chicken".into();
+    models.schemas.insert(entity.type_name.clone(), schema);
+    models.motion.insert(entity.type_name.clone(), motion);
+    // A spawned mob that never moved has received no grounded move packet.
+    entity.on_ground = false;
+    let content = Content::test_cube();
+    let section = |state: u32| {
+        Arc::new(Section {
+            blocks: Palette { bits: 0, values: vec![state], words: Vec::new(), size: 4096 },
+            biomes: Palette { bits: 0, values: vec![0], words: Vec::new(), size: 64 },
+            non_empty_block_count: if state == 0 { 0 } else { 4096 },
+        })
+    };
+    // Solid cubes up to y = 16, air above.
+    let mut world = World::new(0, 32);
+    world
+        .insert([0, 0], Chunk {
+            sections: vec![section(1), section(0)],
+            sky: BTreeMap::new(),
+            block: BTreeMap::new(),
+            block_entities: crate::protocol::world::empty_block_entities(),
+            surface_heightmap: Arc::new(SurfaceHeightmap::new(32).unwrap()),
+            surface_heightmap_received: false,
+        })
+        .unwrap();
+    let rig = solaris_models::authored("minecraft:chicken#main").unwrap();
+    let wing = rig.bones.iter().position(|bone| bone.role == BoneRole::WingNegativeX).unwrap();
+    let wing_at = |entity: &Entity, tick: u64| {
+        let mut pose = vec![];
+        presentation::evaluate_rig(rig, entity, &models, tick, 0.5, Mat4::IDENTITY, &mut pose);
+        pose[wing]
+    };
+    let settle_at = |entity: &mut Entity, y: f64| {
+        entity.position = [8.5, y, 8.5];
+        entity.transform.position = entity.position;
+        entity.previous = entity.transform;
+        for _ in 0..6 {
+            let bounds = physical::bounds(&models, entity, 0, 0.).unwrap();
+            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, bounds).unwrap();
+        }
+    };
+    settle_at(&mut entity, 16.);
+    let rest = wing_at(&entity, 3);
+    for tick in [4, 7, 11] {
+        assert_eq!(wing_at(&entity, tick), rest, "a chicken standing on a block must not flap");
+    }
+    settle_at(&mut entity, 20.);
+    assert_ne!(wing_at(&entity, 3), wing_at(&entity, 7), "a chicken in midair must flap");
+    settle_at(&mut entity, 16.);
+    assert_eq!(wing_at(&entity, 9), rest, "wings fold again after landing");
+}
+
+#[test]
+fn animation_creeper_fuse_swells_and_flashes_and_charge_draws_an_aura() {
+    use crate::{
+        api::{DynamicGeometry, EntityMaterial},
+        entities::EntityRenderFrame,
+        protocol::content::{Content, TextureRegion},
+    };
+    use std::sync::Arc;
+    let (mut models, mut entity) = fixture();
+    let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+    for (name, index) in [("DATA_SHARED_FLAGS_ID", [0, 0]), ("DATA_SWELL_DIR", [16, 1]),
+                          ("DATA_IS_POWERED", [17, 8]), ("DATA_IS_IGNITED", [18, 8])] {
+        schema.accessors.insert(name.into(), index);
+    }
+    let motion = models.motion.remove("minecraft:pig").unwrap();
+    entity.type_name = "minecraft:creeper".into();
+    models.schemas.insert(entity.type_name.clone(), schema);
+    models.motion.insert(entity.type_name.clone(), motion);
+    models.families.insert(entity.type_name.clone(), resources::Family {
+        rig: "minecraft:creeper#main".into(), baby_rig: None,
+        texture: Some("minecraft:entity/creeper/creeper".into()), textures: vec![],
+        renderer_class: None, materials: BTreeMap::new(),
+    });
+    entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());
+    let mut content = Content::test_cube();
+    for (name, layer) in [("minecraft:entity/creeper/creeper", 1), ("minecraft:entity/creeper/creeper_armor", 2)] {
+        content.insert_test_texture(name, TextureRegion { uv: [0., 0., 1., 1.], layer, width: 64, height: 32 });
+    }
+    let models = Arc::new(models);
+    let mut store = Store::new();
+    store.models = Some(models.clone());
+    store.ids.insert(41, 0);
+    store.spatial.entry([0, 0]).or_default().insert(41);
+    store.slots.push(entity);
+    let set = |store: &mut Store, index: u8, value: Metadata| {
+        store.slots[0].metadata.insert(index, value);
+    };
+    let tick = |store: &mut Store, ticks: usize| {
+        for _ in 0..ticks {
+            tick_walk(&models, &mut store.slots[0], 0.);
+        }
+    };
+    let render = |store: &mut Store| {
+        let mut out = DynamicGeometry::default();
+        let stats = presentation::append(store, EntityRenderFrame {
+            content: &content, origin: [0.; 3], camera: [0., 1., -4.], camera_rotation: [0.; 2],
+            radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None,
+            light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None,
+        }, &mut out).unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        out
+    };
+    let body = |out: &DynamicGeometry| {
+        let indices = &out.indices[EntityMaterial::EntityCutout as usize];
+        let xs = indices.iter().map(|&i| out.vertices[i as usize].position[0]);
+        let (low, high) = xs.fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(x), h.max(x)));
+        let flashing = indices.iter().any(|&i| out.vertices[i as usize].overlay_uv[0] > 0.);
+        (high - low, flashing)
+    };
+    set(&mut store, 16, Metadata::Int(-1));
+    let idle = render(&mut store);
+    let (idle_width, idle_flash) = body(&idle);
+    assert!(!idle_flash, "an idle creeper must not flash");
+    assert!(idle.indices[EntityMaterial::EnergySwirl as usize].is_empty(), "uncharged creepers have no aura");
+    set(&mut store, 16, Metadata::Int(1));
+    let mut flashes = [false; 2];
+    let mut widths = vec![];
+    for _ in 0..30 {
+        tick(&mut store, 1);
+        let (width, flashing) = body(&render(&mut store));
+        flashes[usize::from(flashing)] = true;
+        widths.push(width);
+    }
+    assert_eq!(flashes, [true, true], "the fuse must blink white on and off");
+    assert!(widths.windows(2).all(|w| w[1] >= w[0] - 1e-4), "the creeper keeps growing while the fuse burns");
+    assert!(widths[29] > idle_width * 1.2, "a creeper about to explode is visibly swollen: {widths:?}");
+    set(&mut store, 16, Metadata::Int(-1));
+    tick(&mut store, 40);
+    let (calm_width, calm_flash) = body(&render(&mut store));
+    assert!((calm_width - idle_width).abs() < 1e-3 && !calm_flash, "a defused creeper returns to normal");
+    set(&mut store, 17, Metadata::Bool(true));
+    assert!(!render(&mut store).indices[EntityMaterial::EnergySwirl as usize].is_empty(), "charged aura");
+    set(&mut store, 0, Metadata::Byte(32));
+    let invisible = render(&mut store);
+    assert!(invisible.indices[EntityMaterial::EntityCutout as usize].is_empty());
+    assert!(!invisible.indices[EntityMaterial::EnergySwirl as usize].is_empty(), "the aura stays visible");
+}
+
+#[test]
 fn animation_zombie_family_raises_both_arms() {
     let (mut models, mut entity) = fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();

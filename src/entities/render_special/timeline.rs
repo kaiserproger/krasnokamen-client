@@ -206,7 +206,7 @@ impl State {
                         self.lightning_seed = self.random.borrow_mut().next_long();
                     }
                 }
-                effects.sky_flash = self.lightning_life >= 0;
+                effects.sky_flash = self.lightning_visible();
             }
             Kind::Fangs => {
                 if self.fang_started {
@@ -216,6 +216,9 @@ impl State {
             _ => {}
         }
         effects
+    }
+    pub(super) fn lightning_visible(&self) -> bool {
+        matches!(self.kind, Kind::Lightning) && !self.discarded && self.lightning_life >= 0
     }
     pub fn fang_progress(&self, partial: f32) -> f32 {
         if !self.fang_started {

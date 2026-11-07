@@ -863,13 +863,14 @@ impl MapState {
                     f32::from(decoration.rotation) * std::f32::consts::TAU / 16.,
                 )
                 * Mat4::from_scale(Vec3::new(4., 4., 3.))
-                * Mat4::from_translation(Vec3::new(-0.125, 0.125, -0.001 * index as f32))
-                * Mat4::from_scale(Vec3::new(1., -1., 1.));
+                * Mat4::from_translation(Vec3::new(-0.125, 0.125, -0.001 * index as f32));
             painter.set_transform(icon);
+            // Flip the sampled image rather than the geometry: the latter reverses
+            // the world-text quad's winding and back-face culling hides the marker.
             painter.image(
                 &decoration.sprite,
                 [-1., -1., 2., 2.],
-                [0., 0., 1., 1.],
+                [0., 1., 1., 0.],
                 [1.; 3],
                 1.,
             )?;
@@ -1032,5 +1033,57 @@ mod held_map_tests {
         ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut after).unwrap();
         assert_eq!(after.vertices.len(), 8);
         assert_eq!(after.vertices[0].texture_layer, 6);
+    }
+
+    #[test]
+    fn received_map_decorations_face_the_map_and_use_their_atlas_regions() {
+        let mut content = Content::test_cube();
+        content.creative_tabs_report = Arc::from(br#"{"tabs":[],"map_decorations":{"minecraft:frame":{"asset_id":"minecraft:frame","show_on_item_frame":true},"minecraft:player_off_map":{"asset_id":"minecraft:player_off_map","show_on_item_frame":false}}}"#.as_slice());
+        content.set_registries(BTreeMap::from([(
+            "minecraft:map_decoration_type".into(),
+            (0..7).map(|id| (match id { 1 => "minecraft:frame", 6 => "minecraft:player_off_map", _ => "test:unused" }.into(), serde_json::Value::Null)).collect(),
+        )]));
+        for (name, layer, uv) in [
+            ("minecraft:map/map_background_checkerboard", 6, [0., 0., 1., 1.]),
+            ("minecraft:map/decorations/frame", 7, [0.1, 0.2, 0.3, 0.4]),
+            ("minecraft:map/decorations/player_off_map", 8, [0.4, 0.5, 0.6, 0.7]),
+        ] {
+            content.insert_test_texture(name, TextureRegion { layer, uv, width: 16, height: 16 });
+        }
+        let mut ui = UiState::new_state(&content).unwrap();
+        let mut packet = Writer::default();
+        for byte in [42, 0, 0, 1, 2, 1, 0, 4, 4, 0, 6, 127, 1, 0, 0, 1, 1, 0, 0, 1, 4] {
+            packet.byte(byte);
+        }
+        assert!(ui.apply(cb::MAP_ITEM_DATA, &mut Reader::new(&packet.0), &content).unwrap());
+        let mut held = DynamicGeometry::default();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut held).unwrap();
+        assert_eq!(held.vertices.len(), 16);
+        let face = |vertices: &[crate::api::Vertex]| {
+            let a = glam::Vec3::from_array(vertices[0].position);
+            let b = glam::Vec3::from_array(vertices[1].position);
+            let c = glam::Vec3::from_array(vertices[2].position);
+            (b - a).cross(c - a).z
+        };
+        let background_face = face(&held.vertices[0..4]);
+        for (quad, layer, center, uv) in [
+            (&held.vertices[8..12], 7, [63.5, 65.5], [0.1, 0.2, 0.3, 0.4]),
+            (&held.vertices[12..16], 8, [127., 65.], [0.4, 0.5, 0.6, 0.7]),
+        ] {
+            assert!(face(quad) * background_face > 0., "decoration must face the map viewer");
+            assert!(quad.iter().all(|v| v.texture_layer == layer));
+            let average = quad.iter().fold(glam::Vec3::ZERO, |sum, v| sum + glam::Vec3::from_array(v.position)) / 4.;
+            assert!((average.x - center[0]).abs() < 0.0001 && (average.y - center[1]).abs() < 0.0001);
+            assert!(quad.iter().all(|v| (v.uv[0] == uv[0] || v.uv[0] == uv[2]) && (v.uv[1] == uv[1] || v.uv[1] == uv[3])));
+        }
+        // A quarter turn places the atlas top-left at the upper-left of the rotated icon.
+        let frame_top_left = held.vertices[8..12].iter().find(|v| v.uv == [0.1, 0.2]).unwrap();
+        assert!((frame_top_left.position[0] - 59.5).abs() < 0.0001);
+        assert!((frame_top_left.position[1] - 61.5).abs() < 0.0001);
+        let mut framed = DynamicGeometry::default();
+        ui.maps()[&42].append_world_geometry(&content, &ui.text, glam::Mat4::IDENTITY, [-1.; 2], true, &mut framed).unwrap();
+        assert_eq!(framed.vertices.len(), 8);
+        assert_eq!(framed.vertices[4].texture_layer, 7);
+        assert!(face(&framed.vertices[0..4]) * face(&framed.vertices[4..8]) > 0.);
     }
 }

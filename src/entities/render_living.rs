@@ -4,4 +4,4 @@ mod motion;
 pub(crate) use modern::AxolotlAnimation;
 pub(crate) use motion::{BodyRule, MotionFacts, WalkRule};
 mod state;
-pub(crate) use state::{Modern, State, TickInput};
+pub(crate) use state::{Modern, State, TickInput, folds_wings};
