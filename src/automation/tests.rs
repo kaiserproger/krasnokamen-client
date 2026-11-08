@@ -44,6 +44,23 @@ fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
     )
 }
 #[test]
+fn entity_census_schema_export_matches_live_validation() {
+    let args = json!({"radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":""});
+    super::catalog::validate("minecraft_list_entities", &args).unwrap();
+    super::catalog::validate("minecraft_list_entities", &json!({
+        "radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":"2147483647"
+    })).unwrap();
+    assert!(super::catalog::validate("minecraft_list_entities", &json!({"entity_type":""})).is_err());
+    let exported = super::schema();
+    for catalog in ["tools", "headless_tools"] {
+        let tool = exported[catalog].as_array().unwrap().iter()
+            .find(|tool| tool["name"] == "minecraft_list_entities").unwrap();
+        assert_eq!(tool, super::catalog::validate("minecraft_list_entities", &args).unwrap());
+        assert_eq!(tool["inputSchema"]["properties"]["cursor"]["minLength"], 0);
+    }
+}
+
+#[test]
 fn authenticated_transport_writer_is_exclusive_and_context_fenced() {
     let (core, _) = client();
     let live = core.admit("a", "1", "2").unwrap();

@@ -40,6 +40,21 @@ both response packets and subsequent packet handling. The ignored
 `SOLARIS_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
 optional pack; it waits for the real headless session to reach a ready world.
 
+### Complete entity census
+
+`minecraft_list_entities` accepts an optional exact `entity_type` filter,
+applied before its page limit. Set `cursor` to `""` for the first page, then
+repeat with `next_cursor`, unchanged radius/type and the same connection.
+Pages use stable received network IDs, not moving distance ranks; a null
+cursor finishes. Calls without a cursor retain nearest-first ordering.
+Use small pages to respect the MCP transport's byte limit; never treat a
+truncated page as a complete resident baseline. The civilization gate drains
+every page across the original 128-block radius and still requires the new
+baby's received UUID, received baby metadata, targeted screenshot, birth audit
+and final authoritative checkpoint. `solaris-client mcp-schema` exports the
+same native definitions as the live transport; Java schemas remain those
+exported by Loader, without assuming native-only pagination support.
+
 ### Death-screen respawn and controller leases
 
 Clicking the exact `DeathScreen` `Respawn` button through

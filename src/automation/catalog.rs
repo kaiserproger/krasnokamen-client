@@ -24,6 +24,19 @@ pub(super) fn tools() -> &'static Vec<Value> {
                 "description": "Press (true) or release (false) keys until the next explicit release or controller revocation."
             });
         }
+        if let Some(entities) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_list_entities") {
+            entities["inputSchema"]["properties"]["entity_type"] = serde_json::json!({
+                "type":"string","minLength":1,"maxLength":128,
+                "description":"Filter received entity types before limiting the page."
+            });
+            entities["inputSchema"]["properties"]["cursor"] = serde_json::json!({
+                "type":"string","minLength":0,"maxLength":11,
+                "description":"Empty for the first network-id-ordered page; then next_cursor, on the same connection with unchanged radius and entity_type."
+            });
+            entities["description"] = serde_json::json!(
+                "List received client-visible entities. Optional entity_type filters before limiting. Supplying cursor enables stable network-id pagination; null next_cursor finishes. Without cursor, retain nearest-first order."
+            );
+        }
         tools.push(serde_json::json!({
             "name":"client_capture",
             "description":"Capture the real GPU scene target after active UI animations settle, to a PNG artifact.",
