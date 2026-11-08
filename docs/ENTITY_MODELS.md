@@ -211,6 +211,9 @@ are fitted to the visible settlement label. These values are not read from Java
 bytecode. The NoAI head-glance gate uses the server's mob flags rather than
 inventing a local look target for a stationary oracle fixture.
 
+The automation entity listing exposes the current living walk position and speed
+when source animation state exists; missing state is reported as null.
+
 ## Missing models
 
 `Models::rig(key)` never fails. A key with no authored model renders a **magenta, entity-sized
@@ -268,7 +271,9 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   matched front and side comparison showed rear-leaning native horns against upright
   Java horns, so the adult horn rest axes are now upright; this is an oracle-derived
   silhouette fit, not copied model data. The ears and beard counter-rotate the face
-  tilt; the ear spacing also matches the bounded front-view pixel check. Static
+  tilt; the ear spacing also matches the bounded front-view pixel check. A further
+  adult horn depth adjustment was chosen from the side-view offset in the matched
+  Java/native screenshots; it is an authored silhouette fit, not extracted data. Static
   front/side captures were reviewed, but motion and complete parity remain unverified.
   The snifflet rig includes a middle leg pair as well as front and hind legs; its
   gait remains simplified and has not been validated against vanilla motion.

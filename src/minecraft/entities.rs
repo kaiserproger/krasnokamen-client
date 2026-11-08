@@ -238,6 +238,7 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
         Some(Err(error)) => ("error", None, Some(error.as_str())),
     };
     let mut value = entity_value(session, entity)?;
+    let walk = entity.source.as_ref().and_then(|source| source.living.as_ref());
     extend(
         value.as_object_mut().unwrap(),
         json!({
@@ -246,6 +247,8 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
             "received_baby_status": baby_status,
             "cached_rig": rig,
             "cached_rig_status": rig_status,
+            "walk_position": walk.map(|living| living.walk.position(1.)),
+            "walk_speed": walk.map(|living| living.walk.speed(1.)),
             "cached_rig_error": rig_error
         }),
     );
