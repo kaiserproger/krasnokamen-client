@@ -60,6 +60,7 @@ struct ConnectionState {
     terminal_error: Mutex<Option<String>>,
     /// Latest setting; only the I/O owner chooses the phase-specific packet ID.
     view_distance: AtomicU8,
+    main_arm_right: AtomicBool,
 }
 impl ConnectionState {
     fn publish(&self, events: &Sender<Event>, event: Event) -> Result<bool> {
@@ -93,6 +94,7 @@ impl Network {
         address: String,
         username: String,
         view_distance: u8,
+        main_arm_right: bool,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self> {
         let (send, incoming) = mpsc::channel();
@@ -105,6 +107,7 @@ impl Network {
             urgent: Mutex::new(None),
             terminal_error: Mutex::new(None),
             view_distance: AtomicU8::new(view_distance),
+            main_arm_right: AtomicBool::new(main_arm_right),
         });
         let stop = state.clone();
         let endpoint = endpoint(&address)?;
@@ -203,6 +206,12 @@ impl Network {
         self.state
             .view_distance
             .store(view_distance, Ordering::Release);
+        #[cfg(windows)]
+        self.worker_wake.unpark();
+    }
+
+    pub fn set_main_arm_right(&self, right: bool) {
+        self.state.main_arm_right.store(right, Ordering::Release);
         #[cfg(windows)]
         self.worker_wake.unpark();
     }
@@ -423,20 +432,20 @@ fn run(
     let reader = BlockingReader::start(&socket, thread::current()).map_err(|e| e.to_string())?;
     while !state.cancelled.load(Ordering::Acquire) {
         flush_outbound(&mut socket, &commands, state, compression)?;
-        let radius = state.view_distance.load(Ordering::Acquire);
-        if phase != Phase::Login && advertised_radius != Some(radius) {
+        let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
+        if phase != Phase::Login && advertised_radius != Some(settings) {
             let id = if phase == Phase::Configuration {
                 configuration::serverbound::CLIENT_INFORMATION
             } else {
                 play::serverbound::CLIENT_INFORMATION
             };
-            write(&mut socket, id, &client_information(radius), compression)?;
-            advertised_radius = Some(radius);
+            write(&mut socket, id, &client_information(settings.0, settings.1), compression)?;
+            advertised_radius = Some(settings);
         }
         while let Some((id, body)) = extract(&mut buffer, compression)? {
             flush_outbound(&mut socket, &commands, state, compression)?;
             let original = phase;
-            let radius = state.view_distance.load(Ordering::Acquire);
+            let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
             if phase == Phase::Login {
                 match id {
                     login::clientbound::HELLO => return Err("online-mode encryption requires official authentication; offline profile refused".into()),
@@ -449,8 +458,8 @@ fn run(
                     login::clientbound::LOGIN_FINISHED => {
                         write(&mut socket, login::serverbound::LOGIN_ACKNOWLEDGED, &[], compression)?;
                         phase = Phase::Configuration;
-                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(radius), compression)?;
-                        advertised_radius = Some(radius);
+                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(settings.0, settings.1), compression)?;
+                        advertised_radius = Some(settings);
                     }
                     login::clientbound::CUSTOM_QUERY => {
                         let mut r = Reader::new(&body);
@@ -532,8 +541,8 @@ fn run(
                     play::clientbound::START_CONFIGURATION => {
                         write(&mut socket, play::serverbound::CONFIGURATION_ACKNOWLEDGED, &[], compression)?;
                         phase = Phase::Configuration;
-                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(radius), compression)?;
-                        advertised_radius = Some(radius);
+                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(settings.0, settings.1), compression)?;
+                        advertised_radius = Some(settings);
                     }
                     _ => {}
                 }
@@ -580,14 +589,14 @@ fn run(
     Ok(())
 }
 
-fn client_information(view_distance: u8) -> Vec<u8> {
+fn client_information(view_distance: u8, main_arm_right: bool) -> Vec<u8> {
     let mut w = Writer::default();
     w.string("en_us");
     w.byte(view_distance);
     w.var(0);
     w.byte(1);
     w.byte(127);
-    w.var(1);
+    w.var(i32::from(main_arm_right));
     w.byte(0);
     w.byte(1);
     w.var(0);
@@ -667,7 +676,7 @@ mod tests {
     fn windows_play_socket_never_uses_a_read_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let network = Network::connect(
-            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, Arc::new(|| {})
+            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, true, Arc::new(|| {})
         ).unwrap();
         assert_eq!(network.socket.as_ref().unwrap().read_timeout().unwrap(), None);
     }
@@ -698,7 +707,7 @@ mod tests {
     fn client_information_encodes_configured_radius() {
         // Regression: UI distance and the Configuration wire byte disagreed.
         for radius in [8u8, 12] {
-            let body = client_information(radius);
+            let body = client_information(radius, true);
             let mut expected = vec![5, b'e', b'n', b'_', b'u', b's'];
             expected.push(radius);
             expected.extend([0, 1, 127, 1, 0, 1, 0]);
@@ -707,6 +716,14 @@ mod tests {
                 "view-distance byte must echo the configured radius"
             );
         }
+    }
+
+    #[test]
+    fn client_information_encodes_left_and_right_main_arm() {
+        let right = client_information(8, true);
+        let left = client_information(8, false);
+        assert_eq!(right[10], 1);
+        assert_eq!(left[10], 0);
     }
 
     #[test]
@@ -723,7 +740,7 @@ mod tests {
             write(&mut status, 0, &response.0, None).unwrap();
         });
         let mut network = Network::connect(
-            address.to_string(), "VersionTest".into(), 8, Arc::new(|| {}),
+            address.to_string(), "VersionTest".into(), 8, true, Arc::new(|| {}),
         ).unwrap();
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
@@ -783,6 +800,7 @@ mod tests {
                 address.to_string(),
                 "TerminalTest".into(),
                 8,
+                true,
                 Arc::new(|| {}),
             )
             .unwrap();
@@ -859,24 +877,26 @@ mod tests {
             success.var(0);
             write(&mut login, 2, &success.0, None).unwrap();
             assert_eq!(read_packet(&mut login), (3, Vec::new()));
-            assert_eq!(read_packet(&mut login), (0, client_information(8)));
+            assert_eq!(read_packet(&mut login), (0, client_information(8, true)));
 
             ready.send(Phase::Configuration).unwrap();
-            assert_eq!(read_packet(&mut login), (0, client_information(12)));
+            assert_eq!(read_packet(&mut login), (0, client_information(12, true)));
             write(&mut login, 3, &[], None).unwrap();
             assert_eq!(read_packet(&mut login), (3, Vec::new()));
             ready.send(Phase::Play).unwrap();
-            assert_eq!(read_packet(&mut login), (0x0e, client_information(32)));
+            assert_eq!(read_packet(&mut login), (0x0e, client_information(32, true)));
+            ready.send(Phase::Play).unwrap();
+            assert_eq!(read_packet(&mut login), (0x0e, client_information(32, false)));
 
             // A reconfiguration must use the latest published radius, not the
             // startup value and not the session owner's potentially stale phase.
             write(&mut login, 120, &[], None).unwrap();
             assert_eq!(read_packet(&mut login), (16, Vec::new()));
-            assert_eq!(read_packet(&mut login), (0, client_information(32)));
+            assert_eq!(read_packet(&mut login), (0, client_information(32, false)));
             login.shutdown(Shutdown::Write).unwrap();
         });
         let mut network =
-            Network::connect(address.to_string(), "RadiusTest".into(), 8, Arc::new(|| {})).unwrap();
+            Network::connect(address.to_string(), "RadiusTest".into(), 8, true, Arc::new(|| {})).unwrap();
         assert_eq!(
             stages.recv_timeout(Duration::from_secs(5)).unwrap(),
             Phase::Configuration
@@ -887,6 +907,8 @@ mod tests {
             Phase::Play
         );
         network.set_view_distance(32);
+        assert_eq!(stages.recv_timeout(Duration::from_secs(5)).unwrap(), Phase::Play);
+        network.set_main_arm_right(false);
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
     }
@@ -901,6 +923,7 @@ mod tests {
             listener.local_addr().unwrap().to_string(),
             "Burst".into(),
             8,
+            true,
             Arc::new(|| {}),
         )
         .unwrap();
@@ -924,6 +947,7 @@ mod tests {
                 urgent: Mutex::new(None),
                 terminal_error: Mutex::new(None),
                 view_distance: AtomicU8::new(8),
+                main_arm_right: AtomicBool::new(true),
             }),
             socket: None,
             #[cfg(windows)]
@@ -980,7 +1004,7 @@ mod tests {
                 }
                 write(&mut login, id, &[1, 2, 3], None).unwrap();
             });
-            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, Arc::new(|| {})).unwrap();
+            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, Arc::new(|| {})).unwrap();
             peer.join().unwrap();
             network.worker.take().unwrap().join().unwrap();
             assert!(matches!(network.try_recv(), Ok(Event::Packet(received, packet_id, body))

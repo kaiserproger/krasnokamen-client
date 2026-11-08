@@ -701,6 +701,14 @@ impl Session {
                 self.scene.render_distance = self.render_distance;
                 self.push_render_distance();
             }
+            "main_arm_right" => {
+                let right = clean.as_bool().ok_or("client setting main_arm_right lost its boolean")?;
+                self.main_arm_right = right;
+                self.player.set_main_arm_right(right);
+                if let Some(network) = &self.network {
+                    network.set_main_arm_right(right);
+                }
+            }
             "fov" => {
                 self.fov_deg = clean.as_f64().ok_or("client setting fov lost its number")? as f32;
                 self.scene.fov_deg = self.fov_deg;
@@ -750,6 +758,7 @@ impl Session {
     pub fn client_settings_snapshot(&self) -> BTreeMap<String, Value> {
         let mut out = BTreeMap::new();
         out.insert("render_distance".into(), json!(self.render_distance));
+        out.insert("main_arm_right".into(), json!(self.main_arm_right));
         out.insert("fov".into(), json!(self.fov_deg));
         out.insert("mouse_sensitivity".into(), json!(self.mouse_sensitivity));
         out.insert(
@@ -798,6 +807,15 @@ impl Session {
                         self.render_distance = n as u32;
                         self.world.set_view_distance(self.render_distance);
                         self.scene.render_distance = self.render_distance;
+                    }
+                }
+                "main_arm_right" => {
+                    if let Some(right) = clean.as_bool() {
+                        self.main_arm_right = right;
+                        self.player.set_main_arm_right(right);
+                        if let Some(network) = &self.network {
+                            network.set_main_arm_right(right);
+                        }
                     }
                 }
                 "fov" => {
@@ -1137,6 +1155,20 @@ mod client_settings_tests {
         let mut session = Session::new_mode("local-ui-warning".into(), false);
         session.open_trigger(UiTrigger::Book { hand: 0 }).unwrap();
         assert!(session.error.is_none());
+    }
+    #[test]
+    fn main_arm_setting_reaches_player_and_persists() {
+        let mut session = Session::new_mode("main-arm-setting".into(), false);
+        assert!(session.player.main_arm_right());
+        session.apply_client_setting("main_arm_right", &json!(false)).unwrap();
+        assert!(!session.player.main_arm_right());
+        let saved = session.client_settings_snapshot();
+        assert_eq!(saved.get("main_arm_right"), Some(&json!(false)));
+        let mut restored = Session::new_mode("main-arm-restored".into(), false);
+        restored.apply_persisted_settings(saved);
+        assert!(!restored.player.main_arm_right());
+        restored.apply_persisted_settings(BTreeMap::new());
+        assert!(restored.player.main_arm_right());
     }
     #[test]
     fn stores_fov_and_render_distance() {

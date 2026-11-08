@@ -152,6 +152,7 @@ pub struct Session {
     /// distance is in chunks, FOV in degrees, sensitivity multiplies the 0.12
     /// base look scale, volume is the Master gain. All defaults live on UiState.
     render_distance: u32,
+    main_arm_right: bool,
     /// Chunk radius the server last announced (login, set_chunk_cache_radius).
     server_view_distance: Option<u32>,
     fov_deg: f32,
@@ -255,6 +256,7 @@ impl Session {
             shutdown_requested: false,
             debug_overlay_pending: false,
             render_distance: UiState::DEFAULT_RENDER_DISTANCE,
+            main_arm_right: true,
             server_view_distance: None,
             fov_deg: UiState::DEFAULT_FOV_DEG,
             mouse_sensitivity: UiState::DEFAULT_MOUSE_SENSITIVITY,
@@ -514,6 +516,7 @@ impl Session {
         self.address = Some(address.into());
         self.username = Some(username.into());
         self.player = Player::new();
+        self.player.set_main_arm_right(self.main_arm_right);
         self.environment = Environment::new();
         self.item_spawn = None;
         self.item_death = None;
@@ -538,6 +541,7 @@ impl Session {
             UiState::MIN_RENDER_DISTANCE,
             UiState::MAX_RENDER_DISTANCE,
         ) as u8;
+        let main_arm_right = self.main_arm_right;
         let wake = self.wake_callback();
         let presentation = self.presentation;
         thread::Builder::new()
@@ -557,7 +561,7 @@ impl Session {
                         crate::entities::Models::load_state(&content)?
                     });
                     eprintln!("session startup: connecting network");
-                    let network = Network::connect(endpoint, username, view_distance, wake.clone())?;
+                    let network = Network::connect(endpoint, username, view_distance, main_arm_right, wake.clone())?;
                     Ok(Loaded {
                         content,
                         network,
@@ -865,6 +869,7 @@ impl Session {
                                 UiState::MAX_RENDER_DISTANCE,
                             ) as u8,
                     );
+                    network.set_main_arm_right(self.main_arm_right);
                 }
                 if self.presentation && self.terrain.is_none() {
                     self.terrain = Some(Terrain::new(self.wake_callback())?);

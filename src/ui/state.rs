@@ -681,6 +681,7 @@ impl UiState {
         "vsync",
         "max_fps",
         "graphics_preset",
+        "main_arm_right",
         "key_bindings",
     ];
     fn setting_f64(value: &Value) -> Option<f64> {
@@ -691,7 +692,7 @@ impl UiState {
     pub fn sanitize_setting_value(key: &str, value: &Value) -> Option<Value> {
         match key {
             "key_bindings" => crate::controls::Bindings::from_value(value).map(|bindings| bindings.value()),
-            "fullscreen" | "vsync" | "hide_hud" => value.as_bool().map(|v| json!(v)),
+            "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" => value.as_bool().map(|v| json!(v)),
             "graphics_preset" => {
                 GraphicsPreset::from_setting(value).map(|preset| json!(preset.as_str()))
             }
@@ -760,6 +761,7 @@ impl UiState {
             "key_bindings" => Some(crate::controls::Bindings::default().value()),
             "fullscreen" => Some(json!(false)),
             "vsync" => Some(json!(true)),
+            "main_arm_right" => Some(json!(true)),
             "graphics_preset" => Some(json!(GraphicsPreset::default().as_str())),
             "max_fps" => Some(json!(120)),
             "render_distance" => Some(json!(Self::DEFAULT_RENDER_DISTANCE)),
@@ -779,6 +781,7 @@ impl UiState {
             "fullscreen" | "vsync" => Some(json!(!current
                 .and_then(Value::as_bool)
                 .unwrap_or(key != "fullscreen"))),
+            "main_arm_right" => Some(json!(!current.and_then(Value::as_bool).unwrap_or(true))),
             "graphics_preset" => {
                 let current = current
                     .and_then(GraphicsPreset::from_setting)

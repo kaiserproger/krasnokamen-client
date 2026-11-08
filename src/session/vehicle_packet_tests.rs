@@ -6,7 +6,7 @@ use crate::protocol::{packet_ids::play::clientbound as cb, world::{Chunk, Palett
 fn fixture() -> (Session, std::net::TcpListener) {
     let mut session = Session::new_mode("boat-camera-test".into(), false);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    session.network = Some(Network::connect(listener.local_addr().unwrap().to_string(), "BoatTest".into(), 8, Arc::new(|| {})).unwrap());
+    session.network = Some(Network::connect(listener.local_addr().unwrap().to_string(), "BoatTest".into(), 8, true, Arc::new(|| {})).unwrap());
     let mut content = Content::test_cube();
     // Use the pinned 26.3 registry/schema, not a guessed boat entity class.
     let facts: Value = serde_json::from_str(include_str!("../../assets/solaris/entities/entity-facts.json")).unwrap();

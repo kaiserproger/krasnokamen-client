@@ -70,7 +70,7 @@ const VIDEO: [Row; 6] = [
         "Low fast vanilla; Medium rich; High max.",
     ),
 ];
-const CONTROLS: [Row; 2] = [
+const CONTROLS: [Row; 3] = [
     row(
         "mouse_sensitivity",
         "Sensitivity",
@@ -82,6 +82,12 @@ const CONTROLS: [Row; 2] = [
         "Damage tilt",
         Kind::Slider,
         "How strongly the camera shakes when hurt.",
+    ),
+    row(
+        "main_arm_right",
+        "Main hand",
+        Kind::Choice,
+        "Choose which hand holds the main-hand item.",
     ),
 ];
 const AUDIO: [Row; 2] = [
@@ -250,6 +256,7 @@ pub(super) fn value_text(key: &str, value: Option<&Value>) -> String {
         "damage_tilt_strength" => pct(num.unwrap_or(1.)),
         "volume" => pct(num.unwrap_or(1.)),
         "text_background_opacity" => pct(num.unwrap_or(0.5)),
+        "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) { "Right" } else { "Left" }.into(),
         "narrator" => ["Off", "All", "Chat", "System"]
             [value.and_then(Value::as_u64).unwrap_or(0) as usize % 4]
             .into(),

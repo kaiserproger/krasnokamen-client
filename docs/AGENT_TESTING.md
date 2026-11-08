@@ -4,6 +4,15 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### Main hand setting
+
+Controls exposes Main hand as Left or Right. The selection is saved with
+client settings, applied to first-person item placement, and advertised to the
+server in Configuration and Play client information. The focused
+`main_arm_setting_reaches_player_and_persists` and
+`client_information_encodes_left_and_right_main_arm` regressions cover the
+setting and packet encoding; they do not replace a graphical held-item gate.
+
 ### Held-map decorations
 
 `received_map_decorations_face_the_map_and_use_their_atlas_regions` sends a
