@@ -110,8 +110,13 @@ optional pack; it waits for the real headless session to reach a ready world.
 `minecraft_list_entities` accepts an optional exact `entity_type` filter,
 applied before its page limit. Set `cursor` to `""` for the first page, then
 repeat with `next_cursor`, unchanged radius/type and the same connection.
-Pages use stable received network IDs, not moving distance ranks; a null
-cursor finishes. Calls without a cursor retain nearest-first ordering.
+The first page captures all matching received rows once; later pages consume
+that same snapshot in network-ID order, so motion, spawn/removal and metadata
+packets cannot change its membership or facts mid-census. A null cursor
+finishes and releases the snapshot. Cursors are opaque, single-use continuation
+tokens, fenced by connection/dimension and radius/type. There is one active
+census per client: starting another invalidates the old cursor; disconnect
+releases it. Calls without a cursor retain live nearest-first ordering.
 Use small pages to respect the MCP transport's byte limit; never treat a
 truncated page as a complete resident baseline. The civilization gate drains
 every page across the original 128-block radius and still requires the new

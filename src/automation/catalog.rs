@@ -30,11 +30,11 @@ pub(super) fn tools() -> &'static Vec<Value> {
                 "description":"Filter received entity types before limiting the page."
             });
             entities["inputSchema"]["properties"]["cursor"] = serde_json::json!({
-                "type":"string","minLength":0,"maxLength":11,
-                "description":"Empty for the first network-id-ordered page; then next_cursor, on the same connection with unchanged radius and entity_type."
+                "type":"string","minLength":0,"maxLength":20,
+                "description":"Empty to capture the first network-id-ordered census page; then its opaque next_cursor with unchanged radius and entity_type. A new census invalidates the previous cursor."
             });
             entities["description"] = serde_json::json!(
-                "List received client-visible entities. Optional entity_type filters before limiting. Supplying cursor enables stable network-id pagination; null next_cursor finishes. Without cursor, retain nearest-first order."
+                "List received client-visible entities. Optional entity_type filters before limiting. Supplying cursor pages one captured census; motion and received packets cannot change it. Null next_cursor finishes. Without cursor, retain live nearest-first order."
             );
         }
         tools.push(serde_json::json!({
