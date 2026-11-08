@@ -1442,6 +1442,7 @@ impl Renderer {
                         .get("terrain_capture")
                         .cloned()
                         .unwrap_or(Value::Null);
+                    metadata["gait_frame"] = observation.data["gait_capture"].clone();
                     metadata["terrain_submission"] = self.section_upload_receipts();
                     // API calls and logical terrain draws differ under MDI.
                     // Entity/block-entity contributions share material draws.

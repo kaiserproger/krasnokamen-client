@@ -1176,6 +1176,20 @@ impl Session {
         }
         Ok(())
     }
+    /// Living animation inputs sampled after this capture's scene extraction.
+    pub(crate) fn capture_gait_frame(&self) -> Value {
+        Value::Array(self.entities.received_entities().filter_map(|entity| {
+            let living = entity.source.as_ref()?.living.as_ref()?;
+            let transform = entity.presented_transform(self.client_tick, self.presentation_partial);
+            Some(json!({
+                "entity_uuid": entity.uuid,
+                "entity_type": entity.type_name,
+                "position": transform.position,
+                "walk_position": living.walk.position(self.presentation_partial),
+                "walk_speed": living.walk.speed(self.presentation_partial),
+            }))
+        }).collect())
+    }
     fn activate_loader_content(&mut self) -> Result<()> {
         let content = self
             .content

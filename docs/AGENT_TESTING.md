@@ -220,6 +220,9 @@ solaris-client mcp attach --descriptor <FILE> --stdio
 Same-instance `mcp attach --instance <ID> --stdio` is also implemented. `fixture` is the default play profile; automation is opt-in, HTTP is loopback, and artifact directories are restricted to project `.analysis`. `offline-test` is an explicitly permitted test identity, not official authentication evidence. `doctor` proves device creation/buffer roundtrip, **not native-window verification**. Proposed `mcp config` and `test run` commands are not implemented.
 
 Native capture uses the same textured indexed depth target, grass biome tint/alpha overlay and HUD rendered to the actual window, with GPU mapping to PNG. Metadata separates `present_requested` from `display_scanout_verified=false`. The HUD displays selected slot, numeric item ID and count; it is **not full vanilla UI parity**. Fresh exact-instance capabilities and receipts remain authoritative.
+Capture metadata's `gait_frame` samples living-entity animation inputs at
+scene extraction with the same partial tick as the captured frame. It lists
+received entities, not proof that each entity produced visible pixels.
 
 `minecraft_press_inputs` accepts `hold: true` or `hold: false` with `keys` and
 `ticks: 1` to press or release controller-owned inputs across MCP calls; controller
