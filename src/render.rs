@@ -113,8 +113,7 @@ pub fn load_texture(path: &std::path::Path) -> Result<(Arc<Vec<u8>>, u32, u32), 
     Ok((Arc::new(rgba), output.width, output.height))
 }
 
-fn adapter_evidence(adapter: &wgpu::Adapter) -> Value {
-    let info = adapter.get_info();
+fn adapter_evidence(adapter: &wgpu::Adapter, info: &wgpu::AdapterInfo) -> Value {
     let limits = adapter.limits();
     json!({"name":info.name,"vendor":info.vendor,"device":info.device,
         "device_type":format!("{:?}",info.device_type),"backend":format!("{:?}",info.backend),
@@ -139,7 +138,7 @@ fn gpu_instance() -> wgpu::Instance {
 pub fn doctor() -> Result<Value, String> {
     let instance = gpu_instance();
     let adapters = instance.enumerate_adapters(wgpu::Backends::all());
-    let evidence: Vec<_> = adapters.iter().map(adapter_evidence).collect();
+    let evidence: Vec<_> = adapters.iter().map(|adapter| adapter_evidence(adapter, &adapter.get_info())).collect();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .map_err(|e| format!("gpu_adapter_unavailable: {e}"))?;
@@ -184,7 +183,7 @@ pub fn doctor() -> Result<Value, String> {
     }
     Ok(
         json!({"schema":1,"wgpu":"27.0.1","winit":"0.30.12","adapters":evidence,
-        "selected":adapter_evidence(&adapter),"device_creation":"passed","gpu_buffer_roundtrip":"passed",
+        "selected":adapter_evidence(&adapter, &adapter.get_info()),"device_creation":"passed","gpu_buffer_roundtrip":"passed",
         "native_window_verified":false,"onscreen_presentation_verified":false,
         "gpu_timestamp_metrics":"not_enabled","renderer":"portable_indexed_depth"}),
     )
@@ -437,6 +436,7 @@ pub struct Renderer {
     visibility_time_ms: u64,
     completed_frame: Arc<AtomicU64>,
     capabilities: Value,
+    device_type: wgpu::DeviceType,
     timing: timing::Timing,
     capture: Option<Capture>,
     capture_cull: Option<wgpu::Buffer>,
@@ -543,7 +543,8 @@ impl Renderer {
         {
             return Err("render_target_dimensions_or_memory_budget_exceeded".into());
         }
-        let mut capabilities = adapter_evidence(&adapter);
+        let adapter_info = adapter.get_info();
+        let mut capabilities = adapter_evidence(&adapter, &adapter_info);
         let downlevel = adapter.get_downlevel_capabilities();
         let timestamps = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
             && downlevel
@@ -783,8 +784,13 @@ impl Renderer {
         // forces the session's CPU generator instead.
         let far = far::FarTerrain::new(
             &device,
-            downlevel.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
-                && std::env::var_os("SOLARIS_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
+            far_generate::supported(
+                adapter_info.device_type,
+                downlevel
+                    .flags
+                    .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS),
+                std::env::var_os("SOLARIS_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
+            ),
         );
         Ok(Self {
             surface,
@@ -861,6 +867,7 @@ impl Renderer {
             spawn_ready_frame: None,
             completed_frame: Arc::new(AtomicU64::new(0)),
             capabilities,
+            device_type: adapter_info.device_type,
             timing,
             monotonic_origin: Instant::now(),
             visibility_time_ms: 0,
@@ -880,6 +887,10 @@ impl Renderer {
             fps: Default::default(),
             stats: Default::default(),
         })
+    }
+
+    pub(crate) fn software_adapter(&self) -> bool {
+        self.device_type == wgpu::DeviceType::Cpu
     }
 
     pub fn set_reference_mode(&mut self, reference: bool) {

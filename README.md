@@ -48,6 +48,10 @@ Without the launcher: `solaris-client --server 135.106.208.217:25565 --username 
 
 The first Play installs the server's content cache (Minecraft 26.3 registries, tags, loot tables, worldgen data and reports, ~3 MB). The client asks `solaris-launcher --singleplayer-runtime` (next to the client) to download it once from the Solaris static server, SHA-256 pinned inside the launcher like the data tables. No Java runtime or Minecraft server jar is involved, and a server-only player never downloads it. The server binds an OS-assigned loopback port and the client reads the real port from its `is listening` line. If stopping the server fails or has to be killed, the error screen shows the end of its log ("world may not be fully saved"). Each world's server log is `worlds/<name>/logs/server.log`; if the server dies, the error screen shows the end of that log. Mode and difficulty are applied once with ordinary operator commands on the first join; later changes are yours via `/gamemode` and `/difficulty`. The bundled plugin pack is loaded without `solaris-auth` (offline, local operator).
 
+World startup follows the server's pushed log/progress and listening signal,
+not a three-minute deadline. A slow first start remains cancellable; a server
+that exits reports its log tail instead of asking you to press Play again.
+
 ### Server dialogs
 
 The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). Plain-message text is centered line by line like vanilla; hovering a styled run shows its `hover_event` tooltip, and clicking a run with a `click_event` runs it like a button action (`custom` with its typed payload, `run_command`; other kinds are reported, not executed) followed by the dialog's `after_action`. `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button and title tooltips and vanilla's "custom screen" warning button. The server side is documented in the Solaris repo (`docs/DIALOGS.md`).
@@ -68,14 +72,38 @@ finished fading in, avoiding gaps during loading. Far colours are block
 texture averages seen over black (translucent water and cutout leaves read
 darker from afar) times the biome's grass, foliage or water tint.
 
-On Solaris servers with `[lod]` enabled the client draws a coarse heightfield of the overworld beyond the render distance, fading into the sky. `far_terrain` in `client-settings.json` sets its reach in blocks (2048 by default, 1024 with the Low graphics preset, 0 turns it off; the server caps it). It is built from the chunks you received, the server's stored chunks and, for never-generated land, the server's terrain generator. Only if the server operator enables `share_terrain_keys` does the server send its generation program and this machine generate never-generated land itself, on the GPU (or a CPU thread without compute support); singleplayer worlds always enable it. Tiles are cached as heights and colours under `far-terrain/`. `SOLARIS_CLIENT_FAR_TERRAIN=<blocks>` overrides the setting; `SOLARIS_CLIENT_FAR_GPU=0` forces CPU generation.
+On Solaris servers with `[lod]` enabled the client draws a coarse heightfield of the overworld beyond the render distance, fading into the sky. `far_terrain` in `client-settings.json` sets its reach in blocks (2048 by default, 1024 with the Low graphics preset, 0 turns it off; the server caps it). It is built from received chunks, stored server chunks and the server's terrain generator. With `share_terrain_keys` the server sends its generation program for local generation; singleplayer always enables this. Hardware adapters can generate on the GPU; software adapters use the background CPU generator instead of putting expensive compute on the frame queue. An unconfigured software adapter starts at 4 near chunks and 256 far blocks. Valid saved choices take precedence; automatic defaults are not saved as user choices, even when another option is changed. Tiles are cached under `far-terrain/`. `SOLARIS_CLIENT_FAR_TERRAIN=<blocks>` overrides the setting; `SOLARIS_CLIENT_FAR_GPU=0` forces CPU generation.
 
 ## System requirements
 
 - 64-bit Linux (glibc 2.35 or newer, e.g. Ubuntu 22.04+), Windows 10/11 x86_64, or macOS 11+ on Apple Silicon.
 - A GPU and driver with **Vulkan 1.1+** on Linux/Windows (Intel, AMD or NVIDIA; software Vulkan via Mesa `lavapipe` also works but slowly), or Metal support on macOS. The launcher uses OpenGL 3.3 on Linux/Windows and the system graphics stack on macOS.
-- 4 GB RAM, ~1.5 GB free disk, and working audio output (ALSA/PulseAudio/PipeWire on Linux; Core Audio on macOS).
+- ~1.5 GB free disk and working audio output (ALSA/PulseAudio/PipeWire on Linux; Core Audio on macOS). The qualified singleplayer memory envelope is below; a lower-RAM minimum has not been established.
 - Internet access on first run.
+
+### Measured weak singleplayer envelope
+
+Owner-host simulation, 2026-11-07: client **and** local server together on four
+logical CPUs (`0-3`), shared **8 GiB memory cap**, 1280×720 Vulkan lavapipe,
+fresh seed 42, installed 26.3 content, Low preset. Quiet `mem-run -x` runs:
+
+| | RC5 defaults | Software-adapter defaults |
+|---|---:|---:|
+| Play → presented world, loading closed | 17.87 s | 11.38 s |
+| Play → ordinary look input observed | 18.17 s | 11.52 s |
+| Combined cgroup peak | 2.87 GiB | 2.37 GiB |
+| Near chunks / far blocks | 8 / 1024 | 4 / 256 |
+
+Receipts: core harness `.analysis/validation/20261107T125724-native-sp-weak-hardware-1ev8zgzc/result.json`
+and `20261107T125848-native-sp-weak-hardware-jd4y97cu/result.json`;
+their `singleplayer/scenario.json` contains timings/RSS and screenshots contain
+actual-window GPU/device evidence. The latter used the automatic defaults with
+no settings-file or far-distance override; no settings file was written.
+
+Software rendering is a functional fallback, not a smooth-framerate
+recommendation: the final captured frame interval was 124 ms, not a sustained
+FPS benchmark. These process-budget measurements do not qualify a particular
+integrated GPU, a physical-machine RAM minimum, or content-download time.
 
 ## Where things live
 
@@ -120,6 +148,7 @@ backwards. Completions are cleared when disconnecting from a server.
 - **Download fails / stalls.** Press PLAY again: it resumes. Behind a proxy set `HTTPS_PROXY`/`HTTP_PROXY` (also used for the Solaris data download over plain HTTP). **Verify / repair** re-checks every file. The full log is in the Logs tab and `logs/launcher.log`.
 - **"refusing content bundle … does not match the hash pinned in this launcher".** The Solaris data on the server changed after this launcher was built. Download the newest launcher release. The launcher never installs a bundle it was not built to trust.
 - **Singleplayer's first Play fails while downloading the server data.** Only singleplayer needs it (multiplayer never does): the client runs `solaris-launcher --singleplayer-runtime` from beside itself, which downloads from the content manifest in **Settings → Advanced** (`launcher.json`) and logs to `logs/launcher.log`. Set `SOLARIS_LAUNCHER_BIN` if the launcher is not next to the client.
+- **Singleplayer starts slowly.** The loading screen shows the local server's startup progress. Startup waits for its actual readiness or failure, not a fixed 180-second deadline; Cancel still stops it. “Preparing terrain and light” closes only after nearby terrain/light and a completed GPU frame are ready.
 - **Windows SmartScreen warns about an unsigned app.** The preview is unsigned: "More info → Run anyway".
 - **`Client exited with …`.** See the Logs tab; the client's output is prefixed `[client]`.
 - **Start fresh.** Quit everything and delete the data folder.

@@ -160,6 +160,7 @@ pub struct Session {
     damage_tilt_strength: f64,
     volume: f32,
     presentation_settings: BTreeMap<String, Value>,
+    client_defaults: actions::ClientDefaults,
     pub(crate) bindings: crate::controls::Bindings,
     /// Singleplayer: the running local server, a start in flight, first-join
     /// world settings still to apply, and the background stopper.
@@ -263,6 +264,7 @@ impl Session {
             damage_tilt_strength: UiState::DEFAULT_DAMAGE_TILT_STRENGTH,
             volume: UiState::DEFAULT_VOLUME,
             presentation_settings: BTreeMap::new(),
+            client_defaults: actions::ClientDefaults::default(),
             bindings: crate::controls::Bindings::default(),
             local_server: None,
             local_start: None,

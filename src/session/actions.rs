@@ -5,7 +5,20 @@ use crate::{
     player::{BlockHit, Hit, InteractionIntent, UiTrigger, UsePrediction},
     ui::{EditorState, UiCommand, UiIntent},
 };
+#[derive(Default)]
+pub(super) struct ClientDefaults {
+    software_renderer: bool,
+    // Explicit choices stay separate from effective, capacity-derived values.
+    saved: BTreeMap<String, Value>,
+}
+
 impl Session {
+    pub(crate) fn set_software_renderer(&mut self, software: bool) {
+        self.client_defaults.software_renderer = software;
+        let saved = std::mem::take(&mut self.client_defaults.saved);
+        self.apply_persisted_settings(saved);
+    }
+
     pub fn input(&mut self, intent: InputIntent) -> Result<Value> {
         match intent {
             InputIntent::ReleaseAll => {
@@ -737,9 +750,12 @@ impl Session {
             _ => {}
         }
         if let Some(ui) = &mut self.ui {
-            ui.apply_setting(key, clean)?;
+            ui.apply_setting(key, clean.clone())?;
         }
-        crate::local_config::save_client_settings(&self.client_settings_snapshot());
+        if UiState::MANAGED_SETTING_KEYS.contains(&key) {
+            self.client_defaults.saved.insert(key.into(), clean);
+            crate::local_config::save_client_settings(&self.client_defaults.saved);
+        }
         Ok(())
     }
 
@@ -754,7 +770,7 @@ impl Session {
             as u8;
         network.set_view_distance(radius);
     }
-    /// Sanitized managed settings for persistence.
+    /// Current effective managed settings, including unpersisted hardware defaults.
     pub fn client_settings_snapshot(&self) -> BTreeMap<String, Value> {
         let mut out = BTreeMap::new();
         out.insert("render_distance".into(), json!(self.render_distance));
@@ -788,6 +804,10 @@ impl Session {
             let raw = settings
                 .get(*key)
                 .and_then(|v| UiState::sanitize_setting_value(key, v))
+                .or_else(|| {
+                    (self.client_defaults.software_renderer && *key == "render_distance")
+                        .then(|| json!(4))
+                })
                 .or_else(|| UiState::default_setting_value(key));
             let Some(clean) = raw else { continue };
             if let Some(ui) = &mut self.ui {
@@ -865,12 +885,22 @@ impl Session {
                     .and_then(Value::as_u64)
                     .map(|v| v.min(u64::from(crate::far::MAX_DISTANCE)) as u32)
             })
-            .unwrap_or(if low {
-                crate::far::LOW_PRESET_DISTANCE
-            } else {
-                crate::far::DEFAULT_DISTANCE
-            });
+            .unwrap_or(
+                if self.client_defaults.software_renderer
+                    && settings
+                        .get("graphics_preset")
+                        .and_then(|value| UiState::sanitize_setting_value("graphics_preset", value))
+                        .is_none()
+                {
+                    256
+                } else if low {
+                    crate::far::LOW_PRESET_DISTANCE
+                } else {
+                    crate::far::DEFAULT_DISTANCE
+                },
+            );
         self.far.set_distance(distance);
+        self.client_defaults.saved = settings;
         self.camera();
     }
     pub(super) fn consume_player_effects(&mut self) -> Result<()> {
@@ -1741,3 +1771,7 @@ mod chat_completion_tests {
 #[cfg(test)]
 #[path = "book_edit_tests.rs"]
 mod book_edit_tests;
+
+#[cfg(test)]
+#[path = "hardware_defaults_tests.rs"]
+mod hardware_defaults_tests;

@@ -209,7 +209,7 @@ pub fn load_client_settings_from(path: &std::path::Path) -> BTreeMap<String, ser
     }
     out
 }
-/// Test seam: save to an explicit path (same managed-keys-only filter).
+/// Test seam: save managed UI choices and an explicitly selected far distance.
 pub fn save_client_settings_to(
     settings: &BTreeMap<String, serde_json::Value>,
     path: &std::path::Path,
@@ -217,8 +217,14 @@ pub fn save_client_settings_to(
     let kept: BTreeMap<&str, serde_json::Value> = settings
         .iter()
         .filter_map(|(key, value)| {
-            crate::ui::UiState::sanitize_setting_value(key, value)
-                .map(|clean| (key.as_str(), clean))
+            let clean = if key == "far_terrain" {
+                value.as_u64().map(|distance| {
+                    serde_json::json!(distance.min(u64::from(crate::far::MAX_DISTANCE)))
+                })
+            } else {
+                crate::ui::UiState::sanitize_setting_value(key, value)
+            };
+            clean.map(|clean| (key.as_str(), clean))
         })
         .collect();
     let Ok(text) = serde_json::to_string_pretty(&kept) else {
@@ -312,6 +318,7 @@ mod tests {
         settings.insert("vsync".into(), serde_json::json!(false));
         settings.insert("graphics_preset".into(), serde_json::json!("low"));
         settings.insert("max_fps".into(), serde_json::json!(120));
+        settings.insert("far_terrain".into(), serde_json::json!(768));
         settings.insert("chat_key".into(), serde_json::json!("not persisted"));
         save_client_settings_to(&settings, &path);
         let loaded = load_client_settings_from(&path);
@@ -323,6 +330,7 @@ mod tests {
         assert_eq!(loaded.get("vsync"), Some(&serde_json::json!(false)));
         assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("low")));
         assert_eq!(loaded.get("max_fps"), Some(&serde_json::json!(120)));
+        assert_eq!(loaded.get("far_terrain"), Some(&serde_json::json!(768)));
         assert!(!loaded.contains_key("chat_key"));
         // Corrupt file degrades to empty, not an error.
         std::fs::write(&path, "{not json").unwrap();
