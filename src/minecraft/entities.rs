@@ -400,6 +400,39 @@ pub(super) fn visible_item(session: &Session, item: &str, origin: [i32; 3]) -> R
         .nearest_visible_item(item, origin, content(session)?, session.client_tick)?
         .is_some())
 }
+/// A cursor opts into network-id order; ordinary calls retain nearest-first order.
+fn entity_page<'a>(
+    entities: impl Iterator<Item = (f64, i32, &'a str)>,
+    radius: f64,
+    limit: usize,
+    kind: Option<&str>,
+    paged: bool,
+    after: Option<i32>,
+) -> (Vec<(f64, i32)>, usize, usize) {
+    let mut page = Vec::with_capacity(limit + 1);
+    let mut total = 0;
+    let mut remaining = 0;
+    for (distance, id, entity_kind) in entities {
+        if distance > radius * radius || kind.is_some_and(|kind| kind != entity_kind) {
+            continue;
+        }
+        total += 1;
+        if after.is_some_and(|after| id <= after) {
+            continue;
+        }
+        remaining += 1;
+        let key = if paged { f64::from(id) } else { distance };
+        let index = page.partition_point(|other: &(f64, i32)| *other < (key, id));
+        if index < limit {
+            page.insert(index, (key, id));
+            if page.len() > limit {
+                page.pop();
+            }
+        }
+    }
+    (page, total, remaining)
+}
+
 pub(super) fn start(
     session: &mut Session,
     name: &str,
@@ -422,32 +455,27 @@ pub(super) fn start(
         "minecraft_list_entities" => {
             let radius = number(args, "radius", Some(32.), 0., 128.)?;
             let limit = integer(args, "limit", Some(128), 1, 512)? as usize;
-            // Keep only the bounded nearest page; ties are stable across packet ordering.
-            let mut page = Vec::with_capacity(limit + 1);
-            let mut total = 0;
-            for entity in session.entities.received_entities() {
-                let distance = distance_squared(entity.position, session.player.position);
-                if distance > radius * radius {
-                    continue;
-                }
-                total += 1;
-                let index = page.partition_point(|(other_distance, id): &(f64, i32)| {
-                    (*other_distance, *id) < (distance, entity.handle.network_id)
-                });
-                if index < limit {
-                    page.insert(index, (distance, entity.handle.network_id));
-                    if page.len() > limit {
-                        page.pop();
-                    }
-                }
-            }
+            let kind = args.get("entity_type").map(|_| text(args, "entity_type", 128)).transpose()?;
+            let cursor = args.get("cursor").map(|value| value.as_str().ok_or("invalid_cursor")).transpose()?;
+            let after = cursor.filter(|value| !value.is_empty())
+                .map(str::parse::<i32>).transpose().map_err(|_| "invalid_cursor")?;
+            let (page, total, remaining) = entity_page(
+                session.entities.received_entities().map(|entity| (
+                    distance_squared(entity.position, session.player.position),
+                    entity.handle.network_id,
+                    entity.type_name.as_str(),
+                )),
+                radius, limit, kind, cursor.is_some(), after,
+            );
+            let next_cursor = (cursor.is_some() && remaining > page.len())
+                .then(|| page.last().unwrap().1.to_string());
             let entities = page
                 .iter()
                 .map(|(_, id)| list_entity_value(session, session.entities.get(*id).unwrap()))
                 .collect::<Result<Vec<_>>>()?;
             return Ok(Some(Outcome::Complete(
                 json!({"in_play":true,"radius":radius,"visible_count":total,
-                "entities":entities,"truncated":total > limit}),
+                "entities":entities,"truncated":remaining > limit,"next_cursor":next_cursor}),
             )));
         }
         "minecraft_wait_for_visible_entity" => Wait::Visible {
@@ -814,6 +842,38 @@ impl Task {
 #[cfg(test)]
 mod observation_tests {
     use super::*;
+
+    #[test]
+    fn entity_census_filters_before_paging_and_preserves_distant_residents() {
+        let entities = [
+            (1., 1, "minecraft:item"),
+            (100., 9, "minecraft:villager"),
+            (4., 3, "minecraft:sheep"),
+            (9., 7, "minecraft:villager"),
+            (16000., 5, "minecraft:villager"),
+            (17000., 11, "minecraft:villager"),
+        ];
+        let (first, total, remaining) = entity_page(
+            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, None,
+        );
+        assert_eq!(first.iter().map(|row| row.1).collect::<Vec<_>>(), [5, 7]);
+        assert_eq!((total, remaining), (3, 3));
+        let (last, total, remaining) = entity_page(
+            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, Some(7),
+        );
+        assert_eq!(last.iter().map(|row| row.1).collect::<Vec<_>>(), [9]);
+        assert_eq!((total, remaining), (3, 1));
+    }
+
+    #[test]
+    fn entity_census_cursor_order_survives_motion_and_packet_order() {
+        let entities = [(1., 9, "minecraft:villager"), (100., 5, "minecraft:villager"),
+                        (81., 7, "minecraft:villager")];
+        let (page, _, _) = entity_page(entities.into_iter(), 128., 2, None, true, Some(5));
+        assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9]);
+        let (nearest, _, _) = entity_page(entities.into_iter(), 128., 2, None, false, None);
+        assert_eq!(nearest.iter().map(|row| row.1).collect::<Vec<_>>(), [9, 7]);
+    }
 
     #[test]
     fn received_baby_distinguishes_absent_and_false() {

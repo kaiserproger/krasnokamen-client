@@ -12,6 +12,7 @@ const HELP: &str = "Usage:
                  [--artifact-dir DIR] [--runtime-dir DIR]
   solaris-client doctor [--json]
   solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
+  solaris-client mcp-schema              Export the live native MCP argument schemas
 
 Default data: Linux `$XDG_DATA_HOME/solaris-client` (or `~/.local/share/solaris-client`),
 Windows `%APPDATA%\\solaris-client`, macOS `~/Library/Application Support/solaris-client`;
