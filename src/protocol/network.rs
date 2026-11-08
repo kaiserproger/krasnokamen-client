@@ -139,7 +139,7 @@ impl Network {
                     ServerEndpoint { addr, endpoint },
                     username,
                     &send,
-                    receive,
+                    &receive,
                     &stop,
                     wake.as_ref(),
                 );
@@ -194,7 +194,8 @@ impl Network {
         }
         self.outgoing.send((id, body)).map_err(|_| {
             state.outbound_backlog.fetch_sub(1, Ordering::AcqRel);
-            "outbound queue closed: network thread ended".to_string()
+            state.terminal_error.lock().clone()
+                .unwrap_or_else(|| "outbound queue closed: network thread ended".to_string())
         })?;
         #[cfg(windows)]
         self.worker_wake.unpark();
@@ -375,7 +376,7 @@ fn run(
     server: ServerEndpoint,
     username: String,
     events: &Sender<Event>,
-    commands: Receiver<(i32, Vec<u8>)>,
+    commands: &Receiver<(i32, Vec<u8>)>,
     state: &ConnectionState,
     wake: &(dyn Fn() + Send + Sync),
 ) -> Result<()> {
@@ -431,7 +432,7 @@ fn run(
     #[cfg(windows)]
     let reader = BlockingReader::start(&socket, thread::current()).map_err(|e| e.to_string())?;
     while !state.cancelled.load(Ordering::Acquire) {
-        flush_outbound(&mut socket, &commands, state, compression)?;
+        flush_outbound(&mut socket, commands, state, compression)?;
         let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
         if phase != Phase::Login && advertised_radius != Some(settings) {
             let id = if phase == Phase::Configuration {
@@ -443,7 +444,7 @@ fn run(
             advertised_radius = Some(settings);
         }
         while let Some((id, body)) = extract(&mut buffer, compression)? {
-            flush_outbound(&mut socket, &commands, state, compression)?;
+            flush_outbound(&mut socket, commands, state, compression)?;
             let original = phase;
             let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
             if phase == Phase::Login {
@@ -808,6 +809,12 @@ mod tests {
             // Joining the real I/O worker proves all 16 sends completed and
             // termination ran while no consumer had freed a queue slot.
             network.worker.take().unwrap().join().unwrap();
+            let expected_error = if malformed_frame {
+                "frame length bound"
+            } else {
+                "server closed connection"
+            };
+            assert_eq!(network.send(0, Vec::new()).unwrap_err(), expected_error);
             assert!(matches!(
                 network.try_recv(),
                 Ok(Event::Status(status)) if status["version"]["protocol"] == 777

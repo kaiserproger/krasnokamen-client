@@ -85,6 +85,11 @@ be closed](https://learn.microsoft.com/en-us/windows/win32/winsock/sol-socket-so
 The separate status socket's three-second timeout and the play write timeout
 remain fatal to the attempt, not retried operations on an indeterminate socket.
 
+The I/O owner publishes its terminal error before releasing the outbound
+receiver. A send that races with termination reports that same error rather than
+masking EOF with a generic closed-queue error; the terminal event remains
+available for the session to consume.
+
 `cargo test -p solaris-client --lib protocol::network` covers partial-frame
 handoff, idle/EOF/shutdown termination and dropping a backpressured reader.
 Windows additionally checks that the real `Network::connect` play socket has
