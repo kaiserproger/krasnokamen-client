@@ -13,6 +13,26 @@ pub(crate) enum Outcome<T> {
     Pending(T),
 }
 
+#[derive(Default)]
+pub(crate) struct EntityCensus {
+    serial: u64,
+    snapshot: Option<EntityCensusSnapshot>,
+}
+
+struct EntityCensusSnapshot {
+    epochs: (u64, u64),
+    radius: f64,
+    kind: Option<String>,
+    total: usize,
+    rows: std::vec::IntoIter<(i32, Value)>,
+}
+
+impl EntityCensus {
+    pub(crate) fn clear(&mut self) {
+        self.snapshot = None;
+    }
+}
+
 pub(crate) enum Task {
     Inventory(inventory::Task),
     Entities(entities::Task),

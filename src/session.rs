@@ -86,6 +86,7 @@ pub struct Session {
     pub(crate) player: Player,
     pub(crate) inventory: InventoryStore,
     pub(crate) entities: EntityStore,
+    pub(crate) entity_census: crate::minecraft::EntityCensus,
     pub(crate) ui: Option<UiState>,
     ui_viewport: Option<(u32, u32, f64)>,
     /// Monotonic epoch of the UI animation clock (frame time, never sleeps).
@@ -201,6 +202,7 @@ impl Session {
             player,
             inventory: InventoryStore::default(),
             entities: EntityStore::new(),
+            entity_census: crate::minecraft::EntityCensus::default(),
             ui: None,
             ui_viewport: None,
             ui_clock: std::time::Instant::now(),
@@ -618,6 +620,7 @@ impl Session {
         self.far.disconnect();
         self.world.clear();
         self.entities.clear_connection();
+        self.entity_census.clear();
         self.predicted_blocks.clear();
         self.received_chunks.clear();
         self.received_blocks.clear();
