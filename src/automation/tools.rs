@@ -80,17 +80,24 @@ pub(super) fn execute(
             | "minecraft_wait_for_play"
             | "minecraft_wait_for_state_change"
     );
-    let writer = if readonly {
-        None
-    } else {
-        if observation
+    let capture = matches!(name, "client_capture" | "minecraft_screenshot");
+    if !readonly
+        && observation
             .data
             .pointer("/window/focused")
             .and_then(Value::as_bool)
             == Some(false)
-        {
-            return Err("window_not_focused".into());
-        }
+    {
+        return Err("window_not_focused".into());
+    }
+    let capture_fence = if capture {
+        core.capture_fence(session, &observation.connection_epoch, &observation.dimension_epoch)?
+    } else {
+        None
+    };
+    let writer = if readonly || capture {
+        None
+    } else {
         Some(core.admit(
             session,
             &observation.connection_epoch,
@@ -203,7 +210,8 @@ pub(super) fn execute(
             reply,
             expected_connection_epoch: connection,
             expected_dimension_epoch: dimension,
-            automation_fence: writer.as_ref().map(|writer| writer.fence.clone()),
+            automation_fence: writer.as_ref().map(|writer| writer.fence.clone())
+                .or_else(|| capture_fence.clone()),
             cancelled: Some(cancelled.clone()),
         })
         .map_err(|_| "command_queue_full")?;
@@ -260,11 +268,12 @@ pub(super) fn execute(
     // (`writer_action_busy` stays fail-closed) and the fence stays live, so the
     // next write is admitted once the owner drains the in-flight task instead of
     // being fenced forever by a revoked lease.
+    // Capture errors end only that capture; watchdog/transport own lease loss.
     if let Err(error) = &result
-        && let Some(writer) = &writer
+        && let Some(fence) = writer.as_ref().map(|writer| &writer.fence)
         && revoke_on_owner_error(error)
     {
-        core.revoke_lease("owner_error", Some(&writer.fence));
+        core.revoke_lease("owner_error", Some(fence));
     }
     result
 }

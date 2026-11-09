@@ -198,6 +198,38 @@ impl Core {
             _ => json!({"active":false,"last_release_reason":c.last_release}),
         }
     }
+    /// Capture writes an artifact, but is not controller activity. Preserve any
+    /// existing writer's identity/context fence without creating or renewing it.
+    pub(super) fn capture_fence(
+        &self,
+        session: &str,
+        connection: &str,
+        dimension: &str,
+    ) -> Result<Option<Arc<AtomicBool>>, String> {
+        if !self.allow_control {
+            return Err("control_not_locally_authorized".into());
+        }
+        let mut control = self.control.lock();
+        if control.releasing != 0 {
+            return Err("controller_releasing".into());
+        }
+        let Some(lease) = control.lease.as_mut() else {
+            return Ok(None);
+        };
+        if lease.session != session {
+            return Err("controller_busy".into());
+        }
+        if (lease.active_actions == 0 && lease.expires <= Instant::now())
+            || !lease.live.load(Ordering::Acquire)
+        {
+            return Err("lease_expired".into());
+        }
+        lease.observe_respawn(connection, dimension);
+        if lease.connection != connection || lease.dimension != dimension {
+            return Err("stale_context".into());
+        }
+        Ok(Some(lease.live.clone()))
+    }
     /// Canonical Java arguments carry no private control token. The authenticated
     /// transport session is the writer identity; context/live fences stay owner-side.
     pub fn admit(

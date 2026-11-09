@@ -231,15 +231,15 @@ pub fn start(
                 break;
             }
             let Ok(mut stream) = connection else { continue };
-            if t.connections.fetch_add(1, Ordering::AcqRel) >= 32 {
-                t.connections.fetch_sub(1, Ordering::AcqRel);
+            let header_deadline = Instant::now() + HTTP_READ_BUDGET;
+            let Some(slot) = ConnectionSlot::acquire(&t) else {
                 let _ = respond(&mut stream, 429, &[], None);
                 continue;
-            }
-            let active = t.clone();
-            std::thread::spawn(move || {
-                let _ = active.serve(&mut stream);
-                active.connections.fetch_sub(1, Ordering::AcqRel);
+            };
+            // Builder returns spawn errors rather than panicking the accept loop.
+            // Dropping its failed closure releases both the stream and the slot.
+            let _ = spawn_connection(std::thread::Builder::new(), slot, move |active| {
+                let _ = active.serve(&mut stream, header_deadline);
             });
         }
     });
@@ -251,28 +251,115 @@ pub fn start(
         safety: Some(safety),
     })
 }
+struct ConnectionSlot(Arc<Transport>);
+impl ConnectionSlot {
+    fn acquire(transport: &Arc<Transport>) -> Option<Self> {
+        transport.connections.fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            (used < 32).then_some(used + 1)
+        }).ok()?;
+        Some(Self(transport.clone()))
+    }
+}
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.connections.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+fn spawn_connection(
+    builder: std::thread::Builder,
+    slot: ConnectionSlot,
+    serve: impl FnOnce(&Arc<Transport>) + Send + 'static,
+) -> std::io::Result<JoinHandle<()>> {
+    builder.spawn(move || {
+        serve(&slot.0);
+        drop(slot);
+    })
+}
+
 struct Http {
     method: String,
     headers: HashMap<String, String>,
     body: Vec<u8>,
 }
-fn read_http(stream: &mut TcpStream) -> Result<Http, String> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .map_err(|e| e.to_string())?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(5)))
-        .map_err(|e| e.to_string())?;
+const HTTP_READ_BUDGET: Duration = Duration::from_secs(5);
+const HTTP_WRITE_BUDGET: Duration = Duration::from_secs(5);
+const HTTP_HEADER_LIMIT: usize = 16384;
+const HTTP_BODY_LIMIT: usize = 65536;
+const HTTP_READ_CHUNK: usize = 4096;
+
+// The clock/socket seam lets regressions advance time on every successful read,
+// without sleeping or depending on the scheduler to reproduce slow ingress.
+trait HttpInput: Read {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn set_timeout(&mut self, remaining: Duration) -> std::io::Result<()>;
+}
+impl HttpInput for TcpStream {
+    fn set_timeout(&mut self, remaining: Duration) -> std::io::Result<()> {
+        self.set_read_timeout(Some(remaining))
+    }
+}
+
+fn read_before(
+    stream: &mut impl HttpInput,
+    bytes: &mut [u8],
+    deadline: Instant,
+    phase: &str,
+    stopped: &AtomicBool,
+) -> Result<usize, String> {
+    loop {
+        if stopped.load(Ordering::Acquire) {
+            return Err("automation_shutdown".into());
+        }
+        let remaining = deadline.saturating_duration_since(stream.now());
+        if remaining.is_zero() {
+            return Err(format!("{phase}_timeout"));
+        }
+        stream.set_timeout(remaining).map_err(|e| e.to_string())?;
+        let result = stream.read(bytes);
+        if stopped.load(Ordering::Acquire) {
+            return Err("automation_shutdown".into());
+        }
+        if stream.now() >= deadline {
+            return Err(format!("{phase}_timeout"));
+        }
+        match result {
+            Ok(0) => return Err(format!("{phase}_eof")),
+            Ok(count) => return Ok(count),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
+                return Err(format!("{phase}_timeout"));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+fn read_http(
+    stream: &mut impl HttpInput,
+    header_deadline: Instant,
+    stopped: &AtomicBool,
+) -> Result<Http, String> {
     let mut header = Vec::with_capacity(1024);
-    let mut byte = [0u8; 1];
-    while !header.ends_with(b"\r\n\r\n") {
-        if header.len() >= 16384 {
+    let mut chunk = [0u8; HTTP_READ_CHUNK];
+    let header_end = loop {
+        let available = (HTTP_HEADER_LIMIT - header.len()).min(chunk.len());
+        if available == 0 {
             return Err("header_too_large".into());
         }
-        stream.read_exact(&mut byte).map_err(|e| e.to_string())?;
-        header.push(byte[0]);
-    }
-    let header = std::str::from_utf8(&header).map_err(|_| "invalid_header")?;
+        let count = read_before(stream, &mut chunk[..available], header_deadline, "header", stopped)?;
+        let search_from = header.len().saturating_sub(3);
+        header.extend_from_slice(&chunk[..count]);
+        if let Some(offset) = header[search_from..].windows(4).position(|w| w == b"\r\n\r\n") {
+            break search_from + offset + 4;
+        }
+    };
+    // Body bytes coalesced with the terminator belong to this request, not its
+    // headers. Each phase has one absolute budget; progress never renews it.
+    let body_deadline = stream.now() + HTTP_READ_BUDGET;
+    let prefetched = &header[header_end..];
+    let header = std::str::from_utf8(&header[..header_end]).map_err(|_| "invalid_header")?;
     let mut lines = header.split("\r\n");
     let first = lines.next().ok_or("missing_request_line")?;
     let parts: Vec<_> = first.split(' ').collect();
@@ -300,14 +387,19 @@ fn read_http(stream: &mut TcpStream) -> Result<Http, String> {
         .map(|v| v.parse::<usize>().map_err(|_| "invalid_content_length"))
         .transpose()?
         .unwrap_or(0);
-    if length > 65536 {
+    if length > HTTP_BODY_LIMIT {
         return Err("body_too_large".into());
     }
     if parts[0] == "POST" && !headers.contains_key("content-length") {
         return Err("content_length_required".into());
     }
     let mut body = vec![0; length];
-    stream.read_exact(&mut body).map_err(|e| e.to_string())?;
+    let mut received = prefetched.len().min(length);
+    body[..received].copy_from_slice(&prefetched[..received]);
+    while received < length {
+        let end = (received + HTTP_READ_CHUNK).min(length);
+        received += read_before(stream, &mut body[received..end], body_deadline, "body", stopped)?;
+    }
     Ok(Http {
         method: parts[0].into(),
         headers,
@@ -327,12 +419,54 @@ fn respond(
         .unwrap_or_default();
     respond_bytes(stream, status, headers, &bytes)
 }
+trait HttpOutput: Write {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn set_timeout(&mut self, remaining: Duration) -> std::io::Result<()>;
+}
+impl HttpOutput for TcpStream {
+    fn set_timeout(&mut self, remaining: Duration) -> std::io::Result<()> {
+        self.set_write_timeout(Some(remaining))
+    }
+}
+
+// Formatting and body writes share one deadline, without allocating a header buffer.
+struct ResponseWriter<'a, S> {
+    stream: &'a mut S,
+    deadline: Instant,
+}
+impl<S: HttpOutput> Write for ResponseWriter<'_, S> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        loop {
+            let remaining = self.deadline.saturating_duration_since(self.stream.now());
+            if remaining.is_zero() {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            self.stream.set_timeout(remaining)?;
+            let result = self.stream.write(bytes);
+            if self.stream.now() >= self.deadline {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            match result {
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => return result,
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
+    }
+}
+
 fn respond_bytes(
-    stream: &mut TcpStream,
+    stream: &mut impl HttpOutput,
     status: u16,
     headers: &[(&str, &str)],
     bytes: &[u8],
 ) -> Result<(), String> {
+    let deadline = stream.now() + HTTP_WRITE_BUDGET;
+    let mut stream = ResponseWriter { stream, deadline };
     let reason = match status {
         200 => "OK",
         202 => "Accepted",
@@ -385,8 +519,8 @@ impl Transport {
             }
         }
     }
-    fn serve(self: &Arc<Self>, stream: &mut TcpStream) -> Result<(), String> {
-        let http = match read_http(stream) {
+    fn serve(self: &Arc<Self>, stream: &mut TcpStream, header_deadline: Instant) -> Result<(), String> {
+        let http = match read_http(stream, header_deadline, &self.core.stopped) {
             Ok(h) => h,
             Err(e) => {
                 return respond(
@@ -1082,8 +1216,413 @@ pub fn attach_stdio(descriptor: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::redact;
-    use serde_json::{Value, json};
+    use super::*;
+    use std::collections::VecDeque;
+    use std::io::ErrorKind;
+
+    struct ResponseClock {
+        now: Instant,
+        timeout: Duration,
+        timeouts: Vec<Duration>,
+        written: Vec<u8>,
+        header_delay: Duration,
+        body_delay: Duration,
+        body_started: bool,
+        interrupt_once: bool,
+        zero_once: bool,
+    }
+    impl ResponseClock {
+        fn new(header_delay: Duration, body_delay: Duration) -> Self {
+            Self {
+                now: Instant::now(), timeout: Duration::ZERO, timeouts: Vec::new(),
+                written: Vec::new(), header_delay, body_delay, body_started: false,
+                interrupt_once: false, zero_once: false,
+            }
+        }
+    }
+    impl HttpOutput for ResponseClock {
+        fn now(&self) -> Instant { self.now }
+        fn set_timeout(&mut self, timeout: Duration) -> std::io::Result<()> {
+            self.timeout = timeout;
+            self.timeouts.push(timeout);
+            Ok(())
+        }
+    }
+    impl Write for ResponseClock {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if std::mem::take(&mut self.interrupt_once) {
+                self.now += Duration::from_secs(1);
+                return Err(ErrorKind::Interrupted.into());
+            }
+            if std::mem::take(&mut self.zero_once) {
+                return Ok(0);
+            }
+            let delay = if self.body_started { self.body_delay } else {
+                std::mem::take(&mut self.header_delay)
+            };
+            self.now += delay.min(self.timeout);
+            if delay >= self.timeout {
+                return Err(ErrorKind::TimedOut.into());
+            }
+            let count = if self.body_started { bytes.len().min(1) } else { bytes.len() };
+            self.written.extend_from_slice(&bytes[..count]);
+            self.body_started |= self.written.ends_with(b"\r\n\r\n");
+            Ok(count)
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
+    #[test]
+    fn http_response_deadline_bounds_slow_reader_across_headers_and_body() {
+        for header_seconds in [0, 4] {
+            let mut output = ResponseClock::new(
+                Duration::from_secs(header_seconds), Duration::from_secs(1));
+            let deadline = output.now + HTTP_WRITE_BUDGET;
+            assert!(respond_bytes(&mut output, 200, &[("Mcp-Session-Id", "test")], b"abcdef").is_err());
+            assert_eq!(output.now, deadline);
+            assert!(output.body_started, "exercise body progress, not just a header timeout");
+            assert_eq!(output.timeouts.last(), Some(&Duration::from_secs(1)));
+            assert!(output.timeouts.windows(2).all(|pair| pair[1] <= pair[0]));
+            assert!(!output.written.ends_with(b"abcdef"));
+        }
+        let mut output = ResponseClock::new(Duration::ZERO, Duration::ZERO);
+        output.interrupt_once = true;
+        respond_bytes(&mut output, 429, &[], b"ok").unwrap();
+        assert_eq!(&output.timeouts[..2], &[Duration::from_secs(5), Duration::from_secs(4)]);
+        assert!(output.written.starts_with(b"HTTP/1.1 429 Too Many Requests\r\n"));
+        assert!(output.written.ends_with(b"\r\n\r\nok"));
+        let mut output = ResponseClock::new(Duration::ZERO, Duration::ZERO);
+        output.zero_once = true;
+        assert!(respond_bytes(&mut output, 200, &[], b"ok").is_err());
+        assert_eq!(output.timeouts.len(), 1, "zero progress must not spin");
+    }
+
+    #[test]
+    fn http_connection_slot_is_released_when_serve_panics() {
+        let (server, _owner, directory) = test_server();
+        let slot = ConnectionSlot::acquire(&server.transport).unwrap();
+        let worker = spawn_connection(std::thread::Builder::new(), slot, |_| {
+            panic!("injected serve panic");
+        }).unwrap();
+        assert!(worker.join().is_err());
+        assert_eq!(server.transport.connections.load(Ordering::Acquire), 0);
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn http_connection_slot_is_released_when_spawn_fails() {
+        let (server, _owner, directory) = test_server();
+        let slot = ConnectionSlot::acquire(&server.transport).unwrap();
+        // A stack larger than the address space is rejected without allocating it.
+        let spawned = spawn_connection(
+            std::thread::Builder::new().stack_size(usize::MAX / 2), slot,
+            |_| panic!("failed spawn must not run serve"),
+        );
+        assert!(spawned.is_err());
+        assert_eq!(server.transport.connections.load(Ordering::Acquire), 0);
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    enum Step {
+        Bytes(Duration, Vec<u8>),
+        Error(ErrorKind),
+        Shutdown,
+    }
+    struct SocketClock {
+        now: Instant,
+        steps: VecDeque<Step>,
+        timeout: Duration,
+        timeouts: Vec<Duration>,
+        read_sizes: Vec<usize>,
+        stopped: Arc<AtomicBool>,
+    }
+    impl SocketClock {
+        fn new(steps: impl IntoIterator<Item = Step>) -> Self {
+            Self {
+                now: Instant::now(), steps: steps.into_iter().collect(),
+                timeout: Duration::ZERO, timeouts: Vec::new(), read_sizes: Vec::new(),
+                stopped: Arc::new(AtomicBool::new(false)),
+            }
+        }
+        fn parse(&mut self) -> Result<Http, String> {
+            let stopped = self.stopped.clone();
+            let deadline = self.now + HTTP_READ_BUDGET;
+            read_http(self, deadline, &stopped)
+        }
+    }
+    impl HttpInput for SocketClock {
+        fn now(&self) -> Instant { self.now }
+        fn set_timeout(&mut self, timeout: Duration) -> std::io::Result<()> {
+            self.timeout = timeout;
+            self.timeouts.push(timeout);
+            Ok(())
+        }
+    }
+    impl Read for SocketClock {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            self.read_sizes.push(bytes.len());
+            match self.steps.pop_front() {
+                Some(Step::Bytes(delay, data)) => {
+                    self.now += delay.min(self.timeout);
+                    if delay >= self.timeout {
+                        return Err(ErrorKind::TimedOut.into());
+                    }
+                    let count = data.len().min(bytes.len());
+                    bytes[..count].copy_from_slice(&data[..count]);
+                    if count < data.len() {
+                        self.steps.push_front(Step::Bytes(Duration::ZERO, data[count..].to_vec()));
+                    }
+                    Ok(count)
+                }
+                Some(Step::Error(kind)) => Err(kind.into()),
+                Some(Step::Shutdown) => {
+                    self.stopped.store(true, Ordering::Release);
+                    Ok(0)
+                }
+                None => Ok(0),
+            }
+        }
+    }
+    fn bytes(data: impl Into<Vec<u8>>) -> Step {
+        Step::Bytes(Duration::ZERO, data.into())
+    }
+    fn parse_error(input: &mut SocketClock) -> String {
+        input.parse().err().expect("request must be rejected")
+    }
+
+    #[test]
+    fn http_absolute_deadlines_bound_successful_trickle_in_each_phase() {
+        for body in [false, true] {
+            let mut steps = Vec::new();
+            if body {
+                steps.push(bytes(b"POST /mcp HTTP/1.1\r\nContent-Length: 8\r\n\r\n".to_vec()));
+            }
+            steps.extend((0..8).map(|_| Step::Bytes(Duration::from_secs(1), vec![b'x'])));
+            let mut input = SocketClock::new(steps);
+            let start = input.now;
+            assert_eq!(parse_error(&mut input), if body { "body_timeout" } else { "header_timeout" });
+            assert_eq!(input.now - start, HTTP_READ_BUDGET);
+            let timeouts = if body { &input.timeouts[1..] } else { &input.timeouts[..] };
+            assert_eq!(timeouts, &[5, 4, 3, 2, 1].map(Duration::from_secs));
+        }
+    }
+
+    #[test]
+    fn http_body_has_one_independent_budget_after_header_completion() {
+        let mut input = SocketClock::new([
+            Step::Bytes(Duration::from_secs(4),
+                b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\nx".to_vec()),
+            Step::Bytes(Duration::from_secs(4), vec![b'y']),
+        ]);
+        let start = input.now;
+        assert_eq!(input.parse().unwrap().body, b"xy");
+        assert_eq!(input.now - start, Duration::from_secs(8));
+        assert_eq!(input.timeouts, [HTTP_READ_BUDGET; 2]);
+    }
+
+    #[test]
+    fn http_partial_terminator_retains_binary_body_and_bounds_reads() {
+        let header = b"POST /mcp HTTP/1.1\r\nContent-Length: 4\r\n\r\n";
+        for split in 1..=4 {
+            let boundary = header.len() - split;
+            let mut rest = header[boundary..].to_vec();
+            rest.extend([0xff, 0, b'\r']);
+            let mut input = SocketClock::new([
+                bytes(header[..boundary].to_vec()), bytes(rest), bytes(vec![b'\n']),
+            ]);
+            let http = input.parse().unwrap();
+            assert_eq!(http.method, "POST");
+            assert_eq!(http.body, [0xff, 0, b'\r', b'\n']);
+            assert_eq!(input.read_sizes.len(), 3);
+            assert!(input.read_sizes.iter().all(|size| *size <= HTTP_READ_CHUNK));
+        }
+    }
+
+    #[test]
+    fn http_exact_size_boundaries_and_prefetch_do_not_weaken_caps() {
+        for size in [HTTP_HEADER_LIMIT - 1, HTTP_HEADER_LIMIT, HTTP_HEADER_LIMIT + 1] {
+            let mut header = b"POST /mcp HTTP/1.1\r\nContent-Length: 0\r\nX-Pad: ".to_vec();
+            header.resize(size - 4, b'x');
+            header.extend_from_slice(b"\r\n\r\n");
+            let mut input = SocketClock::new([bytes(header)]);
+            if size <= HTTP_HEADER_LIMIT {
+                assert!(input.parse().unwrap().body.is_empty());
+                assert_eq!(input.read_sizes.len(), size.div_ceil(HTTP_READ_CHUNK));
+            } else {
+                assert_eq!(parse_error(&mut input), "header_too_large");
+            }
+        }
+        for size in [0, HTTP_BODY_LIMIT - 1, HTTP_BODY_LIMIT, HTTP_BODY_LIMIT + 1] {
+            let mut request = format!("POST /mcp HTTP/1.1\r\nContent-Length: {size}\r\n\r\n").into_bytes();
+            request.extend(vec![0xff; size]);
+            let mut input = SocketClock::new([bytes(request)]);
+            if size <= HTTP_BODY_LIMIT {
+                assert_eq!(input.parse().unwrap().body, vec![0xff; size]);
+                assert!(input.read_sizes.iter().all(|size| *size <= HTTP_READ_CHUNK));
+            } else {
+                assert_eq!(parse_error(&mut input), "body_too_large");
+                assert_eq!(input.read_sizes.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn http_eof_timeout_interrupt_and_shutdown_are_terminal_or_bounded() {
+        for body in [false, true] {
+            for terminal in [ErrorKind::UnexpectedEof, ErrorKind::TimedOut, ErrorKind::WouldBlock] {
+                let prefix = if body {
+                    b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\nx".as_slice()
+                } else { b"POST /mcp HTTP/1.1\r\n\r".as_slice() };
+                let mut steps = vec![bytes(prefix.to_vec())];
+                if terminal != ErrorKind::UnexpectedEof {
+                    steps.push(Step::Error(terminal));
+                }
+                let mut input = SocketClock::new(steps);
+                let expected = format!("{}_{}", if body { "body" } else { "header" },
+                    if terminal == ErrorKind::UnexpectedEof { "eof" } else { "timeout" });
+                assert_eq!(parse_error(&mut input), expected);
+                let mut input = SocketClock::new([bytes(prefix.to_vec()), Step::Shutdown]);
+                assert_eq!(parse_error(&mut input), "automation_shutdown");
+            }
+        }
+        let mut input = SocketClock::new([
+            Step::Bytes(Duration::from_secs(4), b"GET /mcp HTTP/1.1\r\n".to_vec()),
+            Step::Error(ErrorKind::Interrupted), bytes(b"\r\n".to_vec()),
+        ]);
+        assert_eq!(input.parse().unwrap().method, "GET");
+        assert_eq!(input.timeouts, [5, 1, 1].map(Duration::from_secs));
+        let mut input = SocketClock::new([]);
+        input.stopped.store(true, Ordering::Release);
+        assert_eq!(parse_error(&mut input), "automation_shutdown");
+        assert!(input.read_sizes.is_empty());
+        let mut input = SocketClock::new([]);
+        let stopped = input.stopped.clone();
+        let expired = input.now;
+        assert_eq!(read_http(&mut input, expired, &stopped).err().unwrap(), "header_timeout");
+        assert!(input.read_sizes.is_empty());
+    }
+
+    #[test]
+    fn http_framing_rejections_stay_before_body_reads() {
+        for (header, error) in [
+            ("Content-Length: 0\r\ncontent-length: 0", "duplicate_header"),
+            ("Transfer-Encoding: chunked", "transfer_encoding_not_supported"),
+            ("Content-Length: nope", "invalid_content_length"),
+            ("Content-Length: -1", "invalid_content_length"),
+            ("X-Test: empty", "content_length_required"),
+        ] {
+            let mut input = SocketClock::new([bytes(format!("POST /mcp HTTP/1.1\r\n{header}\r\n\r\n").into_bytes())]);
+            assert_eq!(parse_error(&mut input), error);
+            assert_eq!(input.read_sizes.len(), 1);
+        }
+    }
+
+    fn test_server() -> (Server, mpsc::Receiver<Request>, PathBuf) {
+        let (core, receiver) = super::super::tests::client();
+        let directory = std::env::temp_dir().join(format!("solaris-http-{}", nonce().unwrap()));
+        let server = start(core.shared.clone(), core.sender.clone(), Config {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            runtime_dir: directory.join("runtime"), artifact_dir: directory.join("artifacts"),
+            profile: "test".into(), allow_control: true,
+        }).unwrap();
+        (server, receiver, directory)
+    }
+    fn response(stream: &mut TcpStream) -> String {
+        stream.set_read_timeout(Some(Duration::from_secs(12))).unwrap();
+        let mut data = String::new();
+        stream.read_to_string(&mut data).unwrap();
+        data
+    }
+
+    #[test]
+    fn http_32_stalled_unauthenticated_peers_release_slots_before_honest_request() {
+        let (server, _owner, directory) = test_server();
+        let mut peers = Vec::new();
+        for index in 0..32 {
+            let slot = ConnectionSlot::acquire(&server.transport).unwrap();
+            let prefix: &[u8] = if index % 2 == 0 { b"POST /mcp HTTP/1.1\r\n" } else {
+                b"POST /mcp HTTP/1.1\r\nContent-Length: 4\r\n\r\nx"
+            };
+            let peer = SocketClock::new([
+                bytes(prefix.to_vec()),
+                Step::Bytes(Duration::from_secs(3), vec![b'x']),
+                Step::Bytes(Duration::from_secs(3), vec![b'x']),
+            ]);
+            peers.push((slot, peer));
+        }
+        // Hold all admissions while parser time advances only on virtual reads.
+        // The real listener must reject overflow, then admit an honest client
+        // after the deadline-caused exits release every guard.
+        let mut overflow = TcpStream::connect(server.transport.address).unwrap();
+        assert!(response(&mut overflow).starts_with("HTTP/1.1 429"));
+        assert_eq!(server.transport.connections.load(Ordering::Acquire), 32);
+        for (slot, mut peer) in peers {
+            let deadline = peer.now + HTTP_READ_BUDGET;
+            let result = parse_error(&mut peer);
+            assert!(matches!(result.as_str(), "header_timeout" | "body_timeout"), "{result}");
+            assert_eq!(peer.now, deadline);
+            drop(slot);
+        }
+        assert_eq!(server.transport.connections.load(Ordering::Acquire), 0);
+        let bridge = Bridge {
+            address: server.transport.address, token: server.transport.token.clone(),
+            session: Mutex::new(None), output: Mutex::new(std::io::stdout()),
+        };
+        let (status, _, result) = bridge.send(&json!({
+            "jsonrpc":"2.0", "id":1, "method":"initialize",
+            "params":{"protocolVersion":"2025-11-25","capabilities":{},
+                "clientInfo":{"name":"ingress-regression","version":"1"}}
+        })).unwrap();
+        assert_eq!(status, 200);
+        assert!(result.unwrap().get("result").is_some());
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn http_host_origin_auth_order_and_private_credentials_are_preserved() {
+        let (server, _owner, directory) = test_server();
+        for (host, origin, token, status, message) in [
+            ("wrong".to_string(), "http://wrong", "wrong".to_string(), 400, "invalid Host"),
+            (server.transport.address.to_string(), "http://wrong", "wrong".to_string(), 403, "invalid Origin"),
+            (server.transport.address.to_string(), "", "wrong".to_string(), 401, "unauthorized"),
+            (server.transport.address.to_string(), "", server.transport.token.clone(), 405, ""),
+        ] {
+            let mut peer = TcpStream::connect(server.transport.address).unwrap();
+            let origin = if origin.is_empty() { String::new() } else { format!("Origin: {origin}\r\n") };
+            write!(peer, "GET /mcp HTTP/1.1\r\nHost: {host}\r\n{origin}Authorization: Bearer {token}\r\n\r\n").unwrap();
+            let result = response(&mut peer);
+            assert!(result.starts_with(&format!("HTTP/1.1 {status}")), "{result}");
+            assert!(result.contains(message));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&server.descriptor, &server.token_file] {
+                assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+            }
+        }
+        drop(server);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn http_socket_shutdown_releases_partial_header_and_body() {
+        for prefix in [
+            b"GET /mcp HTTP/1.1\r\n\r".as_slice(),
+            b"POST /mcp HTTP/1.1\r\nContent-Length: 4\r\n\r\nx".as_slice(),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (mut socket, _) = listener.accept().unwrap();
+            peer.write_all(prefix).unwrap();
+            peer.shutdown(std::net::Shutdown::Write).unwrap();
+            let error = read_http(&mut socket, Instant::now() + HTTP_READ_BUDGET, &AtomicBool::new(false)).err().unwrap();
+            assert!(error.ends_with("_eof"), "{error}");
+        }
+    }
     #[test]
     fn transcript_redacts_credentials_in_structured_and_encoded_tool_content() {
         let secret = "unlogged-private-fence";

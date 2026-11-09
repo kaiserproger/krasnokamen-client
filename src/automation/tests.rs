@@ -8,7 +8,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
+pub(super) fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
     let (sender, receiver) = mpsc::sync_channel(16);
     let observation = Observation {
         instance_id: "test".into(),
@@ -717,4 +717,227 @@ fn late_cancelled_owner_result_cannot_revoke_replacement_writer() {
     assert_eq!(lease.active_actions, 1);
     drop(control);
     assert!(receiver.try_recv().is_err(), "no cleanup for the replacement");
+}
+
+#[test]
+fn owner_exit_returns_unknown_result_and_signals_cancellation() {
+    let (core, receiver) = client();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let owner = std::thread::spawn(move || {
+        let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        drop(request.reply);
+    });
+    assert_eq!(
+        super::tools::execute(
+            &core, "a", "minecraft_send_chat", &json!({"message": "pending"}), &cancelled,
+        ).unwrap_err(),
+        "owner_result_unknown",
+    );
+    assert!(cancelled.load(Ordering::Acquire));
+    owner.join().unwrap();
+}
+
+#[test]
+fn screenshot_sandbox_and_idle_writer_are_preserved() {
+    let (mut core, receiver) = client();
+    let directory = std::env::temp_dir().join(format!(
+        "solaris-capture-{}", super::control::nonce().unwrap(),
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    Arc::get_mut(&mut core).unwrap().artifact_dir = directory.clone();
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    let cancelled = Arc::new(AtomicBool::new(false));
+    for (path, error) in [
+        ("../screenshots/escape.png", "screenshot_path_escape"),
+        ("not-screenshots/image.png", "screenshot_requires_artifact_screenshots_directory"),
+        ("/screenshots/escape.png", "screenshot_requires_artifact_screenshots_directory"),
+        ("screenshots/image.jpg", "screenshot_png_required"),
+    ] {
+        assert_eq!(super::tools::execute(
+            &core, "a", "minecraft_screenshot", &json!({"path": path}), &cancelled,
+        ).unwrap_err(), error);
+        assert!(receiver.try_recv().is_err());
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            &directory, directory.join("screenshots").join("escape"),
+        ).unwrap();
+        assert_eq!(super::tools::execute(
+            &core, "a", "minecraft_screenshot",
+            &json!({"path": "screenshots/escape/image.png"}), &cancelled,
+        ).unwrap_err(), "screenshot_symlink_refused");
+        assert!(receiver.try_recv().is_err());
+    }
+    assert!(core.control.lock().lease.is_none(), "rejected captures cannot claim control");
+    for (name, args) in [
+        ("client_capture", json!({"name": "capture-without-writer"})),
+        ("minecraft_screenshot", json!({"path": "screenshots/without-writer.png"})),
+    ] {
+        let caller = core.clone();
+        let worker = std::thread::spawn(move || super::tools::execute(
+            &caller, "a", name, &args, &Arc::new(AtomicBool::new(false)),
+        ));
+        let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(request.automation_fence.is_none());
+        assert!(core.control.lock().lease.is_none());
+        request.reply.send(Ok(json!({"gpu_completion": true}))).unwrap();
+        worker.join().unwrap().unwrap();
+        assert!(core.control.lock().lease.is_none());
+    }
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    let expiry = Instant::now() + Duration::from_secs(30);
+    core.control.lock().lease.as_mut().unwrap().expires = expiry;
+    let owner_core = core.clone();
+    let owner_fence = fence.clone();
+    let owner = std::thread::spawn(move || {
+        let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(Arc::ptr_eq(request.automation_fence.as_ref().unwrap(), &owner_fence));
+        {
+            let control = owner_core.control.lock();
+            let lease = control.lease.as_ref().unwrap();
+            assert_eq!(lease.active_actions, 0, "capture is not writer activity");
+            assert_eq!(lease.expires, expiry);
+        }
+        assert!(matches!(request.command, crate::api::Command::Capture { .. }));
+        request.reply.send(Ok(json!({"gpu_completion": true}))).unwrap();
+    });
+    super::tools::execute(
+        &core, "a", "minecraft_screenshot",
+        &json!({"path": "screenshots/allowed.png"}), &cancelled,
+    ).unwrap();
+    owner.join().unwrap();
+    let control = core.control.lock();
+    let lease = control.lease.as_ref().unwrap();
+    assert_eq!(lease.expires, expiry, "capture must not extend idle authority");
+    assert_eq!(lease.active_actions, 0);
+    assert!(Arc::ptr_eq(&lease.live, &fence));
+    drop(control);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn capture_remains_locally_authorized_focused_and_session_fenced() {
+    let (mut core, receiver) = client();
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    let cancelled = Arc::new(AtomicBool::new(false));
+    Arc::get_mut(&mut core).unwrap().allow_control = false;
+    assert_eq!(super::tools::execute(
+        &core, "a", "client_capture", &json!({"name": "denied"}), &cancelled,
+    ).unwrap_err(), "control_not_locally_authorized");
+    Arc::get_mut(&mut core).unwrap().allow_control = true;
+    core.shared.observation.lock().unwrap().data["window"] = json!({"focused": false});
+    assert_eq!(super::tools::execute(
+        &core, "a", "client_capture", &json!({"name": "unfocused"}), &cancelled,
+    ).unwrap_err(), "window_not_focused");
+    assert!(receiver.try_recv().is_err());
+    assert!(core.control.lock().lease.is_none());
+    core.shared.observation.lock().unwrap().data["window"] = json!({"focused": true});
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    assert_eq!(core.capture_fence("b", "1", "2").unwrap_err(), "controller_busy");
+    assert_eq!(core.capture_fence("a", "9", "2").unwrap_err(), "stale_context");
+    assert_eq!(core.capture_fence("a", "1", "9").unwrap_err(), "stale_context");
+    core.control.lock().lease.as_mut().unwrap().expires =
+        Instant::now() - Duration::from_secs(1);
+    assert_eq!(core.capture_fence("a", "1", "2").unwrap_err(), "lease_expired");
+    core.control.lock().lease.as_mut().unwrap().active_actions = 1;
+    assert!(Arc::ptr_eq(&core.capture_fence("a", "1", "2").unwrap().unwrap(), &fence));
+    fence.store(false, Ordering::Release);
+    assert_eq!(core.capture_fence("a", "1", "2").unwrap_err(), "lease_expired");
+}
+
+#[test]
+fn capture_does_not_extend_an_existing_idle_writer() {
+    let (core, receiver) = client();
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    let expiry = Instant::now() + Duration::from_secs(30);
+    core.control.lock().lease.as_mut().unwrap().expires = expiry;
+    let caller = core.clone();
+    let worker = std::thread::spawn(move || super::tools::execute(
+        &caller, "a", "client_capture", &json!({"name": "idle"}),
+        &Arc::new(AtomicBool::new(false)),
+    ));
+    let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(Arc::ptr_eq(request.automation_fence.as_ref().unwrap(), &fence));
+    let during = {
+        let control = core.control.lock();
+        let lease = control.lease.as_ref().unwrap();
+        (lease.expires, lease.active_actions)
+    };
+    request.reply.send(Ok(json!({"gpu_completion": true}))).unwrap();
+    worker.join().unwrap().unwrap();
+    assert_eq!(during, (expiry, 0), "capture must not renew or extend writer activity");
+    assert_eq!(core.control.lock().lease.as_ref().unwrap().expires, expiry);
+}
+
+#[test]
+fn capture_after_authorized_respawn_preserves_idle_writer() {
+    let (core, receiver) = client();
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    let expiry = Instant::now() + Duration::from_secs(30);
+    {
+        let mut control = core.control.lock();
+        let lease = control.lease.as_mut().unwrap();
+        lease.expires = expiry;
+        lease.pending_respawn = Some(Arc::new(AtomicBool::new(false)));
+    }
+    {
+        let mut observation = core.shared.observation.lock().unwrap();
+        observation.data = json!({"presentation_available": true});
+        observation.dimension_epoch = "3".into();
+    }
+    // No watchdog/admit/drop observer runs between respawn and this capture.
+    let owner = std::thread::spawn(move || {
+        let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(request.expected_dimension_epoch.as_deref(), Some("3"));
+        request.reply.send(Ok(json!({"gpu_completion": true}))).unwrap();
+    });
+    super::tools::execute(&core, "a", "client_capture", &json!({"name": "after-respawn"}),
+        &Arc::new(AtomicBool::new(false))).unwrap();
+    owner.join().unwrap();
+    let control = core.control.lock();
+    let lease = control.lease.as_ref().unwrap();
+    assert!(Arc::ptr_eq(&lease.live, &fence));
+    assert_eq!(lease.dimension, "3");
+    assert!(lease.pending_respawn.is_none());
+    assert_eq!((lease.expires, lease.active_actions), (expiry, 0));
+    drop(control);
+    assert_eq!(core.capture_fence("a", "1", "4").unwrap_err(), "stale_context");
+}
+
+#[test]
+fn capture_owner_errors_never_revoke_or_renew_writer() {
+    let (mut core, receiver) = client();
+    let directory = std::env::temp_dir().join(format!(
+        "solaris-capture-owner-error-{}", super::control::nonce().unwrap()));
+    std::fs::create_dir(&directory).unwrap();
+    Arc::get_mut(&mut core).unwrap().artifact_dir = directory.clone();
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    let expiry = Instant::now() + Duration::from_secs(30);
+    core.control.lock().lease.as_mut().unwrap().expires = expiry;
+    for error in ["cancelled", "cancelled: request_cancelled", "controller_lease_revoked",
+        "lease_expired", "stale_connection_epoch", "stale_dimension_epoch", "capture_cancelled"] {
+        for (name, args) in [
+            ("client_capture", json!({"name": "owner-error"})),
+            ("minecraft_screenshot", json!({"path": "screenshots/owner-error.png"})),
+        ] {
+            let caller = core.clone();
+            let worker = std::thread::spawn(move || super::tools::execute(
+                &caller, "a", name, &args, &Arc::new(AtomicBool::new(false)),
+            ));
+            let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert!(Arc::ptr_eq(request.automation_fence.as_ref().unwrap(), &fence));
+            request.reply.send(Err(error.into())).unwrap();
+            assert_eq!(worker.join().unwrap().unwrap_err(), error);
+            let control = core.control.lock();
+            let lease = control.lease.as_ref().expect("capture error revoked writer");
+            assert!(Arc::ptr_eq(&lease.live, &fence));
+            assert!(fence.load(Ordering::Acquire));
+            assert_eq!((lease.expires, lease.active_actions), (expiry, 0));
+            assert!(receiver.try_recv().is_err(), "capture error queued ReleaseAll");
+        }
+    }
+    std::fs::remove_dir_all(directory).unwrap();
 }
