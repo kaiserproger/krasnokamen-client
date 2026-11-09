@@ -42,7 +42,7 @@ fn map_stack(id: i32) -> Stack {
 fn render(entity: &Entity, models: &Models, content: &Content, cache: &mut Cache, items: &mut ItemModels, ui: &UiState) -> DynamicGeometry {
     let mut out = DynamicGeometry::default();
     append(entity, models, ItemFrameResources { cache, items, maps: ui.map_render_view() }, content,
-        p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 2.], parent: None },
+        p::EntityDrawFrame { origin: [0.; 3], transform: entity.presented_transform(0, 0.), tick: 0, partial: 0., light: [8., 2.], parent: None },
         None, &mut out).unwrap();
     out
 }

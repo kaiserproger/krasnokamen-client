@@ -467,12 +467,27 @@ impl Task {
             self.plan(session)?;
         }
         // Advance only on the observed pose, never on elapsed input duration.
+        let mut center_before_turn = false;
         while self.waypoint < self.planner.path.len() {
             let point = self.planner.path[self.waypoint];
             if horizontal_squared(p, point) <= 0.22 * 0.22
                 && (p[1] - point[1]).abs() <= 0.4
                 && session.player.grounded
             {
+                if let Some(next) = self.planner.path.get(self.waypoint + 1).copied() {
+                    let mut space = ReceivedSpace {
+                        session,
+                        colliders: &mut self.colliders,
+                    };
+                    // A near waypoint cannot permit cutting a collision corner.
+                    // Finish centering only while the planned segment is valid.
+                    if !self.planner.transition(&mut space, p, next)?
+                        && self.planner.transition(&mut space, point, next)?
+                    {
+                        center_before_turn = true;
+                        break;
+                    }
+                }
                 self.waypoint += 1;
                 self.best_distance = f64::INFINITY;
                 self.progress_tick = session.client_tick;
@@ -523,7 +538,7 @@ impl Task {
             session.input(InputIntent::Look { yaw, pitch: 0. })?;
         }
         let jump = session.player.grounded && point[1] - p[1] > 0.6001;
-        self.movement(session, [distance > 0.12 * 0.12, jump])?;
+        self.movement(session, [center_before_turn || distance > 0.12 * 0.12, jump])?;
         Ok(None)
     }
     fn movement(&mut self, session: &mut Session, next: [bool; 2]) -> Result<()> {
@@ -795,5 +810,29 @@ mod tests {
                 json!(["forward"])
             ),
         }
+    }
+    #[test]
+    fn open_door_requires_centering_before_the_next_path_segment() {
+        let mut session = play_session("navigation-open-door-alignment");
+        grass_world(&mut session, 9..10);
+        let content = session.content.as_mut().unwrap();
+        content.insert_test_door();
+        // North-facing left-hinged open door leaves a 13/16-block passage.
+        for state in [2, 4] {
+            content.set_test_collision(state, vec![[0., 0., 0., 0.1875, 1., 1.]]);
+        }
+        for (position, state) in [([149, 1, 51], 2), ([149, 2, 51], 4)] {
+            session.world.set(position, state, |state|
+                session.content.as_ref().unwrap().block_is_air(state)).unwrap();
+        }
+        session.player.position = [149.41612090453967, 1., 52.50179587565344];
+        let mut task = active_task(&session);
+        task.target = [149, 1, 48];
+        task.held = [false; 2];
+        task.plan(&session).unwrap();
+        assert!(task.on_event(&mut session).unwrap().is_none());
+        assert_eq!(session.observation().data["inputs"]["held"], json!(["forward"]));
+        assert!((-100. ..=-80.).contains(&session.player.yaw),
+            "must align east before turning north into the door: {}", session.player.yaw);
     }
 }

@@ -128,14 +128,15 @@ pub(super) fn sampled(
 }
 pub(super) fn entity_light(
     e: &Entity,
+    store: &Store,
     models: &Models,
     tick: u64,
-    partial: f32,
+    transform: super::Transform,
     dimensions: &resources::Dimensions,
     scale: f32,
     light: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
 ) -> Result<Option<[f32; 2]>> {
-    let t = e.presented_transform(tick, partial);
+    let t = transform;
     if e.type_name == "minecraft:armor_stand"
         && number(models, e, "DATA_CLIENT_FLAGS").unwrap_or(0) & 16 != 0
     {
@@ -149,7 +150,7 @@ pub(super) fn entity_light(
         } else {
             &schema.dimensions
         };
-        let t = e.presented_transform(tick, 0.);
+        let t = store.presented_transform(e, tick, 0.)?;
         let half = f64::from(dims.width) * 0.5;
         let low = [
             (t.position[0] - half).floor() as i32,
@@ -461,6 +462,7 @@ pub(super) struct DrawStore<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct EntityDrawFrame {
     pub origin: [f64; 3],
+    pub transform: super::Transform,
     pub tick: u64,
     pub partial: f32,
     pub light: [f32; 2],
@@ -472,21 +474,22 @@ struct OrbFrame<'a> {
     camera_rotation: [f32; 2],
     tick: u64,
     partial: f32,
+    transform: super::Transform,
     light_source: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
 }
 
 // The sprite and value tiers are specified by the 26.1.2 orb renderer.
 fn append_experience_orb(
     entity: &Entity,
+    store: &Store,
     models: &Models,
     content: &Content,
     frame: OrbFrame<'_>,
     out: &mut DynamicGeometry,
 ) -> Result<bool> {
-    let OrbFrame { origin, camera_rotation, tick, partial, light_source } = frame;
-    let transform = entity.presented_transform(tick, partial);
+    let OrbFrame { origin, camera_rotation, tick, partial, transform, light_source } = frame;
     let (dimensions, scale) = models.dimensions(entity)?;
-    let Some(mut light) = entity_light(entity, models, tick, partial, dimensions, scale, light_source)? else {
+    let Some(mut light) = entity_light(entity, store, models, tick, transform, dimensions, scale, light_source)? else {
         return Ok(false);
     };
     light[1] = (light[1] + 7.).min(15.);
@@ -534,8 +537,7 @@ fn append_entity_fire(
     content: &Content,
     origin: [f64; 3],
     camera_yaw: f32,
-    tick: u64,
-    partial: f32,
+    transform: super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
     let flags = number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
@@ -543,7 +545,7 @@ fn append_entity_fire(
         return Ok(());
     }
     let (dimensions, scale) = models.dimensions(entity)?;
-    let position = entity.presented_transform(tick, partial).position;
+    let position = transform.position;
     let center = Vec3::from_array(std::array::from_fn(|i| (position[i] - origin[i]) as f32));
     let facing = Mat4::from_rotation_y((180. - camera_yaw).to_radians());
     let width = dimensions.width * scale * 1.4;
@@ -590,27 +592,16 @@ pub fn append(
         known: store.len(),
         ..Default::default()
     };
-    let query_radius = f64::from(radius) + store.query_padding();
-    let min = [
-        ((camera[0] - query_radius) / 16.).floor() as i32,
-        ((camera[2] - query_radius) / 16.).floor() as i32,
-    ];
     store.frame_partial = partial.clamp(0., 1.);
     store.frame_tick = tick;
-    let max = [
-        ((camera[0] + query_radius) / 16.).floor() as i32,
-        ((camera[2] + query_radius) / 16.).floor() as i32,
-    ];
-    // Bucket queries restrict extraction to visible-eligible neighborhood, not the whole roster.
+    // Mounted bodies can occupy a different raw bucket from their seat.
+    let area = crate::player::Bounds {
+        min: camera.map(|value| value - f64::from(radius)),
+        max: camera.map(|value| value + f64::from(radius)),
+    };
     let mut visible = std::mem::take(&mut store.visible_ids);
     visible.clear();
-    for (_, bucket) in store
-        .spatial
-        .range([min[0], i32::MIN]..=[max[0], i32::MAX])
-        .filter(|(cell, _)| cell[1] >= min[1] && cell[1] <= max[1])
-    {
-        visible.extend(bucket.iter().copied());
-    }
+    visible.extend(store.candidates(area).map(|entity| entity.handle.network_id));
     for index in 0..visible.len() + usize::from(store.local_render_slot.is_some()) {
         let slot = if index == visible.len() {
             store.local_render_slot.unwrap()
@@ -618,9 +609,14 @@ pub fn append(
             store.ids[&visible[index]]
         };
         let entity = &store.slots[slot];
-        let distance = entity
-            .presented_transform(tick, partial)
-            .position
+        let transform = match store.presented_transform(entity, tick, partial) {
+            Ok(transform) => transform,
+            Err(reason) => {
+                stats.unrendered.insert(entity.type_name.clone(), reason);
+                continue;
+            }
+        };
+        let distance = transform.position
             .iter()
             .zip(camera)
             .map(|(a, b)| (a - b) * (a - b))
@@ -637,9 +633,9 @@ pub fn append(
             continue;
         }
         if entity.type_name == "minecraft:experience_orb" {
-            match append_experience_orb(entity, &models, content, OrbFrame { origin, camera_rotation, tick, partial, light_source }, out) {
+            match append_experience_orb(entity, store, &models, content, OrbFrame { origin, camera_rotation, tick, partial, transform, light_source }, out) {
                 Ok(true) => {
-                    append_entity_fire(entity, &models, content, origin, camera_rotation[0], tick, partial, out)?;
+                    append_entity_fire(entity, &models, content, origin, camera_rotation[0], transform, out)?;
                     stats.animated += 1;
                     stats.submitted += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
@@ -655,7 +651,7 @@ pub fn append(
         let stacks = [stack.or_else(|| entity.equipment_value(0)),
             entity.equipment_value(1), entity.equipment_value(5)];
         let clock_context = match store.special_render_cache.item_context(
-            entity, stacks, content, entity.presented_transform(tick, partial).position, clock_environment,
+            entity, stacks, content, transform.position, clock_environment,
         ) {
             Ok(context) => context,
             Err(reason) => {
@@ -665,11 +661,11 @@ pub fn append(
         };
         let start = out.vertices.len();
         match super::render_special::append(store, slot, &models, content, origin,
-            tick, partial, clock_context.as_ref(), maps, light_source, tint_source, out) {
+            tick, partial, transform, clock_context.as_ref(), maps, light_source, tint_source, out) {
             Ok(super::render_special::Handled::Unhandled) => {}
             Ok(handled @ (super::render_special::Handled::Rendered | super::render_special::Handled::NoGeometry)) => {
                 if matches!(handled, super::render_special::Handled::Rendered) {
-                    append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], tick, partial, out)?;
+                    append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], transform, out)?;
                 }
                 if out.vertices.len() > start {
                     stats.submitted += 1;
@@ -697,9 +693,10 @@ pub fn append(
         };
         let Some(light) = entity_light(
             entity,
+            store,
             &models,
             tick,
-            partial,
+            transform,
             dimensions,
             scale,
             light_source,
@@ -733,10 +730,10 @@ pub fn append(
             clock_context: clock_context.as_ref(),
             bed_direction,
         };
-        draw_entity(entity, &models, content, EntityDrawFrame { origin, tick, partial, light, parent: None },
+        draw_entity(entity, &models, content, EntityDrawFrame { origin, transform, tick, partial, light, parent: None },
             &mut draw_store, out, &mut stats)?;
         if entity.binding.as_ref().is_some_and(Result::is_ok) {
-            append_entity_fire(entity, &models, content, origin, camera_rotation[0], tick, partial, out)?;
+            append_entity_fire(entity, &models, content, origin, camera_rotation[0], transform, out)?;
         }
         if out.vertices.len() > start {
             stats.submitted += 1;
@@ -757,13 +754,13 @@ pub(super) fn draw_entity(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EntityDrawFrame { origin, tick, partial, light, parent } = frame;
+    let EntityDrawFrame { origin, transform, tick, partial, light, parent } = frame;
     let start = out.vertices.len();
         match entity.binding.as_ref().unwrap() {
             Ok(binding) => {
                 let rig = models.rig(&binding.rig);
                 let tex = binding.texture;
-                let t = entity.presented_transform(tick, partial);
+                let t = transform;
                 let body_yaw = entity
                     .source
                     .as_ref()
@@ -2047,7 +2044,7 @@ fn append_item_entity(
     } else {
         "fixed"
     };
-    let t = e.presented_transform(tick, partial);
+    let t = frame.transform;
     let mut pos = Vec3::new(
         (t.position[0] - origin[0]) as f32,
         (t.position[1] - origin[1]) as f32,
@@ -2466,7 +2463,7 @@ mod tests {
         };
         let render = |store: &mut Store, time| {
             let mut out = DynamicGeometry::default();
-            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: time, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut out).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: time, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut out).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(!out.vertices.is_empty());
             let layer = out.vertices[0].texture_layer;
@@ -2516,7 +2513,7 @@ mod tests {
         for (flags, burning) in [(0, false), (1, true), (32, false), (33, false), (0, false)] {
             store.slots[0].metadata.insert(0, Metadata::Byte(flags));
             let mut geometry = DynamicGeometry::default();
-            append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             let fire: Vec<_> = geometry.vertices.iter()
                 .filter(|v| v.texture_layer == 42 || v.texture_layer == 43).collect();
             assert_eq!(!fire.is_empty(), burning, "flags {flags}");
@@ -2809,7 +2806,7 @@ mod tests {
         for (value, u, v) in [(1, 0., 0.), (7, 0.5, 0.), (2477, 0.5, 0.5)] {
             store.slots[0].metadata.insert(8, Metadata::Int(value));
             let mut geometry = DynamicGeometry::default();
-            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(stats.unrendered.is_empty());
             assert_eq!(geometry.vertices.len(), 4);
@@ -2822,18 +2819,18 @@ mod tests {
             assert!((vertex.uv[0] - u).abs() < 1e-5 && (vertex.uv[1] - v - 0.25).abs() < 1e-5);
         }
         let mut rotated = DynamicGeometry::default();
-        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut rotated).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut rotated).unwrap();
         assert_eq!(stats.submitted, 1);
         assert!(rotated.vertices.iter().all(|p| p.position[0].abs() < 1e-5));
         assert!((rotated.vertices[0].position[2].abs() - 0.15).abs() < 1e-5);
         let mut pitched = DynamicGeometry::default();
-        append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 30.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut pitched).unwrap();
+        append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 30.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut pitched).unwrap();
         let expected_normal = glam::Quat::from_euler(
             glam::EulerRot::YXZ, 90f32.to_radians(), -30f32.to_radians(), 0.,
         ) * Vec3::Y;
         assert!(pitched.vertices.iter().all(|p| Vec3::from_array(p.normal).dot(expected_normal) > 0.999));
         let mut geometry = DynamicGeometry::default();
-        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(None), bed_direction: &|_| None }, &mut geometry).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(None), bed_direction: &|_| None }, &mut geometry).unwrap();
         assert_eq!(stats.lighting_pending, 1);
         assert!(geometry.vertices.is_empty());
     }
@@ -2869,7 +2866,7 @@ mod tests {
             store.slots[0].spawn_data = direction;
             let mut geometry = DynamicGeometry::default();
             let samples = std::cell::RefCell::new(Vec::new());
-            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1);
             assert!(stats.unrendered.is_empty());
             assert_eq!(samples.borrow().len(), 16);
@@ -2917,7 +2914,7 @@ mod tests {
         store.slots.push(entity);
         let render = |store: &mut Store| {
             let mut geometry = DynamicGeometry::default();
-            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
             geometry.vertices.iter().map(|v| v.position[1]).collect::<Vec<_>>()
         };
@@ -2958,7 +2955,7 @@ mod tests {
                 for invisible in [false, true] {
                     store.slots[0].metadata.insert(0, Metadata::Byte(if invisible { 32 } else { 0 }));
                     let mut geometry = DynamicGeometry::default();
-                    let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+                    let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
                     assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
                     let cutout = &geometry.indices[EntityMaterial::EntityCutout as usize];
                     let translucent = &geometry.indices[EntityMaterial::EntityTranslucent as usize];

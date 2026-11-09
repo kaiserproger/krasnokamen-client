@@ -67,6 +67,33 @@ type before predicting quick-moves. `received_mount_screen_quick_moves_player_ca
 exercises packet dispatch and slot prediction for mount variants; it does not
 replace the original graphical custody/mount scenario or server confirmation.
 
+### Received passenger presentation
+
+Scene extraction and presented bounds resolve received passenger relations before
+using positions. The vehicle's interpolated transform and actual dimensions
+(including marker armor stands) supply its PASSENGER attachment; the rider's
+scaled, yaw-rotated VEHICLE attachment is subtracted. The attachment variants
+remain owned by `player/vehicle.rs`, shared with local mount prediction. Received
+body coordinates/interpolation are not rewritten, and the local predicted avatar
+is not attached a second time. Mounted candidates are not culled by their raw
+body bucket. Rigs, special renderers, lights, fire, text and shadows consume the
+derived position, not a per-vertex parent lookup.
+
+Authored `entities::animation_tests::seat_attachment_` regressions cover actual
+rig vertices and presented bounds with a deliberately different body/seat,
+marker dimensions, parent motion/yaw/scale and changed attachment, rider
+dimensions, dismount/removal, nested mounts, local prediction and frozen/stepped
+interpolation. The fixtures contain no Mojang bytes. These source-phase tests
+are unexecuted until Main runs the focused positive and production-only negative
+controls.
+
+The original resident-seat appearance gap stays OPEN until Main captures the
+actual native client on the corrected source, with the same received UUID,
+independent marker anchor and collision-safe body. Retain mounted and ordinary
+dismount/work frames, raw packet positions, passenger relation, metadata,
+binary/tree hashes and frame identity. A corrected server AABB, bent legs,
+source regression or successful travel alone does not establish seated appearance.
+
 ### Server resource-pack offers
 
 The client does not install server-provided packs. It declines each offer by

@@ -338,7 +338,7 @@ fn animation_creeper_fuse_swells_and_flashes_and_charge_draws_an_aura() {
     };
     let render = |store: &mut Store| {
         let mut out = DynamicGeometry::default();
-        let stats = presentation::append(store, EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0., 1., -4.], camera_rotation: [0.; 2],
+        let stats = presentation::append(store, EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0., 1., -4.], camera_rotation: [0.; 2],
         radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None,
         light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None, }, &mut out).unwrap();
         assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
@@ -577,7 +577,7 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     let mut axes = Vec::new();
     for direction in [[0, 1], [-1, 0], [0, -1], [1, 0]] {
         let mut geometry = DynamicGeometry::default();
-        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|position| {
+        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|position| {
             assert_eq!(position, [0, 0, 0]);
             Some(direction)
         } }, &mut geometry).unwrap();
@@ -619,13 +619,238 @@ fn rc2_passenger_packet_bends_villager_legs_and_dismount_restores_them() {
     store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 0]), &Content::test_cube(), 0).unwrap();
     assert_eq!(matrices(&store), standing);
 }
+
+/// Authored attachment/quad fixture, not extracted game geometry. The received
+/// collision-safe body is intentionally nowhere near the invisible marker seat.
+fn seat_attachment_fixture() -> Store {
+    let (mut models, mut rider) = fixture();
+    let (mut seat_models, mut seat) = fixture();
+    let mut rider_schema = models.schemas.remove("minecraft:pig").unwrap();
+    rider_schema.dimensions.attachments.insert("VEHICLE".into(), vec![[0., 0.25, 0.]]);
+    models.schemas.insert("minecraft:villager".into(), rider_schema);
+    let facts = models.motion.remove("minecraft:pig").unwrap();
+    models.motion.insert("minecraft:villager".into(), facts);
+    let mut seat_schema = seat_models.schemas.remove("minecraft:pig").unwrap();
+    seat_schema.method_owners.insert("getPassengerAttachmentPoint".into(),
+        "net.minecraft.world.entity.Entity".into());
+    seat_schema.accessors.insert("DATA_CLIENT_FLAGS".into(), [8, 0]);
+    seat_schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    seat_schema.dimensions.attachments.insert("PASSENGER".into(), vec![[1., 1., 0.]]);
+    let mut marker = seat_schema.dimensions.clone();
+    marker.width = 0.;
+    marker.height = 0.;
+    marker.eye_height = 0.;
+    marker.attachments.insert("PASSENGER".into(), vec![[0.; 3]]);
+    marker.attachments.insert("VEHICLE".into(), vec![[0.; 3]]);
+    seat_schema.dimension_constants.insert("MARKER_DIMENSIONS".into(),
+        resources::DimensionConstant::Dimensions(marker));
+    models.schemas.insert("minecraft:armor_stand".into(), seat_schema);
+    models.motion.insert("minecraft:armor_stand".into(),
+        seat_models.motion.remove("minecraft:pig").unwrap());
+    models.rigs.insert("authored:seat_quad".into(), Rig {
+        bones: vec![Bone {
+            parent: None, pivot: Vec3::ZERO, rotation: Vec3::ZERO, scale: Vec3::ONE,
+            role: BoneRole::Fixed, name: "body".into(),
+            quads: vec![[[0., 0., 0., 0., 0.], [1., 0., 0., 1., 0.],
+                [1., 1., 0., 1., 1.], [0., 1., 0., 0., 1.]]],
+            normals: vec![[0., 0., 1.]],
+        }],
+        part_by_name: BTreeMap::new(),
+    });
+    let binding = || Some(Ok(presentation::Binding {
+        rig: "authored:seat_quad".into(),
+        texture: crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1,
+        },
+        style: presentation::RootStyle::Object, layers: None, anger: None,
+    }));
+    rider.type_name = "minecraft:villager".into();
+    rider.position = [500., 202., 500.];
+    rider.transform.position = rider.position;
+    rider.previous = rider.transform;
+    rider.source = None;
+    rider.binding = binding();
+    seat.handle.network_id = 42;
+    seat.uuid = "00000000-0000-0000-0000-000000000042".into();
+    seat.type_name = "minecraft:armor_stand".into();
+    seat.position = [9.5, 201.5, -199.5];
+    seat.transform.position = seat.position;
+    seat.previous = seat.transform;
+    seat.source = None;
+    seat.binding = binding();
+    seat.metadata.insert(0, Metadata::Byte(32));
+    seat.metadata.insert(8, Metadata::Byte(16));
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    for entity in [rider, seat] {
+        let id = entity.handle.network_id;
+        store.ids.insert(id, store.slots.len());
+        store.spatial.entry(cell(entity.position)).or_default().insert(id);
+        store.physical_active.insert(id);
+        store.slots.push(entity);
+    }
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]),
+        &Content::test_cube(), 0).unwrap();
+    store
+}
+
+fn seat_attachment_frame(store: &mut Store, tick: u64, partial: f32, camera: [f64; 3])
+    -> (PresentationStats, DynamicGeometry)
+{
+    let mut geometry = DynamicGeometry::default();
+    let stats = store.append_geometry(EntityRenderFrame {
+        maps: crate::ui::MapRenderFixture::empty().view(),
+        tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(),
+        origin: [0.; 3], camera, camera_rotation: [0.; 2], radius: 32.,
+        tick, partial, game_time: 0, clock_environment: None,
+        light: &|position| Ok(Some(if position[1] < 202.5 { [3., 7.] } else { [13., 1.] })),
+        bed_direction: &|_| None,
+    }, &mut geometry).unwrap();
+    (stats, geometry)
+}
+
+fn seat_attachment_assert_vertex(geometry: &DynamicGeometry, expected: [f64; 3]) {
+    assert_eq!(geometry.vertices.len(), 4, "the rider's actual rig quad must be submitted");
+    for (actual, expected) in geometry.vertices[0].position.into_iter().zip(expected) {
+        assert!((f64::from(actual) - expected).abs() < 0.001, "{actual} vs {expected}");
+    }
+}
+
+#[test]
+fn seat_attachment_marker_anchor_reaches_rig_and_bounds_without_rewriting_body() {
+    let mut store = seat_attachment_fixture();
+    let handle = store.get(41).unwrap().handle;
+    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
+    assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+    seat_attachment_assert_vertex(&geometry, [9.5, 201.25, -199.5]);
+    assert!(geometry.vertices.iter().all(|vertex| vertex.light == [3., 7.]));
+    let bounds = store.bounds(handle, 1, 0.5).unwrap();
+    assert_eq!(bounds.min, [9., 201.25, -200.]);
+    assert_eq!(bounds.max, [10., 202.25, -199.]);
+    let rider = store.get(41).unwrap();
+    assert_eq!(rider.position, [500., 202., 500.]);
+    assert_eq!(rider.transform.position, rider.position);
+    assert_eq!(rider.previous.position, rider.position);
+}
+
+#[test]
+fn seat_attachment_parent_yaw_scale_and_changed_attachments_reach_frame() {
+    let mut store = seat_attachment_fixture();
+    let seat = store.get_mut(42).unwrap();
+    seat.metadata.insert(8, Metadata::Byte(0)); // Use received ordinary dimensions, not marker dimensions.
+    seat.attributes.insert(1, 2.);
+    seat.transform.yaw = 90.;
+    seat.previous.yaw = 90.;
+    let rider = store.get_mut(41).unwrap();
+    rider.attributes.insert(1, 2.);
+    rider.transform.yaw = 90.;
+    rider.previous.yaw = 90.;
+    Arc::get_mut(store.models.as_mut().unwrap()).unwrap().schemas
+        .get_mut("minecraft:villager").unwrap().dimensions.attachments
+        .insert("VEHICLE".into(), vec![[0.25, 0.25, 0.5]]);
+    let (_, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&geometry, [10.5, 203., -198.]);
+    let models = Arc::get_mut(store.models.as_mut().unwrap()).unwrap();
+    models.schemas.get_mut("minecraft:armor_stand").unwrap().dimensions.attachments
+        .insert("PASSENGER".into(), vec![[0., 2., 1.]]);
+    let (_, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&geometry, [8.5, 205., -200.]);
+    assert_eq!(store.bounds(store.get(41).unwrap().handle, 1, 0.5).unwrap().min[1], 205.);
+}
+
+#[test]
+fn seat_attachment_dismount_and_parent_removal_restore_received_body() {
+    let mut store = seat_attachment_fixture();
+    let handle = store.get(41).unwrap().handle;
+    let uuid = store.get(41).unwrap().uuid.clone();
+    let (_, mounted) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&mounted, [9.5, 201.25, -199.5]);
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 0]), &Content::test_cube(), 1).unwrap();
+    let (_, ordinary) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    seat_attachment_assert_vertex(&ordinary, [500., 202., 500.]);
+    assert_eq!(store.bounds(handle, 1, 0.5).unwrap().min[1], 202.);
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &Content::test_cube(), 1).unwrap();
+    store.apply(cb::REMOVE_ENTITIES, &mut Reader::new(&[1, 42]), &Content::test_cube(), 1).unwrap();
+    let (_, removed) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    seat_attachment_assert_vertex(&removed, [500., 202., 500.]);
+    assert_eq!(store.get(41).unwrap().handle, handle);
+    assert_eq!(store.get(41).unwrap().uuid, uuid);
+    assert!(store.get(41).unwrap().vehicle.is_none());
+}
+
+#[test]
+fn seat_attachment_freeze_and_step_preserve_parent_interpolation() {
+    let mut store = seat_attachment_fixture();
+    let seat = store.get_mut(42).unwrap();
+    let mut target = seat.transform;
+    target.position = [12.5, 204.5, -199.5];
+    seat.move_to(target, None, true, 0, false, 0.5);
+    seat.physical.lerp_progress = 1;
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    store.tick_presentation(1, true, &world, &content, 100).unwrap();
+    let (_, frozen_start) = seat_attachment_frame(&mut store, 1, 0., [9.5, 201.5, -199.5]);
+    let (_, frozen_end) = seat_attachment_frame(&mut store, 1, 0.9, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&frozen_start, [10.5, 202.25, -199.5]);
+    seat_attachment_assert_vertex(&frozen_end, [10.5, 202.25, -199.5]);
+    store.tick_presentation(2, false, &world, &content, 101).unwrap();
+    let (_, stepped) = seat_attachment_frame(&mut store, 2, 0.5, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&stepped, [11.5, 203.25, -199.5]);
+    let (_, later) = seat_attachment_frame(&mut store, 2, 0.9, [9.5, 201.5, -199.5]);
+    seat_attachment_assert_vertex(&later, [11.9, 203.65, -199.5]);
+    assert_eq!(store.get(41).unwrap().position, [500., 202., 500.]);
+}
+
+#[test]
+fn seat_attachment_nested_parents_and_local_prediction_keep_their_owners() {
+    let mut store = seat_attachment_fixture();
+    let mut outer = seat_attachment_fixture().slots.pop().unwrap();
+    outer.handle.network_id = 43;
+    outer.uuid = "00000000-0000-0000-0000-000000000043".into();
+    outer.position = [12.5, 205.5, -196.5];
+    outer.transform.position = outer.position;
+    outer.previous = outer.transform;
+    outer.passenger_ids.clear();
+    outer.passengers.clear();
+    store.ids.insert(43, store.slots.len());
+    store.spatial.entry(cell(outer.position)).or_default().insert(43);
+    store.slots.push(outer);
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[43, 1, 42]), &Content::test_cube(), 1).unwrap();
+    let (_, nested) = seat_attachment_frame(&mut store, 1, 0.5, [12.5, 205.5, -196.5]);
+    seat_attachment_assert_vertex(&nested, [12.5, 205.25, -196.5]);
+    // The real local-avatar extraction slot is outside the received index.
+    // Its coordinates already contain the prediction owner's seat calculation.
+    let slot = store.ids.remove(&41).unwrap();
+    let avatar = store.slots.swap_remove(slot);
+    if slot < store.slots.len() {
+        store.ids.insert(store.slots[slot].handle.network_id, slot);
+    }
+    store.spatial.get_mut(&cell(avatar.position)).unwrap().remove(&41);
+    store.local_avatar = Some(avatar);
+    store.set_local_visible(true);
+    store.local_entity_id = Some(41);
+    let (_, predicted) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    seat_attachment_assert_vertex(&predicted, [500., 202., 500.]);
+    assert_eq!(store.local_avatar.as_ref().unwrap().position, [500., 202., 500.]);
+}
+
+#[test]
+fn seat_attachment_unsupported_parent_rule_is_reported_not_drawn_at_body() {
+    let mut store = seat_attachment_fixture();
+    Arc::get_mut(store.models.as_mut().unwrap()).unwrap().schemas
+        .get_mut("minecraft:armor_stand").unwrap().method_owners
+        .insert("getPassengerAttachmentPoint".into(), "authored.unsupported".into());
+    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    assert!(geometry.vertices.is_empty());
+    assert!(stats.unrendered["minecraft:villager"].starts_with("unknown_source_mount_seat:"));
+}
 #[test]
 fn animation_local_render_slot_is_restored_even_when_extraction_fails() {
     let (_, entity) = fixture();
     let mut store = Store::new();
     store.local_avatar = Some(entity);
     store.set_local_visible(true);
-    let result = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut DynamicGeometry::default());
+    let result = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut DynamicGeometry::default());
     assert!(result.is_err());
     assert!(store.local_avatar.is_some());
     assert!(store.local_render_slot.is_none());
@@ -729,7 +954,7 @@ fn animation_hurt_flash_is_emitted_and_expires_on_real_rig_vertices() {
     store.set_local_visible(true);
     for (tick, expected) in [(10, [0., 3.]), (19, [0., 3.]), (20, [0., 10.])] {
         let mut geometry = DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick, partial: 0.5, game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick, partial: 0.5, game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
             .unwrap();
         assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
         assert_eq!(geometry.vertices.len(), 4);
@@ -1007,7 +1232,7 @@ fn armor_stand_renders_feet_on_plate_and_respects_part_flags() {
     let mut render = |flags: i8| {
         store.local_avatar.as_mut().unwrap().metadata.insert(15, Metadata::Byte(flags));
         let mut geometry = DynamicGeometry::default();
-        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
+        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
             .unwrap();
         geometry
     };
@@ -1117,7 +1342,7 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
     };
     let mut render = |context: &ItemContext| {
         let mut geometry = DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: Some((context, &at)), light: &|_| Ok(Some([15., 15.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: Some((context, &at)), light: &|_| Ok(Some([15., 15.])), bed_direction: &|_| None }, &mut geometry).unwrap();
         let count = |layer| geometry.vertices.iter().filter(|v| v.texture_layer == layer).count();
         (count(11), count(22), count(33), stats.unrendered.get("minecraft:item_frame").cloned())
     };
@@ -1369,7 +1594,6 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
         let mut model = content.models[0].clone();
         for quad in &mut model.quads {
             quad.texture_layer = layer;
-            for point in &mut quad.positions { for axis in point { *axis -= 0.5; } }
         }
         items.insert_test_model(name, model);
     }
@@ -1444,6 +1668,56 @@ fn animation_modern_baby_adult_and_identity_changes_do_not_reuse_action_timers()
         e.uuid = "00000000-0000-0000-0000-000000000099".into();
         e.source = Some(source_state::SourceState::new(&e, &models).unwrap());
         assert_eq!(standing, action_pose(&models, &e, &content, rig));
+    }
+}
+
+/// The received camel seat must land on the authored back and saddle. Seat
+/// heights follow `player::vehicle::camel_seat_height` for the 2.375-block
+/// camel (standing 2.375 - 0.375; sitting dimensions 2.375 - 1.43, minus 0.375,
+/// plus 0.2), and the first rider sits 0.5 blocks forward (model -Z).
+#[test]
+fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
+    use render_living::Modern;
+    let extent = |rig: &Rig, pose: &[Mat4], bone: &str, axis: usize| {
+        let index = rig.part_by_name[bone];
+        rig.bones[index].quads.iter().flatten()
+            .map(|v| pose[index].transform_point3(glam::Vec3::new(v[0], v[1], v[2]))[axis])
+            .fold((f32::MAX, f32::MIN), |(low, high), value| (low.min(value), high.max(value)))
+    };
+    let (models, mut e, content) = action_fixture("minecraft:camel");
+    e.metadata.insert(16, Metadata::Bool(false));
+    let pairs = [
+        ("minecraft:camel#main", "minecraft:camel_saddle_equipment#main"),
+        ("minecraft:camel_husk#main", "minecraft:camel_husk_saddle_equipment#main"),
+    ];
+    let mut feet = Vec::new();
+    for (base, _) in pairs {
+        let rig = solaris_models::authored(base).unwrap();
+        let standing = action_pose(&models, &e, &content, rig);
+        // Model space is Y-down: the standing feet are the lowest leg point.
+        feet.push(extent(rig, &standing, "right_hind_leg", 1).1);
+        for bone in ["neck", "humps"] {
+            let (front, back) = extent(rig, &standing, bone, 2);
+            assert!(!(front..=back).contains(&-0.5), "{base}: {bone} occupies the rider's seat line");
+        }
+    }
+    for (sitting, seat) in [(false, 2.375f32 - 0.375), (true, 2.375 - 1.43 - 0.375 + 0.2)] {
+        if sitting {
+            if let Modern::Camel { sit_pose, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+                sit_pose.start(0);
+            }
+        }
+        for ((base, saddle), feet) in pairs.into_iter().zip(&feet) {
+            let rig = solaris_models::authored(base).unwrap();
+            let (back, belly) = extent(rig, &action_pose(&models, &e, &content, rig), "body", 1);
+            assert!((feet - back - seat).abs() <= 1. / 16.,
+                "{base} sitting={sitting}: back {} blocks above feet, seat {seat}", feet - back);
+            assert!(belly <= feet + 1e-4, "{base} sitting={sitting}: body sinks below its feet");
+            let saddle_rig = solaris_models::authored(saddle).unwrap();
+            let (pad, _) = extent(saddle_rig, &action_pose(&models, &e, &content, saddle_rig), "body", 1);
+            assert!((feet - pad - seat).abs() <= 1. / 16.,
+                "{saddle} sitting={sitting}: saddle {} blocks above feet, seat {seat}", feet - pad);
+        }
     }
 }
 
@@ -1549,7 +1823,7 @@ fn modern_visibility_reaches_submitted_geometry_for_tongue_croak_and_shell() {
         let render = |store: &mut Store| {
             let mut out = DynamicGeometry::default();
             let stats = store.append_geometry(crate::entities::EntityRenderFrame {
-                maps:crate::ui::MapRenderView::empty(), tint_source:&|_,_|Ok([1.;3]),
+                maps:crate::ui::MapRenderFixture::empty().view(), tint_source:&|_,_|Ok([1.;3]),
                 content:&content,origin:[0.;3],camera:[0.;3],camera_rotation:[0.;2],
                 radius:32.,tick:0,partial:0.,game_time:0,clock_environment:None,
                 light:&|_|Ok(Some([15.;2])),bed_direction:&|_|None,
@@ -1682,7 +1956,7 @@ fn animation_wither_invulnerability_scale_reaches_visible_geometry() {
     let render_width = |store: &mut Store| {
         let mut out = DynamicGeometry::default();
         let stats = store.append_geometry(crate::entities::EntityRenderFrame {
-            maps:crate::ui::MapRenderView::empty(),tint_source:&|_,_|Ok([1.;3]),
+            maps:crate::ui::MapRenderFixture::empty().view(),tint_source:&|_,_|Ok([1.;3]),
             content:&content,origin:[0.;3],camera:[0.;3],camera_rotation:[0.;2],
             radius:32.,tick:0,partial:0.,game_time:0,clock_environment:None,
             light:&|_|Ok(Some([15.;2])),bed_direction:&|_|None,

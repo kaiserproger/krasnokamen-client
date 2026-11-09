@@ -1234,6 +1234,34 @@ mod debug_tests {
         assert_eq!(session.ui.as_ref().unwrap().hud.players.len(), 1);
     }
     #[test]
+    fn synchronous_release_does_not_clear_replacement_input_on_ui_sync() {
+        use crate::api::InputIntent;
+
+        let mut session = Session::new_mode("replacement-input".into(), false);
+        let mut content = crate::protocol::content::Content::test_cube();
+        content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
+        content.insert_test_font("minecraft:default", &json!({"providers":[]}));
+        content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");
+        session.ui = Some(crate::ui::UiState::new(&content).unwrap());
+        session.content = Some(content);
+        session.phase = "play".into();
+        session.player.pose_known = true;
+        session.sync_ui_state(true).unwrap();
+
+        session.input(InputIntent::Key { key: "sneak".into(), pressed: true }).unwrap();
+        session.input(InputIntent::ReleaseAll).unwrap();
+        session.input(InputIntent::Key { key: "forward".into(), pressed: true }).unwrap();
+        session.sync_ui_state(true).unwrap();
+        assert_eq!(session.minecraft_observation()["inputs"]["held"], json!(["forward"]));
+        session.sync_ui_state(true).unwrap();
+        assert_eq!(session.minecraft_observation()["inputs"]["held"], json!(["forward"]));
+
+        // UI-originated releases still reach the gameplay owner.
+        session.ui.as_mut().unwrap().release_all();
+        session.sync_ui_state(true).unwrap();
+        assert_eq!(session.minecraft_observation()["inputs"]["held"], json!([]));
+    }
+    #[test]
     fn singleplayer_start_observation_reports_progress_and_failure() {
         let mut session = Session::new_mode("local-start-observation".into(), false);
         let mut content = crate::protocol::content::Content::test_cube();
@@ -1611,6 +1639,8 @@ mod destruction_tests {
                 "effects":{"water_color":"#507090"},"attributes":{},
             }))],
         )]));
+        content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
+        session.ui = Some(UiState::new_state(content).unwrap());
         let mut terrain = Terrain::new(Arc::new(|| {})).unwrap();
         terrain.activate(session.content.as_ref().unwrap(), [0; 3]).unwrap();
         terrain.set_render_rules([1.; 6], false, 0, Some(0)).unwrap();

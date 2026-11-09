@@ -284,7 +284,7 @@ impl super::Store {
                     let mut painter = |_: &Value, matrix: Mat4, light: [f32; 2], out: &mut DynamicGeometry| {
                         let mut diagnostics = super::PresentationStats::default();
                         super::presentation::draw_entity(entity, models, content,
-                            super::presentation::EntityDrawFrame { origin: [0.; 3], tick, partial, light,
+                            super::presentation::EntityDrawFrame { origin: [0.; 3], transform: entity.presented_transform(tick, partial), tick, partial, light,
                                 parent: Some(matrix * Mat4::from_scale(Vec3::splat(preview_scale))) },
                             &mut draw_store, out, &mut diagnostics)?;
                         if let Some((key, error)) = diagnostics.unrendered.into_iter().next() {

@@ -80,7 +80,7 @@ pub(super) fn execute(
             | "minecraft_wait_for_play"
             | "minecraft_wait_for_state_change"
     );
-    let fence = if readonly {
+    let writer = if readonly {
         None
     } else {
         if observation
@@ -203,7 +203,7 @@ pub(super) fn execute(
             reply,
             expected_connection_epoch: connection,
             expected_dimension_epoch: dimension,
-            automation_fence: fence,
+            automation_fence: writer.as_ref().map(|writer| writer.fence.clone()),
             cancelled: Some(cancelled.clone()),
         })
         .map_err(|_| "command_queue_full")?;
@@ -261,10 +261,10 @@ pub(super) fn execute(
     // next write is admitted once the owner drains the in-flight task instead of
     // being fenced forever by a revoked lease.
     if let Err(error) = &result
-        && !readonly
+        && let Some(writer) = &writer
         && revoke_on_owner_error(error)
     {
-        core.revoke("owner_error");
+        core.revoke_lease("owner_error", Some(&writer.fence));
     }
     result
 }

@@ -207,16 +207,26 @@ impl Planner {
         }
         let x = start[0].floor() as i32;
         let z = start[2].floor() as i32;
-        self.column(space, x, z, low, high)?;
+        // Prefer the center, then supporting columns touched by the actual body.
+        // A grounded edge pose still has to pass the same swept checks.
+        let (min, max) = self.body(start);
+        let min_x = min[0].floor() as i32;
+        let max_x = max[0].floor() as i32;
+        let footprint = (min[2].floor() as i32..=max[2].floor() as i32)
+            .flat_map(|z| (min_x..=max_x).map(move |x| [x, z]))
+            .filter(|column| *column != [x, z]);
         let mut root = None;
-        let length = self.columns[&[x, z]].len();
-        for i in 0..length {
-            let node = self.columns[&[x, z]][i];
-            if (node.position()[1] - start[1]).abs() < 0.6
-                && self.transition(space, start, node.position())?
-            {
-                root = Some(node);
-                break;
+        'anchor: for [x, z] in std::iter::once([x, z]).chain(footprint) {
+            self.column(space, x, z, low, high)?;
+            let length = self.columns[&[x, z]].len();
+            for i in 0..length {
+                let node = self.columns[&[x, z]][i];
+                if (node.position()[1] - start[1]).abs() < 0.6
+                    && self.transition(space, start, node.position())?
+                {
+                    root = Some(node);
+                    break 'anchor;
+                }
             }
         }
         let Some(root) = root else {
@@ -439,6 +449,35 @@ mod tests {
     }
     fn planner_transition(terrain: &mut Terrain, a: [f64; 3], b: [f64; 3]) -> bool {
         Planner::new(0.3, 1.8).transition(terrain, a, b).unwrap()
+    }
+    #[test]
+    fn grounded_edge_pose_can_enter_a_supported_neighbor_column() {
+        for (start, min, max, target) in [
+            ([0.85, 1., 0.5], [1., 0., 0.], [2., 1., 1.], [4, 0, 0]),
+            ([1.15, 1., 0.5], [0., 0., 0.], [1., 1., 1.], [-3, 0, 0]),
+            ([0.5, 1., 0.85], [0., 0., 1.], [1., 1., 2.], [0, 0, 4]),
+            ([0.5, 1., 1.15], [0., 0., 0.], [1., 1., 1.], [0, 0, -3]),
+        ] {
+            let mut terrain = Terrain::flat();
+            terrain.wall(min, max);
+            let mut planner = Planner::new(0.3, 1.8);
+            assert!(planner.plan(&mut terrain, start, target, false).unwrap(),
+                "grounded edge origin {start:?}");
+            assert!(planner_transition(&mut terrain, start, planner.path[0]));
+            assert!(planner.path.windows(2).all(|edge|
+                planner_transition(&mut terrain, edge[0], edge[1])));
+            let end = *planner.path.last().unwrap();
+            assert!(near(end, target, 1.5));
+            assert!(planner.collision_free(&mut terrain, end).unwrap());
+        }
+    }
+    #[test]
+    fn unsupported_pose_cannot_anchor_across_a_gap() {
+        let mut terrain = Terrain::flat();
+        terrain.wall([1., 0., 0.], [2., 1., 1.]);
+        let mut planner = Planner::new(0.3, 1.8);
+        assert!(!planner.plan(&mut terrain, [0.65, 1., 0.5], [4, 0, 0], false).unwrap());
+        assert!(planner.path.is_empty());
     }
     #[test]
     fn unavailable_space_cannot_bridge_route() {

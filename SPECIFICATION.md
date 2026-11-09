@@ -621,7 +621,9 @@ Automation выключена в обычном пользовательском
 
 Scopes: `observe`, `control`, `ui`, `capture`, `performance`, `scenario`; отдельно `test_debug`. Game server или WASM addon не может выдавать scopes. Новый опасный scope не следует из старого согласия на HUD.
 
-Один writer lease на player input; readonly calls могут быть параллельными. Lease имеет bounded TTL, controller identity и fencing token. Ручной ввод может отобрать управление; emergency-stop всегда прекращает held keys, macro и navigation. Смена screen/focus/connection, timeout, error, cancel и lease expiry освобождают все удерживаемые действия.
+Один writer lease на player input; readonly calls могут быть параллельными. Lease имеет controller identity, fencing token и TTL простоя 120 секунд. Допущенная bounded writer-операция не считается простоем: отсчёт возобновляется после завершения последней такой операции. Readonly calls не продлевают lease.
+
+Ручной ввод может отобрать управление; emergency-stop прекращает held keys, macro и navigation. Отмена, потеря контекста и завершение старого action относятся к его исходному fencing token. Запоздалый error/reply или уничтожение старого guard не могут отозвать уже допущенного нового writer либо освободить его удерживаемые действия. Синхронный ReleaseAll потребляет и отложенный UI-release в той же операции: следующий UI sync не должен повторно освобождать уже новый ввод.
 
 Нельзя «получить ещё одного контроллера» через второй MCP connection и одновременно нажать противоположные кнопки. Командование несколькими клиентами работает через разные instance IDs, а не глобальную mutable selected-instance переменную.
 

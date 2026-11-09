@@ -603,7 +603,7 @@ mod tests {
             store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1).unwrap();
         }
         let mut out = crate::api::DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [4.,4.,3.], camera: [4.,5.,0.], camera_rotation: [0.;2], radius: 32., tick: 1, partial: 0., game_time: 0, clock_environment: None, maps: crate::ui::MapRenderView::empty(), tint_source: &|tint, _| match tint { crate::protocol::models::TintKind::None => Ok([1.; 3]), crate::protocol::models::TintKind::Constant(color) => Ok(color), _ => Err("test biome tint not installed".into()) }, light: &|point| {
+        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [4.,4.,3.], camera: [4.,5.,0.], camera_rotation: [0.;2], radius: 32., tick: 1, partial: 0., game_time: 0, clock_environment: None, maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|tint, _| match tint { crate::protocol::models::TintKind::None => Ok([1.; 3]), crate::protocol::models::TintKind::Constant(color) => Ok(color), _ => Err("test biome tint not installed".into()) }, light: &|point| {
             // A painting's segment cells are available, but not its generic eye sample.
             Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
                 .then_some([15.;2]))

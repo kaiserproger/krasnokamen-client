@@ -43,13 +43,13 @@ pub(super) fn append(
     clock_context: Option<&ItemContext>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    let p::EntityDrawFrame { origin, tick, partial, light, .. } = frame;
+    let p::EntityDrawFrame { origin, transform, light, .. } = frame;
     let ItemFrameResources { cache, items, maps } = resources;
     let direction = match p::value(models, entity, "DATA_DIRECTION") {
         Some(value) => value.int().ok_or("item frame direction metadata invalid")?,
         None => entity.spawn_data,
     };
-    let root = frame_root(entity.presented_transform(tick, partial).position, origin, direction)?;
+    let root = frame_root(transform.position, origin, direction)?;
     let stack = match p::value(models, entity, "DATA_ITEM") {
         Some(Metadata::Item(stack)) if !stack.empty() => Some(stack),
         _ => None,
@@ -189,8 +189,8 @@ mod tests {
         cache.models.insert("minecraft:block/item_frame".into(), cube);
         let render = |entity: &Entity, cache: &mut Cache, items: &mut ItemModels| {
             let mut out = DynamicGeometry::default();
-            let handled = append(entity, &models, ItemFrameResources { cache, items, maps: crate::ui::MapRenderView::empty() }, &content,
-                p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 12.], parent: None },
+            let handled = append(entity, &models, ItemFrameResources { cache, items, maps: crate::ui::MapRenderFixture::empty().view() }, &content,
+                p::EntityDrawFrame { origin: [0.; 3], transform: entity.presented_transform(0, 0.), tick: 0, partial: 0., light: [8., 12.], parent: None },
                 None, &mut out).unwrap();
             (handled, out)
         };
@@ -235,8 +235,8 @@ mod tests {
         for stack in [held(1), held(2)] {
             entity.metadata.insert(9, Metadata::Item(stack));
             let mut out = DynamicGeometry::default();
-            append(&entity, &models, ItemFrameResources { cache: &mut cache, items: &mut items, maps: crate::ui::MapRenderView::empty() }, &content,
-                p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 2.], parent: None },
+            append(&entity, &models, ItemFrameResources { cache: &mut cache, items: &mut items, maps: crate::ui::MapRenderFixture::empty().view() }, &content,
+                p::EntityDrawFrame { origin: [0.; 3], transform: entity.presented_transform(0, 0.), tick: 0, partial: 0., light: [8., 2.], parent: None },
                 None, &mut out).unwrap();
             assert!(out.vertices[..body].iter().all(|v| v.light == [8., 5.]));
             assert!(out.vertices[..body].iter().all(|v| v.texture_layer != 77),

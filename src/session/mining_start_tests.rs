@@ -40,6 +40,12 @@ pub(super) fn session() -> Session {
             },
         )
         .unwrap();
+    session.environment.activate_dimension(
+        "minecraft:overworld",
+        &json!({"min_y":0,"height":16,"has_skylight":false,"has_ceiling":true,"skybox":"none"}),
+        0,
+    ).unwrap();
+    session.environment.publish_world(&mut session.world).unwrap();
     session.entities.models = Some(Arc::new(Models {
         rigs: BTreeMap::new(),
         schemas: BTreeMap::new(),

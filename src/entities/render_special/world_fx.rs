@@ -93,7 +93,7 @@ pub(super) fn append_block(
     } else {
         (1., false)
     };
-    let transform = entity.presented_transform(frame.tick, frame.partial);
+    let transform = frame.transform;
     // Swelling is centered vertically; the block model is one block wide.
     let matrix = translation(transform.position, frame.origin)
         * glam::Mat4::from_translation(Vec3::Y * 0.5)
@@ -110,8 +110,8 @@ pub(super) fn append_block(
         }
     };
     let seed = crate::protocol::models::position_seed(seed_position);
-    let current = entity.presented_transform(frame.tick, 0.).position;
-    let bounds = super::super::physical::bounds(models, entity, frame.tick, 0.)?;
+    let current = store.presented_transform(entity, frame.tick, 0.)?.position;
+    let bounds = super::super::physical::bounds_at(models, entity, current)?;
     let tint_position = [
         current[0].floor() as i32,
         bounds.max[1].floor() as i32,
@@ -155,8 +155,7 @@ pub(super) fn append_block(
 pub(super) fn append_bolt(
     entity: &Entity,
     origin: [f64; 3],
-    tick: u64,
-    partial: f32,
+    transform: super::super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let timeline = &entity
@@ -167,7 +166,7 @@ pub(super) fn append_bolt(
     if !timeline.lightning_visible() {
         return Ok(Handled::NoGeometry);
     }
-    let position = translation(entity.presented_transform(tick, partial).position, origin)
+    let position = translation(transform.position, origin)
         .transform_point3(Vec3::ZERO);
     append_lightning(timeline.lightning_seed, position, out)?;
     Ok(Handled::Rendered)
@@ -249,17 +248,19 @@ fn leash_anchors(
     mob: &Entity,
     holder: &Entity,
     models: &Models,
+    store: &Store,
     tick: u64,
     partial: f32,
 ) -> Result<([f64; 3], [f64; 3])> {
     fn anchor(
         entity: &Entity,
         models: &Models,
+        store: &Store,
         tick: u64,
         partial: f32,
         holder: bool,
     ) -> Result<[f64; 3]> {
-        let t = entity.presented_transform(tick, partial);
+        let t = store.presented_transform(entity, tick, partial)?;
         let (dimensions, scale) = models.dimensions(entity)?;
         let height = dimensions.height * scale;
         let width = dimensions.width * scale;
@@ -290,8 +291,8 @@ fn leash_anchors(
         }))
     }
     Ok((
-        anchor(mob, models, tick, partial, false)?,
-        anchor(holder, models, tick, partial, true)?,
+        anchor(mob, models, store, tick, partial, false)?,
+        anchor(holder, models, store, tick, partial, true)?,
     ))
 }
 
@@ -352,7 +353,7 @@ pub(super) fn append_leash(
     let Some(holder) = leash_holder(entity, store) else {
         return Ok(Handled::Unhandled);
     };
-    let (mob_point, holder_point) = leash_anchors(entity, holder, models, tick, partial)?;
+    let (mob_point, holder_point) = leash_anchors(entity, holder, models, store, tick, partial)?;
     let (Some(mob_light), Some(holder_light)) = (
         p::sampled(light_source, mob_point)?,
         p::sampled(light_source, holder_point)?,

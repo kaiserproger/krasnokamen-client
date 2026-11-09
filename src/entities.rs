@@ -166,6 +166,8 @@ pub struct Entity {
     pub submitted_revision: Option<u64>,
 }
 impl Entity {
+    /// Interpolates this entity's received body only. Scene consumers resolve
+    /// passenger attachments through `Store::presented_transform`.
     pub fn presented_transform(&self, _tick: u64, partial: f32) -> Transform {
         let elapsed = (f64::from(self.physical.lerp_progress)
             + if self.physical.frozen {
@@ -413,12 +415,7 @@ impl Store {
             .and_then(|index| entity.metadata.get(&index)))
     }
     pub(crate) fn entity_bounds(&self, handle: Handle, tick: u64) -> Result<crate::player::Bounds> {
-        physical::bounds(
-            self.models_ref().ok_or("entity models not activated")?,
-            self.resolve(handle)?,
-            tick,
-            0.,
-        )
+        self.bounds(handle, tick, 0.)
     }
     pub fn resolve(&self, handle: Handle) -> Result<&Entity> {
         if let Some((parent, _)) = self.dragon_parts.get(&handle.network_id) {
@@ -516,49 +513,37 @@ impl Store {
             .zip(bounds.max)
             .ok_or_else(|| format!("source attribute {name} is not ranged"))
     }
-    pub fn passenger_position_at(
-        &self,
-        handle: Handle,
-        passenger: i32,
-        position: [f64; 3],
-        yaw: f32,
-        _tick: u64,
-        _partial: f32,
-    ) -> Result<[f64; 3]> {
-        if position.iter().any(|value| !value.is_finite()) || !yaw.is_finite() {
-            return Err("invalid predicted vehicle transform".into());
+    pub(crate) fn presented_transform(
+        &self, entity: &Entity, tick: u64, partial: f32,
+    ) -> Result<Transform> {
+        self.attached_transform(entity, tick, partial, 0)
+    }
+    fn attached_transform(
+        &self, entity: &Entity, tick: u64, partial: f32, depth: usize,
+    ) -> Result<Transform> {
+        if depth > self.ids.len().min(1024) {
+            return Err("entity passenger cycle".into());
         }
-        let entity = self.resolve(handle)?;
-        let index = entity
-            .passenger_ids
-            .iter()
-            .position(|id| *id == passenger)
-            .ok_or("entity is not a passenger of this vehicle")?;
+        let mut transform = entity.presented_transform(tick, partial);
+        // The local avatar already follows Player's predicted mount position.
+        if self.local_entity_id == Some(entity.handle.network_id) {
+            return Ok(transform);
+        }
+        let Some(vehicle) = entity.vehicle else { return Ok(transform) };
+        let parent = self.resolve(vehicle)?;
+        let parent_transform = self.attached_transform(parent, tick, partial, depth + 1)?;
         let models = self.models_ref().ok_or("entity models not activated")?;
-        let schema = &models.schemas[&entity.type_name];
-        if schema
-            .method_owners
-            .get("getPassengerAttachmentPoint")
-            .is_some_and(|owner| owner != "net.minecraft.world.entity.Entity")
-        {
-            return Err(format!(
-                "vehicle attachment override is not implemented: {}",
-                schema.class
-            ));
-        }
         let (dimensions, scale) = models.dimensions(entity)?;
-        let points = dimensions
-            .attachments
-            .get("PASSENGER")
-            .filter(|points| !points.is_empty())
-            .ok_or("source passenger attachment missing")?;
-        let point = points[index.min(points.len() - 1)].map(|value| value * f64::from(scale));
-        let (sin, cos) = (-yaw).to_radians().sin_cos();
-        Ok([
-            position[0] + point[0] * f64::from(cos) + point[2] * f64::from(sin),
-            position[1] + point[1],
-            position[2] + point[2] * f64::from(cos) - point[0] * f64::from(sin),
-        ])
+        let attachment = dimensions.attachments.get("VEHICLE")
+            .and_then(|points| points.first())
+            .ok_or("source rider vehicle attachment missing")?
+            .map(|value| value * f64::from(scale));
+        transform.position = crate::player::vehicle::passenger_position(
+            self, vehicle, entity.handle.network_id, parent_transform.position,
+            parent_transform.yaw, attachment, transform.yaw,
+            parent.physical.seat_motion.as_ref(), parent.physical.seat_game_time,
+        )?;
+        Ok(transform)
     }
     pub fn bounds(&self, handle: Handle, tick: u64, partial: f32) -> Result<crate::player::Bounds> {
         if let Some((parent, index)) = self.dragon_parts.get(&handle.network_id) {
@@ -573,11 +558,10 @@ impl Store {
                 .ok_or("dragon flight state missing")?
                 .bounds(*index);
         }
-        physical::bounds(
-            self.models_ref().ok_or("entity models not activated")?,
-            self.resolve(handle)?,
-            tick,
-            partial,
+        let entity = self.resolve(handle)?;
+        physical::bounds_at(
+            self.models_ref().ok_or("entity models not activated")?, entity,
+            self.presented_transform(entity, tick, partial)?.position,
         )
     }
     fn get_mut(&mut self, id: i32) -> Option<&mut Entity> {

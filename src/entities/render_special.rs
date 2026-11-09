@@ -173,6 +173,7 @@ pub(crate) fn append(
     origin: [f64; 3],
     tick: u64,
     partial: f32,
+    transform: super::Transform,
     clock_context: Option<&ItemContext>,
     maps: crate::ui::MapRenderView<'_>,
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
@@ -192,7 +193,7 @@ pub(crate) fn append(
     let result = (|| {
         let entity = &store.slots[slot];
         if entity.type_name == "minecraft:lightning_bolt" {
-            return world_fx::append_bolt(entity, origin, tick, partial, out);
+            return world_fx::append_bolt(entity, origin, transform, out);
         }
         if !matches!(entity.type_name.as_str(),
             "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
@@ -205,17 +206,17 @@ pub(crate) fn append(
         }
         let entity = &store.slots[slot];
         let (dimensions, scale) = models.dimensions(entity)?;
-        let Some(light) = p::entity_light(entity, models, tick, partial,
+        let Some(light) = p::entity_light(entity, store, models, tick, transform,
             dimensions, scale, light_source)? else {
             return Ok(Handled::PendingLighting);
         };
         if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
             return world_fx::append_block(store, slot, models, content,
-                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, tint_source, out);
+                p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, tint_source, out);
         }
         item_frame::append(entity, models, item_frame::ItemFrameResources {
             cache: &mut store.special_render_cache, items: &mut store.items, maps,
-        }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
+        }, content, p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, clock_context, out)
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);

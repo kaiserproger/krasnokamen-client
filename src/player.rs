@@ -11,7 +11,7 @@ mod interaction;
 pub(crate) mod math;
 mod movement;
 mod use_on;
-mod vehicle;
+pub(crate) mod vehicle;
 mod visual;
 use crate::{
     entities::{Handle, Store as EntityStore},

@@ -63,17 +63,17 @@ fn entity_census_schema_export_matches_live_validation() {
 #[test]
 fn authenticated_transport_writer_is_exclusive_and_context_fenced() {
     let (core, _) = client();
-    let live = core.admit("a", "1", "2").unwrap();
+    let live = core.admit("a", "1", "2").unwrap().fence.clone();
     assert_eq!(core.admit("b", "1", "2").unwrap_err(), "controller_busy");
     assert_eq!(core.admit("a", "9", "2").unwrap_err(), "stale_context");
     assert_eq!(core.admit("a", "1", "9").unwrap_err(), "stale_context");
-    let renewed = core.admit("a", "1", "2").unwrap();
+    let renewed = core.admit("a", "1", "2").unwrap().fence.clone();
     assert!(Arc::ptr_eq(&live, &renewed));
 }
 #[test]
 fn preemption_invalidates_pending_owner_fences_before_new_writer() {
     let (core, receiver) = client();
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     core.revoke("manual_input");
     assert!(!old.load(Ordering::Acquire));
     let cleanup = receiver
@@ -83,7 +83,7 @@ fn preemption_invalidates_pending_owner_fences_before_new_writer() {
         cleanup.command,
         crate::api::Command::Input(crate::api::InputIntent::ReleaseAll)
     ));
-    let new = core.admit("b", "1", "2").unwrap();
+    let new = core.admit("b", "1", "2").unwrap().fence.clone();
     assert!(new.load(Ordering::Acquire));
     assert!(!Arc::ptr_eq(&old, &new));
 }
@@ -100,7 +100,7 @@ fn expired_writer_cannot_be_implicitly_renewed() {
 #[test]
 fn respawn_handoff_preserves_writer_for_one_expected_dimension_reset() {
     let (core, _) = client();
-    let live = core.admit("a", "1", "2").unwrap();
+    let live = core.admit("a", "1", "2").unwrap().fence.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     {
         let mut control = core.control.lock();
@@ -109,7 +109,7 @@ fn respawn_handoff_preserves_writer_for_one_expected_dimension_reset() {
         lease.observe_respawn("1", "3");
         assert!(lease.pending_respawn.is_none());
     }
-    let renewed = core.admit("a", "1", "3").unwrap();
+    let renewed = core.admit("a", "1", "3").unwrap().fence.clone();
     assert!(Arc::ptr_eq(&live, &renewed));
     assert_eq!(core.admit("a", "1", "2").unwrap_err(), "stale_context");
     core.control
@@ -125,7 +125,7 @@ fn respawn_handoff_preserves_writer_for_one_expected_dimension_reset() {
 fn ui_respawn_click_preserves_lease_until_one_dimension_handoff() {
     let (core, receiver) = client();
     core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
-    let live = core.admit("a", "1", "2").unwrap();
+    let live = core.admit("a", "1", "2").unwrap().fence.clone();
     let owner = std::thread::spawn(move || {
         let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         request.reply.send(Ok(json!({"status": "ok"}))).unwrap();
@@ -145,7 +145,7 @@ fn ui_respawn_click_preserves_lease_until_one_dimension_handoff() {
     owner.join().unwrap();
     let (verdict, _) = Core::lease_verdict(&mut core.control.lock(), "1", "3");
     assert!(verdict.is_none(), "respawn must preserve the controller");
-    assert!(Arc::ptr_eq(&live, &core.admit("a", "1", "3").unwrap()));
+    assert!(Arc::ptr_eq(&live, &core.admit("a", "1", "3").unwrap().fence));
     let (verdict, _) = Core::lease_verdict(&mut core.control.lock(), "1", "4");
     assert_eq!(verdict.unwrap().0, "context_changed");
 }
@@ -272,7 +272,7 @@ fn respawn_handoff_refuses_unarmed_cancelled_switched_or_skipped_contexts() {
 #[test]
 fn ordinary_owner_error_keeps_lease_and_queues_no_cleanup() {
     let (core, receiver) = client();
-    let live = core.admit("a", "1", "2").unwrap();
+    let live = core.admit("a", "1", "2").unwrap().fence.clone();
     let cancelled = Arc::new(AtomicBool::new(false));
     let owner = std::thread::spawn(move || {
         let request = receiver
@@ -375,18 +375,18 @@ fn next_write_after_plain_error_reuses_the_live_writer_fence() {
 fn dead_session_lease_is_reclaimable_by_a_new_session() {
     // Clock-expired: the previous MCP session is gone, nobody renews.
     let (core, _) = client();
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
     let new = core
         .admit("b", "1", "2")
-        .expect("a new session must reclaim a clock-expired lease");
+        .expect("a new session must reclaim a clock-expired lease").fence.clone();
     assert!(!old.load(Ordering::Acquire));
     assert!(!Arc::ptr_eq(&old, &new));
     assert!(new.load(Ordering::Acquire));
     assert_eq!(core.admit("a", "1", "2").unwrap_err(), "controller_busy");
     // Event-invalidated: the same recovery must apply.
     let (core, _) = client();
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     assert!(core.invalidate("transport_session_deleted"));
     assert!(!old.load(Ordering::Acquire));
     assert!(core.admit("b", "1", "2").is_ok());
@@ -402,9 +402,9 @@ fn is_release_all(request: &crate::api::Request) -> bool {
 #[test]
 fn reclaiming_a_dead_lease_releases_held_inputs_before_the_new_writer() {
     let (core, receiver) = client();
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
-    let new = core.admit("b", "1", "2").unwrap();
+    let new = core.admit("b", "1", "2").unwrap().fence.clone();
     assert!(!old.load(Ordering::Acquire));
     assert!(new.load(Ordering::Acquire));
     let cleanup = receiver
@@ -423,7 +423,7 @@ fn reclaim_with_a_full_owner_queue_refuses_until_release_all_is_delivered() {
         core.sender = sender.clone();
         Arc::new(core)
     };
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
     let filler = crate::api::Request {
         command: crate::api::Command::Input(crate::api::InputIntent::ReleaseAll),
@@ -445,13 +445,13 @@ fn reclaim_with_a_full_owner_queue_refuses_until_release_all_is_delivered() {
     while core.control.lock().releasing != 0 {
         std::thread::yield_now();
     }
-    assert!(core.admit("b", "1", "2").unwrap().load(Ordering::Acquire));
+    assert!(core.admit("b", "1", "2").unwrap().fence.load(Ordering::Acquire));
 }
 
 #[test]
 fn deferred_expiry_revoke_never_hits_a_writer_admitted_after_the_check() {
     let (core, receiver) = client();
-    let old = core.admit("a", "1", "2").unwrap();
+    let old = core.admit("a", "1", "2").unwrap().fence.clone();
     core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
     // Watchdog: expiry decided under the lock...
     let (verdict, _) = Core::lease_verdict(&mut core.control.lock(), "1", "2");
@@ -459,86 +459,20 @@ fn deferred_expiry_revoke_never_hits_a_writer_admitted_after_the_check() {
     assert_eq!(reason, "lease_expired");
     assert!(Arc::ptr_eq(&checked, &old));
     // ...a new session replaces the lease before the deferred revoke runs...
-    let new = core.admit("b", "1", "2").unwrap();
+    let new = core.admit("b", "1", "2").unwrap().fence.clone();
     assert!(is_release_all(&receiver.try_recv().unwrap()));
     // ...and the deferred revoke must target only the lease that was checked.
     core.revoke_lease(reason, Some(&checked));
     assert!(new.load(Ordering::Acquire), "new writer fence was revoked");
     assert!(core.control.lock().lease.is_some());
     assert!(receiver.try_recv().is_err(), "no spurious ReleaseAll");
-    assert!(Arc::ptr_eq(&core.admit("b", "1", "2").unwrap(), &new));
+    assert!(Arc::ptr_eq(&core.admit("b", "1", "2").unwrap().fence, &new));
     // The still-current lease is revoked as before.
     core.revoke_lease("lease_expired", Some(&new));
     assert!(!new.load(Ordering::Acquire));
     assert!(is_release_all(&receiver.try_recv().unwrap()));
 }
 
-#[test]
-fn concurrent_second_writer_still_rejected_while_first_is_in_flight() {
-    let (core, receiver) = client();
-    let live = core.admit("a", "1", "2").unwrap();
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let first_core = core.clone();
-    let first_cancelled = cancelled.clone();
-    let first = std::thread::spawn(move || {
-        super::tools::execute(
-            &first_core,
-            "a",
-            "minecraft_send_chat",
-            &json!({"message": "first"}),
-            &first_cancelled,
-        )
-    });
-    let request = receiver
-        .recv_timeout(Duration::from_secs(10))
-        .expect("first write must reach the owner");
-    assert!(Arc::ptr_eq(
-        &request.automation_fence.clone().expect("writer fence"),
-        &live
-    ));
-    // The second writer goes through the same fence admission path the owner
-    // uses: no concurrent writer task may be in flight.
-    let busy = {
-        let mut pending = 0;
-        let _ = receiver.try_recv().map(|_| pending += 1);
-        pending
-    };
-    assert_eq!(
-        busy, 0,
-        "no second request may reach the owner while the first is in flight"
-    );
-    request
-        .reply
-        .send(Ok(json!({"status": "ok"})))
-        .expect("owner reply");
-    first
-        .join()
-        .expect("first thread")
-        .expect("first write succeeds");
-    let second_cancelled = cancelled.clone();
-    let owner = std::thread::spawn(move || {
-        let request = receiver
-            .recv_timeout(Duration::from_secs(10))
-            .expect("second write must reach the owner after the first completes");
-        let fence = request.automation_fence.clone().expect("writer fence");
-        request
-            .reply
-            .send(Ok(json!({"status": "ok"})))
-            .expect("owner reply");
-        fence
-    });
-    super::tools::execute(
-        &core,
-        "a",
-        "minecraft_send_chat",
-        &json!({"message": "second"}),
-        &second_cancelled,
-    )
-    .expect("second write admitted after the first completes");
-    let fence = owner.join().expect("owner thread");
-    assert!(Arc::ptr_eq(&fence, &live));
-    assert!(fence.load(Ordering::Acquire));
-}
 
 #[test]
 fn validation_error_before_dispatch_never_touches_lease_or_queue() {
@@ -643,51 +577,144 @@ fn stale_container_state_keeps_lease_for_retry() {
     );
 }
 
+
 #[test]
-fn reply_timeout_signals_owner_cancel_and_keeps_lease_for_retry() {
+fn active_writer_action_survives_idle_expiry_then_returns_to_idle() {
     let (core, receiver) = client();
-    let live = core.admit("a", "1", "2").unwrap();
-    let cancelled = Arc::new(AtomicBool::new(false));
-    // `execute` enforces a 125 s safety-bound floor, so a real timeout cannot
-    // run in a unit test. Assert the exact contract the timeout path relies on
-    // instead: the request carries the caller's shared cancel flag to the
-    // owner, and the lease/fence stay live while the task is in flight — the
-    // timeout arm only flips that flag (event-driven, no polling), and the
-    // owner's next `fence()` refuses the hung task with `cancelled` and frees
-    // the writer slot.
-    let owner_cancelled = cancelled.clone();
-    let owner_core = core.clone();
-    let owner = std::thread::spawn(move || {
+    let caller = core.clone();
+    let worker = std::thread::spawn(move || {
+        super::tools::execute(&caller, "a", "minecraft_send_chat",
+            &json!({"message": "activity"}), &Arc::new(AtomicBool::new(false)))
+    });
+    let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    let fence = request.automation_fence.as_ref().unwrap().clone();
+    {
+        let mut control = core.control.lock();
+        control.lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+        let (revoke, deadline) = Core::lease_verdict(&mut control, "1", "2");
+        assert!(revoke.is_none(), "an admitted owner action is not an idle writer");
+        assert!(deadline.is_none(), "wait for completion, not an elapsed idle deadline");
+    }
+    assert_eq!(core.controller()["active"], true);
+    assert_eq!(core.admit("b", "1", "2").unwrap_err(), "controller_busy");
+    request.reply.send(Err("target is unreachable".into())).unwrap();
+    assert_eq!(worker.join().unwrap().unwrap_err(), "target is unreachable");
+    let (reason, checked) = {
+        let mut control = core.control.lock();
+        let lease = control.lease.as_mut().unwrap();
+        assert_eq!(lease.active_actions, 0);
+        assert!(lease.expires > Instant::now());
+        assert!(Arc::ptr_eq(&lease.live, &fence));
+        lease.expires = Instant::now() - Duration::from_secs(1);
+        Core::lease_verdict(&mut control, "1", "2").0.unwrap()
+    };
+    assert_eq!(reason, "lease_expired");
+    core.revoke_lease(reason, Some(&checked));
+    assert!(!fence.load(Ordering::Acquire));
+    assert!(is_release_all(&receiver.try_recv().unwrap()));
+}
+
+#[test]
+fn active_writer_still_obeys_context_and_manual_preemption() {
+    for reason in ["context_changed", "manual_input"] {
+        let (core, receiver) = client();
+        let old = core.admit("a", "1", "2").unwrap();
+        core.control.lock().lease.as_mut().unwrap().expires =
+            Instant::now() - Duration::from_secs(1);
+        if reason == "context_changed" {
+            let (revocation, _) = Core::lease_verdict(&mut core.control.lock(), "1", "3");
+            let (observed, fence) = revocation.unwrap();
+            assert_eq!(observed, reason);
+            core.revoke_lease(observed, Some(&fence));
+        } else {
+            core.revoke(reason);
+        }
+        assert!(!old.fence.load(Ordering::Acquire));
+        assert!(is_release_all(&receiver.try_recv().unwrap()));
+        let new = core.admit("b", "1", "3").unwrap();
+        let deadline = core.control.lock().lease.as_ref().unwrap().expires;
+        drop(old);
+        {
+            let control = core.control.lock();
+            let lease = control.lease.as_ref().unwrap();
+            assert_eq!(lease.active_actions, 1);
+            assert_eq!(lease.expires, deadline, "old completion must not renew a replacement");
+            assert!(Arc::ptr_eq(&lease.live, &new.fence));
+        }
+        assert!(new.fence.load(Ordering::Acquire));
+    }
+}
+
+#[test]
+fn last_writer_action_ends_activity_not_an_earlier_concurrent_reply() {
+    let (core, _) = client();
+    let first = core.admit("a", "1", "2").unwrap();
+    let second = core.admit("a", "1", "2").unwrap();
+    assert!(Arc::ptr_eq(&first.fence, &second.fence));
+    core.control.lock().lease.as_mut().unwrap().expires =
+        Instant::now() - Duration::from_secs(1);
+    drop(second);
+    let (revoke, deadline) = Core::lease_verdict(&mut core.control.lock(), "1", "2");
+    assert!(revoke.is_none());
+    assert!(deadline.is_none());
+    assert!(first.fence.load(Ordering::Acquire));
+    drop(first);
+    let (revoke, deadline) = Core::lease_verdict(&mut core.control.lock(), "1", "2");
+    assert!(revoke.is_none());
+    assert!(deadline.is_some_and(|deadline| deadline > Instant::now()));
+}
+
+#[test]
+fn readonly_request_does_not_keep_an_idle_writer_alive() {
+    let (core, receiver) = client();
+    let fence = core.admit("a", "1", "2").unwrap().fence.clone();
+    let caller = core.clone();
+    let worker = std::thread::spawn(move || {
+        super::tools::execute(&caller, "a", "minecraft_observe", &json!({}),
+            &Arc::new(AtomicBool::new(false)))
+    });
+    let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(request.automation_fence.is_none());
+    core.control.lock().lease.as_mut().unwrap().expires =
+        Instant::now() - Duration::from_secs(1);
+    let (reason, checked) =
+        Core::lease_verdict(&mut core.control.lock(), "1", "2").0.unwrap();
+    assert_eq!(reason, "lease_expired");
+    core.revoke_lease(reason, Some(&checked));
+    assert!(!fence.load(Ordering::Acquire));
+    request.reply.send(Ok(json!({"in_play": true}))).unwrap();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
+fn late_cancelled_owner_result_cannot_revoke_replacement_writer() {
+    let (core, receiver) = client();
+    let caller = core.clone();
+    let old_action = std::thread::spawn(move || {
         super::tools::execute(
-            &owner_core,
+            &caller,
             "a",
             "minecraft_send_chat",
-            &json!({"message": "hi"}),
-            &owner_cancelled,
+            &json!({"message": "pending"}),
+            &Arc::new(AtomicBool::new(false)),
         )
     });
-    let request = receiver
-        .recv_timeout(Duration::from_secs(10))
-        .expect("write must reach the owner");
-    let fence = request
-        .automation_fence
-        .clone()
-        .expect("write carries a writer fence");
-    assert!(Arc::ptr_eq(&fence, &live));
-    let shared = request.cancelled.clone().expect("shared cancel flag");
-    assert!(Arc::ptr_eq(&shared, &cancelled));
-    request
-        .reply
-        .send(Ok(json!({"status": "ok"})))
-        .expect("owner reply");
-    owner.join().expect("owner thread").expect("write succeeds");
-    assert!(fence.load(Ordering::Acquire));
+    let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
+    let old_fence = request.automation_fence.as_ref().unwrap().clone();
+    core.revoke("request_cancelled");
+    assert!(!old_fence.load(Ordering::Acquire));
+    assert!(is_release_all(&receiver.recv_timeout(Duration::from_secs(10)).unwrap()));
+    let replacement = core.admit("b", "1", "2").unwrap();
+    request.reply.send(Err("cancelled".into())).unwrap();
+    assert_eq!(old_action.join().unwrap().unwrap_err(), "cancelled");
     assert!(
-        core.control
-            .lock()
-            .lease
-            .as_ref()
-            .is_some_and(|lease| lease.session == "a"),
-        "lease must still be held after the owner replies"
+        replacement.fence.load(Ordering::Acquire),
+        "the old owner's cancelled reply must not revoke the replacement"
     );
+    let control = core.control.lock();
+    let lease = control.lease.as_ref().unwrap();
+    assert!(Arc::ptr_eq(&lease.live, &replacement.fence));
+    assert_eq!(lease.active_actions, 1);
+    drop(control);
+    assert!(receiver.try_recv().is_err(), "no cleanup for the replacement");
 }

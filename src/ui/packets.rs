@@ -100,16 +100,21 @@ pub struct MapRenderView<'a> {
     pub maps: &'a BTreeMap<i32, MapState>,
     pub text: &'a super::render::TextRenderer,
 }
-impl MapRenderView<'_> {
-    #[cfg(test)]
+#[cfg(test)]
+pub(crate) struct MapRenderFixture {
+    maps: BTreeMap<i32, MapState>,
+    text: super::render::TextRenderer,
+}
+#[cfg(test)]
+impl MapRenderFixture {
     pub(crate) fn empty() -> Self {
-        static EMPTY: std::sync::LazyLock<(BTreeMap<i32, MapState>, super::render::TextRenderer)> =
-            std::sync::LazyLock::new(|| (
-                BTreeMap::new(),
-                super::render::TextRenderer::load_state(&Content::test_cube()).unwrap(),
-            ));
-        let (maps, text) = &*EMPTY;
-        Self { maps, text }
+        Self {
+            maps: BTreeMap::new(),
+            text: super::render::TextRenderer::load_state(&Content::test_cube()).unwrap(),
+        }
+    }
+    pub(crate) fn view(&self) -> MapRenderView<'_> {
+        MapRenderView { maps: &self.maps, text: &self.text }
     }
 }
 #[derive(Clone, Debug)]

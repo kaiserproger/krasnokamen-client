@@ -26,6 +26,9 @@ impl Session {
                 self.player.release_all(&mut self.commands)?;
                 if let Some(ui) = &mut self.ui {
                     ui.release_all();
+                    // This owner already released gameplay input synchronously.
+                    // Do not replay that release over the next writer's keys.
+                    ui.release_pending = false;
                 }
                 if self.network.is_some() {
                     self.flush_commands()?;

@@ -419,8 +419,14 @@ impl State {
             Modern::Camel { sit, sit_pose, sit_up, dash, idle, .. } => {
                 let down = if sit_pose.started() { 1. } else { seconds(*sit).map_or(0., |s| (s / 2.).clamp(0., 1.)) };
                 let down = if sit_up.started() { seconds(*sit_up).map_or(0., |s| 1. - (s / 2.6).clamp(0., 1.)) } else { down };
-                if top { pivot.y += down * 9. * unit; }
-                if leg { rotation.x = bone.rotation.x - down * 1.5; }
+                // Resting depth of the authored rigs: the adult back drops onto the
+                // received sitting seat and its folded front legs tuck back under the chest.
+                let (drop, tuck) = if baby { (4.5, 0.) } else { (19., 12.) };
+                if top { pivot.y += down * drop / 16.; }
+                if leg {
+                    rotation.x = bone.rotation.x - down * 1.5;
+                    if name.contains("front") { pivot.z += down * tuck / 16.; }
+                }
                 if name == "body" && dash.started() { rotation.x += 5_f32.to_radians(); }
                 if name == "head" { rotation.x -= pulse(*dash, 0.5) * 0.4; }
                 if name == "tail" { rotation.y += pulse(*idle, 4.) * (age * 0.4).sin() * 0.15; }

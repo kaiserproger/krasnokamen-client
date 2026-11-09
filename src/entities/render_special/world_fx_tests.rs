@@ -21,6 +21,7 @@ fn draw(kind: &str, fuse: i32) -> DynamicGeometry {
     // The authored cube substitutes for a received pack model, not for geometry emission.
     store.special_render_cache.tnt_state = Some(1);
     let mut out = DynamicGeometry::default();
+    let transform = store.slots[0].presented_transform(0, 0.);
     let result = super::super::append(
         &mut store,
         0,
@@ -29,8 +30,9 @@ fn draw(kind: &str, fuse: i32) -> DynamicGeometry {
         [0.; 3],
         0,
         0.,
+        transform,
         None,
-        crate::ui::MapRenderView::empty(),
+        crate::ui::MapRenderFixture::empty().view(),
         &|_| Ok(Some([7., 11.])),
         &|_, _| Ok([1.; 3]),
         &mut out,
@@ -64,6 +66,7 @@ fn falling_air_state_emits_no_geometry() {
     let mut store = Store::new();
     store.slots.push(entity);
     let mut out = DynamicGeometry::default();
+    let transform = store.slots[0].presented_transform(0, 0.);
     assert_eq!(
         super::super::append(
             &mut store,
@@ -73,8 +76,9 @@ fn falling_air_state_emits_no_geometry() {
             [0.; 3],
             0,
             0.,
+            transform,
             None,
-            crate::ui::MapRenderView::empty(),
+            crate::ui::MapRenderFixture::empty().view(),
             &|_| Ok(Some([7., 11.])),
             &|_, _| Ok([1.; 3]),
             &mut out
@@ -121,8 +125,9 @@ fn tnt_uses_received_block_state_and_fuse_boundaries() {
     store.slots.push(entity);
     let mut out = DynamicGeometry::default();
     let render = |store: &mut Store, out: &mut DynamicGeometry| {
+        let transform = store.slots[0].presented_transform(0, 0.);
         super::super::append(store, 0, &models, &Content::test_cube(), [0.; 3],
-            0, 0., None, crate::ui::MapRenderView::empty(), &|_| Ok(Some([7., 11.])), &|_, _| Ok([1.; 3]), out).unwrap()
+            0, 0., transform, None, crate::ui::MapRenderFixture::empty().view(), &|_| Ok(Some([7., 11.])), &|_, _| Ok([1.; 3]), out).unwrap()
     };
     assert_eq!(render(&mut store, &mut out), Handled::NoGeometry);
     assert!(out.vertices.is_empty());
@@ -144,6 +149,7 @@ fn lightning_dispatch_emits_seeded_geometry_without_light_or_pack_textures() {
     let mut store = Store::new();
     store.slots.push(entity);
     let mut out = DynamicGeometry::default();
+    let transform = store.slots[0].presented_transform(0, 0.);
     assert_eq!(
         super::super::append(
             &mut store,
@@ -153,8 +159,9 @@ fn lightning_dispatch_emits_seeded_geometry_without_light_or_pack_textures() {
             [0.; 3],
             0,
             0.,
+            transform,
             None,
-            crate::ui::MapRenderView::empty(),
+            crate::ui::MapRenderFixture::empty().view(),
             &|_| panic!("lightning must be fullbright"),
             &|_, _| panic!("lightning samples no tint"),
             &mut out
@@ -203,6 +210,7 @@ fn lightning_is_absent_between_sky_flashes() {
     let mut store = Store::new();
     store.slots.push(entity);
     let mut out = DynamicGeometry::default();
+    let transform = store.slots[0].presented_transform(0, 0.);
     assert_eq!(
         super::super::append(
             &mut store,
@@ -212,8 +220,9 @@ fn lightning_is_absent_between_sky_flashes() {
             [0.; 3],
             0,
             0.,
+            transform,
             None,
-            crate::ui::MapRenderView::empty(),
+            crate::ui::MapRenderFixture::empty().view(),
             &|_| panic!("inactive bolt samples no light"),
             &|_, _| panic!("lightning samples no tint"),
             &mut out
@@ -246,6 +255,7 @@ fn rope_anchors_sag_light_and_unleash_follow_received_entities() {
     store.slots.extend([mob, holder]);
     let mut out = DynamicGeometry::default();
     let light = |p: [f64; 3]| Ok(Some([p[0] as f32, 9.]));
+    let transform = store.slots[0].presented_transform(0, 0.);
     assert_eq!(
         super::super::append(
             &mut store,
@@ -255,8 +265,9 @@ fn rope_anchors_sag_light_and_unleash_follow_received_entities() {
             [0.; 3],
             0,
             0.,
+            transform,
             None,
-            crate::ui::MapRenderView::empty(),
+            crate::ui::MapRenderFixture::empty().view(),
             &light,
             &|_, _| Ok([1.; 3]),
             &mut out
@@ -265,7 +276,7 @@ fn rope_anchors_sag_light_and_unleash_follow_received_entities() {
         super::super::Handled::Unhandled
     );
     assert!(!out.indices[EntityMaterial::Leash as usize].is_empty());
-    let (start, end) = leash_anchors(&store.slots[0], &store.slots[1], &models, 0, 0.).unwrap();
+    let (start, end) = leash_anchors(&store.slots[0], &store.slots[1], &models, &store, 0, 0.).unwrap();
     for (actual, expected) in start.into_iter().zip([0., 0.7, 0.5]) {
         assert!((actual - expected).abs() < 1e-6);
     }
@@ -375,9 +386,10 @@ fn missing_holder_light_does_not_hide_the_leashed_entity() {
     store.ids.insert(42, 1);
     store.slots.extend([mob, holder]);
     let mut out = DynamicGeometry::default();
+    let transform = store.slots[0].presented_transform(0, 0.);
     let result = super::super::append(
-        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., None,
-        crate::ui::MapRenderView::empty(),
+        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., transform, None,
+        crate::ui::MapRenderFixture::empty().view(),
         &|pos| Ok(if pos[0] > 2. { None } else { Some([7., 11.]) }),
         &|_, _| Ok([1.; 3]),
         &mut out,
@@ -385,8 +397,8 @@ fn missing_holder_light_does_not_hide_the_leashed_entity() {
     assert_eq!(result, Handled::Unhandled);
     assert!(out.indices[EntityMaterial::Leash as usize].is_empty());
     let result = super::super::append(
-        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., None,
-        crate::ui::MapRenderView::empty(),
+        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., transform, None,
+        crate::ui::MapRenderFixture::empty().view(),
         &|_| Ok(Some([7., 11.])), &|_, _| Ok([1.; 3]), &mut out,
     ).unwrap();
     assert_eq!(result, Handled::Unhandled);
@@ -443,7 +455,7 @@ fn burning_flag_transitions_reach_each_entity_draw_route() {
                 content: &content, origin: [0.; 3], camera: [0.; 3],
                 camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0.,
                 game_time: 0, clock_environment: None,
-                maps: crate::ui::MapRenderView::empty(),
+                maps: crate::ui::MapRenderFixture::empty().view(),
                 tint_source: &|_, _| Ok([1.; 3]),
                 light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None,
             }, &mut out).unwrap();
