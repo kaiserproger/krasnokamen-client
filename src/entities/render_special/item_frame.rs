@@ -31,6 +31,7 @@ pub(in crate::entities) fn center(position: [f64; 3], direction: i32) -> Result<
 pub(super) struct ItemFrameResources<'a> {
     pub cache: &'a mut Cache,
     pub items: &'a mut ItemModels,
+    pub maps: crate::ui::MapRenderView<'a>,
 }
 
 pub(super) fn append(
@@ -43,7 +44,7 @@ pub(super) fn append(
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let p::EntityDrawFrame { origin, tick, partial, light, .. } = frame;
-    let ItemFrameResources { cache, items } = resources;
+    let ItemFrameResources { cache, items, maps } = resources;
     let direction = match p::value(models, entity, "DATA_DIRECTION") {
         Some(value) => value.int().ok_or("item frame direction metadata invalid")?,
         None => entity.spawn_data,
@@ -53,10 +54,15 @@ pub(super) fn append(
         Some(Metadata::Item(stack)) if !stack.empty() => Some(stack),
         _ => None,
     };
+    let map = stack.and_then(|stack| stack.component("minecraft:map_id"))
+        .map(|value| value.as_i64().and_then(|id| i32::try_from(id).ok())
+            .filter(|id| *id >= 0).ok_or("invalid framed map id"))
+        .transpose()?
+        .and_then(|id| maps.maps.get(&id));
     let invisible = p::number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
     let glow = entity.type_name == "minecraft:glow_item_frame";
     // Clocks in frames follow received world time like the dropped clock does.
-    let item_model = stack
+    let item_model = stack.filter(|_| map.is_none())
         .map(|stack| match clock_context {
             Some(clock) => {
                 let mut state = clock.clone();
@@ -67,9 +73,7 @@ pub(super) fn append(
         })
         .transpose()?;
     if !invisible {
-        let map = stack.is_some_and(|stack| content.item_names.get(&stack.id)
-            .is_some_and(|name| name == "minecraft:filled_map"));
-        let model_name = match (glow, map) {
+        let model_name = match (glow, map.is_some()) {
             (false, false) => "minecraft:block/item_frame",
             (false, true) => "minecraft:block/item_frame_map",
             (true, false) => "minecraft:block/glow_item_frame",
@@ -81,8 +85,18 @@ pub(super) fn append(
         if glow { body_light[1] = body_light[1].max(5.); }
         p::append_baked(model, root * Mat4::from_translation(Vec3::splat(-0.5)), body_light, out)?;
     }
-    if let (Some(stack), Some(model)) = (stack, item_model) {
-        let rotation = p::number(models, entity, "DATA_ROTATION").unwrap_or(0).rem_euclid(8);
+    let rotation = p::number(models, entity, "DATA_ROTATION").unwrap_or(0).rem_euclid(8);
+    if let Some(map) = map {
+        // 26.3 ItemFrameRenderer.submit: map rotations are quarter turns,
+        // followed by 180 degrees, 1/128 scale and (-64,-64,-1) translation.
+        let surface = root
+            * Mat4::from_translation(Vec3::new(0., 0., if invisible { 0.5 } else { 0.4375 }))
+            * Mat4::from_rotation_z((rotation % 4) as f32 * std::f32::consts::FRAC_PI_2 + std::f32::consts::PI)
+            * Mat4::from_scale(Vec3::splat(1. / 128.))
+            * Mat4::from_translation(Vec3::new(-64., -64., -1.));
+        map.append_world_geometry(content, maps.text, surface,
+            if glow { [15., 13.] } else { light }, true, out)?;
+    } else if let (Some(stack), Some(model)) = (stack, item_model) {
         let item = root
             * Mat4::from_translation(Vec3::new(0., 0., if invisible { 0.5 } else { 0.4375 }))
             * Mat4::from_rotation_z(rotation as f32 * std::f32::consts::FRAC_PI_4)
@@ -141,7 +155,7 @@ mod tests {
         }
     }
 
-    fn frame_fixture(kind: &str) -> (Models, Entity, Content, Cache, ItemModels, BakedModel) {
+    pub(super) fn frame_fixture(kind: &str) -> (Models, Entity, Content, Cache, ItemModels, BakedModel) {
         let (mut models, mut entity) = super::super::super::animation_tests::fixture();
         let mut schema = models.schemas.remove("minecraft:pig").unwrap();
         schema.accessors.insert("DATA_ITEM".into(), [9, 7]);
@@ -158,7 +172,7 @@ mod tests {
         (models, entity, content, Cache::default(), items, cube)
     }
 
-    fn held(id: u32) -> Stack {
+    pub(super) fn held(id: u32) -> Stack {
         let mut stack = Stack::default();
         stack.id = id;
         stack.count = 1;
@@ -175,7 +189,7 @@ mod tests {
         cache.models.insert("minecraft:block/item_frame".into(), cube);
         let render = |entity: &Entity, cache: &mut Cache, items: &mut ItemModels| {
             let mut out = DynamicGeometry::default();
-            let handled = append(entity, &models, ItemFrameResources { cache, items }, &content,
+            let handled = append(entity, &models, ItemFrameResources { cache, items, maps: crate::ui::MapRenderView::empty() }, &content,
                 p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 12.], parent: None },
                 None, &mut out).unwrap();
             (handled, out)
@@ -207,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn glow_frame_raises_block_light_and_maps_use_the_map_frame_model() {
+    fn glow_frame_raises_block_light_and_unobserved_maps_remain_items() {
         let (models, mut entity, mut content, mut cache, mut items, cube) =
             frame_fixture("minecraft:glow_item_frame");
         let mut map_body = cube.clone();
@@ -218,15 +232,20 @@ mod tests {
         cache.models.insert("minecraft:block/glow_item_frame_map".into(), map_body);
         content.item_names.insert(2, "minecraft:filled_map".into());
         let body = cube.quads.len() * 4;
-        for (stack, map) in [(held(1), false), (held(2), true)] {
+        for stack in [held(1), held(2)] {
             entity.metadata.insert(9, Metadata::Item(stack));
             let mut out = DynamicGeometry::default();
-            append(&entity, &models, ItemFrameResources { cache: &mut cache, items: &mut items }, &content,
+            append(&entity, &models, ItemFrameResources { cache: &mut cache, items: &mut items, maps: crate::ui::MapRenderView::empty() }, &content,
                 p::EntityDrawFrame { origin: [0.; 3], tick: 0, partial: 0., light: [8., 2.], parent: None },
                 None, &mut out).unwrap();
             assert!(out.vertices[..body].iter().all(|v| v.light == [8., 5.]));
-            assert_eq!(out.vertices[..body].iter().all(|v| v.texture_layer == 77), map);
+            assert!(out.vertices[..body].iter().all(|v| v.texture_layer != 77),
+                "an unobserved map uses the ordinary item frame, never invented pixels");
             assert!(out.vertices[body..].iter().all(|v| v.light == [15., 15.]));
         }
     }
 }
+
+#[cfg(test)]
+#[path = "item_frame_map_tests.rs"]
+mod map_tests;

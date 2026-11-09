@@ -1144,3 +1144,70 @@ fn shade_direction_override_reads_the_dimensions_weights() {
     let colors = face_shades(NETHER_SHADE, |quad| quad.shade_direction = Some(1));
     assert_eq!(colors, [0.9; 6].map(packed_shade));
 }
+
+#[test]
+fn element_emission_stays_on_its_quad_across_chunk_boundaries() {
+    let mut content = fixture_content();
+    let mut base = content.models[0].quads[1].clone();
+    base.cullface = None;
+    base.texture_layer = 20;
+    let mut overlay = base.clone();
+    overlay.texture_layer = 21;
+    overlay.light_emission = 15;
+    overlay.layer = RenderLayer::Cutout;
+    content.models[0].quads = vec![base, overlay];
+    let catalog = Catalog::capture(&content).unwrap();
+    let mut world = World::new(0, 16);
+    for (chunk_pos, position) in [([0, 0], [15, 8, 8]), ([1, 0], [16, 8, 8])] {
+        let mut chunk = lit_chunk(&[position], 1, 16);
+        for layer in chunk.sky.values_mut().chain(chunk.block.values_mut()) {
+            *layer = Arc::new(vec![0; 2048]);
+        }
+        world.insert(chunk_pos, chunk).unwrap();
+    }
+    for chunk_x in [0, 1] {
+        let section = mesher::build(
+            &world.snapshot([chunk_x, 0]), &catalog, [chunk_x, 0, 0],
+            deterministic_rules(), &AtomicU64::new(0), 0, BYTE_LIMIT,
+        ).unwrap().unwrap();
+        let geometry = &section.geometry;
+        for (layer, expected) in [(20, [0., 0.]), (21, [15., 15.])] {
+            let vertices: Vec<_> = geometry.vertices.iter()
+                .filter(|vertex| vertex.texture_layer == layer).collect();
+            assert_eq!(vertices.len(), 4);
+            assert!(vertices.iter().all(|vertex| vertex.light == expected));
+        }
+        assert_eq!(geometry.indices[RenderLayer::Opaque as usize].len(), 6);
+        assert_eq!(geometry.indices[RenderLayer::Cutout as usize].len(), 6);
+    }
+}
+
+#[test]
+fn dynamic_tint_uses_active_terrain_biomes_at_negative_start_position() {
+    use crate::protocol::models::TintKind;
+    let mut content = fixture_content();
+    content.set_registries(BTreeMap::from([(
+        "minecraft:worldgen/biome".to_owned(),
+        vec![("test:colored".to_owned(), serde_json::json!({
+            "temperature": 0.5, "downfall": 0.5,
+            "effects": {"grass_color": "#406080", "foliage_color": "#355637",
+                        "dry_foliage_color": "#987654", "water_color": "#3f76e4"},
+            "attributes": {}
+        }))],
+    )]));
+    let mut world = World::new(0, 16);
+    world.configure_environment_context("minecraft:overworld", 0, 63).unwrap();
+    world.insert([-1, -1], lit_chunk(&[[-8, 8, -8]], 1, 16)).unwrap();
+    let mut terrain = super::Terrain::new(Arc::new(|| {})).unwrap();
+    terrain.activate(&content, [1; 3]).unwrap();
+    terrain.set_render_rules([1.; 6], false, 2, None).unwrap();
+    assert_eq!(
+        terrain.sample_tint(&world, TintKind::Grass, [-8, 8, -8]).unwrap(),
+        [64. / 255., 96. / 255., 128. / 255.]
+    );
+    assert!(terrain.sample_tint(&world, TintKind::Grass, [-40, 8, -8]).is_err());
+    assert_eq!(
+        terrain.sample_tint(&world, TintKind::Constant([0.2, 0.3, 0.4]), [-40, 8, -8]).unwrap(),
+        [0.2, 0.3, 0.4]
+    );
+}

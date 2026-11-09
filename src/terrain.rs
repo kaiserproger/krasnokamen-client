@@ -825,6 +825,19 @@ impl Terrain {
             }
         }
     }
+    /// Sample the same active biome blend as terrain at a world block position.
+    pub(crate) fn sample_tint(
+        &self,
+        world: &World,
+        tint: crate::protocol::models::TintKind,
+        position: [i32; 3],
+    ) -> Result<[f32; 3]> {
+        let catalog = self.catalog.as_deref().ok_or("terrain_resources_not_activated")?;
+        let rules = self.rules.ok_or("source_terrain_render_rules_not_set")?;
+        let center = [position[0].div_euclid(16), position[2].div_euclid(16)];
+        mesher::sample_tint(&world.snapshot(center), catalog, tint, position, rules.biome_blend_radius)
+    }
+
 
     pub fn append_moving_block(
         &self,

@@ -59,7 +59,7 @@ impl ReceivedSpace<'_> {
                 .as_ref()
                 .ok_or("client resources unavailable")?,
             &self.session.entities,
-            self.session.client_tick,
+            self.session.world_tick,
             area,
             self.colliders,
         ) {
@@ -133,7 +133,7 @@ impl Space for ReceivedSpace<'_> {
             area,
             self.session.player.entity_id,
             None,
-            self.session.client_tick,
+            self.session.world_tick,
             self.session.player.position,
             &self.session.world,
             content,

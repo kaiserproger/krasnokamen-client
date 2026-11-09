@@ -17,6 +17,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
     ) -> Result<Outcome> {
         let BlockUse { hit, hand } = action;
         if self.game_mode == 3 {
@@ -80,7 +81,7 @@ impl Player {
         {
             return Ok(Outcome::Pass);
         }
-        self.item_on_result(action, world, content, inventory, entities, tick)
+        self.item_on_result(action, world, content, inventory, entities, tick, world_tick)
     }
 
     pub(super) fn item_on_result(
@@ -91,6 +92,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
     ) -> Result<Outcome> {
         let BlockUse { hit, hand } = action;
         let Some(item) =
@@ -101,7 +103,7 @@ impl Player {
         let owner = content.item_use_owner(item.id, true)?;
         let first_prediction = self.use_predictions.len();
         let result =
-            self.source_item_on(owner, hit, hand, world, content, inventory, entities, tick)?;
+            self.source_item_on(owner, hit, hand, world, content, inventory, entities, tick, world_tick)?;
         if self.abilities.instabuild {
             let slot = if hand == 1 {
                 45

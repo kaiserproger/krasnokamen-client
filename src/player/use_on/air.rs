@@ -39,6 +39,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
     ) -> Result<Outcome> {
         let AirUse { hand, target } = action;
         let Some(item) =
@@ -75,7 +76,7 @@ impl Player {
             "TridentItem" => {
                 if next_damage_breaks(item)
                     || self.trident_spin_strength(item, content)? > 0.
-                        && !self.in_water_or_rain(world, content, entities, tick)?
+                        && !self.in_water_or_rain(world, content, entities, world_tick)?
                 {
                     Outcome::Fail
                 } else {
@@ -232,7 +233,7 @@ impl Player {
             }
             "BucketItem" => self.bucket_result(hand, world, content, inventory, entities, tick)?,
             "BottleItem" => self.bottle_result(hand, world, content, inventory, entities, tick)?,
-            "BoatItem" => self.boat_result(hand, world, content, inventory, entities, tick)?,
+            "BoatItem" => self.boat_result(hand, world, content, inventory, entities, world_tick)?,
             "SpawnEggItem" => {
                 self.spawn_egg_air_result(hand, world, content, inventory, entities, tick)?
             }
@@ -483,7 +484,7 @@ mod p1_helmet_tests {
         let mut player = Player::new();
         player.position = [12.5, 64., -8.25];
         let result = player.air_result(AirUse { hand: 0, target: None }, &World::new(0, 16), &content,
-            &inventory, &EntityStore::new(), 9).unwrap();
+            &inventory, &EntityStore::new(), 9, 9).unwrap();
         assert_eq!(result, Outcome::CONSUME);
         assert!(player.using.is_some());
         match player.take_use_prediction() {
@@ -558,7 +559,7 @@ mod p1_helmet_tests {
             let mut player = Player::new();
             assert_eq!(
                 player
-                    .air_result(AirUse { hand: 0, target: None }, &world, &content, &inventory, &entities, 0)
+                    .air_result(AirUse { hand: 0, target: None }, &world, &content, &inventory, &entities, 0, 0)
                     .unwrap(),
                 expected,
             );
@@ -595,7 +596,7 @@ mod p1_helmet_tests {
                     }
                     assert_eq!(
                         player
-                            .air_result(AirUse { hand, target: None }, &world, &content, &inventory, &entities, 0)
+                            .air_result(AirUse { hand, target: None }, &world, &content, &inventory, &entities, 0, 0)
                             .unwrap(),
                         Outcome::CLIENT,
                     );
@@ -658,6 +659,7 @@ mod p1_helmet_tests {
                     InteractionIntent::Use { hand },
                     &context,
                     InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities },
+                    0,
                     0,
                     &mut packets,
                 )

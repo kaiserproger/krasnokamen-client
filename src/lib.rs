@@ -68,7 +68,7 @@ fn native_item_key(
     inventory_open: bool,
 ) -> Option<InputIntent> {
     let action = bindings.action(input)?;
-    if !inventory_open && matches!(action, "drop" | "swap_offhand") {
+    if !inventory_open && matches!(action, "drop" | "swap_offhand" | "pick") {
         return Some(InputIntent::Key { key: action.into(), pressed });
     }
     if !pressed { return None; }
@@ -1190,19 +1190,15 @@ impl ApplicationHandler for App {
                 // gameplay keeps raw mouse-look capture.
                 self.last_cursor = Some((position.x, position.y));
                 if self.session.dialog_screen_active() || self.session.screen() == "inventory" {
-                    let _ = self.session.command(Command::Input(InputIntent::Ui {
+                    self.manual(InputIntent::Ui {
                         intent: crate::ui::UiIntent::Pointer {
                             phase: crate::ui::PointerPhase::Move,
                             x: position.x,
                             y: position.y,
                             button: None,
-                            modifiers: crate::ui::Modifiers {
-                                shift: self.shift_held,
-                                ..Default::default()
-                            },
+                            modifiers: self.native_modifiers,
                         },
-                    }));
-                    self.publish_session();
+                    });
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -1248,13 +1244,8 @@ impl ApplicationHandler for App {
                     frame_trace::toggle(self);
                     return;
                 }
-                if code == KeyCode::F1 && pressed && !event.repeat && self.session.screen() == "game" {
-                    let _ = self.session.execute_ui(crate::ui::UiIntent::Key {
-                        key: "F1".into(),
-                        pressed: true,
-                        modifiers: self.native_modifiers,
-                    });
-                    self.publish_session();
+                if code == KeyCode::F1 && self.session.screen() == "game" {
+                    self.manual(InputIntent::Key { key: "hide_hud".into(), pressed });
                     return;
                 }
                 if matches!(code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
@@ -1431,20 +1422,16 @@ impl ApplicationHandler for App {
                     })
                     .chain(synthesized_up.then_some(crate::ui::PointerPhase::Up));
                     for edge in edges {
-                        let _ = self.session.command(Command::Input(InputIntent::Ui {
+                        self.manual(InputIntent::Ui {
                             intent: crate::ui::UiIntent::Pointer {
                                 phase: edge,
                                 x,
                                 y,
                                 button: Some(ui_button),
-                                modifiers: crate::ui::Modifiers {
-                                    shift: self.shift_held,
-                                    ..Default::default()
-                                },
+                                modifiers: self.native_modifiers,
                             },
-                        }));
+                        });
                     }
-                    self.publish_session();
                 }
             }
             WindowEvent::MouseInput { state, button, .. }

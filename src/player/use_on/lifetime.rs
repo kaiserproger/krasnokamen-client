@@ -61,6 +61,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
         let Some(using) = self.using.as_ref() else {
@@ -80,7 +81,7 @@ impl Player {
             36 + u16::from(inventory.selected_slot)
         })?;
         if using.crossbow_components.as_ref().is_some_and(|components| !Arc::ptr_eq(components, &item.components)) {
-            let charge_ticks = self.crossbow_charge_ticks(item, content)?;
+            let charge_ticks = crossbow_charge_ticks(item, content, &mut |kind| match kind { EffectSample::Uniform => f64::from(self.random_float()), EffectSample::Gaussian => self.random_gaussian() })?;
             let using = self.using.as_mut().unwrap();
             using.crossbow_charge_ticks = charge_ticks;
             using.crossbow_components = Some(Arc::clone(&item.components));
@@ -126,7 +127,7 @@ impl Player {
                     self.using = None;
                     return Ok(());
                 }
-                let Some(hit) = self.brush_hit(world, content, entities, tick)? else {
+                let Some(hit) = self.brush_hit(world, content, entities, world_tick)? else {
                     self.using = None;
                     return Ok(());
                 };
@@ -399,6 +400,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
     ) -> Result<()> {
         let Some(using) = self.using.take() else {
             return Ok(());
@@ -415,7 +417,7 @@ impl Player {
         })?;
         if identity != using.slot_identity {
             self.pending_use_release = Some(using);
-            return self.apply_pending_use_release(world, content, inventory, entities, tick);
+            return self.apply_pending_use_release(world, content, inventory, entities, world_tick);
         }
         let result = if item.component("minecraft:consumable").is_some() {
             self.consume_item(item, world)?

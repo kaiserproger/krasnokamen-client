@@ -203,7 +203,7 @@ impl Session {
         value["target"] = match self
             .content
             .as_ref()
-            .map(|content| player.raycast(&self.world, content, &self.entities, self.client_tick))
+            .map(|content| player.raycast(&self.world, content, &self.entities, self.world_tick))
         {
             Some(Ok(Some(Hit::Block(hit)))) => {
                 json!({"type":"block","location":vector(hit.point),"x":hit.position[0],"y":hit.position[1],"z":hit.position[2],"face":(["down","up","north","south","west","east"][hit.face as usize]),"block_id":self.content.as_ref().and_then(|content| content.name(hit.state))})
@@ -783,7 +783,7 @@ impl Session {
                     .player
                     .effect_duration("minecraft:conduit_power", self.client_tick)
                     .is_some(),
-                entity_tick: self.client_tick,
+                entity_tick: self.world_tick,
                 flat_world: self.flat_world,
                 ..Default::default()
             };
@@ -806,7 +806,7 @@ impl Session {
                 self.scene.camera_position,
                 self.scene.origin,
                 self.scene.environment.rain,
-                self.client_tick as f64 + f64::from(self.presentation_partial),
+                self.world_tick as f64 + f64::from(self.presentation_partial),
                 &mut self.scene.dynamic,
             )?;
             self.clouds.append(
@@ -815,7 +815,7 @@ impl Session {
                     epoch: self.resource_epoch,
                     camera: self.scene.camera_position,
                     origin: self.scene.origin,
-                    ticks: self.client_tick as f64 + f64::from(self.presentation_partial),
+                    ticks: self.world_tick as f64 + f64::from(self.presentation_partial),
                 },
                 &self.scene.environment,
                 &mut self.scene.dynamic,
@@ -832,7 +832,9 @@ impl Session {
                         .map(|(sky, block)| [f32::from(sky), f32::from(block)]))
                 };
                 let item_time_at = |point| self.environment.item_time_attributes(world, point);
-                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.client_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), light: &sample_light, bed_direction: &|position| {
+                let terrain = self.terrain.as_ref().ok_or("entity tint terrain unavailable")?;
+                let tint_source = |tint, position| terrain.sample_tint(world, tint, position);
+                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.world_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), maps: self.ui.as_ref().ok_or("entity map UI state unavailable")?.map_render_view(), tint_source: &tint_source, light: &sample_light, bed_direction: &|position| {
                     let state = world.block(position)?;
                     if !content.name(state)?.ends_with("_bed") {
                         return None;
@@ -850,7 +852,7 @@ impl Session {
                     world,
                     self.scene.origin,
                     self.scene.camera_position,
-                    self.client_tick,
+                    self.world_tick,
                     self.presentation_partial,
                     &mut self.scene.dynamic,
                 )?;
@@ -867,6 +869,9 @@ impl Session {
                         scoping: self.player.is_scoping(content),
                         // Match the filtering preference sent by client_information.
                         text_filtering: false,
+                        operator_overlay_visible: self.player.game_mode == 3
+                            || (self.player.game_mode == 1
+                                && self.player.permission_level.is_some_and(|level| level >= 2)),
                         game_time: self.environment.game_time(),
                         partial: self.presentation_partial,
                         sample_light: &sample_light,
@@ -887,7 +892,7 @@ impl Session {
                     world,
                     content,
                     &self.entities,
-                    self.client_tick,
+                    self.world_tick,
                 )?;
                 if let Some(Hit::Block(block)) = &hit {
                     super::block_outline::append(
@@ -909,7 +914,7 @@ impl Session {
                         self.scene.camera_position,
                         [self.scene.yaw, self.scene.pitch],
                         self.render_distance as f32 * 16.,
-                        self.client_tick,
+                        self.world_tick,
                         self.presentation_partial,
                         &crate::entities::NameplateView {
                             crosshair,
@@ -939,7 +944,7 @@ impl Session {
                     && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
                     && let Some(light) = sample_light(self.player.eye_position())?
                 {
-                    let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.presentation_partial, light, item_context: &item_context, ui: self.ui.as_ref() });
+                    let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.local_partial, light, item_context: &item_context, ui: self.ui.as_ref() });
                     if let Err(reason) = result {
                         self.scene.entity_presentation.unrendered.insert(
                             "local:first_person".into(),
@@ -969,7 +974,7 @@ impl Session {
                 &mut self.scene.dynamic,
             )?;
             if let Some(terrain) = &self.terrain {
-                let now = (self.client_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
+                let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
                 self.block_motion.append(
                     terrain,
                     &self.world,

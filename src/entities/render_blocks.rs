@@ -126,6 +126,8 @@ pub(crate) struct StaticBlockSceneFrame<'a> {
     pub radius: f32,
     pub scoping: bool,
     pub text_filtering: bool,
+    /// Viewer may see the vanilla game-master bounding-box overlay.
+    pub operator_overlay_visible: bool,
     pub game_time: i64,
     pub partial: f32,
     pub sample_light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
@@ -156,7 +158,7 @@ impl super::Store {
     ) -> Result<super::PresentationStats> {
         let StaticBlockSceneFrame {
             content, world, origin, camera, camera_rotation, radius, scoping, text_filtering,
-            game_time, partial, sample_light,
+            operator_overlay_visible, game_time, partial, sample_light,
         } = frame;
         if !radius.is_finite() || !(0. ..=4096.).contains(&radius) {
             return Err("block presentation radius bound".into());
@@ -195,10 +197,12 @@ impl super::Store {
                     | "minecraft:beacon"
                     | "minecraft:end_portal"
                     | "minecraft:end_gateway"
+                    | "minecraft:structure_block"
+                    | "minecraft:test_instance_block"
                     | "minecraft:skull"
             )
         }) {
-            let gateway = block.type_name == "minecraft:end_gateway";
+            let gateway = matches!(block.type_name.as_str(), "minecraft:end_gateway" | "minecraft:test_instance_block");
             let distance = (0..3)
                 .filter(|&i| i != 1 || !(gateway || block.type_name == "minecraft:beacon"))
                 .map(|i| (f64::from(block.position[i]) + 0.5 - camera[i]).powi(2))
@@ -321,6 +325,21 @@ impl super::Store {
                         )
                     }
                 }
+                "minecraft:structure_block" => surfaces::structure(
+                    block, content, world, root, operator_overlay_visible, out,
+                ),
+                "minecraft:test_instance_block" => surfaces::test_instance(
+                    block,
+                    content,
+                    &mut surfaces::TestInstanceFrame {
+                        origin, camera, camera_rotation, game_time, partial, scoping,
+                        visible: operator_overlay_visible,
+                        text: self.text.as_deref(),
+                        cache: &mut self.block_render_cache,
+                    },
+                    root,
+                    out,
+                ),
                 "minecraft:sign" | "minecraft:hanging_sign" => signs::append(
                     block,
                     content,
@@ -1189,7 +1208,7 @@ mod tests {
                 .ensure_sign_block_entity(position, 1, &content, 1)
                 .unwrap();
             let mut geometry = DynamicGeometry::default();
-            let defaults = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
+            let defaults = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
                 .unwrap();
             assert_eq!(defaults.block_entities, 1);
             assert!(defaults.unrendered.is_empty());
@@ -1268,7 +1287,7 @@ mod tests {
                 assert_eq!(store.block_entities[&position].state, Some(1));
                 let initial_text_indices =
                     geometry.indices[EntityMaterial::TextPolygonOffset as usize].len();
-                let submitted = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
+                let submitted = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
                     .unwrap();
                 assert_eq!(submitted.block_entities, 1);
                 assert!(submitted.unrendered.is_empty());
@@ -1318,7 +1337,7 @@ mod tests {
                 }
             }
             let mut pending = DynamicGeometry::default();
-            let unavailable_light = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(None) }, &mut pending)
+            let unavailable_light = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial: 0., sample_light: &|_| Ok(None) }, &mut pending)
                 .unwrap();
             assert_eq!(unavailable_light.lighting_pending, 1);
             assert_eq!(unavailable_light.block_entities, 0);

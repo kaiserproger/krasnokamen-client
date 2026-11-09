@@ -311,3 +311,52 @@ fn inventory_double_click_caps_collection_and_release_clears_click_history() {
     let (_, carried) = click(&packets[0], 9, 0, 0);
     assert_eq!(carried, None);
 }
+
+#[test]
+fn focus_loss_cancels_pointer_gesture_and_slider_capture() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    let pickup = pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    assert_eq!(pickup.len(), 1);
+    pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    pointer(&mut ui, &mut inv, &content, 10, PointerPhase::Down);
+    pointer(&mut ui, &mut inv, &content, 11, PointerPhase::Move);
+    ui.slider_drag = Some("volume".into());
+    ui.set_focus_active(false);
+    assert!(ui.slider_drag.is_none());
+    let packets = pointer(&mut ui, &mut inv, &content, 11, PointerPhase::Up);
+    assert!(packets.is_empty(), "focus loss must cancel the pending transfer");
+    assert_eq!(inv.cursor.as_ref().unwrap().count, 10);
+    assert!(inv.player.slots[10].as_ref().unwrap().empty());
+    assert!(inv.player.slots[11].as_ref().unwrap().empty());
+}
+
+#[test]
+fn hovered_hotbar_swap_reconciles_server_rejection() {
+    use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
+    let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
+        &crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit1),
+        true, Modifiers::default(), true,
+    ) else { panic!("number key must target hovered slot") };
+    assert_eq!(dispatch(&mut ui, &mut inv, &content, intent).len(), 1);
+    assert_eq!(inv.player.slots[36].as_ref().unwrap().count, 10);
+    for (slot, count) in [(9_i16, 10), (36_i16, 0)] {
+        let mut packet = Writer::default();
+        packet.var(0);
+        packet.var(1);
+        packet.0.extend(slot.to_be_bytes());
+        packet.var(count);
+        if count != 0 {
+            packet.var(0);
+            packet.var(0);
+            packet.var(0);
+        }
+        assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+    }
+    assert_eq!(inv.player.slots[9].as_ref().unwrap().count, 10);
+    assert!(inv.player.slots[36].as_ref().unwrap().empty());
+    assert_eq!(inv.received_player_slot(9).unwrap().unwrap().count, 10);
+}

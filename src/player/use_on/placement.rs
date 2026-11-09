@@ -2318,6 +2318,7 @@ impl Player {
         inventory: &InventoryStore,
         entities: &EntityStore,
         tick: u64,
+        world_tick: u64,
     ) -> Result<Outcome> {
         let Some(item) =
             super::super::interaction::held(inventory, hand).filter(|item| !item.empty())
@@ -2334,10 +2335,10 @@ impl Player {
             // Growth, effects and the inventory debit are server-authoritative.
             "BoneMealItem" => Ok(Outcome::CLIENT),
             "HangingEntityItem" => self.hanging_item_on(
-                hit, hand, world, content, inventory, entities, tick,
+                hit, hand, world, content, inventory, entities, world_tick,
             ),
             "MinecartItem" => self.minecart_item_on(
-                hit, hand, world, content, inventory, entities, tick,
+                hit, hand, world, content, inventory, entities, world_tick,
             ),
             "DebugStickItem" | "SpawnEggItem" => Ok(Outcome::CLIENT),
             "ArmorStandItem" => {
@@ -2363,7 +2364,7 @@ impl Player {
                     world,
                     content,
                     entities,
-                    tick,
+                    world_tick,
                     bounds,
                     Some(super::super::collision::Context {
                         // Empty.isAbove(_, _, true) is true regardless of the cell.
@@ -2380,7 +2381,7 @@ impl Player {
                         self.bounds(),
                         self.entity_id,
                         self.game_mode == 3,
-                        tick,
+                        world_tick,
                     )?
                 {
                     return Ok(Outcome::Fail);
@@ -2398,7 +2399,7 @@ impl Player {
             }
             "BlockItem" | "SolidBucketItem" => {
                 let result =
-                    self.place_item(hit, hand, world, content, inventory, entities, tick)?;
+                    self.place_item(hit, hand, world, content, inventory, entities, world_tick)?;
                 if result.consumes() && short_class(owner) == "SolidBucketItem" {
                     if !self.abilities.instabuild {
                         let bucket = crate::inventory::creative_stack(
@@ -2415,7 +2416,7 @@ impl Player {
                 Ok(result)
             }
             "BrushItem" => {
-                if self.brush_hit(world, content, entities, tick)?.is_some() {
+                if self.brush_hit(world, content, entities, world_tick)?.is_some() {
                     self.start_using(Some(item), hand, content, inventory, tick)?;
                 }
                 Ok(Outcome::CONSUME)

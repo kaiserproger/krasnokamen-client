@@ -189,7 +189,7 @@ impl Session {
         if self.phase != "play" || !self.player.pose_known {
             return Err("client is not in play".into());
         }
-        let bounds = self.entities.entity_bounds(handle, self.client_tick)?;
+        let bounds = self.entities.entity_bounds(handle, self.world_tick)?;
         let eye = self.player.eye_position();
         let reach = self.player.attribute("minecraft:entity_interaction_range");
         let nearest: [f64; 3] = std::array::from_fn(|a| eye[a].clamp(bounds.min[a], bounds.max[a]));
@@ -237,7 +237,7 @@ impl Session {
             let content = self.content.as_ref().ok_or("content unavailable")?;
             let hit = self
                 .player
-                .raycast(&self.world, content, &self.entities, self.client_tick)?;
+                .raycast(&self.world, content, &self.entities, self.world_tick)?;
             if matches!(hit, Some(Hit::Entity { handle: target, .. }) if target == handle) {
                 if !apply {
                     self.player.look(yaw, pitch)?;
@@ -255,7 +255,7 @@ impl Session {
         let content = self.content.as_ref().ok_or("content unavailable")?;
         let blocker = self
             .player
-            .raycast(&self.world, content, &self.entities, self.client_tick)?;
+            .raycast(&self.world, content, &self.entities, self.world_tick)?;
         self.player.look(yaw, pitch)?;
         Ok(Some(match blocker {
             Some(Hit::Block(hit)) => format!(
@@ -298,7 +298,7 @@ impl Session {
             content,
             &self.inventory,
             &self.entities,
-            self.client_tick,
+            self.world_tick,
         )?;
         if let Some(handle) = handle {
             self.entities.resolve(handle)?;
@@ -316,6 +316,7 @@ impl Session {
             &context,
             crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
             self.client_tick,
+            self.world_tick,
             &mut self.commands,
         )?;
         let started = self.commands[start..].iter().any(|command| {
@@ -381,6 +382,7 @@ impl Session {
             hand,
             crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
             self.client_tick,
+            self.world_tick,
             &mut self.commands,
         )?;
         self.consume_player_effects()?;
@@ -906,7 +908,7 @@ impl Session {
     pub(super) fn consume_player_effects(&mut self) -> Result<()> {
         if let Some(content) = self.content.as_ref() {
             let result = self.player.apply_pending_use_release(
-                &self.world, content, &self.inventory, &self.entities, self.client_tick,
+                &self.world, content, &self.inventory, &self.entities, self.world_tick,
             );
             if let Err(error) = result {
                 let item_id = self.inventory.player_slot(36 + u16::from(self.inventory.selected_slot))
@@ -947,9 +949,9 @@ impl Session {
                         }
                     }
                     self.world.set(position,state,|id| content.block_is_air(id))?;
-                    self.entities.ensure_block_entity(position,state,content,self.client_tick)?;
+                    self.entities.ensure_block_entity(position,state,content,self.world_tick)?;
                     self.entities.block_changed(position,state);
-                    let now = (self.client_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
+                    let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
                     if let Some(terrain) = &mut self.terrain {
                         terrain.invalidate_block(&self.world,position)?;
                         if old != Some(state) {
@@ -973,8 +975,8 @@ impl Session {
                     let kind = content.placement_metadata(state)?["block_entity_type"].as_str().ok_or("Source block entity type missing")?;
                     self.entities.predict_block_entity_components(position,components,patch,kind)?;
                 }
-                UsePrediction::EntitySwing {handle,hand} => self.entities.predict_swing(handle,hand,self.client_tick)?,
-                UsePrediction::EntityEffect {handle,effect,duration,amplifier,flags,tick} => self.entities.predict_effect(handle,effect,duration,amplifier,flags,tick)?,
+                UsePrediction::EntitySwing {handle,hand} => self.entities.predict_swing(handle,hand,self.world_tick)?,
+                UsePrediction::EntityEffect {handle,effect,duration,amplifier,flags,tick: _} => self.entities.predict_effect(handle,effect,duration,amplifier,flags,self.world_tick)?,
                 UsePrediction::EntityMetadata {handle,key,value} => self.entities.predict_metadata(handle,key,value)?,
                 UsePrediction::Particles {count,..} => self.event(json!({"type":"unsupported_local_particle_presentation","count":count,"origin":"locally_predicted","rendered":false})),
                 UsePrediction::LevelEvent {event,position,data} => {
@@ -1050,7 +1052,7 @@ impl Session {
         let content = self.content.as_ref().ok_or("content unavailable")?;
         if !self
             .entities
-            .ensure_sign_block_entity(position, state, content, self.client_tick)?
+            .ensure_sign_block_entity(position, state, content, self.world_tick)?
         {
             return Ok(false);
         }

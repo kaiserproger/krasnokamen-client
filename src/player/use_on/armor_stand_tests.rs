@@ -104,7 +104,7 @@ fn use_on(
     entities: &EntityStore,
 ) -> Outcome {
     player
-        .item_on_result(BlockUse { hit, hand: 0 }, world, content, inventory, entities, 1)
+        .item_on_result(BlockUse { hit, hand: 0 }, world, content, inventory, entities, 1, 1)
         .unwrap()
 }
 

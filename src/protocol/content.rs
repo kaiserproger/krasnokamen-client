@@ -2359,6 +2359,7 @@ impl Content {
             shade_direction: None,
             gui_light_side: true,
             ambient_occlusion: true,
+            light_emission: 0,
             layer: RenderLayer::Opaque,
             entity_material: None,
             alpha: 1.,

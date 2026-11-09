@@ -80,7 +80,7 @@ mod wearables {
                 .0;
             let rig = models.rig(key);
             let mut transforms = Vec::new();
-            p::evaluate_rig(rig, entity, &models, 3, 0., Mat4::IDENTITY, &mut transforms);
+            p::evaluate_rig(rig, entity, &models, &crate::protocol::content::Content::test_cube(), 3, 0., Mat4::IDENTITY, &mut transforms);
             let mut items = crate::ui::items::ItemModels::new();
             let frame = Frame {
                 models: &models,
@@ -93,11 +93,9 @@ mod wearables {
             let mut out = DynamicGeometry::default();
             let mut stats = p::PresentationStats::default();
             p::append_equipment(
-                p::EquipmentPose {
-                    entity,
-                    rig,
-                    transforms: &transforms,
-                },
+                p::EquipmentPose { item_context: None, entity,
+                rig,
+                transforms: &transforms, },
                 &mut items,
                 &mut cache,
                 frame,
@@ -125,11 +123,9 @@ mod wearables {
                 .unwrap();
             let mut stripped = DynamicGeometry::default();
             p::append_equipment(
-                p::EquipmentPose {
-                    entity: store.get(4).unwrap(),
-                    rig,
-                    transforms: &transforms,
-                },
+                p::EquipmentPose { item_context: None, entity: store.get(4).unwrap(),
+                rig,
+                transforms: &transforms, },
                 &mut items,
                 &mut cache,
                 frame,
@@ -156,15 +152,13 @@ mod wearables {
         let entity = store.get(4).unwrap();
         let rig = models.rig("minecraft:cow#main");
         let mut transforms = Vec::new();
-        p::evaluate_rig(rig, entity, &models, 3, 0., Mat4::IDENTITY, &mut transforms);
+        p::evaluate_rig(rig, entity, &models, &crate::protocol::content::Content::test_cube(), 3, 0., Mat4::IDENTITY, &mut transforms);
         let mut stats = p::PresentationStats::default();
         let mut items = crate::ui::items::ItemModels::new();
         p::append_equipment(
-            p::EquipmentPose {
-                entity,
-                rig,
-                transforms: &transforms,
-            },
+            p::EquipmentPose { item_context: None, entity,
+            rig,
+            transforms: &transforms, },
             &mut items,
             &mut cache,
             Frame {
@@ -285,5 +279,33 @@ mod wearables {
             .unwrap();
         assert_eq!(stripped.vertices.len(), cape.vertices.len());
         assert!(stripped.vertices.iter().all(|v| v.texture_layer == 21));
+    }
+
+    #[test]
+    fn received_animal_body_equipment_follows_supported_adult_baby_transition() {
+        for (species, kind) in [("wolf", "wolf_body"), ("llama", "llama_body")] {
+            let (mut store, mut models, mut content, mut cache) =
+                humanoid_fixture(&format!("minecraft:{species}"));
+            models.schemas.get_mut(&format!("minecraft:{species}")).unwrap()
+                .accessors.insert("DATA_BABY_ID".into(), [23, 8]);
+            content.item_names.insert(5, "test:body".into());
+            content.insert_test_item_components(5, BTreeMap::from([(
+                "minecraft:equippable".into(), json!({"slot":"body","asset_id":"test:body"})
+            )]));
+            content.insert_test_resource("assets/test/equipment/body.json",
+                json!({"layers":{(kind):[{"texture":"test:body"}]}}).to_string().as_bytes());
+            content.insert_test_texture(&format!("test:entity/equipment/{kind}/body"), region(30));
+            equip(&mut store, &content, 6, 5);
+            for baby in [true, false, true] {
+                store.get_mut(4).unwrap().metadata.insert(23, crate::entities::Metadata::Bool(baby));
+                let entity = store.get(4).unwrap();
+                let mut out = DynamicGeometry::default();
+                assert!(cache.append(entity, 6, entity.equipment_value(6).unwrap(), Frame {
+                    models:&models, content:&content, root:Mat4::IDENTITY, tick:3, partial:0.,light:[15.;2],
+                }, &mut out).unwrap());
+                assert_eq!(out.vertices.is_empty(), baby, "{species}:{baby}");
+                assert!(out.vertices.iter().all(|v| v.texture_layer == 30));
+            }
+        }
     }
 }

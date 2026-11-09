@@ -72,7 +72,7 @@ pub(super) fn append(
         return Ok(());
     };
     let rig = models.rig(key);
-    p::evaluate_rig(rig, entity, models, tick, partial, root, transforms);
+    p::evaluate_rig(rig, entity, models, content, tick, partial, root, transforms);
     p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
 }
 

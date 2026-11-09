@@ -1292,7 +1292,7 @@ impl Player {
             & ((1u64 << 48) - 1);
         (self.interaction_random >> (48 - bits)) as u32
     }
-    fn random_float(&mut self) -> f32 {
+    pub(super) fn random_float(&mut self) -> f32 {
         self.random_bits(24) as f32 * (1. / 16777216.)
     }
     fn random_double(&mut self) -> f64 {
@@ -1300,23 +1300,52 @@ impl Player {
         let low = u64::from(self.random_bits(27));
         ((high << 27) + low) as f64 * (1. / 9007199254740992.)
     }
-    fn random_gaussian(&mut self) -> f64 {
-        if let Some(value) = self.interaction_gaussian.take() {
-            return value;
-        }
-        loop {
-            let x = 2. * self.random_double() - 1.;
-            let y = 2. * self.random_double() - 1.;
-            let square = x * x + y * y;
-            if square >= 1. || square == 0. {
-                continue;
-            }
-            let multiplier = (-2. * square.ln() / square).sqrt();
-            self.interaction_gaussian = Some(y * multiplier);
-            return x * multiplier;
-        }
+    pub(super) fn random_gaussian(&mut self) -> f64 {
+        let mut spare = self.interaction_gaussian.take();
+        let value = sample_gaussian(&mut spare, &mut || self.random_double());
+        self.interaction_gaussian = spare;
+        value
     }
-    fn value_effect(&mut self, effect: &Value, level: i32, input: f32, depth: u8) -> Result<f32> {
+    pub(super) fn trident_spin_strength(&mut self, item: &Stack, content: &Content) -> Result<f32> {
+        let Some(values) = item
+            .component("minecraft:enchantments")
+            .and_then(Value::as_object)
+        else {
+            return Ok(0.);
+        };
+        let mut strength = 0.;
+        for (name, level) in values {
+            let level = level
+                .as_i64()
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or("invalid enchantment level")?;
+            if let Some(effect) = enchantment(content, name)?
+                .get("effects")
+                .and_then(|effects| effects.get("minecraft:trident_spin_attack_strength"))
+            {
+                strength = value_effect(effect, level, strength, 0, &mut |kind| match kind {
+                    EffectSample::Uniform => f64::from(self.random_float()),
+                    EffectSample::Gaussian => self.random_gaussian(),
+                })?;
+            }
+        }
+        Ok(strength)
+    }
+    pub(super) fn in_water_or_rain(
+        &mut self,
+        world: &World,
+        content: &Content,
+        entities: &EntityStore,
+        tick: u64,
+    ) -> Result<bool> {
+        if self.source_in_water(world, content, entities, tick)? {
+            return Ok(true);
+        }
+        self.rain_at_position
+            .ok_or_else(|| "source_rain_column_not_available".into())
+    }
+}
+    fn value_effect(effect: &Value, level: i32, input: f32, depth: u8, sample: &mut impl FnMut(EffectSample) -> f64) -> Result<f32> {
         if depth >= 64 {
             return Err("enchantment_effect_depth".into());
         }
@@ -1340,7 +1369,7 @@ impl Player {
                         .as_array()
                         .ok_or("invalid all_of effects")?
                     {
-                        result = self.value_effect(effect, level, result, depth + 1)?
+                        result = value_effect(effect, level, result, depth + 1, sample)?
                     }
                     result
                 }
@@ -1353,7 +1382,7 @@ impl Player {
                     {
                         let mut index = 0;
                         while (index as f32) < input {
-                            if self.random_float() < probability {
+                            if (sample(EffectSample::Uniform) as f32) < probability {
                                 removed += 1
                             }
                             index += 1;
@@ -1361,7 +1390,7 @@ impl Player {
                     } else {
                         let mean = f64::from(input * probability).floor();
                         let sigma = f64::from(input * probability * (1. - probability)).sqrt();
-                        removed = ((mean + self.random_gaussian() * sigma + 0.5).floor() as i32)
+                        removed = ((mean + sample(EffectSample::Gaussian) * sigma + 0.5).floor() as i32)
                             .clamp(0, input as i32);
                     }
                     input - removed as f32
@@ -1370,7 +1399,7 @@ impl Player {
             },
         )
     }
-    pub(crate) fn crossbow_charge_ticks(&mut self, item: &Stack, content: &Content) -> Result<f32> {
+    pub(crate) fn crossbow_charge_ticks(item: &Stack, content: &Content, sample: &mut impl FnMut(EffectSample) -> f64) -> Result<f32> {
         let mut seconds = 1.25;
         if let Some(values) = item.component("minecraft:enchantments").and_then(Value::as_object) {
             for (name, level) in values {
@@ -1380,48 +1409,29 @@ impl Player {
                     .get("effects")
                     .and_then(|effects| effects.get("minecraft:crossbow_charge_time"))
                 {
-                    seconds = self.value_effect(effect, level, seconds, 0)?;
+                    seconds = value_effect(effect, level, seconds, 0, sample)?;
                 }
             }
         }
         Ok((seconds * 20.).floor().max(1.))
     }
-    pub(super) fn trident_spin_strength(&mut self, item: &Stack, content: &Content) -> Result<f32> {
-        let Some(values) = item
-            .component("minecraft:enchantments")
-            .and_then(Value::as_object)
-        else {
-            return Ok(0.);
-        };
-        let mut strength = 0.;
-        for (name, level) in values {
-            let level = level
-                .as_i64()
-                .and_then(|value| i32::try_from(value).ok())
-                .ok_or("invalid enchantment level")?;
-            if let Some(effect) = enchantment(content, name)?
-                .get("effects")
-                .and_then(|effects| effects.get("minecraft:trident_spin_attack_strength"))
-            {
-                strength = self.value_effect(effect, level, strength, 0)?;
-            }
-        }
-        Ok(strength)
-    }
-    pub(super) fn in_water_or_rain(
-        &mut self,
-        world: &World,
-        content: &Content,
-        entities: &EntityStore,
-        tick: u64,
-    ) -> Result<bool> {
-        if self.source_in_water(world, content, entities, tick)? {
-            return Ok(true);
-        }
-        self.rain_at_position
-            .ok_or_else(|| "source_rain_column_not_available".into())
+
+#[derive(Clone, Copy)]
+pub(crate) enum EffectSample { Uniform, Gaussian }
+
+pub(crate) fn sample_gaussian(spare: &mut Option<f64>, uniform: &mut impl FnMut() -> f64) -> f64 {
+    if let Some(value) = spare.take() { return value; }
+    loop {
+        let x = 2. * uniform() - 1.;
+        let y = 2. * uniform() - 1.;
+        let square = x * x + y * y;
+        if square >= 1. || square == 0. { continue; }
+        let multiplier = (-2. * square.ln() / square).sqrt();
+        *spare = Some(y * multiplier);
+        return x * multiplier;
     }
 }
+
 
 impl Player {
     pub fn apply_pending_use_release(
