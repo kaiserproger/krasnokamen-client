@@ -3,6 +3,7 @@
 use crate::protocol::packet_ids::play::clientbound as cb;
 mod block_components;
 mod blocks;
+pub(crate) mod clip_pose;
 mod creaking_eyes;
 mod creeper;
 mod display;
@@ -164,6 +165,8 @@ pub struct Entity {
     pub death_tick: Option<u64>,
     pub hurt_direction: f32,
     pub submitted_revision: Option<u64>,
+    /// Keyframe clip layers the clip runtime plays (`clip_pose`).
+    pub clip: clip_pose::ClipState,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
@@ -835,6 +838,7 @@ impl Store {
                     death_tick: None,
                     hurt_direction: 0.,
                     submitted_revision: None,
+                    clip: Default::default(),
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"

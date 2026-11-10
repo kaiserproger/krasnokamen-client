@@ -79,6 +79,7 @@ impl Store {
                 death_tick: None,
                 hurt_direction: 0.,
                 submitted_revision: None,
+                clip: Default::default(),
             };
             entity.physical.lerp_duration = 1;
             entity.source = Some(source_state::SourceState::new(&entity, &models)?);

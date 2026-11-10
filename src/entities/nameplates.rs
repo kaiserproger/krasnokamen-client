@@ -385,6 +385,7 @@ mod tests {
             death_tick: None,
             hurt_direction: 0.,
             submitted_revision: None,
+            clip: Default::default(),
         };
         (Store::default(), models, entity)
     }

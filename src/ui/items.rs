@@ -120,10 +120,12 @@ pub(crate) fn item_model_location(id: &str) -> (&str, &str) {
 pub struct ItemModels {
     definitions: BTreeMap<String, Arc<Value>>,
     baked: BTreeMap<String, BakedModel>,
+    /// Retained selections with a process-unique serial (the identity crowd composites key on).
     selected: BTreeMap<
         (u32, usize, String, Vec<usize>),
-        (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6]),
+        (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64),
     >,
+    next_serial: u64,
     entities: Option<Arc<entities::Models>>,
 }
 impl ItemModels {
@@ -196,6 +198,24 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, [f32; 6])> {
+        self.select(c, s, ctx).map(|selected| (&selected.1, selected.2))
+    }
+    /// `model_with` plus an identity that changes whenever the selected geometry may.
+    pub(crate) fn model_identity<'a>(
+        &'a mut self,
+        c: &Content,
+        s: &Stack,
+        ctx: &ItemContext,
+    ) -> Result<(&'a BakedModel, u64)> {
+        self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
+    }
+    #[expect(clippy::type_complexity, reason = "the retained selection entry")]
+    fn select<'a>(
+        &'a mut self,
+        c: &Content,
+        s: &Stack,
+        ctx: &ItemContext,
+    ) -> Result<&'a (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64)> {
         if s.empty() {
             return Err("empty stack has no item model".into());
         }
@@ -318,14 +338,14 @@ impl ItemModels {
                 self.selected.clear();
             }
             let bounds = model_bounds(&result, display_matrix(&result, &ctx.display));
-            let selected =
-                self.selected
-                    .entry(key)
-                    .or_insert((Arc::clone(&s.components), result, bounds));
-            return Ok((&selected.1, selected.2));
+            self.next_serial += 1;
+            let serial = self.next_serial;
+            return Ok(self
+                .selected
+                .entry(key)
+                .or_insert((Arc::clone(&s.components), result, bounds, serial)));
         }
-        let selected = &self.selected[&key];
-        Ok((&selected.1, selected.2))
+        Ok(&self.selected[&key])
     }
 }
 // GUI overlays have no depth buffer. Keep the cutout material and its foil

@@ -63,6 +63,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         death_tick: None,
         hurt_direction: 0.,
         submitted_revision: None,
+        clip: Default::default(),
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},
