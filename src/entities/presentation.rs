@@ -2874,9 +2874,48 @@ mod tests {
     }
 
     #[test]
+    fn authored_arrow_matches_vanilla_26_3_arrow_model_layer() {
+        // Vanilla ArrowModel.createBodyLayer (26.3 javap): a 16x4x0 shaft plane at
+        // texOffs(0,0) shared by cross_1 (xRot 45deg) and cross_2 (xRot 135deg), plus
+        // a 5x5x0 "back" fletching plane at offset x=-11 (mesh scaled 0.9 -> -9.9),
+        // xRot 45deg, part scale 0.8; 32x32 texture. Default box unwrap: the shaft
+        // front face samples the whole [0,0,16,4] strip, not the 1px brown row.
+        let model = super::super::solaris_models::ModelFile::parse(include_str!(
+            "../../assets/solaris/models/entity/arrow.json"
+        )).unwrap();
+        assert_eq!(model.texture.path, "entity/projectiles/arrow.png");
+        assert_eq!(model.texture.size, [32, 32]);
+        assert_eq!(model.bone_names(), ["back", "cross_1", "cross_2"]);
+        let back = &model.bones[0];
+        assert!((back.pivot[0] - -9.9).abs() < 1e-6, "mesh pose scale 0.9 on -11");
+        assert_eq!(back.rotation, [45., 0., 0.]);
+        assert_eq!(back.scale, [0.8, 0.8, 0.8]);
+        assert_eq!(back.cubes.len(), 1);
+        assert_eq!(back.cubes[0].origin, [0., -2.5, -2.5]);
+        assert_eq!(back.cubes[0].size, [5., 5., 0.]);
+        assert_eq!(back.cubes[0].uv, [0., 0.]);
+        assert!(back.cubes[0].faces.is_empty(), "default box unwrap");
+        for (index, (name, rotation)) in [("cross_1", 45.), ("cross_2", 135.)].iter().enumerate() {
+            let bone = &model.bones[index + 1];
+            assert_eq!(bone.name, *name);
+            assert_eq!(bone.rotation, [*rotation, 0., 0.]);
+            assert_eq!(bone.cubes.len(), 1);
+            let cube = &bone.cubes[0];
+            assert_eq!(cube.origin, [-12., -2., 0.]);
+            assert_eq!(cube.size, [16., 4., 0.]);
+            assert_eq!(cube.uv, [0., 0.]);
+            assert!(cube.faces.is_empty(), "{name} default box unwrap: the shaft must not override the front face with the 1px row");
+        }
+        // The baked shaft front face samples the full 16x4 top strip of arrow.png.
+        let rects = model.uv_rects();
+        assert!(rects.iter().any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 4.]));
+        assert!(!rects.iter().any(|(_, rect)| *rect == [0., 2., 16., 3.]), "old hand-authored brown row");
+    }
+
+    #[test]
     fn trident_and_arrow_authored_axes_follow_same_projectile_orientation() {
         for (key, bone_name, axis, other) in [
-            ("minecraft:arrow#renderer/model", "shaft", 0, 1),
+            ("minecraft:arrow#renderer/model", "cross_1", 0, 2),
             ("minecraft:trident#renderer/model", "pole", 1, 0),
         ] {
             let rig = super::super::solaris_models::authored(key).unwrap();
