@@ -1127,6 +1127,35 @@ fn first_person_local_avatar_ignores_empty_equipment_stacks() {
     assert!(equipment[1..].iter().all(Option::is_none));
 }
 
+/// The local avatar keeps its first dead tick while dead, so its death tilt advances like a
+/// remote entity's (it used to restart every tick and never tilted).
+#[test]
+fn local_avatar_death_tick_holds_the_first_dead_tick_until_alive() {
+    let (mut models, entity) = fixture();
+    let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+    schema.class = "authored.player".into();
+    models.schemas.insert("minecraft:player".into(), schema);
+    let mut facts = models.motion.remove("minecraft:pig").unwrap();
+    facts.is_mob = false;
+    facts.body_rule = Some(render_living::BodyRule::Living);
+    models.motion.insert("minecraft:player".into(), facts);
+    let mut content = Content::test_cube();
+    content.entity_names.insert(1, "minecraft:player".into());
+    let inventory = crate::inventory::InventoryStore::default();
+    let mut player = crate::player::Player::new();
+    player.uuid = Some(Arc::from(entity.uuid));
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    let world = crate::protocol::world::World::default();
+    for (tick, health, expected) in [
+        (1, 20., None), (2, 0., Some(2)), (3, 0., Some(2)), (9, 0., Some(2)), (10, 20., None), (12, 0., Some(12)),
+    ] {
+        player.health = Some(health);
+        store.sync_local_avatar(&player, &inventory, &world, &content, (tick, tick as i64)).unwrap();
+        assert_eq!(store.local_avatar.as_ref().unwrap().death_tick, expected, "tick {tick}");
+    }
+}
+
 /// The villager family has no per-hand arm bones, only the crossed `arms`: the main-hand item
 /// (a witch's potion hangs from the nose) must still be emitted, at that anchor.
 #[test]
@@ -1993,4 +2022,57 @@ fn animation_kinetic_weapon_uses_the_component_zero_delay_default() {
     let delayed = action_pose(&models, &e, &content, &rig)[2].transform_vector3(Vec3::Y);
     assert!(delayed.z > -0.8, "an explicit delay retains its authored windup");
     assert!(immediate.is_finite() && delayed.is_finite());
+}
+
+/// NATIVE-DEATH-TILT-PIVOT. 26.3 `LivingEntityRenderer.setupRotations` (javap) turns a dying
+/// body about Z by `min(sqrt((deathTime - 1) / 20 * 1.6), 1) * 90` degrees after the body
+/// yaw and before `scale(-1, -1, 1)` and `translate(0, -1.501, 0)`: about the feet, level
+/// from render deathTime 13.5. The native root turned about a point 1.501 blocks up and
+/// reached level only at 20 ticks.
+#[test]
+fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
+    let (models, mut entity) = fixture();
+    entity.binding = Some(Ok(presentation::Binding {
+        rig: "authored:rig".into(),
+        texture: crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1 },
+        style: presentation::RootStyle::Living,
+        layers: None,
+        anger: None,
+    }));
+    entity.transform.position = [10.5, 64., -3.5];
+    entity.death_tick = Some(100);
+    let Some(Ok(binding)) = entity.binding.as_ref() else { unreachable!() };
+    let relative = Vec3::new(2.5, 4., -3.5);
+    // (ticks since the death event, partial, vanilla degrees): the render deathTime is 0
+    // until the first dead tick, then ticks + partial.
+    for (elapsed, partial, degrees) in [
+        (0, 0.5, 0.), (1, 0., 0.), (1, 0.5, 18.), (2, 0., 25.455_845), (5, 0.5, 54.),
+        (10, 0., 76.367_53), (13, 0.5, 90.), (14, 0., 90.), (19, 0.75, 90.),
+    ] {
+        let frame = presentation::EntityDrawFrame {
+            origin: [8., 60., 0.], transform: entity.transform, tick: 100 + elapsed, partial, light: [15., 0.], parent: None,
+        };
+        let root = presentation::root_matrix(&entity, &models, binding, frame, &|_| None);
+        let vanilla = Mat4::from_translation(relative)
+            * Mat4::from_rotation_y(std::f32::consts::PI)
+            * Mat4::from_rotation_z(f32::to_radians(degrees))
+            * Mat4::from_scale(Vec3::new(-1., -1., 1.))
+            * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
+        assert!(root.abs_diff_eq(vanilla, 1e-4), "deathTime {elapsed}+{partial}: {root:?} != {vanilla:?}");
+        // The feet stay on the received position; a point 1.8 blocks up sinks to the ground.
+        let feet = root.transform_point3(Vec3::new(0., 1.501, 0.));
+        assert!(feet.abs_diff_eq(relative, 1e-4), "deathTime {elapsed}+{partial}: feet {feet:?}");
+        let head = root.transform_point3(Vec3::new(0., 1.501 - 1.8, 0.)) - relative;
+        assert!((head.y - 1.8 * f32::to_radians(degrees).cos()).abs() < 1e-4, "deathTime {elapsed}+{partial}: head {head:?}");
+    }
+    // getFlipDegrees: 180 for spiders, cave spiders, silverfish and endermites; a death clip
+    // that replaces the root scales the vanilla turn down.
+    let about_feet = |degrees: f32| Mat4::from_translation(Vec3::new(0., 1.501, 0.))
+        * Mat4::from_rotation_z(degrees.to_radians())
+        * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
+    for (name, flip) in [("minecraft:spider", 180.), ("minecraft:cave_spider", 180.), ("minecraft:silverfish", 180.),
+        ("minecraft:endermite", 180.), ("minecraft:zombie", 90.)] {
+        assert!(presentation::death_tilt(name, 14, 0., 1.).abs_diff_eq(about_feet(flip), 1e-5), "{name}");
+        assert!(presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5), "{name}");
+    }
 }
