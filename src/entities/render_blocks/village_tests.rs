@@ -788,11 +788,12 @@ fn static_decorated_pot_uses_received_sherd_textures() {
     ])));
     let position = [8, 64, -12];
     place(&mut store, &content, position);
+    // MODEL-PLACED-POT-DECORATIONS: 26.3 PotDecorations sides are ItemStackTemplates, which decode
+    // a bare item id as well as an {id} record; the server sends placed-from-item pots as bare ids.
+    // Absent sides are brick.
     store.block_entities.get_mut(&position).unwrap().data = Arc::new(
         serde_json::json!({"sherds": {
-            "back": {"id": "minecraft:angler_pottery_sherd"},
-            "left": {"id": "minecraft:brick"},
-            "right": {"id": "minecraft:brick"},
+            "back": "minecraft:angler_pottery_sherd",
             "front": {"id": "minecraft:skull_pottery_sherd"}
         }}),
     );

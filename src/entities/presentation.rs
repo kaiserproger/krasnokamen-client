@@ -2515,24 +2515,16 @@ pub fn special_item(
     }
     if kind == "decorated_pot" {
         let sides = models.rig("minecraft:decorated_pot_sides#main");
-        let decorations = stack.component("minecraft:pot_decorations").and_then(Value::as_array);
+        let decorations = stack.component("minecraft:pot_decorations");
         matrices.clear();
         for bone in &sides.bones {
             let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(item_root)
                 * resources::transform(bone.pivot, bone.rotation, bone.scale);
             matrices.push(matrix);
-            let Some(index) = ["back", "left", "right", "front"].iter()
-                .position(|side| *side == bone.name) else { continue };
-            let item = decorations.and_then(|values| values.get(index))
-                .and_then(Value::as_str).unwrap_or("minecraft:brick");
-            let name = if let Some(pattern) = item.strip_prefix("minecraft:")
-                .and_then(|name| name.strip_suffix("_pottery_sherd"))
-            {
-                format!("entity/decorated_pot/{pattern}_pottery_pattern")
-            } else {
-                "entity/decorated_pot/decorated_pot_side".to_owned()
-            };
-            let tex = texture(content, &name)?;
+            if !["back", "left", "right", "front"].contains(&bone.name.as_str()) {
+                continue;
+            }
+            let tex = texture(content, &pot_side_texture(decorations, &bone.name))?;
             for quad in &bone.quads {
                 model.quads.push(BakedQuad {
                     positions: quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array()),
@@ -2558,6 +2550,20 @@ pub fn special_item(
         }
     }
     Ok(model)
+}
+
+/// Texture of one decorated-pot side. 26.3 `PotDecorations` (local javap) is a record of optional
+/// `back`/`left`/`right`/`front` ItemStackTemplates, and `ItemStackTemplate.CODEC` takes either
+/// the `{id, ...}` record or, as its alternative, a bare item id. Absent sides are brick.
+pub(super) fn pot_side_texture(decorations: Option<&Value>, side: &str) -> String {
+    let item = decorations
+        .and_then(|sides| sides.get(side))
+        .and_then(|template| template.as_str().or_else(|| template["id"].as_str()))
+        .unwrap_or("minecraft:brick");
+    match item.strip_prefix("minecraft:").and_then(|name| name.strip_suffix("_pottery_sherd")) {
+        Some(pattern) => format!("entity/decorated_pot/{pattern}_pottery_pattern"),
+        None => "entity/decorated_pot/decorated_pot_side".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -3045,9 +3051,10 @@ mod tests {
         assert!(back_count > 0 && side_count > back_count);
         let plain = special_item(&models, &content, &stack, &special).unwrap();
         assert_eq!(plain.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count);
+        // The 26.3 component as `inventory::components` decodes it: a side record of templates.
         stack.components = std::sync::Arc::new(BTreeMap::from([(
             "minecraft:pot_decorations".into(),
-            serde_json::json!(["minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:brick", "minecraft:brick"]),
+            serde_json::json!({"back": {"id": "minecraft:angler_pottery_sherd"}, "front": {"id": "minecraft:brick"}}),
         )]));
         let patterned = special_item(&models, &content, &stack, &special).unwrap();
         assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 42).count(), back_count);
