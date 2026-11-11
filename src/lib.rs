@@ -1,6 +1,7 @@
 pub mod api;
 pub mod audio;
 pub mod automation;
+pub mod capture;
 mod controls;
 #[cfg(test)]
 mod controls_tests;
@@ -21,6 +22,7 @@ pub mod player;
 pub mod profile_textures;
 pub mod protocol;
 pub mod render;
+pub mod replay;
 pub mod session;
 mod screenshot;
 mod singleplayer;
@@ -130,6 +132,8 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
         return launch::play(args);
     }
     match args.next().as_deref() {
+        Some("render-replay") => capture::cli(args),
+        Some("record") => replay::record::cli(args),
         Some("mcp-schema") => {
             if args.next().is_some() {
                 return Err("usage: solaris-client mcp-schema".into());
@@ -340,9 +344,9 @@ impl App {
             native_modifiers: crate::ui::Modifiers::default(),
             ime_composing: false,
             hotbar_wheel: hotbar_wheel::HotbarWheel::default(),
-            next_tick: Instant::now(),
+            next_tick: replay::clock::now(),
             tick_interval,
-            next_frame: Instant::now(),
+            next_frame: replay::clock::now(),
             advance_cpu_ms: 0.,
             drain_cpu_ms: 0.,
             publish_cpu_ms: 0.,
@@ -851,7 +855,7 @@ impl App {
             },
             None => None,
         };
-        let remaining = self.next_tick.saturating_duration_since(Instant::now()).as_secs_f32();
+        let remaining = self.next_tick.saturating_duration_since(replay::clock::now()).as_secs_f32();
         let prepare_start = Instant::now();
         self.session.prepare_frame(
             (1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.),
@@ -967,13 +971,13 @@ impl App {
         // both return unchanged). Pass the already-drained flag in so the
         // first tick skips its duplicate drain.
         let mut events_drained = false;
-        if self.next_tick > Instant::now() {
+        if self.next_tick > replay::clock::now() {
             let events_start = Instant::now();
             changed |= self.session.process_events();
             self.events_cpu_ms += events_start.elapsed().as_secs_f64() * 1000.;
             events_drained = true;
         }
-        let now = Instant::now();
+        let now = replay::clock::now();
         let interval = self.session.tick_interval();
         if interval != self.tick_interval {
             self.tick_interval = interval;

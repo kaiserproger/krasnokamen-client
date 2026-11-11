@@ -19,6 +19,7 @@ mod entity_instancing_tests;
 mod entity_instancing;
 mod far;
 mod far_generate;
+mod capture;
 mod frame;
 mod graphics;
 pub use graphics::GraphicsPreset;
@@ -548,7 +549,8 @@ impl Renderer {
             || height == 0
             || width > adapter.limits().max_texture_dimension_2d
             || height > adapter.limits().max_texture_dimension_2d
-            || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024 > 256 * 1024 * 1024
+            || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024
+                > if surface.is_none() { 2 * 1024 * 1024 * 1024 } else { 256 * 1024 * 1024 }
         {
             return Err("render_target_dimensions_or_memory_budget_exceeded".into());
         }
@@ -882,7 +884,7 @@ impl Renderer {
             capabilities,
             device_type: adapter_info.device_type,
             timing,
-            monotonic_origin: Instant::now(),
+            monotonic_origin: crate::replay::clock::now(),
             visibility_time_ms: 0,
             capture: None,
             capture_cull: None,

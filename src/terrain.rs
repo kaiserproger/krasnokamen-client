@@ -158,6 +158,7 @@ pub struct Terrain {
     queue: Arc<JobQueue>,
     threads: Vec<thread::JoinHandle<()>>,
     receive: mpsc::Receiver<Completion>,
+    replay_completion: Option<Completion>,
     /// Dispatched jobs whose completion has not been received yet.
     in_flight: usize,
     max_in_flight: usize,
@@ -246,6 +247,7 @@ impl Terrain {
             queue,
             threads,
             receive,
+            replay_completion: None,
             in_flight: 0,
             max_in_flight,
             candidates: [Vec::new(), Vec::new()],
@@ -637,7 +639,7 @@ impl Terrain {
         }
         self.camera = Some(camera);
         let mut changed = self.sync_view(world, camera, render_distance, draws)?;
-        while let Ok(completion) = self.receive.try_recv() {
+        while let Some(completion) = self.replay_completion.take().or_else(|| self.receive.try_recv().ok()) {
             self.in_flight -= 1;
             self.has_pending = true;
             if let Some(section) = self.sections.get_mut(&completion.key) {
@@ -699,6 +701,24 @@ impl Terrain {
             self.dispatch(world, camera, &catalog, rules, draws, free);
         }
         Ok(changed)
+    }
+
+    /// Offline export only. Preserve the completion for the ordinary update
+    /// path; do not simulate another tick while waiting for worker output.
+    pub(crate) fn wait_replay_completion(
+        &mut self, replay: bool, timeout: std::time::Duration,
+    ) -> Result<bool> {
+        if !replay { return Err("terrain blocking completion is forbidden in live mode".into()); }
+        if self.replay_completion.is_some() { return Ok(true); }
+        if self.in_flight == 0 {
+            if !self.pending.is_empty() {
+                return Err("replay terrain cannot finish within CPU mesh residency budget".into());
+            }
+            return Ok(false);
+        }
+        self.replay_completion = Some(self.receive.recv_timeout(timeout)
+            .map_err(|e| format!("replay terrain completion: {e}"))?);
+        Ok(true)
     }
     /// Score every eligible section once and queue the best `free` jobs.
     /// Prompt jobs go first (and to the front of the worker queue):

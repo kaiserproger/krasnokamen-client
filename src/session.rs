@@ -13,6 +13,7 @@ mod entity_aim_tests;
 mod mining_start_tests;
 mod observation;
 mod packets;
+mod replay;
 mod ui_packets;
 mod weather;
 #[cfg(test)]
@@ -61,7 +62,7 @@ struct PredictedBlock {
 }
 struct Loaded {
     content: Content,
-    network: Network,
+    network: Option<Network>,
     models: Arc<crate::entities::Models>,
 }
 
@@ -75,6 +76,10 @@ pub struct Session {
     instance_id: String,
     presentation: bool,
     network: Option<Network>,
+    replaying: bool,
+    recording: Option<crate::replay::format::RecordingOptions>,
+    recording_tick: Option<u64>,
+    cinematic_camera: Option<crate::capture::camera::Pose>,
     loading: Option<mpsc::Receiver<Result<Loaded>>>,
     wake: Arc<RwLock<Wake>>,
     pub(crate) phase: String,
@@ -194,6 +199,10 @@ impl Session {
             instance_id,
             presentation,
             network: None,
+            replaying: false,
+            recording: None,
+            recording_tick: None,
+            cinematic_camera: None,
             loading: None,
             wake: Arc::new(RwLock::new(Arc::new(|| {}))),
             phase: "fixture".into(),
@@ -207,7 +216,7 @@ impl Session {
             entities: EntityStore::new(),
             ui: None,
             ui_viewport: None,
-            ui_clock: std::time::Instant::now(),
+            ui_clock: crate::replay::clock::now(),
             loader: crate::loader::Loader::default(),
             environment: Environment::new(),
             terrain: None,
@@ -551,6 +560,7 @@ impl Session {
         let main_arm_right = self.main_arm_right;
         let wake = self.wake_callback();
         let presentation = self.presentation;
+        let recording = self.recording.clone();
         thread::Builder::new()
             .name("session-bootstrap".into())
             .spawn(move || {
@@ -568,10 +578,10 @@ impl Session {
                         crate::entities::Models::load_state(&content)?
                     });
                     eprintln!("session startup: connecting network");
-                    let network = Network::connect(endpoint, username, view_distance, main_arm_right, wake.clone())?;
+                    let network = Network::connect(endpoint, username, view_distance, main_arm_right, wake.clone(), recording)?;
                     Ok(Loaded {
                         content,
-                        network,
+                        network: Some(network),
                         models,
                     })
                 })();
@@ -771,6 +781,7 @@ impl Session {
         Ok(out)
     }
     fn send(&self, id: i32, payload: Writer) -> Result<()> {
+        if self.replaying { return Ok(()); }
         self.network
             .as_ref()
             .ok_or("not connected")?
@@ -830,6 +841,7 @@ impl Session {
         self.send_loader(outgoing)
     }
     fn flush_commands(&mut self) -> Result<()> {
+        if self.replaying { self.commands.clear(); return Ok(()); }
         let network = self.network.as_ref().ok_or("not connected")?;
         for command in self.commands.drain(..) {
             network.send(command.id, command.payload.0)?;
@@ -840,53 +852,7 @@ impl Session {
         let mut changed = self.poll_local_server();
         if let Some(result) = self.loading.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.loading = None;
-            let result = result.and_then(|loaded| {
-                eprintln!("session startup: activating content and UI");
-                self.entities.activate_models(loaded.models.clone());
-                self.player.set_visual_models(Arc::clone(&loaded.models));
-                // Font/FreeType resources are owner-thread local, not transferable.
-                let mut ui = if self.presentation {
-                    UiState::new(&loaded.content)?
-                } else {
-                    UiState::new_state(&loaded.content)?
-                };
-                self.entities.set_text_renderer(ui.text_renderer());
-                ui.set_entity_models(loaded.models);
-                if let Some((width, height, scale)) = self.ui_viewport {
-                    ui.resize(width, height, scale);
-                }
-                self.resource_epoch += 1;
-                if self.presentation {
-                    self.install_atlas(&loaded.content);
-                }
-                self.content = Some(loaded.content);
-                ui.singleplayer_active = self.local_server.is_some();
-                self.ui = Some(ui);
-                // Re-apply persisted client-local Options onto the fresh UI/session
-                // state (fresh UiState starts with an empty settings map), then
-                // re-publish the persisted radius: the worker was spawned with
-                // the pre-activation value (bootstrap loads before activation).
-                self.apply_persisted_settings(crate::local_config::load_client_settings());
-                self.network = Some(loaded.network);
-                if let Some(network) = self.network.as_ref() {
-                    network.set_view_distance(
-                        self.render_distance
-                            .clamp(
-                                UiState::MIN_RENDER_DISTANCE,
-                                UiState::MAX_RENDER_DISTANCE,
-                            ) as u8,
-                    );
-                    network.set_main_arm_right(self.main_arm_right);
-                }
-                if self.presentation && self.terrain.is_none() {
-                    self.terrain = Some(Terrain::new(self.wake_callback())?);
-                }
-                self.phase = "status".into();
-                // Stay in title mode across an ordinary Title Connect: a later
-                // manual disconnect returns to the Title screen (the windowed
-                // Title proof asserts this round-trip).
-                Ok(())
-            });
+            let result = result.and_then(|loaded| self.activate_resources(loaded));
             if let Err(error) = result {
                 self.fail(error);
             }
@@ -920,15 +886,11 @@ impl Session {
                     break;
                 }
                 Event::Packet(phase, id, body) => {
-                    self.packet_sequence += 1;
-                    *self.packet_counts.entry(id).or_default() += 1;
-                    if let Err(error) = self.apply(phase, id, &body) {
-                        self.fail(format!(
-                            "{phase:?} packet 0x{id:02x} sequence {}: {error}",
-                            self.packet_sequence
-                        ));
+                    if let Err(error) = self.receive_packet(phase, id, &body) {
+                        self.fail(error);
                         break;
                     }
+                    continue; // receive_packet already publishes this mutation.
                 }
             }
             self.changed_state();
@@ -1103,6 +1065,15 @@ impl Session {
         self.camera_mode == 0 && self.content.as_ref().is_some_and(|content| self.player.is_scoping(content))
     }
     fn camera(&mut self) {
+        if let Some(pose) = self.cinematic_camera {
+            self.scene.camera_position = pose.position;
+            self.scene.yaw = pose.yaw;
+            self.scene.pitch = pose.pitch;
+            self.scene.fov_deg = pose.fov;
+            self.scene.roll_deg = 0.;
+            self.scene.hurt_tilt_deg = 0.;
+            return;
+        }
         let view = self.player.visual_view(self.local_partial);
         let yaw = self.player.yaw;
         self.scene.camera_position = view.eye;
@@ -1154,7 +1125,7 @@ impl Session {
         if !self.presentation {
             return;
         }
-        let now = self.ui_clock.elapsed().as_secs_f64();
+        let now = crate::replay::clock::elapsed(self.ui_clock).as_secs_f64();
         let (Some(ui), Some(content)) = (self.ui.as_mut(), self.content.as_ref()) else {
             return;
         };

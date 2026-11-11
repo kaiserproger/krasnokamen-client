@@ -220,7 +220,7 @@ impl Tile {
             revision: 0,
             dirty: false,
             requested: false,
-            touched: Instant::now(),
+            touched: crate::replay::clock::now(),
             generated: false,
         }
     }
@@ -588,7 +588,7 @@ impl Default for Far {
             tiles: HashMap::new(),
             desired: Vec::new(),
             desired_for: None,
-            desired_at: Instant::now(),
+            desired_at: crate::replay::clock::now(),
             inflight: HashMap::new(),
             colours: None,
             writer: None,
@@ -714,7 +714,7 @@ impl Far {
             .collect();
         for (key, index, height, rgba) in resolved {
             let tile = self.resident(key);
-            tile.touched = Instant::now();
+            tile.touched = crate::replay::clock::now();
             if write(tile, index, height, rgba, Source::Received) {
                 self.revision += 1;
             }
@@ -782,7 +782,7 @@ impl Far {
             return Vec::new();
         };
         let cell = [camera[0], camera[2]].map(|v| (v / 16.).floor() as i64);
-        let now = Instant::now();
+        let now = crate::replay::clock::now();
         // Moving recomputes at once; chunk loads alone at most once a second.
         let stale = match self.desired_for {
             None => true,
@@ -1066,7 +1066,7 @@ fn read_cache(path: &Path) -> Option<Tile> {
         revision: 1,
         dirty: false,
         requested: false,
-        touched: Instant::now(),
+        touched: crate::replay::clock::now(),
         generated: false,
     })
 }

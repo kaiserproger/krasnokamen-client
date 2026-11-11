@@ -1020,7 +1020,7 @@ mod tests {
         });
         let mut session = Session::new_mode("pack-test".into(), false);
         session.content = Some(Content::test_cube());
-        session.network = Some(Network::connect(address.to_string(), "PackTest".into(), 8, true, Arc::new(|| {})).unwrap());
+        session.network = Some(Network::connect(address.to_string(), "PackTest".into(), 8, true, Arc::new(|| {}), None).unwrap());
         wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
         let mut push = Writer((0..16).collect());
         push.string("https://example.invalid/pack.zip");
@@ -1257,7 +1257,7 @@ mod tests {
         for x in 1..=COUNT / 4096 {
             session.world.insert([x, 0], template.clone()).unwrap();
         }
-        session.network = Some(Network::connect(address.to_string(), "BurstTest".into(), 8, true, Arc::new(|| {})).unwrap());
+        session.network = Some(Network::connect(address.to_string(), "BurstTest".into(), 8, true, Arc::new(|| {}), None).unwrap());
         // No consumer runs until the peer observes the echo: a full world-event
         // queue must never stop the socket owner from reading the keepalive.
         let elapsed = answer.recv_timeout(Duration::from_secs(1));
