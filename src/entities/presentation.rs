@@ -2362,8 +2362,16 @@ pub fn special_item(
                 _ => return Err(format!("unknown special head family {kind}")),
             }
         }
+        // Source CopperGolemStatueSpecialRenderer.Unbaked: `pose` is a required field
+        // that selects one of the four golem layers, as the placed statue does.
         "copper_golem_statue" => (
-            "minecraft:copper_golem#main",
+            match special["pose"].as_str() {
+                Some("standing") => "minecraft:copper_golem#main",
+                Some("running") => "minecraft:copper_golem_running#main",
+                Some("sitting") => "minecraft:copper_golem_sitting#main",
+                Some("star") => "minecraft:copper_golem_star#main",
+                _ => return Err("copper golem statue item pose missing or invalid".into()),
+            },
             special["texture"]
                 .as_str()
                 .ok_or("copper golem statue item texture missing")?
@@ -2438,6 +2446,11 @@ pub fn special_item(
         // The rig is centered in X/Z and uses +Y down; item coordinates use +Y up.
         Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
             * Mat4::from_scale(Vec3::new(1., -1., 1.))
+    } else if kind == "copper_golem_statue" {
+        // Source CopperGolemStatueModel.setupAnim: the root sits at the feet (y = 0)
+        // and turns half about Z. Authored rigs keep the feet at y = 24 px, so the
+        // turned feet are lifted back to 0, like the placed statue's root.
+        Mat4::from_translation(Vec3::new(0., 1.5, 0.)) * Mat4::from_rotation_z(std::f32::consts::PI)
     } else {
         Mat4::IDENTITY
     };

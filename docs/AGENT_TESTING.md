@@ -75,6 +75,32 @@ Run isolated negative controls for map winding, framed-map drawing and potion
 event admission; retain exact binary/tree/packet/frame identities. Source-phase
 authored cases are unexecuted until Main records focused runs and real frames.
 
+### Held items, held and framed maps, potion impacts (Java oracle gate)
+
+`tools/held_items_scene.json` is one scene-shot scenario for both clients: a
+light-gray concrete floor, the copper golem statue in its sitting and standing
+poses, a default player head, a filled map with a real `map_id` (created by using
+an empty map) held two-handed and then one-handed beside an off-hand item frame,
+that map in a floor item frame, and water (2002) and healing (2007) splash
+potions thrown at the floor. Shoot it once with `--client java` and once with
+`--client native` against the same release server, then run
+`tools/held_items_oracle.py <java-receipt> <native-receipt> --panels <dir>`. It
+compares item and map silhouettes (intersection over union and area ratio) and
+the count and spread of potion-coloured particle pixels, and exits non-zero on
+any failed shot.
+
+The Java oracle runs NeoForge, whose first-person renderer treats any
+`MapItem` as a map; vanilla 26.3 tests `DataComponents.MAP_ID`. An id-less
+`filled_map` is therefore an ordinary sprite in vanilla and on the native
+client but a blank two-handed map on the oracle, so map scenes must hold a map
+with a real ID.
+
+The floor frame sits two blocks ahead of the player: the oracle reported its
+crosshair hit three blocks away as out of entity reach (`target.type = miss`)
+and never inserted the map. Each item shot waits 220 ticks after its
+`item replace` so the chat lines and the selected-item name have faded on both
+clients before the silhouettes are compared.
+
 ### Mount inventory quick-move
 
 The session associates an opened mount screen with the already received entity

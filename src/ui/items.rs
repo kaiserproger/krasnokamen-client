@@ -217,6 +217,30 @@ impl ItemModels {
     ) -> Result<(&'a BakedModel, u64)> {
         self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
     }
+    /// The received stack's client item definition (`assets/<ns>/items/<path>.json`).
+    fn definition(&mut self, c: &Content, s: &Stack) -> Result<Arc<Value>> {
+        let id = item_model_id(c, s).ok_or("unknown item model ID")?;
+        if !self.definitions.contains_key(id) {
+            let (ns, path) = item_model_location(id);
+            let bytes = c.resource_bytes(&format!("assets/{ns}/items/{path}.json"))?;
+            let v: Value =
+                serde_json::from_slice(&bytes).map_err(|e| format!("item graph {id}: {e}"))?;
+            self.definitions.insert(id.into(), Arc::new(v));
+        }
+        Ok(Arc::clone(&self.definitions[id]))
+    }
+    /// Source `ClientItem.Properties.swap_animation_scale` (default 1): scales how far
+    /// the first-person hand lowers while this item is swapped in or out.
+    pub(crate) fn swap_animation_scale(&mut self, c: &Content, s: &Stack) -> Result<f32> {
+        if s.empty() || item_model_id(c, s).is_none() {
+            return Ok(1.);
+        }
+        match self.definition(c, s)?.get("swap_animation_scale") {
+            None => Ok(1.),
+            Some(value) => value.as_f64().map(|v| v as f32)
+                .ok_or_else(|| "item swap_animation_scale must be a number".into()),
+        }
+    }
     #[expect(clippy::type_complexity, reason = "the retained selection entry")]
     fn select<'a>(
         &'a mut self,
@@ -227,15 +251,7 @@ impl ItemModels {
         if s.empty() {
             return Err("empty stack has no item model".into());
         }
-        let id = item_model_id(c, s).ok_or("unknown item model ID")?;
-        if !self.definitions.contains_key(id) {
-            let (ns, path) = item_model_location(id);
-            let bytes = c.resource_bytes(&format!("assets/{ns}/items/{path}.json"))?;
-            let v: Value =
-                serde_json::from_slice(&bytes).map_err(|e| format!("item graph {id}: {e}"))?;
-            self.definitions.insert(id.into(), Arc::new(v));
-        }
-        let definition = Arc::clone(&self.definitions[id]);
+        let definition = self.definition(c, s)?;
         let graph = &definition["model"];
         let mut nodes = Vec::new();
         evaluate(graph, s, ctx, 0, Mat4::IDENTITY, &mut nodes)?;
@@ -403,9 +419,11 @@ fn sort_gui_special_head(model: &mut BakedModel) {
 /// Source `ItemTransform.apply`: translate, rotate by the quaternion
 /// `rotationXYZ(rx, ry, rz)` (matrix `Rx * Ry * Rz`, so a vertex is turned about Z
 /// first and X last), scale, then recentre the unit-cube model on the origin.
+/// `ItemDisplayContext.leftHand()` is true for both left-hand contexts, first and
+/// third person, and negates the translation X and the Y/Z rotations.
 pub(crate) fn display_matrix(model: &BakedModel, context: &str) -> Mat4 {
     if let Some(t) = model.display.get(context) {
-        let mirrored = context == "thirdperson_lefthand";
+        let mirrored = matches!(context, "thirdperson_lefthand" | "firstperson_lefthand");
         let translation = Vec3::from_array(t.translation)
             * if mirrored { Vec3::new(-1., 1., 1.) } else { Vec3::ONE };
         let rotation = Vec3::from_array(t.rotation)
@@ -1140,19 +1158,21 @@ mod tests {
             && matches!(q.tint, TintKind::Constant(_))));
     }
 
-    fn assert_thirdperson_left_mirrored(model: &BakedModel) {
+    /// `left` equals the reflection (x -> -x) of the right-hand transform applied to the
+    /// mirrored unit-cube point, with the same source values in both contexts.
+    fn assert_left_mirrored(model: &BakedModel, left_context: &str, right_context: &str) {
         let mut same_transform = model.clone();
-        let left = *same_transform.display.get("thirdperson_lefthand")
+        let left = *same_transform.display.get(left_context)
             .expect("left hand display resource");
-        same_transform.display.insert("thirdperson_righthand".into(), left);
-        let left = display_matrix(model, "thirdperson_lefthand");
-        let right = display_matrix(&same_transform, "thirdperson_righthand");
+        same_transform.display.insert(right_context.into(), left);
+        let left = display_matrix(model, left_context);
+        let right = display_matrix(&same_transform, right_context);
         let reflect = Vec3::new(-1., 1., 1.);
         for point in [Vec3::splat(0.5), Vec3::new(0.2, 0.3, 0.8), Vec3::new(0.9, 0.7, 0.1)] {
             let mirrored_input = (point - Vec3::splat(0.5)) * reflect + Vec3::splat(0.5);
             let expected = right.transform_point3(mirrored_input) * reflect;
             let actual = left.transform_point3(point);
-            assert!((actual - expected).length() < 1e-5, "{actual:?} != {expected:?}");
+            assert!((actual - expected).length() < 1e-5, "{left_context}: {actual:?} != {expected:?}");
         }
     }
 
@@ -1166,8 +1186,8 @@ mod tests {
             for (actual, original) in model.quads.iter().zip(&baseline.quads) {
                 assert_eq!(actual.positions, original.positions, "geometry changed for {hand}");
             }
-            if hand == "thirdperson_lefthand" {
-                assert_thirdperson_left_mirrored(model);
+            if let Some(right) = hand.strip_suffix("lefthand") {
+                assert_left_mirrored(model, hand, &format!("{right}righthand"));
             }
         }
     }
@@ -1201,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn thirdperson_left_display_mirrors_shield_and_preserves_first_person_and_sword() {
+    fn left_hand_displays_mirror_shield_and_sword_in_first_and_third_person() {
         let mut content = Content::test_cube();
         content.insert_test_texture("minecraft:entity/shield/shield_base_nopattern",
             crate::protocol::content::TextureRegion { layer: 5, uv: [0., 0., 1., 1.], width: 64, height: 64 });
@@ -1240,15 +1260,46 @@ mod tests {
                 assert_eq!(actual.positions, original.positions, "ordinary model must not shift");
             }
             if hand == "thirdperson_lefthand" {
-                assert_thirdperson_left_mirrored(sword);
+                assert_left_mirrored(sword, hand, "thirdperson_righthand");
             }
         }
         let mut fixture = BakedModel::default();
         fixture.display.insert("thirdperson_lefthand".into(), asymmetric);
         fixture.display.insert("thirdperson_righthand".into(), asymmetric);
         fixture.display.insert("firstperson_lefthand".into(), asymmetric);
-        assert_thirdperson_left_mirrored(&fixture);
-        assert_eq!(display_matrix(&fixture, "firstperson_lefthand"), display_matrix(&fixture, "thirdperson_righthand"));
+        fixture.display.insert("firstperson_righthand".into(), asymmetric);
+        // 26.3 ItemStackRenderState applies ItemTransform with displayContext.leftHand(),
+        // which is true for FIRST_PERSON_LEFT_HAND as well as THIRD_PERSON_LEFT_HAND.
+        assert_left_mirrored(&fixture, "thirdperson_lefthand", "thirdperson_righthand");
+        assert_left_mirrored(&fixture, "firstperson_lefthand", "firstperson_righthand");
+        assert_ne!(display_matrix(&fixture, "firstperson_lefthand"), display_matrix(&fixture, "firstperson_righthand"));
+    }
+
+    #[test]
+    fn missing_left_hand_display_reuses_the_same_files_right_hand_transform() {
+        // Source ItemTransforms deserializer: per model file, an absent left-hand
+        // transform is that file's right-hand one; parents only fill contexts a file
+        // leaves empty (ResolvedModel.findTopTransform).
+        let mut content = Content::test_cube();
+        content.insert_test_resource("assets/test/models/item/flat.json",
+            br#"{"display":{"firstperson_righthand":{"rotation":[0,-90,25],"translation":[1.13,3.2,1.13],"scale":[0.68,0.68,0.68]},
+                "thirdperson_righthand":{"translation":[0,3,1],"scale":[0.55,0.55,0.55]}}}"#);
+        content.insert_test_resource("assets/test/models/item/framed.json", br#"{"parent":"test:item/flat"}"#);
+        content.insert_test_resource("assets/test/models/item/tool.json",
+            br#"{"parent":"test:item/flat","display":{"firstperson_lefthand":{"rotation":[0,90,-25]}}}"#);
+        content.insert_test_resource("assets/test/models/item/override.json",
+            br#"{"parent":"test:item/tool","display":{"firstperson_righthand":{"translation":[2,0,0]}}}"#);
+        let framed = content.bake_model("test:item/framed").unwrap();
+        for (left, right) in [("firstperson_lefthand", "firstperson_righthand"), ("thirdperson_lefthand", "thirdperson_righthand")] {
+            let (l, r) = (framed.display[left], framed.display[right]);
+            assert_eq!((l.rotation, l.translation, l.scale), (r.rotation, r.translation, r.scale), "{left}");
+            assert_left_mirrored(&framed, left, right);
+        }
+        let tool = content.bake_model("test:item/tool").unwrap();
+        assert_eq!(tool.display["firstperson_lefthand"].rotation, [0., 90., -25.]);
+        let overridden = content.bake_model("test:item/override").unwrap();
+        assert_eq!(overridden.display["firstperson_lefthand"].translation, [0.125, 0., 0.]);
+        assert_eq!(overridden.display["firstperson_lefthand"].rotation, [0., 0., 0.]);
     }
 
     #[test]
