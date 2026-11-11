@@ -874,6 +874,7 @@ impl Session {
                                 && self.player.permission_level.is_some_and(|level| level >= 2)),
                         game_time: self.environment.game_time(),
                         partial: self.presentation_partial,
+                        clock_environment: Some((&item_context, &item_time_at)),
                         sample_light: &sample_light,
                     },
                     &mut self.scene.dynamic,

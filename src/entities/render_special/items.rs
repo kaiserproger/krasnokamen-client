@@ -29,11 +29,11 @@ pub(in crate::entities) fn observed_stack(content: &Content, value: &Value) -> R
     crate::inventory::creative_stack_with_components(content, id, count, &components).map(Some)
 }
 impl Cache {
-    fn observed_stack<'a>(
-        &'a mut self,
+    fn ensure_observed_stack(
+        &mut self,
         content: &Content,
         value: &Value,
-    ) -> Result<Option<&'a Stack>> {
+    ) -> Result<usize> {
         let key = value as *const Value as usize;
         let changed = self
             .observed_items
@@ -54,7 +54,7 @@ impl Cache {
                 },
             );
         }
-        Ok(self.observed_items[&key].stack.as_ref())
+        Ok(key)
     }
 }
 pub(crate) struct ObservedItemFrame<'a> {
@@ -62,6 +62,7 @@ pub(crate) struct ObservedItemFrame<'a> {
     pub seed: i32,
     pub root: Mat4,
     pub light: [f32; 2],
+    pub block_world: Option<([i32; 3], f32, super::super::ClockEnvironment<'a>)>,
 }
 
 pub(crate) fn append_observed_item(
@@ -72,8 +73,9 @@ pub(crate) fn append_observed_item(
     cache: &mut Cache,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let ObservedItemFrame { context, seed, root, light } = frame;
-    let Some(stack) = cache.observed_stack(content, observed)? else {
+    let ObservedItemFrame { context, seed, root, light, block_world } = frame;
+    let key = cache.ensure_observed_stack(content, observed)?;
+    let Some(stack) = cache.observed_items[&key].stack.as_ref() else {
         return Ok(());
     };
     let display = match context {
@@ -81,10 +83,30 @@ pub(crate) fn append_observed_item(
         "on_shelf_bottom" | "on_shelf_center" => "on_shelf",
         value => value,
     };
+    let mut world_context = None;
+    if let Some((position, yaw, (base, time_at))) = block_world
+        && dynamic_item(&mut cache.dynamic_models, content, stack)?
+        && let Some(mut world) = base.world.clone()
+    {
+        let point = position.map(|coordinate| f64::from(coordinate) + 0.5);
+        let (sun_angle, moon_phase) = time_at(point)?;
+        world.position = point;
+        world.yaw = yaw;
+        world.sun_angle = sun_angle;
+        world.moon_phase = moon_phase;
+        let key = (position, seed);
+        if cache.block_clock_needles.len() >= 4096 && !cache.block_clock_needles.contains_key(&key) {
+            cache.block_clock_needles.pop_first();
+        }
+        world.needles = cache.block_clock_needles.entry(key).or_default().clone();
+        let mut state = base.clone();
+        state.world = Some(world);
+        world_context = Some(state);
+    }
     let state = ItemContext {
         display: display.into(),
         seed,
-        ..Default::default()
+        ..world_context.unwrap_or_default()
     };
     let (model, bounds) = items.model_with_bounds(content, stack, &state)?;
     let matrix = crate::ui::items::display_matrix(model, display);

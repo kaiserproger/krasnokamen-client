@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "id": "cushion",
+  "texture": {
+    "path": "entity/cushion/white_cushion.png",
+    "size": [
+      64,
+      64
+    ]
+  },
+  "bones": [
+    {
+      "name": "cushion",
+      "pivot": [
+        0,
+        24,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -8,
+            -4,
+            -8
+          ],
+          "size": [
+            16,
+            4,
+            16
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "inflate": -0.005
+        }
+      ]
+    }
+  ]
+}

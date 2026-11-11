@@ -542,11 +542,15 @@ mod tests {
     use super::*;
 
     /// Textures of the received-render fixture; each has its own atlas layer.
-    const FIXTURE_TEXTURES: [&str; 8] = [
+    const FIXTURE_TEXTURES: [&str; 12] = [
         "test:painting/canvas", "minecraft:painting/back", "minecraft:test/frame",
         "minecraft:entity/minecart/minecart", "minecraft:entity/cushion/white_cushion",
         "minecraft:entity/cushion/lime_cushion", "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer_small",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner_small",
     ];
     fn fixture_layer(texture: &str) -> u32 {
         7 + FIXTURE_TEXTURES.iter().position(|name| *name == texture).unwrap() as u32
@@ -638,6 +642,23 @@ mod tests {
         let top = out.vertices.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
         assert!(bottom >= -0.001, "minecart bottom below received rail position: {bottom}");
         assert!(top > 0.5, "minecart top buried: {top}");
+    }
+
+    #[test]
+    fn entity_render_263_cushion_and_sulfur_cube_use_received_metadata() {
+        let white = render_received_fixture("minecraft:cushion", 0, &[]);
+        let lime = render_received_fixture("minecraft:cushion", 0, &[1, 8, 43, 5, 255]);
+        let has = |out: &crate::api::DynamicGeometry, texture: &str| {
+            out.vertices.iter().any(|v| v.texture_layer == fixture_layer(texture))
+        };
+        assert!(has(&white, "minecraft:entity/cushion/white_cushion"));
+        assert!(has(&lime, "minecraft:entity/cushion/lime_cushion"));
+        let adult = render_received_fixture("minecraft:sulfur_cube", 0, &[]);
+        let baby = render_received_fixture("minecraft:sulfur_cube", 0, &[1, 16, 8, 1, 255]);
+        assert!(has(&adult, "minecraft:entity/sulfur_cube/sulfur_cube_outer"));
+        assert!(has(&adult, "minecraft:entity/sulfur_cube/sulfur_cube_inner"));
+        assert!(has(&baby, "minecraft:entity/sulfur_cube/sulfur_cube_outer_small"));
+        assert!(has(&baby, "minecraft:entity/sulfur_cube/sulfur_cube_inner_small"));
     }
 
 

@@ -1591,6 +1591,7 @@ impl Store {
         self.predicted_block_data.remove(&position);
         self.block_active.remove(&position);
         self.block_render_cache.remove(position);
+        self.special_render_cache.remove_block(position);
         self.preview_cache.remove(&position);
         self.revision += 1;
     }
@@ -1609,6 +1610,7 @@ impl Store {
         self.preview_cache.retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.block_active
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
+        self.special_render_cache.unload_chunk(chunk);
         self.revision += 1;
     }
     pub fn append_geometry(

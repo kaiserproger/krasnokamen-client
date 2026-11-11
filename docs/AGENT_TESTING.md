@@ -4,6 +4,19 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+### 26.3 cushion and sulfur cube
+
+The client resolves cushion color from received dye metadata and renders the
+authored 26.3 cushion rig with the matching runtime texture. Sulfur cubes use
+adult or small outer and inner rigs and textures from received baby metadata.
+The model dimensions and UV offsets are based on the local 26.3 client jar's
+`CushionModel`, `SulfurCubeModel` and `SmallSulfurCubeModel` layer definitions;
+the PNG textures are loaded from the user's vanilla resource cache at runtime.
+`entity_render_263_cushion_and_sulfur_cube_use_received_metadata` covers the
+received packet path; the core `native-263-entity-rigs` graphical scenario
+also captures both entities and the two poplar boats. Its extraction assertions
+do not replace review of the captured pixels.
+
 ### Main hand setting
 
 Controls exposes Main hand as Left or Right. The selection is saved with

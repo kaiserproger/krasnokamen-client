@@ -55,13 +55,45 @@ pub(crate) struct Cache {
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
     clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    block_clock_needles: BTreeMap<([i32; 3], i32), std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
     dynamic_models: BTreeMap<String, Result<bool>>,
     tnt_state: Option<u32>,
 }
+
+fn dynamic_item(cache: &mut BTreeMap<String, Result<bool>>, content: &Content, stack: &Stack) -> Result<bool> {
+    fn dynamic(value: &Value) -> bool {
+        match value {
+            Value::Object(fields) => fields.get("property").and_then(Value::as_str).is_some_and(|name| {
+                matches!(name.strip_prefix("minecraft:").unwrap_or(name), "time" | "compass")
+            }) || fields.values().any(dynamic),
+            Value::Array(values) => values.iter().any(dynamic),
+            _ => false,
+        }
+    }
+    let Some(id) = crate::ui::items::item_model_id(content, stack) else { return Ok(false) };
+    if !cache.contains_key(id) {
+        if cache.len() >= 4096 {
+            return Err("dynamic item model cache bound".into());
+        }
+        let (ns, path) = crate::ui::items::item_model_location(id);
+        let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+            .map(|graph| dynamic(&graph));
+        cache.insert(id.into(), result);
+    }
+    cache[id].as_ref().copied().map_err(Clone::clone)
+}
+
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
         self.text.remove(&handle);
         self.clock_needles.remove(&handle);
+    }
+    pub(super) fn remove_block(&mut self, position: [i32; 3]) {
+        self.block_clock_needles.retain(|(p, _), _| *p != position);
+    }
+    pub(super) fn unload_chunk(&mut self, chunk: [i32; 2]) {
+        self.block_clock_needles.retain(|(p, _), _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
     }
     pub(super) fn item_context(
         &mut self,
@@ -76,31 +108,9 @@ impl Cache {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
         }
-        fn dynamic(value: &Value) -> bool {
-            match value {
-                Value::Object(fields) => {
-                    fields.get("property").and_then(Value::as_str).is_some_and(|name| {
-                        matches!(name.strip_prefix("minecraft:").unwrap_or(name), "time" | "compass")
-                    }) || fields.values().any(dynamic)
-                }
-                Value::Array(values) => values.iter().any(dynamic),
-                _ => false,
-            }
-        }
         let mut needs_world = false;
         for stack in stacks.into_iter().flatten().filter(|s| !s.empty()) {
-            let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
-            if !self.dynamic_models.contains_key(id) {
-                if self.dynamic_models.len() >= 4096 {
-                    return Err("dynamic item model cache bound".into());
-                }
-                let (ns, path) = crate::ui::items::item_model_location(id);
-                let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
-                    .map(|graph| dynamic(&graph));
-                self.dynamic_models.insert(id.into(), result);
-            }
-            needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
+            needs_world |= dynamic_item(&mut self.dynamic_models, content, stack)?;
         }
         if !needs_world {
             self.clock_needles.remove(&entity.handle);
@@ -227,3 +237,21 @@ pub(crate) fn append(
     result
 }
 pub(super) use items::observed_stack;
+
+#[cfg(test)]
+mod block_needle_tests {
+    use super::Cache;
+
+    #[test]
+    fn removing_blocks_and_chunks_drops_only_their_needles() {
+        let mut cache = Cache::default();
+        for key in [([-1, 64, -1], 0), ([-1, 64, -1], 1), ([-17, 64, -1], 0), ([0, 64, 0], 0)] {
+            cache.block_clock_needles.insert(key, Default::default());
+        }
+        cache.remove_block([-1, 64, -1]);
+        assert_eq!(cache.block_clock_needles.len(), 2);
+        cache.unload_chunk([-2, -1]);
+        assert_eq!(cache.block_clock_needles.len(), 1);
+        assert!(cache.block_clock_needles.contains_key(&([0, 64, 0], 0)));
+    }
+}

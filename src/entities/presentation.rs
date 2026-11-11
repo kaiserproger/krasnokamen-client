@@ -268,6 +268,41 @@ pub(super) fn material(
             anger: None,
         });
     }
+    // These 26.3 renderers are absent from the exported renderer-family facts.
+    // Their authored models and texture selection follow the 26.3 client layers.
+    if e.type_name == "minecraft:cushion" || e.type_name == "minecraft:sulfur_cube" {
+        let baby = boolean(models, e, "DATA_BABY_ID");
+        let (rig, resource) = if e.type_name == "minecraft:cushion" {
+            const TEXTURES: [&str; 16] = [
+                "minecraft:entity/cushion/white_cushion", "minecraft:entity/cushion/orange_cushion",
+                "minecraft:entity/cushion/magenta_cushion", "minecraft:entity/cushion/light_blue_cushion",
+                "minecraft:entity/cushion/yellow_cushion", "minecraft:entity/cushion/lime_cushion",
+                "minecraft:entity/cushion/pink_cushion", "minecraft:entity/cushion/gray_cushion",
+                "minecraft:entity/cushion/light_gray_cushion", "minecraft:entity/cushion/cyan_cushion",
+                "minecraft:entity/cushion/purple_cushion", "minecraft:entity/cushion/blue_cushion",
+                "minecraft:entity/cushion/brown_cushion", "minecraft:entity/cushion/green_cushion",
+                "minecraft:entity/cushion/red_cushion", "minecraft:entity/cushion/black_cushion",
+            ];
+            let color = number(models, e, "DATA_COLOR").unwrap_or(0);
+            let texture = TEXTURES.get(usize::try_from(color).map_err(|_| "invalid cushion color")?)
+                .ok_or("invalid cushion color")?;
+            ("minecraft:cushion#main", *texture)
+        } else if baby {
+            ("minecraft:sulfur_cube_baby#main", "minecraft:entity/sulfur_cube/sulfur_cube_outer_small")
+        } else {
+            ("minecraft:sulfur_cube#main", "minecraft:entity/sulfur_cube/sulfur_cube_outer")
+        };
+        if !models.has_authored_rig(rig) {
+            return Err(format!("missing authored rig {rig}"));
+        }
+        return Ok(Binding {
+            rig: rig.into(),
+            texture: texture(content, resource)?,
+            style: RootStyle::Living,
+            layers: None,
+            anger: None,
+        });
+    }
     let family = models
         .families
         .get(&e.type_name)
@@ -795,6 +830,11 @@ pub(super) fn root_matrix(
     );
     let mut matrix = match binding.style {
         RootStyle::Living => {
+            let body_yaw = if entity.type_name == "minecraft:cushion" {
+                (body_yaw / 90. + 0.5).floor() * 90.
+            } else {
+                body_yaw
+            };
             Mat4::from_translation(relative)
                 * Mat4::from_rotation_y((180. - body_yaw).to_radians())
                 * Mat4::from_scale(Vec3::new(-1., -1., 1.))
@@ -869,6 +909,15 @@ pub(super) fn root_matrix(
             relative,
             number(models, entity, "ID_SIZE"),
         );
+    }
+    if entity.type_name == "minecraft:sulfur_cube" {
+        matrix = scale_cube_model(matrix, relative, number(models, entity, "ID_SIZE"));
+        if !boolean(models, entity, "DATA_BABY_ID") {
+            matrix = Mat4::from_translation(relative)
+                * Mat4::from_scale(Vec3::splat(0.5))
+                * Mat4::from_translation(-relative)
+                * matrix;
+        }
     }
     if entity.type_name == "minecraft:armor_stand"
         && number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0
@@ -982,12 +1031,24 @@ pub(super) fn draw_entity(
                 let swell = super::creeper::swell(entity, partial);
                 let invisible =
                     number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
+                if !invisible && entity.type_name == "minecraft:sulfur_cube" {
+                    let baby = boolean(models, entity, "DATA_BABY_ID");
+                    let key = if baby { "minecraft:sulfur_cube_inner_baby#main" } else { "minecraft:sulfur_cube_inner#main" };
+                    let inner = super::solaris_models::authored(key).ok_or("missing sulfur cube inner rig")?;
+                    let texture = texture(content, if baby {
+                        "minecraft:entity/sulfur_cube/sulfur_cube_inner_small"
+                    } else {
+                        "minecraft:entity/sulfur_cube/sulfur_cube_inner"
+                    })?;
+                    evaluate_rig(inner, entity, models, content, tick, partial, matrix, store.transforms);
+                    emit_rig(inner, store.transforms, RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)?;
+                }
                 evaluate_rig(rig, entity, models, content, tick, partial, matrix, store.transforms);
                 if !invisible {
                     emit_rig_parts(
                         rig,
                         store.transforms,
-                        RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light },
+                        RigStyle { tex, color: [1.; 3], layer: if entity.type_name == "minecraft:sulfur_cube" { EntityMaterial::EntityTranslucent } else { EntityMaterial::EntityCutout }, alpha: 1., light },
                         (entity.type_name == "minecraft:armor_stand")
                             .then(|| number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0)),
                         entity.type_name == "minecraft:end_crystal"
