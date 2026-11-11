@@ -403,37 +403,82 @@ pub(super) fn visible_item(session: &Session, item: &str, origin: [i32; 3]) -> R
         .nearest_visible_item(item, origin, content(session)?, session.world_tick)?
         .is_some())
 }
-/// A cursor opts into network-id order; ordinary calls retain nearest-first order.
+/// Ordinary, unpaged calls retain nearest-first order.
 fn entity_page<'a>(
     entities: impl Iterator<Item = (f64, i32, &'a str)>,
     radius: f64,
     limit: usize,
     kind: Option<&str>,
-    paged: bool,
-    after: Option<i32>,
-) -> (Vec<(f64, i32)>, usize, usize) {
+) -> (Vec<(f64, i32)>, usize) {
     let mut page = Vec::with_capacity(limit + 1);
     let mut total = 0;
-    let mut remaining = 0;
     for (distance, id, entity_kind) in entities {
         if distance > radius * radius || kind.is_some_and(|kind| kind != entity_kind) {
             continue;
         }
         total += 1;
-        if after.is_some_and(|after| id <= after) {
-            continue;
-        }
-        remaining += 1;
-        let key = if paged { f64::from(id) } else { distance };
-        let index = page.partition_point(|other: &(f64, i32)| *other < (key, id));
+        let index = page.partition_point(|other: &(f64, i32)| *other < (distance, id));
         if index < limit {
-            page.insert(index, (key, id));
+            page.insert(index, (distance, id));
             if page.len() > limit {
                 page.pop();
             }
         }
     }
-    (page, total, remaining)
+    (page, total)
+}
+
+impl super::EntityCensus {
+    fn begin(
+        &mut self,
+        epochs: (u64, u64),
+        radius: f64,
+        kind: Option<&str>,
+        game_time: i64,
+        mut rows: Vec<(i32, Value)>,
+    ) {
+        rows.sort_unstable_by_key(|(id, _)| *id);
+        self.snapshot = Some(super::EntityCensusSnapshot {
+            epochs,
+            radius,
+            kind: kind.map(str::to_owned),
+            game_time,
+            total: rows.len(),
+            rows: rows.into_iter(),
+        });
+    }
+
+    fn page(
+        &mut self,
+        epochs: (u64, u64),
+        radius: f64,
+        kind: Option<&str>,
+        cursor: &str,
+        limit: usize,
+    ) -> Result<Value> {
+        if !cursor.is_empty()
+            && cursor.parse::<u64>().map_err(|_| "invalid_cursor")? != self.serial
+        {
+            return Err("entity census cursor expired".into());
+        }
+        let snapshot = self.snapshot.as_mut().ok_or("entity census cursor expired")?;
+        if snapshot.epochs != epochs || snapshot.radius != radius || snapshot.kind.as_deref() != kind {
+            return Err("entity census query or context changed".into());
+        }
+        let serial = self.serial.checked_add(1).ok_or("entity census cursor exhausted")?;
+        let entities = snapshot.rows.by_ref().take(limit).map(|(_, value)| value).collect::<Vec<_>>();
+        let more = snapshot.rows.len() != 0;
+        let mut value = json!({
+            "in_play":true,"radius":radius,"visible_count":snapshot.total,"game_time":snapshot.game_time,
+            "entities":[],"truncated":more,"next_cursor":more.then(|| serial.to_string()),
+        });
+        value["entities"] = Value::Array(entities);
+        self.serial = serial;
+        if !more {
+            self.snapshot = None;
+        }
+        Ok(value)
+    }
 }
 
 pub(super) fn start(
@@ -460,18 +505,32 @@ pub(super) fn start(
             let limit = integer(args, "limit", Some(128), 1, 512)? as usize;
             let kind = args.get("entity_type").map(|_| text(args, "entity_type", 128)).transpose()?;
             let cursor = args.get("cursor").map(|value| value.as_str().ok_or("invalid_cursor")).transpose()?;
-            let after = cursor.filter(|value| !value.is_empty())
-                .map(str::parse::<i32>).transpose().map_err(|_| "invalid_cursor")?;
-            let (page, total, remaining) = entity_page(
+            if let Some(cursor) = cursor {
+                let epochs = session.context_epochs();
+                if cursor.is_empty() {
+                    let radius_squared = radius * radius;
+                    let rows = session.entities.received_entities()
+                        .filter(|entity| {
+                            distance_squared(entity.position, session.player.position) <= radius_squared
+                                && kind.is_none_or(|kind| kind == entity.type_name)
+                        })
+                        .map(|entity| list_entity_value(session, entity)
+                            .map(|value| (entity.handle.network_id, value)))
+                        .collect::<Result<Vec<_>>>()?;
+                    session.entity_census.begin(epochs, radius, kind, session.game_time(), rows);
+                }
+                return Ok(Some(Outcome::Complete(
+                    session.entity_census.page(epochs, radius, kind, cursor, limit)?,
+                )));
+            }
+            let (page, total) = entity_page(
                 session.entities.received_entities().map(|entity| (
                     distance_squared(entity.position, session.player.position),
                     entity.handle.network_id,
                     entity.type_name.as_str(),
                 )),
-                radius, limit, kind, cursor.is_some(), after,
+                radius, limit, kind,
             );
-            let next_cursor = (cursor.is_some() && remaining > page.len())
-                .then(|| page.last().unwrap().1.to_string());
             let entities = page
                 .iter()
                 .map(|(_, id)| list_entity_value(session, session.entities.get(*id).unwrap()))
@@ -479,7 +538,7 @@ pub(super) fn start(
             return Ok(Some(Outcome::Complete(
                 json!({"in_play":true,"radius":radius,"visible_count":total,
                 "game_time":session.game_time(),"entities":entities,
-                "truncated":remaining > limit,"next_cursor":next_cursor}),
+                "truncated":total > limit,"next_cursor":null}),
             )));
         }
         "minecraft_wait_for_visible_entity" => Wait::Visible {
@@ -847,6 +906,135 @@ impl Task {
 mod observation_tests {
     use super::*;
 
+    fn census_session() -> Session {
+        let mut session = Session::new_mode("entity-census".into(), false);
+        let mut content = Content::test_cube();
+        let facts: Value = serde_json::from_str(include_str!(
+            "../../assets/solaris/entities/entity-facts.json"
+        )).unwrap();
+        content.entity_names = facts["entities"].as_object().unwrap().iter()
+            .map(|(name, schema)| (u32::try_from(schema["protocol_id"].as_u64().unwrap()).unwrap(), name.clone()))
+            .collect();
+        session.entities.activate_models(std::sync::Arc::new(
+            crate::entities::Models::load_state(&content).unwrap(),
+        ));
+        session.content = Some(content);
+        session.phase = "play".into();
+        session.player.pose_known = true;
+        session.player.position = [0.; 3];
+        session
+    }
+
+    fn census_spawn(session: &mut Session, id: i32, x: f64) {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let content = session.content.as_ref().unwrap();
+        let kind = content.entity_names.iter()
+            .find(|(_, name)| *name == "minecraft:villager").unwrap().0;
+        let mut packet = Writer::default();
+        packet.var(id);
+        packet.0.extend([u8::try_from(id).unwrap(); 16]);
+        packet.var(i32::try_from(*kind).unwrap());
+        packet.f64(x);
+        packet.f64(0.);
+        packet.f64(0.);
+        packet.0.extend([0u8; 5]);
+        session.entities.apply(cb::ADD_ENTITY, &mut Reader::new(&packet.0), content, 1).unwrap();
+    }
+
+    fn census_page(session: &mut Session, arguments: Value) -> Value {
+        match start(session, "minecraft_list_entities", &arguments).unwrap().unwrap() {
+            Outcome::Complete(value) => value,
+            Outcome::Pending(_) => panic!("entity census unexpectedly waits"),
+        }
+    }
+
+    #[test]
+    fn entity_census_snapshot_keeps_received_rows_across_packet_and_pose_changes() {
+        let mut session = census_session();
+        for id in [9, 5, 7] {
+            census_spawn(&mut session, id, 1.);
+        }
+        let first = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
+        assert_eq!(first["visible_count"], 3);
+        assert_eq!(first["entities"][0]["entity_id"], 5);
+
+        session.player.position[0] = 1024.;
+        census_spawn(&mut session, 11, 1025.);
+        let second = census_page(&mut session, json!({
+            "radius":128,"limit":1,"cursor":first["next_cursor"],
+        }));
+        assert_eq!(second["visible_count"], 3);
+        assert_eq!(second["entities"][0]["entity_id"], 7);
+        let last = census_page(&mut session, json!({
+            "radius":128,"limit":1,"cursor":second["next_cursor"],
+        }));
+        assert_eq!(last["visible_count"], 3);
+        assert_eq!(last["entities"][0]["entity_id"], 9);
+        assert_eq!(last["next_cursor"], Value::Null);
+        assert_eq!(last["truncated"], false);
+
+        let current = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
+        assert_eq!(current["visible_count"], 1);
+        assert_eq!(current["entities"][0]["entity_id"], 11);
+    }
+
+    #[test]
+    fn entity_census_snapshot_filters_radius_and_type_before_limits() {
+        let mut session = census_session();
+        for (id, x) in [(5, 127.), (7, 2.), (9, 129.)] {
+            census_spawn(&mut session, id, x);
+        }
+        let absent = census_page(&mut session, json!({
+            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:sheep",
+        }));
+        assert_eq!(absent["visible_count"], 0);
+        assert_eq!(absent["entities"], json!([]));
+        assert_eq!(absent["next_cursor"], Value::Null);
+
+        let first = census_page(&mut session, json!({
+            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:villager",
+        }));
+        assert_eq!(first["visible_count"], 2);
+        assert_eq!(first["entities"][0]["entity_id"], 5);
+        let last = census_page(&mut session, json!({
+            "radius":128,"limit":1,"cursor":first["next_cursor"],"entity_type":"minecraft:villager",
+        }));
+        assert_eq!(last["entities"][0]["entity_id"], 7);
+        assert_eq!(last["next_cursor"], Value::Null);
+        assert_eq!(last["truncated"], false);
+    }
+
+    #[test]
+    fn entity_census_snapshot_fences_query_context_replay_and_replacement() {
+        let mut session = census_session();
+        for id in [5, 7, 9] {
+            census_spawn(&mut session, id, 1.);
+        }
+        let first = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
+        let cursor = first["next_cursor"].as_str().unwrap();
+        assert!(start(&mut session, "minecraft_list_entities", &json!({
+            "radius":64,"limit":1,"cursor":cursor,
+        })).is_err());
+        assert!(start(&mut session, "minecraft_list_entities", &json!({
+            "radius":128,"limit":1,"cursor":cursor,"entity_type":"minecraft:villager",
+        })).is_err());
+        assert!(session.entity_census.page((0, 1), 128., None, cursor, 1).is_err());
+
+        let replacement = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
+        assert!(start(&mut session, "minecraft_list_entities", &json!({
+            "radius":128,"limit":1,"cursor":cursor,
+        })).is_err());
+        let current = replacement["next_cursor"].as_str().unwrap();
+        let second = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":current}));
+        assert_eq!(second["entities"][0]["entity_id"], 7);
+        assert!(start(&mut session, "minecraft_list_entities", &json!({
+            "radius":128,"limit":1,"cursor":current,
+        })).is_err());
+        session.disconnect();
+        assert!(session.entity_census.page((0, 0), 128., None,
+            second["next_cursor"].as_str().unwrap(), 1).is_err());
+    }
+
     #[test]
     fn entity_census_filters_before_paging_and_preserves_distant_residents() {
         let entities = [
@@ -857,25 +1045,18 @@ mod observation_tests {
             (16000., 5, "minecraft:villager"),
             (17000., 11, "minecraft:villager"),
         ];
-        let (first, total, remaining) = entity_page(
-            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, None,
+        let (page, total) = entity_page(
+            entities.into_iter(), 128., 3, Some("minecraft:villager"),
         );
-        assert_eq!(first.iter().map(|row| row.1).collect::<Vec<_>>(), [5, 7]);
-        assert_eq!((total, remaining), (3, 3));
-        let (last, total, remaining) = entity_page(
-            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, Some(7),
-        );
-        assert_eq!(last.iter().map(|row| row.1).collect::<Vec<_>>(), [9]);
-        assert_eq!((total, remaining), (3, 1));
+        assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9, 5]);
+        assert_eq!(total, 3);
     }
 
     #[test]
-    fn entity_census_cursor_order_survives_motion_and_packet_order() {
+    fn entity_census_unpaged_calls_preserve_nearest_order() {
         let entities = [(1., 9, "minecraft:villager"), (100., 5, "minecraft:villager"),
                         (81., 7, "minecraft:villager")];
-        let (page, _, _) = entity_page(entities.into_iter(), 128., 2, None, true, Some(5));
-        assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9]);
-        let (nearest, _, _) = entity_page(entities.into_iter(), 128., 2, None, false, None);
+        let (nearest, _) = entity_page(entities.into_iter(), 128., 2, None);
         assert_eq!(nearest.iter().map(|row| row.1).collect::<Vec<_>>(), [9, 7]);
     }
 
