@@ -1321,6 +1321,74 @@ mod tests {
         assert_eq!(top(&chunk, [2, 0], 0, &surface), None);
     }
 
+    /// NATIVE-BLACK-SKY-GEOMETRY: seed 100 has wheat and a melon stem on the
+    /// farm at y 76 south of spawn. A received chunk's far sample there must be
+    /// the farmland under them: the crop's near-black texture average, drawn as
+    /// an opaque far prism a block above the farmland, showed above the hill
+    /// while the real chunk was not yet covering its column.
+    #[test]
+    fn received_chunk_samples_the_ground_under_a_crop() {
+        use crate::protocol::world::{Palette, Section, SurfaceHeightmap};
+        let mut content = Content::test_cube();
+        // State 2: a crop (no collision); without a model it averages grey.
+        let mut crop = content.states[1].clone();
+        crop.collision = Collision::Empty;
+        crop.model = None;
+        content.states.push(crop);
+        let uniform = |size| Palette {
+            bits: 0,
+            values: vec![0],
+            words: Vec::new(),
+            size,
+        };
+        let mut blocks = uniform(4096);
+        // Column (0, 0): ground at y 3, the crop on it at y 4.
+        blocks.set(3 * 256, 1);
+        blocks.set(4 * 256, 2);
+        let chunk = Chunk {
+            sections: vec![Arc::new(Section {
+                blocks,
+                biomes: uniform(64),
+                non_empty_block_count: 2,
+            })],
+            sky: std::collections::BTreeMap::new(),
+            block: std::collections::BTreeMap::new(),
+            block_entities: crate::protocol::world::empty_block_entities(),
+            surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+            surface_heightmap_received: false,
+        };
+        let mut far = Far::default();
+        far.server = Some(ServerLod {
+            max_distance: 1024,
+            max_inflight: 8,
+            min_y: 0,
+            height: 256,
+            sea_level: 63,
+            keys: false,
+        });
+        far.overworld = true;
+        far.colours = Some(Colours {
+            states: HashMap::new(),
+            biomes: Vec::new(),
+            water: [0.; 3],
+            lava: [0.; 3],
+            surfaces: HashMap::new(),
+        });
+        far.ingest_chunk([0, 0], &chunk, 0, &content).unwrap();
+        for level in MIN_LEVEL..=MAX_LEVEL {
+            let tile = &far.tiles[&TileKey { level, x: 0, z: 0 }];
+            assert_eq!(
+                unpack(tile.data[0]),
+                (3, Source::Received),
+                "level {level}: the ground's height, not the crop's"
+            );
+            assert_eq!(
+                tile.data[1], 0xffff_ffff,
+                "level {level}: the ground's colour"
+            );
+        }
+    }
+
     /// Thin snow is not a far surface, so the snowy block under it must still
     /// read as snow from above.
     #[test]
