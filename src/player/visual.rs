@@ -20,6 +20,11 @@ fn held(inventory: &InventoryStore, hand: u8) -> Option<&Stack> {
     interaction::held(inventory, hand).filter(|stack| !stack.empty())
 }
 
+/// Vanilla holds a map two-handed when it is in the main hand and the off hand is empty.
+fn map_two_handed(hand: u8, inventory: &InventoryStore) -> bool {
+    hand == 0 && held(inventory, 1).is_none()
+}
+
 /// Camera-relative held-map placement; the two arms do not follow map tilt.
 struct MapPose {
     arms: Option<Mat4>,
@@ -427,7 +432,7 @@ impl Player {
                     .ok_or("invalid held map id")?;
                 let ui = ui.ok_or("held map UI state unavailable")?;
                 let swing = if self.visual.swing_hand.get() == hand { view.swing } else { 0. };
-                let pose = map_pose(hand == 0 && held(inventory, 1).is_none(), side, scene.pitch, equip, swing);
+                let pose = map_pose(map_two_handed(hand, inventory), side, scene.pitch, equip, swing);
                 let sway = camera_to_world
                     * Mat4::from_translation(Vec3::new(hx, view.bob[1] + hy, hz))
                     * Mat4::from_rotation_z(view.hand.roll_deg.to_radians());
@@ -904,5 +909,19 @@ mod tests {
         let mut player2 = Player::new();
         player2.visual_tick(player2.position, &inventory, &plain);
         assert!((player2.visual.equip - 0.6).abs() < 1e-6, "equip {}", player2.visual.equip);
+    }
+    #[test]
+    fn map_two_handed_condition_matches_vanilla() {
+        let mut map = Stack::default();
+        map.id = 7;
+        map.count = 1;
+        let mut empty = InventoryStore::default();
+        empty.player.slots[36] = Some(map.clone());
+        let mut occupied = InventoryStore::default();
+        occupied.player.slots[36] = Some(map.clone());
+        occupied.player.slots[45] = Some(map.clone());
+        assert!(map_two_handed(0, &empty), "main-hand map with empty offhand is two-handed");
+        assert!(!map_two_handed(0, &occupied), "a filled offhand makes the map one-handed");
+        assert!(!map_two_handed(1, &empty), "the offhand alone is never two-handed");
     }
 }
