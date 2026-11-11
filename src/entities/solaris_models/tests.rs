@@ -997,19 +997,20 @@ fn bed_has_no_legacy_entity_rig_with_mirrored_leg() {
 #[test]
 fn baby_leggings_stay_visible_above_boots_in_every_family() {
     for kind in ["drowned", "husk", "piglin", "zombie", "zombie_villager", "zombified_piglin"] {
-        let legs = embedded(&model_id(&format!("minecraft:{kind}#layer3/babyModelSet/legs")));
+        let chest = embedded(&model_id(&format!("minecraft:{kind}#layer3/babyModelSet/chest")));
         let feet = embedded(&model_id(&format!("minecraft:{kind}#layer3/babyModelSet/feet")));
+        // Model +Y points down. In front view the chest shell covers the torso down to
+        // its bottom edge, so the leggings band a viewer can see is the boot shell's
+        // top edge minus the chest shell's bottom edge.
+        let cb = chest.bones.iter().find(|b| b.name == "body").unwrap();
+        let cc = &cb.cubes[0];
+        let chest_bottom = cb.pivot[1] + cc.origin[1] + cc.size[1] + cc.inflate;
         for side in ["right_leg", "left_leg"] {
-            let lb = legs.bones.iter().find(|b| b.name == side).unwrap();
             let fb = feet.bones.iter().find(|b| b.name == side).unwrap();
-            let lc = &lb.cubes[0];
             let fc = &fb.cubes[0];
-            // Model +Y points down: the visible leggings band on the leg is the
-            // boot shell's top edge minus the leggings shell's top edge.
-            let leg_top = lb.pivot[1] + lc.origin[1] - lc.inflate;
             let boot_top = fb.pivot[1] + fc.origin[1] - fc.inflate;
-            assert!(boot_top - leg_top >= 1.,
-                "{kind} {side}: leggings band only {} px", boot_top - leg_top);
+            assert!(boot_top - chest_bottom >= 1.,
+                "{kind} {side}: leggings band only {} px above the boots", boot_top - chest_bottom);
         }
     }
 }
