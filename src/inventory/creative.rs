@@ -2,7 +2,7 @@
 use crate::protocol::packet_ids::play::serverbound as sb;
 use super::{InventoryStore, Prediction, normalized};
 use crate::{
-    inventory::{MenuKind, PacketCommand, Stack, UiContext},
+    inventory::{PacketCommand, Stack, UiContext},
     protocol::{Result, Writer, content::Content},
     ui::ClickMode,
 };
@@ -14,11 +14,7 @@ fn packet(slot: i16, stack: &Stack) -> Result<PacketCommand> {
 }
 impl InventoryStore {
     pub(super) fn validate_creative_item(&self, stack: &Stack, content: &Content) -> Result<()> {
-        if !self.screen_open
-            || !self.creative_screen
-            || self.game_mode != 1
-            || self.menu().kind != MenuKind::Inventory
-        {
+        if !self.creative_screen() {
             return Err("creative screen unavailable".into());
         }
         if !stack.empty() {

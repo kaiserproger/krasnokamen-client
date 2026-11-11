@@ -1532,3 +1532,31 @@ Receipt:
 `/run/media/kaiserroman/games/solaris-work/scenarios/terra-armada-20261101/model-audit/rnd-20261102/terra-new-entities-next/receipt-PqJ1VAD0`.
 This visibility smoke does not establish all variants, animation, vanilla parity
 or current-server compatibility.
+
+## Falling sand and physical input regression probes
+
+The core harness registers `native-v2-input-menus`, `native-v2-input-pick`,
+`native-v2-input-camera` and `native-v2-input-sand`. Run windowed against pinned
+server/client candidates. Menu and pick probes dispatch physical input to the
+owned client window, including press/release edges shorter than one game tick;
+the authoritative menu reply checks custody rather than optimistic UI state.
+
+26.3 `FallingBlockEntity.tick` runs on both sides: gravity `0.04`, clipped
+movement, then `Entity.getAirDrag()` (`0.98f`). Prediction must not change the
+received relative-packet base. `entities::falling_tests` covers this distinction,
+landing, freeze and no-gravity metadata. The sand probe steps fewer than the
+server's position-update interval and compares received versus predicted and
+presented positions. `minecraft_list_entities` reports the latter two separately
+for falling blocks, plus their presentation tick; these are diagnostics, not
+proof of GPU submission or visible pixels. Review retained source, airborne,
+descended and landed captures and their frame geometry evidence.
+
+The admin-command freeze oracle waits for local client ticks and requires
+received server gametime to remain constant; five server steps advance it by
+exactly five. A frozen local input/render loop is a regression, not a pass.
+
+Creative player-menu routing derives from the open menu and received game mode,
+not a UI-maintained flag. `creative_player_menu_moves_and_drops_use_set_slot_without_ui_side_state`
+checks 26.3 set-slot packets for pickup, placement and Q/drop, retained contents
+after reopen, and the survival control. The physical menu probe additionally
+covers hovered inventory-tab Q and carried-stack pixels.

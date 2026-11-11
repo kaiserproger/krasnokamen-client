@@ -17,6 +17,8 @@ mod local;
 mod animation_tests;
 #[cfg(test)]
 mod asset_model_regression_tests;
+#[cfg(test)]
+mod falling_tests;
 mod metadata;
 mod nameplates;
 mod physical;
@@ -267,6 +269,8 @@ pub struct Store {
     pub(crate) local_uuid: Option<String>,
     pub(crate) visible_ids: Vec<i32>,
     pub(crate) physical_active: BTreeSet<i32>,
+    /// Reused by falling-block presentation; collision queries clear it.
+    pub(crate) falling_colliders: Vec<crate::player::Bounds>,
     pub(crate) redirectable_projectiles: BTreeSet<u32>,
     pub(crate) spatial_padding: f64,
     /// Login entity id of the local player and the metadata rows the server sent for it.
@@ -988,6 +992,8 @@ impl Store {
                 r.done()?;
                 if let Some(e) = self.get(target) {
                     let mut transform = e.transform;
+                    // Relative packets use the received base, never locally simulated motion.
+                    transform.position = e.position;
                     if let Some(d) = delta {
                         for i in 0..3 {
                             transform.position[i] += d[i];

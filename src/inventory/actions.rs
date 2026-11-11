@@ -700,7 +700,7 @@ impl Prediction<'_> {
                         commands.push(PacketCommand::new(sb::BUNDLE_ITEM_SELECTED, selected));
                     }
                 }
-                if self.source.creative_screen {
+                if self.source.creative_screen() {
                     return self.creative_click(*slot, *button, *mode, commands);
                 }
                 let before = self.menu.slots.clone();

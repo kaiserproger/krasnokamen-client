@@ -762,6 +762,9 @@ impl Store {
                 0
             };
             self.remove_motion_span(span);
+            if self.get(*id).is_some_and(|e| e.type_name == "minecraft:falling_block") {
+                self.fall_step(*id, &models, world, content, tick)?;
+            }
             if effects.sky_flash || effects.lightning_sound_pitches.is_some() {
                 self.event(serde_json::json!({
                     "type": "source_lightning", "entity": id,
@@ -778,11 +781,61 @@ impl Store {
                     || matches!(
                         e.type_name.as_str(),
                         "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon"
+                            | "minecraft:falling_block"
                     )
             })
         });
         self.physical_active = active;
         self.tick_blocks(frozen)?;
+        Ok(())
+    }
+    /// FallingBlockEntity is SERVER_AND_CLIENT in 26.3: gravity, clipped move,
+    /// then air drag. Keep the received position as the relative-packet base.
+    fn fall_step(&mut self, id: i32, models: &Models, world: &World, content: &Content, tick: u64) -> Result<()> {
+        let entity = self.get(id).expect("active falling block");
+        let mut velocity = entity.velocity;
+        if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
+            velocity[1] -= 0.04;
+        }
+        let body = bounds_at(models, entity, entity.transform.position)?;
+        let swept = Bounds {
+            min: std::array::from_fn(|i| body.min[i] + velocity[i].min(0.)),
+            max: std::array::from_fn(|i| body.max[i] + velocity[i].max(0.)),
+        };
+        let mut colliders = std::mem::take(&mut self.falling_colliders);
+        let gathered = collision::gather(world, content, self, tick, swept, &mut colliders);
+        let moved = gathered.as_ref().ok().map(|_| collision::collide(body, &colliders, velocity));
+        self.falling_colliders = colliders;
+        let Some(moved) = moved else {
+            // Do not predict into terrain the connection has not received.
+            return match gathered {
+                Err(error) if error == "unloaded_collision_neighborhood" => Ok(()),
+                Err(error) => Err(error),
+                Ok(()) => unreachable!(),
+            };
+        };
+        let entity = self.get_mut(id).expect("active falling block");
+        entity.previous = entity.transform;
+        for i in 0..3 {
+            entity.transform.position[i] += moved[i];
+            if moved[i] != velocity[i] {
+                velocity[i] = 0.;
+            }
+        }
+        entity.velocity = velocity.map(|v| v * f64::from(0.98_f32));
+        entity.physical.lerp_progress = 0;
+        entity.physical.lerp_duration = 1;
+        entity.physical.lerp_phase = 0.;
+        let old_span = entity.physical.lerp_span;
+        let span = (entity.position[0] - entity.transform.position[0])
+            .abs()
+            .max((entity.position[2] - entity.transform.position[2]).abs())
+            .ceil() as i64;
+        entity.physical.lerp_span = span;
+        self.remove_motion_span(old_span);
+        if span != 0 {
+            *self.motion_spans.entry(span).or_default() += 1;
+        }
         Ok(())
     }
     fn root_has_player(&self, id: i32, models: &Models, depth: usize) -> Result<bool> {
