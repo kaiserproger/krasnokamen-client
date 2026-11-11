@@ -140,8 +140,8 @@ or wall-clock drift.
 
 ## Camera JSON
 
-Times are seconds on the recording timeline. The selected render range is
-half-open. Paths need 2..4096 strictly increasing keys, finite values, and a FOV
+Times are seconds on the selected `--timebase` (`wall` by default, or `tick`).
+The selected render range is half-open. Paths need 2..4096 strictly increasing keys, finite values, and a FOV
 between 1 and 179 degrees. Each path uses either `look_target` on every key or
 `yaw` and `pitch` on every key, never both. Uniform Catmull–Rom interpolation
 uses duplicated endpoint keys; optional `ease: true` on a key smoothsteps its
@@ -162,10 +162,50 @@ An optional top-level `"attach_entity":123` makes positions and look targets
 world-axis offsets from that received entity's interpolated position, including
 mount attachment. Missing/despawned entities fail the shot; there is no fallback
 camera. The JSON does not alter gameplay or the recorded viewer's position.
-`replay::Player::seek` replays from the initial stream on backwards seeks and
-applies every intervening packet/tick on forward seeks. There are no lossy
-snapshots. `step(frame)` samples rational `frame/60` time without accumulated
-floating-point drift.
+`replay::Player::open(path, presentation, timebase)` selects the same timeline as
+the exporter. `seek` is a **shot/cut boundary**, never an operation within a shot.
+Backwards seeks rebuild the initial packet stream, retaining the explicit radius
+and crowd capability. Every received packet and world/client clock tick is still
+applied; the uncaptured prefix skips local player prediction, entity presentation
+and scene extraction. The final 80 client ticks (four seconds at 20 Hz, or all
+available history for an earlier cut) warm the normal entity presentation owner
+before one target scene refresh. Frozen world ticks do not advance that owner.
+The actual warmed world-tick count is `seek_warmup_ticks` in the frame sidecar.
+80 is provisional: on the authored moving-entity fixture an 80-tick warm-up
+matches a 400-tick uncut run (interpolated position within 1e-12 blocks, body
+yaw within 1e-4 degrees, walk speed within 1e-6). It has not been measured on a
+real take; `replay::seek_tests::captured_take_warmup_convergence` (ignored,
+see Focused checks) does that against a cut-free presentation reference.
+Received positions/state remain authoritative; cumulative presentation age/gait
+phase may restart at a cut and are not promised identical to playing from login.
+Use `advance_to`/`step(frame)` inside the shot, preserving that warmed history.
+`step` uses rational `frame/60` time without accumulated floating-point drift;
+it rejects backwards time (use an explicit cut-boundary `seek`).
+
+### Timebase and coverage
+
+`--timebase wall` preserves packet receive times and the existing client tick
+cadence. A server running below 20 TPS therefore plays in slow motion.
+`--timebase tick` maps each `solaris:tick` group to
+`(tick - first_actual_marker_tick) * 0.05` seconds. Packets before the first
+marker are configuration at zero; a marker itself starts its new group, and
+all subsequent packets keep that group's time until the next marker. Missing
+ticks remain gaps; duplicate/decreasing markers and timeline overflow fail.
+The raw recorded bytes/timestamps and `last_applied_tick`/`wall_ns` labels are
+never rewritten. Client ticks run every 50 ms in this mode. Camera keys and
+`--start`/`--end` must use **tick seconds**, not receipt-wall seconds. For a slow
+server, label the final video “20 ticks/s playback; actual server TPS on graph”;
+the telemetry overlay must still join on the original `last_applied_tick`.
+
+`--render-distance N` sets both entity and terrain radius to `N * 16` blocks,
+including cinematic fog, within the normal client bounds 2..32 chunks. Without
+the flag, replay follows the server radius received in the recording, falling
+back to the deterministic client default 8 until one is announced. It never
+reads or writes the render host's persisted options. An override can reveal
+received corner entities beyond the recorder's spherical fog radius; it cannot
+recover chunks/entities that the recorder never received. Inspect `known`,
+`eligible` and the frame itself, rather than treating prepared instances as
+proof of visible GPU pixels.
 
 ## Export a one-second smoke shot
 
@@ -199,7 +239,7 @@ owner's GPU, omit the lavapipe override (and any inherited software ICD selector
 WGPU_BACKEND=vulkan "$SOLARIS_CLIENT_BINARY" render-replay \
   --recording /work/takes/battle.solrec --camera /work/takes/smoke.json \
   --output /work/takes/smoke-gpu.mp4 --size 1920x1080 \
-  --start 6 --end 7 --motion-samples 4 --data-dir /work/client-data
+  --start 6 --end 7 --motion-samples 1 --data-dir /work/client-data
 ```
 
 Expect 60 frames, the chosen output dimensions and 60/1 fps. Inspect decoded
@@ -209,15 +249,27 @@ and compare `cpu_state_sha256` in the sidecars. GPU RGBA hashes are recorded but
 are not promised identical across devices/drivers. Repeat on lavapipe under
 Xvfb when collecting that platform's acceptance receipt.
 
+For a sub-20-TPS battle take, author tick-second camera keys and export with
+`--timebase tick --render-distance 20 --motion-samples 1`. Run the two identical
+exports sequentially through the current graphical admission wrapper. Compare
+both `cpu_state_sha256` and `rgba_sha256` on the **same pin/device/driver**;
+cross-driver pixel equality remains outside the contract.
+
 Rendering is fixed-step, not real time: output dimensions are rendered at twice
 each axis and box-downsampled (four samples per output pixel). The Medium
 HDR/shadow preset has TAA and projection jitter/history off. Optional 1..16
 subframes sample the first half-frame (180-degree shutter) and average the
 **display-encoded RGBA**, not linear HDR; this is intentionally documented, not
 claimed physically exact blur. CPU mesh jobs finish through an event-driven
-completion barrier before capture; mesh residency exhaustion/timeout is an
-error. Replay terrain has no upload-dependent fade-in. Raw padded GPU rows are
-stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
+completion barrier before capture; a timeout is an error. The barrier meshes
+sections before their first upload, so a wide `--render-distance` can exceed the
+terrain's 512 MiB CPU mesh budget: a result that does not fit then waits, still
+in flight, while the exporter renders an **uncaptured upload frame** and
+releases the uploaded CPU payloads, and settling continues. Live play reaches
+the same backpressure only when its per-frame uploads fall behind. Replay
+terrain uses explicit zero-duration upload admission, so it has no
+upload-dependent fade-in; an unknown fade policy is not drawable. Raw padded GPU
+rows are stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
 
 The exporter negotiates the C1 crowd-instancing path from the offscreen
 renderer and retains that choice across backward seeks. Recording itself
@@ -240,15 +292,55 @@ retains all sample labels. Join telemetry by tick, not encoding time. A failed
 export can leave a partial MP4/sidecar: only a successful process exit makes a
 complete shot. Outputs are never intentionally overwritten.
 
+Each frame also contains `presentation`:
+
+- `crowd_instances`: prepared instances supplied to the crowd renderer, **not**
+  a GPU-visible count or proof that every recorded soldier is in camera range.
+- `crowd_fallback`: the existing CPU-path counts by crowd kind and reason.
+- `entity_extraction`: the session's existing presentation statistics, including
+  known/eligible/submitted entities and unrendered reasons.
+- `cpu_entity_extract_ms`: measured CPU extraction time accumulated across that
+  frame's shutter samples and replay advancement. The first frame includes the
+  single target refresh that ends its cut-boundary seek; this is not GPU time.
+
+Counts/reasons describe the final shutter sample, like the camera pose. Camera
+range and received tracking data still bound extraction; these counters do not
+expand the view or recover unrecorded entities.
+
+`terrain.upload_frames` counts that frame's uncaptured upload frames and
+`terrain.cpu_mesh_resident_peak_bytes` is the largest CPU mesh payload held so
+far in the process (never above the budget).
+
 ## Focused checks and provenance
 
 `cargo test -p solaris-client --lib replay`,
 `cargo test -p solaris-client --lib capture::`, and the live-no-block session test
 cover original packet bytes (including noncanonical IDs and compression),
 record reader/writer round trip and truncation, same-stream CPU frame hashes,
-fixed-frame versus forward seek, authoritative tick gaps/received health,
-camera endpoints/yaw wrap/attachment/easing, and SSAA/shutter arithmetic.
-These do not replace the captured real-world smoke shot or a full 20k battle.
+fixed-frame versus forward seek, cut-boundary seek versus uncut playback and the
+unchanged live tick, tick timebase gaps/monotonic markers, replay radius,
+authoritative tick gaps/received health, camera endpoints/yaw wrap/attachment/
+easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain::`
+includes the replay settle beyond the CPU mesh budget (several upload rounds equal
+one round). These do not replace the captured real-world smoke shot or a full
+20k battle.
+
+The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):
+
+```sh
+SOLARIS_CINEMA_RECORDING=/work/takes/battle.solrec SOLARIS_CINEMA_RECEIPTS=/work/warmup \
+SOLARIS_CINEMA_DATA=/work/client-data SOLARIS_CINEMA_RENDER_DISTANCE=20 \
+SOLARIS_CINEMA_TICK_CAMERA=/work/takes/tick-shot.json \
+SOLARIS_CINEMA_WALL_CAMERA=/work/takes/wall-shot.json WGPU_BACKEND=vulkan \
+cargo test --release -p solaris-client --lib \
+  replay::seek_tests::captured_take_warmup_convergence -- --exact --ignored --nocapture
+```
+
+Each camera's first key is the cut target. For each timebase it plays a
+cut-free presentation reference to that target, then cuts with 0..160 warm-up
+ticks; received state, packet and clock state must be exact, and
+`<receipts>/{tick,wall}/convergence.json` records position/seat/body-yaw/walk
+differences and the 480x270 image difference against the reference.
 
 The explicit authored-fixture GPU/ffmpeg check (not a battle capture) is:
 
