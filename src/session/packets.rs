@@ -2015,7 +2015,12 @@ mod tests {
     #[test]
     fn p1_review_block_updates_create_native_default_block_entities() {
         let position = [-1, 3, -1];
+        // Every 26.3 BlockEntityTypes entry a block update builds (the moving piston, whose
+        // newBlockEntity is null, has its own test below). Beds have no block entity since
+        // 26.3: BedBlock is not an EntityBlock and BlockEntityTypes has no BED.
         for kind in [
+            "minecraft:sign",
+            "minecraft:hanging_sign",
             "minecraft:chest",
             "minecraft:trapped_chest",
             "minecraft:ender_chest",
@@ -2025,7 +2030,7 @@ mod tests {
             "minecraft:banner",
             "minecraft:decorated_pot",
             "minecraft:skull",
-            "minecraft:bed",
+            "minecraft:potent_sulfur",
             "minecraft:bell",
             "minecraft:conduit",
             "minecraft:campfire",
