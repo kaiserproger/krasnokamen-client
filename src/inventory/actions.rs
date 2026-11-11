@@ -449,6 +449,95 @@ impl InventoryStore {
     ) -> Result<Vec<PacketCommand>> {
         self.execute_with_hover_name(intents, content, None)
     }
+    pub(crate) fn can_take_all_from(&self, slot: i16) -> bool {
+        usize::try_from(slot).ok().is_some_and(|index| {
+            index < self.menu().slots.len() && policies::can_take_all(self.menu().kind, index)
+        })
+    }
+
+    // 26.3 AbstractContainerScreen.mouseReleased: matching is reevaluated after
+    // each quick-move, and only slots in the released slot's container qualify.
+    pub(crate) fn execute_bulk_quick_move(
+        &mut self,
+        context: &UiContext,
+        slot: i16,
+        template: &Stack,
+        content: &Content,
+    ) -> Result<Vec<PacketCommand>> {
+        self.validate(context)?;
+        if !self.screen_open {
+            return Err("container_not_open".into());
+        }
+        let source = usize::try_from(slot).map_err(|_| "negative container slot")?;
+        let mut prediction = Prediction {
+            source: self,
+            content,
+            menu: self.menu().clone(),
+            player: self.player.clone(),
+            cursor: self.cursor.clone().ok_or("cursor not observed")?,
+            drag: self.drag.clone(),
+            experience_level: self.experience_level,
+            player_slot_identities: self.player_slot_identities,
+        };
+        if source >= prediction.menu.slots.len() {
+            return Err("container slot out of range".into());
+        }
+        let mut commands = Vec::new();
+        if prediction.can_take_all(source) && !template.empty() {
+            for index in 0..prediction.menu.slots.len() {
+                let same_container = match prediction.menu.kind {
+                    MenuKind::Inventory => match source {
+                        0 => index == 0,
+                        1..=4 => (1..=4).contains(&index),
+                        _ => index >= 5,
+                    },
+                    _ if prediction.menu.player_slot_index(source).is_some() =>
+                        prediction.menu.player_slot_index(index).is_some(),
+                    _ if prediction.menu.player_slot_index(index).is_some() => false,
+                    MenuKind::Crafting => (source == 0) == (index == 0),
+                    MenuKind::Anvil | MenuKind::Grindstone | MenuKind::Cartography =>
+                        (source == 2) == (index == 2),
+                    MenuKind::Loom | MenuKind::Smithing =>
+                        (source == 3) == (index == 3),
+                    MenuKind::Stonecutter => (source == 1) == (index == 1),
+                    MenuKind::Crafter => (source == 45) == (index == 45),
+                    MenuKind::Horse if source < 2 || index < 2 => source == index,
+                    _ => true,
+                };
+                if !same_container {
+                    continue;
+                }
+                let candidate = prediction.slot(index)?;
+                if !candidate.empty() && candidate.same_item(template)
+                    && candidate.count <= template.max_count()?
+                    && prediction.may_pickup(index)?
+                {
+                    prediction.execute(&UiIntent::ClickSlot {
+                        context: context.clone(),
+                        slot: index as i16,
+                        button: 0,
+                        mode: ClickMode::QuickMove,
+                    }, &mut commands)?;
+                }
+            }
+        }
+        let Prediction { menu, player, cursor, drag, experience_level, player_slot_identities, .. } = prediction;
+        self.player = player;
+        if self.active.is_some() {
+            self.active = Some(menu);
+        } else {
+            self.player = menu;
+        }
+        self.cursor = Some(normalized(cursor));
+        self.drag = drag;
+        self.sync_player();
+        self.experience_level = experience_level;
+        self.player_slot_identities = player_slot_identities;
+        if !commands.is_empty() {
+            self.revision += 1;
+        }
+        Ok(commands)
+    }
     fn execute_with_hover_name(
         &mut self,
         intents: &[UiIntent],

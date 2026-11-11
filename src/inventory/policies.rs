@@ -8,6 +8,16 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::Arc;
+pub(super) fn can_take_all(kind: MenuKind, index: usize) -> bool {
+    match kind {
+        MenuKind::Inventory | MenuKind::Crafting => index != 0,
+        MenuKind::Cartography | MenuKind::Grindstone | MenuKind::Anvil => index != 2,
+        MenuKind::Smithing | MenuKind::Loom => index != 3,
+        MenuKind::Stonecutter => index != 1,
+        _ => true,
+    }
+}
+
 fn damaged(stack: &Stack) -> bool {
     stack
         .component("minecraft:max_damage")
@@ -337,13 +347,7 @@ impl Prediction<'_> {
         Ok(true)
     }
     pub(super) fn can_take_all(&self, index: usize) -> bool {
-        match self.menu.kind {
-            MenuKind::Inventory | MenuKind::Crafting => index != 0,
-            MenuKind::Cartography | MenuKind::Grindstone | MenuKind::Anvil => index != 2,
-            MenuKind::Smithing | MenuKind::Loom => index != 3,
-            MenuKind::Stonecutter => index != 1,
-            _ => true,
-        }
+        can_take_all(self.menu.kind, index)
     }
     fn move_to(&mut self, left: &mut Stack, range: Range<usize>, reverse: bool) -> Result<bool> {
         let before = left.count;
