@@ -170,7 +170,7 @@ impl BlockEffects {
                 velocity: [(f64::from(next()) - 0.5) * 0.1, 0.002 + f64::from(next()) * 0.1,
                     (f64::from(next()) - 0.5) * 0.1],
                 uv: uv(sprite), layer: sprite.layer, color: color.map(|v| v * brightness),
-                size: 0.075, remaining: lifetime, spell: Some((family, lifetime)),
+                size: 0.15, remaining: lifetime, spell: Some((family, lifetime)),
             });
         }
         Ok(true)

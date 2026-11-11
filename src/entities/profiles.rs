@@ -36,14 +36,14 @@ pub struct ProfileTextures {
     pub model: Option<PlayerModel>,
     pub secure: bool,
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct RemoteChatKey {
     pub session_id: String,
     pub expires_at_millis: String,
     pub public_key_der: Arc<[u8]>,
     pub signature: Arc<[u8]>,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PlayerProfile {
     pub uuid: String,
     pub name: String,
@@ -168,18 +168,21 @@ fn decode(r: &mut Reader<'_>) -> Result<Vec<Update>> {
     r.done()?;
     Ok(out)
 }
-/// Skin of a placed player head: the head's profile (UUID as four ints, else its name)
-/// must name a listed player whose textures the client already verified and published.
-/// Other profiles stay unresolved; their textures are never fetched for a head here.
-pub(super) fn head_skin(
-    profiles: &std::collections::BTreeMap<String, PlayerProfile>,
+/// Listed player behind a placed or held head's `profile` value (UUID as four
+/// ints, else its name). Other profiles stay unresolved; their textures are
+/// never fetched for a head here.
+pub(super) fn listed_head_profile<'a>(
+    profiles: &'a std::collections::BTreeMap<String, PlayerProfile>,
     profile: &Value,
-) -> Result<TextureRegion> {
-    let player = match &profile["id"] {
+) -> Result<&'a PlayerProfile> {
+    match &profile["id"] {
         Value::Null => {
             let name = profile["name"].as_str().or(profile.as_str())
                 .ok_or("player head profile has neither id nor name")?;
-            profiles.values().find(|candidate| candidate.name == name)
+            profiles
+                .values()
+                .find(|candidate| candidate.name == name)
+                .ok_or_else(|| "player head profile names no listed player".into())
         }
         Value::Array(words) if words.len() == 4 => {
             let mut bits = 0u128;
@@ -188,12 +191,22 @@ pub(super) fn head_skin(
                     .ok_or("player head profile id is not four ints")?;
                 bits = bits << 32 | u128::from(word as u32);
             }
-            profiles.get(&uuid::Uuid::from_u128(bits).to_string())
+            profiles
+                .get(&uuid::Uuid::from_u128(bits).to_string())
+                .ok_or_else(|| "player head profile id names no listed player".into())
         }
-        _ => return Err("player head profile id is not four ints".into()),
-    };
-    player
-        .and_then(|player| player.textures)
+        _ => Err("player head profile id is not four ints".into()),
+    }
+}
+/// Skin of a placed player head: the head's profile (UUID as four ints, else its name)
+/// must name a listed player whose textures the client already verified and published.
+/// Other profiles stay unresolved; their textures are never fetched for a head here.
+pub(super) fn head_skin(
+    profiles: &std::collections::BTreeMap<String, PlayerProfile>,
+    profile: &Value,
+) -> Result<TextureRegion> {
+    listed_head_profile(profiles, profile)?
+        .textures
         .and_then(|textures| textures.skin)
         .ok_or_else(|| "player head profile is not a listed player with a published skin".into())
 }
@@ -254,6 +267,7 @@ impl Store {
         });
         self.invalidate_profile(uuid);
         self.revision += 1;
+        self.profiles_revision = self.profiles_revision.wrapping_add(1);
         Ok(true)
     }
     fn invalidate_profile(&mut self, uuid: &str) {
@@ -371,6 +385,7 @@ impl Store {
             }
         }
         self.revision += 1;
+        self.profiles_revision = self.profiles_revision.wrapping_add(1);
         Ok(())
     }
 }

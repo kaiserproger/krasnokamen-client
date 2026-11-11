@@ -13,6 +13,23 @@ server in Configuration and Play client information. The focused
 `client_information_encodes_left_and_right_main_arm` regressions cover the
 setting and packet encoding; they do not replace a graphical held-item gate.
 
+### Copper statue item poses
+
+Special copper statue item models select the existing authored statue rig from
+the resource graph's `pose`. `copper_statue_item_uses_selected_pose_rig` checks
+distinct geometry for standing, running, sitting and star. This source test
+does not establish visual parity; compare the received item in a real window
+against the Java oracle. The separate spear swap-animation scale remains open.
+
+### Player head item profile
+
+`player_head` items read the stack's `profile` component and bake onto the
+listed player's published skin when the client has one; unresolved profiles
+keep Steve (heads never fetch textures themselves).
+`player_head_item_uses_listed_profile_skin` covers the listed/unlisted/none
+branches. Visual proof of a custom skin still needs a listed player with a
+verified published skin in the real-client scene.
+
 ### Received maps: held decorations and item frames
 
 The held-map winding correction already exists at the ClientNext source base.

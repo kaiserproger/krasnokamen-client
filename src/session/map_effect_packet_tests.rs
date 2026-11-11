@@ -81,6 +81,14 @@ fn received_potion_impact_uses_event_rgb_and_effect_family_until_expiry() {
     assert!(spells.iter().all(|v| (0.75..=1.).contains(&v.color[0]) && v.color[1] == 0. && v.color[2] == 0.));
     assert!(spells.iter().all(|v| (2. < v.position[1]) && v.position[1] < 4.));
     assert_eq!(red.indices[EntityMaterial::EntityTranslucent as usize].len(), 100 * 6);
+    // Effect particles render at the vanilla spell-particle quad size (~0.3 blocks wide).
+    let pts: Vec<_> = spells.iter().map(|v| v.position).collect();
+    let span = pts.iter()
+        .flat_map(|a| pts.iter().map(move |b| {
+            (a[0] - b[0]).hypot(a[1] - b[1]).hypot(a[2] - b[2])
+        }))
+        .fold(0.0f32, f32::max);
+    assert!(span > 0.25, "effect particles too small: {span}");
     // High bits do not make a valid received RGB color a negative block-state ID.
     impact(&mut session, 2007, 0xff00ff00_u32 as i32);
     let both = geometry(&session);

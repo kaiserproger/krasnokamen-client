@@ -116,6 +116,22 @@ pub(crate) fn item_model_id<'a>(content: &'a Content, stack: &'a Stack) -> Optio
 pub(crate) fn item_model_location(id: &str) -> (&str, &str) {
     id.split_once(':').unwrap_or(("minecraft", id))
 }
+/// `swap_animation_scale` from the item definition (26.3): scales the
+/// hotbar-switch equip animation of the newly selected item. Default 1.
+pub(crate) fn swap_animation_scale(content: &Content, stack: &Stack) -> f32 {
+    let Some(id) = item_model_id(content, stack) else {
+        return 1.;
+    };
+    let (ns, path) = item_model_location(id);
+    let Ok(bytes) = content.resource_bytes(&format!("assets/{ns}/items/{path}.json")) else {
+        return 1.;
+    };
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| value["swap_animation_scale"].as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(1.)
+}
 
 #[derive(Default)]
 pub struct ItemModels {
@@ -129,6 +145,9 @@ pub struct ItemModels {
     /// Shape of each distinct selected geometry, keyed by everything entity emission reads.
     shapes: BTreeMap<Vec<u32>, u64>,
     entities: Option<Arc<entities::Models>>,
+    /// Snapshot of the listed player profiles; player-head items resolve their
+    /// skin from it. Refreshed when the entity store's profiles revision moves.
+    profiles: Option<Arc<BTreeMap<String, entities::PlayerProfile>>>,
 }
 /// Shape identities are process-unique, so a cleared cache can never alias an old one.
 static NEXT_SHAPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -138,6 +157,12 @@ impl ItemModels {
     }
     pub fn set_entity_models(&mut self, models: Arc<entities::Models>) {
         self.entities = Some(models);
+        self.selected.clear();
+    }
+    /// Refresh the listed-player snapshot used to resolve player-head skins;
+    /// profiled heads depend on it, so the selection cache is cleared with it.
+    pub fn set_entity_profiles(&mut self, profiles: Arc<BTreeMap<String, entities::PlayerProfile>>) {
+        self.profiles = Some(profiles);
         self.selected.clear();
     }
     /// Registers `model` under `id` with a one-node item graph (test fixtures only).
@@ -295,7 +320,7 @@ impl ItemModels {
                             .entities
                             .as_ref()
                             .ok_or("entity model resources not activated")?;
-                        let mut special = entities::special_item(models, c, s, &node["model"])?;
+                        let mut special = entities::special_item(models, c, s, &node["model"], self.profiles.as_deref())?;
                         let base = c.bake_model(
                             node["base"].as_str().ok_or("special item base missing")?,
                         )?;
@@ -734,14 +759,17 @@ fn graph_transform(t: &Value) -> Result<Mat4> {
             a[3].as_f64().ok_or("item quaternion")? as f32,
         ))
     }
-    let translation = vec3(t, "translation", [0.; 3])?;
+    // Vanilla parses item transforms in pixel units (translation * 1/16,
+    // clamped) and ItemTransform.apply ends with a -0.5 model-space centering.
+    let translation = vec3(t, "translation", [0.; 3])? * (1. / 16.);
     let scale = vec3(t, "scale", [1.; 3])?;
     let left = quat(t, "left_rotation")?;
     let right = quat(t, "right_rotation")?;
     Ok(Mat4::from_translation(translation)
         * Mat4::from_quat(left)
         * Mat4::from_scale(scale)
-        * Mat4::from_quat(right))
+        * Mat4::from_quat(right)
+        * Mat4::from_translation(Vec3::splat(-0.5)))
 }
 
 fn apply_graph_transform(m: &mut BakedModel, transformation: Mat4) {
@@ -981,15 +1009,18 @@ mod tests {
         for (index, quad) in source.quads.iter().enumerate() {
             for (vertex, position) in quad.positions.iter().enumerate() {
                 let [x, y, z] = *position;
-                assert_eq!(model.quads[index].positions[vertex], [x, -y - 2., -z - 3.]);
-                assert_eq!(model.quads[index + source.quads.len()].positions[vertex], [x, -y, -z]);
+                // Vanilla ItemTransform: translation is in 1/16 units and apply()
+                // ends with a -0.5 centering, so parent S(1,-1,-1) * T(-0.5) over
+                // child T([0,2,3]/16) * T(-0.5) maps (x,y,z) to:
+                assert_eq!(model.quads[index].positions[vertex], [x - 1., 0.875 - y, 0.8125 - z]);
+                assert_eq!(model.quads[index + source.quads.len()].positions[vertex], [x - 0.5, 0.5 - y, 0.5 - z]);
             }
         }
         let ctx = ItemContext { using_item: true, ..ItemContext::default() };
         let model = models.model_with(&content, &stack, &ctx).unwrap();
         assert_eq!(model.quads.len(), source.quads.len());
         let [x, y, z] = source.quads[0].positions[0];
-        assert_eq!(model.quads[0].positions[0], [x, -y, -z]);
+        assert_eq!(model.quads[0].positions[0], [x - 0.5, 0.5 - y, 0.5 - z]);
     }
 
     #[test]

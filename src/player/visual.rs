@@ -199,7 +199,7 @@ impl FirstPerson {
     }
 }
 impl Player {
-    pub(super) fn visual_tick(&mut self, previous: [f64; 3], inventory: &InventoryStore) {
+    pub(super) fn visual_tick(&mut self, previous: [f64; 3], inventory: &InventoryStore, content: &crate::protocol::content::Content) {
         let target_height = self.eye_position()[1] - self.position[1];
         // Eating/drinking pose follows the held consumable's own animation kind.
         let consuming = self.using.as_ref().and_then(|using| {
@@ -258,7 +258,9 @@ impl Player {
             (None, None) => true,
             _ => false,
         };
-        v.equip += ((if same { 1. } else { 0. }) - v.equip).clamp(-0.4, 0.4);
+        // 26.3 `swap_animation_scale` on the newly selected item scales the equip animation rate.
+        let scale = held.map_or(1., |stack| crate::ui::items::swap_animation_scale(content, stack));
+        v.equip += ((if same { 1. } else { 0. }) - v.equip).clamp(-0.4 * scale, 0.4 * scale);
         if v.equip < 0.1 {
             v.shown = held.cloned();
         }
@@ -330,6 +332,10 @@ impl Player {
 
     pub(crate) fn set_visual_models(&mut self, models: Arc<crate::entities::Models>) {
         self.visual.items.set_entity_models(models);
+    }
+
+    pub(crate) fn set_visual_profiles(&mut self, profiles: Arc<BTreeMap<String, crate::entities::PlayerProfile>>) {
+        self.visual.items.set_entity_profiles(profiles);
     }
 
     pub(crate) fn append_first_person(
@@ -606,7 +612,7 @@ mod tests {
         assert!(held(&inventory, 0).is_none());
         assert!(held(&inventory, 1).is_none());
         let mut player = Player::new();
-        player.visual_tick(player.position, &inventory);
+        player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
         assert!(player.visual.shown.is_none());
         assert_eq!(player.visual.equip, 1.);
     }
@@ -653,16 +659,16 @@ mod tests {
         let mut player = Player::new();
         player.pose_known = true;
         player.grounded = true;
-        player.visual_tick([0.; 3], &InventoryStore::default());
+        player.visual_tick([0.; 3], &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         let idle = player.visual.sample(&player, 1.);
         player.position[0] = 0.2;
-        player.visual_tick([0.; 3], &InventoryStore::default());
+        player.visual_tick([0.; 3], &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         let walking = player.visual.sample(&player, 1.);
         assert_ne!(idle.bob, walking.bob);
         assert!(walking.bob[1].abs() > 0.);
         player.grounded = false;
         for _ in 0..30 {
-            player.visual_tick(player.position, &InventoryStore::default());
+            player.visual_tick(player.position, &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         }
         assert!(player.visual.sample(&player, 1.).bob[1].abs() < 0.0001);
     }
@@ -671,11 +677,11 @@ mod tests {
     fn first_person_sneak_and_sprint_are_smoothed_and_render_only() {
         let mut player = Player::new();
         player.pose_known = true;
-        player.visual_tick(player.position, &InventoryStore::default());
+        player.visual_tick(player.position, &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         player.pose = Pose::Crouching;
         player.sprinting = true;
         let physical_eye = player.eye_position();
-        player.visual_tick(player.position, &InventoryStore::default());
+        player.visual_tick(player.position, &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         let sample = player.visual.sample(&player, 1.);
         assert!(sample.eye[1] > physical_eye[1]);
         assert!(sample.eye[1] < 1.62);
@@ -690,14 +696,14 @@ mod tests {
         let mut packets = Vec::new();
         player.swing(0, &mut packets);
         assert_eq!(packets[0].id, 46);
-        player.visual_tick(player.position, &inventory);
+        player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
         assert!(player.visual.sample(&player, 0.5).swing > 0.);
         // Repeated block-hit swings must not pin the animation at its first frame.
         player.swing(0, &mut packets);
-        player.visual_tick(player.position, &inventory);
+        player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
         assert!(player.visual.sample(&player, 0.5).swing > 0.2);
         for _ in 0..8 {
-            player.visual_tick(player.position, &inventory);
+            player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
         }
         assert_eq!(player.visual.sample(&player, 1.).swing, 0.);
     }
@@ -711,10 +717,10 @@ mod tests {
             player.visual_animate(0.);
             player.grounded = false;
             player.fall_distance = fall;
-            player.visual_tick(player.position, &inventory);
+            player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
             player.grounded = true;
             player.fall_distance = 0.;
-            player.visual_tick(player.position, &inventory);
+            player.visual_tick(player.position, &inventory, &crate::protocol::content::Content::test_cube());
             let mut peak = 0f32;
             for frame in 1..=60 {
                 player.visual_animate(f64::from(frame) / 6.);
@@ -746,7 +752,7 @@ mod tests {
         assert!(player.visual.sample(&player, 0.).hand.offset[2].abs() < 0.001);
         // The next ordinary attack is a full swing again.
         for _ in 0..8 {
-            player.visual_tick(player.position, &InventoryStore::default());
+            player.visual_tick(player.position, &InventoryStore::default(), &crate::protocol::content::Content::test_cube());
         }
         player.swing(0, &mut packets);
         assert!(!player.visual.swing_use.get());
@@ -874,5 +880,29 @@ mod tests {
         assert!((using.crossbow_pull(0.) - 1.6).abs() < 0.0001);
         player.stop_using(&mut Vec::new()).unwrap();
         assert!(player.using.is_none());
+    }
+    #[test]
+    fn swap_animation_scale_scales_the_equip_animation_rate() {
+        use crate::protocol::content::Content;
+        let mut content = Content::test_cube();
+        content.insert_test_resource(
+            "assets/minecraft/items/test_spear.json",
+            br#"{"model":{"type":"minecraft:model","model":"minecraft:item/test_spear"},"swap_animation_scale":2.0}"#.as_slice(),
+        );
+        content.item_names.insert(7, "minecraft:test_spear".into());
+        let mut stack = Stack::default();
+        stack.id = 7;
+        stack.count = 1;
+        let mut inventory = InventoryStore::default();
+        inventory.player.slots[36] = Some(stack);
+        let mut player = Player::new();
+        player.visual_tick(player.position, &inventory, &content);
+        // equip drops by 0.4 * swap_animation_scale (2.0) on the switch tick
+        assert!((player.visual.equip - 0.2).abs() < 1e-6, "equip {}", player.visual.equip);
+        // without the definition field the rate stays 0.4
+        let plain = Content::test_cube();
+        let mut player2 = Player::new();
+        player2.visual_tick(player2.position, &inventory, &plain);
+        assert!((player2.visual.equip - 0.6).abs() < 1e-6, "equip {}", player2.visual.equip);
     }
 }

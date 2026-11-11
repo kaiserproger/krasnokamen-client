@@ -91,6 +91,8 @@ pub struct Session {
     pub(crate) player: Player,
     pub(crate) inventory: InventoryStore,
     pub(crate) entities: EntityStore,
+    /// `entities.profiles_revision` already pushed into the item bakes.
+    profiles_synced: u64,
     pub(crate) ui: Option<UiState>,
     ui_viewport: Option<(u32, u32, f64)>,
     /// Monotonic epoch of the UI animation clock (frame time, never sleeps).
@@ -214,6 +216,7 @@ impl Session {
             player,
             inventory: InventoryStore::default(),
             entities: EntityStore::new(),
+            profiles_synced: 0,
             ui: None,
             ui_viewport: None,
             ui_clock: crate::replay::clock::now(),

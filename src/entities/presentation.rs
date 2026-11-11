@@ -2280,6 +2280,7 @@ pub fn special_item(
     content: &Content,
     stack: &Stack,
     special: &Value,
+    profiles: Option<&BTreeMap<String, super::PlayerProfile>>,
 ) -> Result<BakedModel> {
     let kind = special["type"]
         .as_str()
@@ -2289,6 +2290,7 @@ pub fn special_item(
         && (stack.component("minecraft:base_color").is_some()
             || stack.component("minecraft:banner_patterns")
                 .and_then(Value::as_array).is_some_and(|patterns| !patterns.is_empty()));
+    let mut head_skin = None;
     let (rig, texture_name) = match kind {
         "shield" => ("minecraft:shield#main", if shield_patterned {
             "entity/shield/shield_base"
@@ -2355,15 +2357,31 @@ pub fn special_item(
                     "minecraft:dragon_skull#main",
                     "entity/enderdragon/dragon".to_owned(),
                 ),
-                "player" => (
-                    "minecraft:player_head#main",
-                    "entity/player/wide/steve".to_owned(),
-                ),
+                "player" => {
+                    // A profiled head uses the listed player's published skin when the
+                    // client has one; unresolved profiles keep Steve (heads never fetch).
+                    if let Some(profile) = stack.component("minecraft:profile")
+                        && let Some(profiles) = profiles
+                        && let Ok(skin) = super::profiles::head_skin(profiles, profile)
+                    {
+                        head_skin = Some(skin);
+                    }
+                    (
+                        "minecraft:player_head#main",
+                        "entity/player/wide/steve".to_owned(),
+                    )
+                }
                 _ => return Err(format!("unknown special head family {kind}")),
             }
         }
         "copper_golem_statue" => (
-            "minecraft:copper_golem#main",
+            match special["pose"].as_str().unwrap_or("standing") {
+                "standing" => "minecraft:copper_golem#main",
+                "running" => "minecraft:copper_golem_running#main",
+                "sitting" => "minecraft:copper_golem_sitting#main",
+                "star" => "minecraft:copper_golem_star#main",
+                _ => return Err("invalid copper statue item pose".into()),
+            },
             special["texture"]
                 .as_str()
                 .ok_or("copper golem statue item texture missing")?
@@ -2384,7 +2402,10 @@ pub fn special_item(
         }
     }
     let rig = models.rig(rig);
-    let tex = texture(content, &texture_name)?;
+    let tex = match head_skin {
+        Some(region) => region,
+        None => texture(content, &texture_name)?,
+    };
     let mut model = BakedModel::default();
     let mut banner_layers = Vec::new();
     if kind == "banner" || shield_patterned {
@@ -2929,13 +2950,13 @@ mod tests {
         let side_count: usize = sides.bones.iter().map(|bone| bone.quads.len()).sum();
         let back_count = sides.bones.iter().find(|bone| bone.name == "back").unwrap().quads.len();
         assert!(back_count > 0 && side_count > back_count);
-        let plain = special_item(&models, &content, &stack, &special).unwrap();
+        let plain = special_item(&models, &content, &stack, &special, None).unwrap();
         assert_eq!(plain.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count);
         stack.components = std::sync::Arc::new(BTreeMap::from([(
             "minecraft:pot_decorations".into(),
             serde_json::json!(["minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:brick", "minecraft:brick"]),
         )]));
-        let patterned = special_item(&models, &content, &stack, &special).unwrap();
+        let patterned = special_item(&models, &content, &stack, &special, None).unwrap();
         assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 42).count(), back_count);
         assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count - back_count);
         assert!(patterned.quads.iter().any(|quad| quad.texture_layer == 40));
@@ -3217,6 +3238,7 @@ mod tests {
         let item = special_item(
             &models, &content, &Stack::default(),
             &serde_json::json!({"type":"minecraft:chest","texture":"normal"}),
+            None,
         ).unwrap();
         let rig = models.rig("minecraft:chest#main");
         let root = Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
@@ -3257,7 +3279,7 @@ mod tests {
             layer: 42, uv: [0., 0., 1., 1.], width: 64, height: 64,
         });
         let special = serde_json::json!({"type":"minecraft:chest","texture":"normal"});
-        let item = special_item(&models, &content, &Stack::default(), &special).unwrap();
+        let item = special_item(&models, &content, &Stack::default(), &special, None).unwrap();
         let y_bounds = |quads: &[BakedQuad]| {
             quads.iter().flat_map(|q| q.positions).map(|p| p[1])
                 .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)))
@@ -3404,7 +3426,7 @@ mod tests {
             layer: 42, uv: [0., 0., 1., 1.], width: 32, height: 32,
         });
         let item = special_item(&models, &content, &Stack::default(),
-            &serde_json::json!({"type":"minecraft:trident"})).unwrap();
+            &serde_json::json!({"type":"minecraft:trident"}), None).unwrap();
         let rig = models.rig("minecraft:trident#main");
         let pole = rig.bones.iter().find(|bone| bone.name == "pole").unwrap();
         let (lo, hi) = pole.quads.iter().flatten().map(|vertex| vertex[1])

@@ -994,7 +994,7 @@ impl Player {
             self.stop_using(out)?;
             self.pending_use_release = None;
         }
-        self.visual_tick(previous_position, inventory);
+        self.visual_tick(previous_position, inventory, content);
         self.send_movement(out);
         self.last_input = input;
         self.attack_ticks = self.attack_ticks.saturating_add(1);
