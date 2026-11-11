@@ -56,6 +56,35 @@ fn map_pose(two_handed: bool, side: f32, pitch: f32, equip: f32, swing: f32) -> 
     }
 }
 
+/// Source `FirstPersonHandsAndItemsRenderer.renderPlayerArm` (26.3): the bare-arm pose
+/// for an arm side (`side` +1 right, -1 left), lowered by `inverse_height` and swung by
+/// `attack`, up to the arm part's own pose.
+fn player_arm(side: f32, inverse_height: f32, attack: f32) -> Mat4 {
+    use std::f32::consts::PI;
+    let attack = attack.clamp(0., 1.);
+    let root = attack.sqrt();
+    Mat4::from_translation(Vec3::new(
+        side * (-0.3 * (root * PI).sin() + 0.64),
+        0.4 * (root * 2. * PI).sin() - 0.6 - inverse_height * 0.6,
+        -0.4 * (attack * PI).sin() - 0.72,
+    )) * Mat4::from_rotation_y((side * 45.).to_radians())
+        * Mat4::from_rotation_y((side * (root * PI).sin() * 70.).to_radians())
+        * Mat4::from_rotation_z((side * (attack * attack * PI).sin() * -20.).to_radians())
+        * Mat4::from_translation(Vec3::new(-side, 3.6, 3.5))
+        * Mat4::from_rotation_z((side * 120.).to_radians())
+        * Mat4::from_rotation_x(200f32.to_radians())
+        * Mat4::from_rotation_y((side * -135.).to_radians())
+        * Mat4::from_translation(Vec3::new(side * 5.6, 0., 0.))
+}
+
+/// Source `AvatarRenderer.renderHand`: the arm part at its model pivot with the
+/// first-person zRot of +-0.1 rad (right arm +, left arm -).
+fn hand_part(pose: Mat4, right: bool) -> Mat4 {
+    let side = if right { 1. } else { -1. };
+    pose * Mat4::from_translation(Vec3::new(-5. / 16. * side, 2. / 16., 0.))
+        * Mat4::from_rotation_z(0.1 * side)
+}
+
 /// Map-pixel space (128x128, +y down, layers toward -z) placed on a held pose.
 fn map_surface_transform(pose: Mat4) -> Mat4 {
     pose * Mat4::from_rotation_y(std::f32::consts::PI)
@@ -388,6 +417,14 @@ impl Player {
             } else {
                 1.
             };
+            // Source FirstPersonHandsAndItemsRenderer.submitHandsWithItems: the hand
+            // lowers by inverseArmHeight = swapAnimationScale * (1 - height) of the
+            // item it shows (26.3 client item `swap_animation_scale`, default 1).
+            let swap_scale = match stack {
+                Some(stack) => self.visual.items.swap_animation_scale(content, stack)?,
+                None => 1.,
+            };
+            let lowered = (1. - equip) * swap_scale;
             let [hx, hy, hz] = view.hand.offset;
             // `base` is the rest placement of the hand space in front of the camera
             // (right, up, forward) and `drop` the lowered-hand travel while equipping.
@@ -396,7 +433,7 @@ impl Player {
                 camera_to_world
                     * Mat4::from_translation(Vec3::new(
                         side * (base.x - stroke * 0.16) * (1. - 0.65 * consume) + hx,
-                        base.y - (1. - equip) * drop
+                        base.y - lowered * drop
                             + stroke * 0.1
                             + view.bob[1]
                             + use_bob
@@ -408,7 +445,7 @@ impl Player {
                     * Mat4::from_rotation_y(side * (-stroke * 0.8))
                     * Mat4::from_rotation_x(
                         -stroke * 0.9
-                            - (1. - equip) * 0.45
+                            - lowered * 0.45
                             - consume * if self.visual.consume_drink { 0.7 } else { 0.35 },
                     )
             };
@@ -421,7 +458,7 @@ impl Player {
                     .ok_or("invalid held map id")?;
                 let ui = ui.ok_or("held map UI state unavailable")?;
                 let swing = if self.visual.swing_hand.get() == hand { view.swing } else { 0. };
-                let pose = map_pose(hand == 0 && held(inventory, 1).is_none(), side, scene.pitch, equip, swing);
+                let pose = map_pose(hand == 0 && held(inventory, 1).is_none(), side, scene.pitch, 1. - lowered, swing);
                 let sway = camera_to_world
                     * Mat4::from_translation(Vec3::new(hx, view.bob[1] + hy, hz))
                     * Mat4::from_rotation_z(view.hand.roll_deg.to_radians());
@@ -432,16 +469,17 @@ impl Player {
                             * Mat4::from_rotation_y(92f32.to_radians())
                             * Mat4::from_rotation_x(45f32.to_radians())
                             * Mat4::from_rotation_z((-41. * f).to_radians())
-                            * Mat4::from_translation(Vec3::new(0.3 * f, -1.1, 0.45))
-                            * Mat4::from_translation(Vec3::new(-5. / 16. * f, 2. / 16., 0.));
-                        entities.append_local_arm(content, arm_right, shoulder, light, &mut scene.first_person)?;
+                            * Mat4::from_translation(Vec3::new(0.3 * f, -1.1, 0.45));
+                        entities.append_local_arm(content, arm_right, hand_part(shoulder, arm_right), light, &mut scene.first_person)?;
                     }
                 } else {
-                    let shoulder = hand_root(Vec3::new(0.38, -0.32, -0.65), 0.55)
-                        * Mat4::from_translation(Vec3::new(side * 0.14, -0.58, 0.))
-                        * Mat4::from_rotation_z(side * 0.25)
-                        * Mat4::from_rotation_x(-0.15);
-                    entities.append_local_arm(content, right, shoulder, light, &mut scene.first_person)?;
+                    // Source renderOneHandedMap: from the map's shifted origin the arm
+                    // turns 10 degrees about Z, then the bare-arm pose of this side.
+                    let shoulder = sway
+                        * Mat4::from_translation(Vec3::new(side * 0.125, -0.125, 0.))
+                        * Mat4::from_rotation_z((side * 10.).to_radians())
+                        * player_arm(side, lowered, swing);
+                    entities.append_local_arm(content, right, hand_part(shoulder, right), light, &mut scene.first_person)?;
                 }
                 ui.append_held_map(id, content, map_surface_transform(sway * pose.map), light, &mut scene.first_person)?;
                 continue;
@@ -843,6 +881,83 @@ mod tests {
                 );
             }
         }
+    }
+    /// Camera-space centroid of the first-person geometry for a shown stack at `equip`.
+    fn held_centroid(content: &Content, stack: &Stack, models: &[&str], equip: f32) -> Vec3 {
+        let mut inventory = InventoryStore::default();
+        inventory.player.slots[36] = Some(stack.clone());
+        let mut player = Player::new();
+        player.pose_known = true;
+        player.visual.shown = Some(stack.clone());
+        (player.visual.old_equip, player.visual.equip) = (equip, equip);
+        for id in models {
+            player.visual.items.insert_test_model(id, content.models[0].clone());
+        }
+        let mut scene = crate::api::Scene {
+            yaw: 0., pitch: 0., origin: [4096., 0., -4096.],
+            camera_position: [4096.5, 65.62, -4095.5],
+            ..Default::default()
+        };
+        player.append_first_person(content, &inventory, &mut EntityStore::new(), &mut scene,
+            crate::player::FirstPersonFrame { partial: 1., light: [15., 0.], item_context: &ItemContext::default(), ui: None })
+            .unwrap();
+        let view = crate::render::camera_view(Vec3::ZERO, scene.yaw, scene.pitch);
+        let pres = Vec3::from_array(std::array::from_fn(|i| (scene.origin[i] - scene.camera_position[i]) as f32));
+        let vertices = &scene.first_person.vertices;
+        assert!(!vertices.is_empty());
+        vertices.iter().map(|v| view.transform_point3(Vec3::from_array(v.position) + pres))
+            .fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f32
+    }
+
+    #[test]
+    fn swap_animation_scale_scales_how_far_the_shown_item_lowers() {
+        // Source 26.3 submitHandsWithItems: inverseArmHeight = swapAnimationScale *
+        // (1 - height); applyItemArmTransform lowers by 0.6 per unit of it.
+        let mut content = Content::test_cube();
+        content.item_names.insert(7, "test:spear".into());
+        content.item_names.insert(8, "test:plain".into());
+        content.insert_test_resource("assets/test/items/spear.json",
+            br#"{"model":{"type":"minecraft:model","model":"test:spear_model"},"swap_animation_scale":1.95}"#);
+        content.insert_test_resource("assets/test/items/plain.json",
+            br#"{"model":{"type":"minecraft:model","model":"test:spear_model"}}"#);
+        let stack = |id| {
+            let mut stack = Stack::default();
+            stack.id = id;
+            stack.count = 1;
+            stack
+        };
+        let models = ["test:spear_model"];
+        let rest = held_centroid(&content, &stack(8), &models, 1.);
+        let plain = held_centroid(&content, &stack(8), &models, 0.5);
+        let spear = held_centroid(&content, &stack(7), &models, 0.5);
+        // smoothstep(0.5) = 0.5, so the plain item drops 0.3 and the spear 1.95 times that.
+        assert!(((rest.y - plain.y) - 0.3).abs() < 1e-4, "{rest:?} {plain:?}");
+        assert!(((rest.y - spear.y) - 0.3 * 1.95).abs() < 1e-4, "{rest:?} {spear:?}");
+        assert_eq!(held_centroid(&content, &stack(7), &models, 1.), rest);
+    }
+
+    #[test]
+    fn one_handed_map_arm_follows_the_source_bare_arm_pose() {
+        // Source renderOneHandedMap -> renderPlayerArm -> renderHand at rest (right arm).
+        let pose = Mat4::from_translation(Vec3::new(0.125, -0.125, 0.))
+            * Mat4::from_rotation_z(10f32.to_radians()) * player_arm(1., 0., 0.);
+        let hand = hand_part(pose, true);
+        // Shoulder pivot of the right arm part and the fist end 10 px further down it.
+        let shoulder = hand.transform_point3(Vec3::ZERO);
+        let fist = hand.transform_point3(Vec3::new(-1. / 16., 10. / 16., 0.));
+        for p in [shoulder, fist] {
+            assert!(p.is_finite());
+        }
+        assert!(fist.x > 0. && fist.z < 0., "the fist sits right of and ahead of the eye: {fist:?}");
+        assert!(fist.y > shoulder.y, "the arm reaches up from below the view toward the fist");
+        let left = hand_part(Mat4::from_translation(Vec3::new(-0.125, -0.125, 0.))
+            * Mat4::from_rotation_z((-10f32).to_radians()) * player_arm(-1., 0., 0.), false);
+        let mirrored = left.transform_point3(Vec3::new(1. / 16., 10. / 16., 0.));
+        assert!((mirrored - fist * Vec3::new(-1., 1., 1.)).length() < 1e-5, "{mirrored:?} vs {fist:?}");
+        let lowered = hand_part(Mat4::from_translation(Vec3::new(0.125, -0.125, 0.))
+            * Mat4::from_rotation_z(10f32.to_radians()) * player_arm(1., 1., 0.), true);
+        let drop = (lowered.transform_point3(Vec3::ZERO) - shoulder).length();
+        assert!((drop - 0.6).abs() < 1e-4, "{drop}");
     }
 
     #[test]
