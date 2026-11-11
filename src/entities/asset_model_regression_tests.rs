@@ -161,6 +161,45 @@ fn skeleton_and_creeper_limb_texture_handedness_is_not_interchangeable() {
 }
 
 #[test]
+fn standing_and_wall_banner_flags_retain_full_height() {
+    for id in ["standing_banner", "wall_banner"] {
+        let rig = rig(id);
+        let (min, max) = bounds(rig, &rest(rig), "flag");
+        let width = max.x - min.x;
+        let height = max.y - min.y;
+        assert!(width > 0., "{id}: flag must emit geometry");
+        assert!((height - 2. * width).abs() < 1e-5, "{id}: flag is truncated");
+    }
+}
+
+#[test]
+fn standing_banner_flag_covers_the_crossbar_from_the_front() {
+    let banner = rig("standing_banner");
+    let pose = rest(banner);
+    let flag = bounds(banner, &pose, "flag");
+    let bar = bounds(banner, &pose, "bar");
+    // Provisional front-view fit: keep the bar behind the cloth without
+    // projecting beyond its top or sides. Model-space +Y points down.
+    assert_eq!(flag.0.y, bar.0.y, "flag and crossbar top");
+    assert_eq!((flag.0.x, flag.1.x), (bar.0.x, bar.1.x), "crossbar width");
+    assert!(flag.1.z < bar.0.z, "crossbar projects in front of the cloth");
+}
+
+#[test]
+fn double_chest_lid_top_samples_the_outer_texture_island() {
+    for id in ["chest", "double_chest_left", "double_chest_right"] {
+        let rig = rig(id);
+        // In authored model space -Y is up. The top and underside are adjacent
+        // islands; a plain box unwrap swaps them, darkening the visible lid.
+        let top = uv_bounds(face(rig, "lid", -Vec3::Y));
+        let bottom = uv_bounds(face(rig, "lid", Vec3::Y));
+        assert_eq!(top[0], bottom[2], "{id}: lid top must follow underside in the atlas");
+        assert_eq!((top[1], top[3]), (bottom[1], bottom[3]), "{id}: lid island height");
+        assert!(top[2] > top[0] && bottom[2] > bottom[0], "{id}: nonempty islands");
+    }
+}
+
+#[test]
 fn shulker_base_uses_lower_shell_and_spiral_floor_not_lid_texels() {
     for id in ["shulker_box", "shulker"] {
         let rig = rig(id);
@@ -174,6 +213,21 @@ fn shulker_base_uses_lower_shell_and_spiral_floor_not_lid_texels() {
         assert!(floor[0] >= 32. / 64. && floor[2] <= 48. / 64.);
         assert!(floor[1] >= 28. / 64. && floor[3] <= 44. / 64., "{id}: bottom spiral island");
         assert!(floor[2] > floor[0] && floor[3] > floor[1]);
+    }
+}
+
+#[test]
+fn shulker_box_closed_shell_matches_the_authored_shulker_shell() {
+    let entity = rig("shulker");
+    let box_rig = rig("shulker_box");
+    let entity_pose = rest(entity);
+    let box_pose = rest(box_rig);
+    for part in ["base", "lid"] {
+        assert_eq!(
+            bounds(box_rig, &box_pose, part),
+            bounds(entity, &entity_pose, part),
+            "{part}: the placed box must use the complete shell"
+        );
     }
 }
 
