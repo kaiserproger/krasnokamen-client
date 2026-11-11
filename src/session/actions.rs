@@ -717,7 +717,7 @@ impl Session {
                 self.bindings = crate::controls::Bindings::from_value(&clean)
                     .ok_or("invalid key bindings")?;
             }
-            "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" => {
+            "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" | "desktop_computer" | "monitor_apps" | "voice_chat" | "voice_mute" | "voice_deafen" | "voice_volume" | "voice_mic_volume" => {
                 self.presentation_settings.insert(key.into(), clean.clone());
             }
             "render_distance" => {
@@ -752,6 +752,13 @@ impl Session {
                     .as_f64()
                     .ok_or("client setting damage_tilt_strength lost its number")?;
                 self.camera();
+            }
+            "gamma" => {
+                self.gamma = clean
+                    .as_f64()
+                    .ok_or("client setting gamma lost its number")? as f32;
+                // The lightmap is rebuilt from the session state on the next scene update.
+                self.revision += 1;
             }
             "volume" => {
                 self.volume = clean
@@ -796,6 +803,7 @@ impl Session {
             "damage_tilt_strength".into(),
             json!(self.damage_tilt_strength),
         );
+        out.insert("gamma".into(), json!(self.gamma));
         out.insert("volume".into(), json!(self.volume));
         out.insert("key_bindings".into(), self.bindings.value());
         out.extend(self.presentation_settings.iter().map(|(key, value)| (key.clone(), value.clone())));
@@ -834,7 +842,7 @@ impl Session {
                         self.bindings = bindings;
                     }
                 }
-                "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" => {
+                "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" | "desktop_computer" | "monitor_apps" | "voice_chat" | "voice_mute" | "voice_deafen" | "voice_volume" | "voice_mic_volume" => {
                     self.presentation_settings.insert((*key).into(), clean.clone());
                 }
                 "render_distance" => {
@@ -867,6 +875,11 @@ impl Session {
                 "damage_tilt_strength" => {
                     if let Some(f) = clean.as_f64() {
                         self.damage_tilt_strength = f;
+                    }
+                }
+                "gamma" => {
+                    if let Some(f) = clean.as_f64() {
+                        self.gamma = f as f32;
                     }
                 }
                 "volume" => {
@@ -1271,6 +1284,18 @@ mod client_settings_tests {
         assert_eq!(session.fov_deg(), UiState::DEFAULT_FOV_DEG);
     }
     #[test]
+    fn monitor_apps_reach_native_picker_and_persisted_snapshot() {
+        let mut session = Session::new_mode("monitor-app-settings".into(), false);
+        let apps = json!([["ptyxis", "-s"]]);
+        session.apply_persisted_settings(BTreeMap::from([("monitor_apps".into(), apps.clone())]));
+        assert_eq!(session.native_setting("monitor_apps"), Some(&apps));
+        assert_eq!(session.client_settings_snapshot()["monitor_apps"], apps);
+        session.apply_persisted_settings(BTreeMap::from([("monitor_apps".into(), json!([]))]));
+        assert_eq!(session.native_setting("monitor_apps"), Some(&json!([])));
+        session.apply_persisted_settings(BTreeMap::new());
+        assert_eq!(session.native_setting("monitor_apps"), Some(&Value::Null));
+    }
+    #[test]
     fn p1_sign_submit_clears_screen_admission_and_queues_update_only() {
         let mut session = Session::new_mode("sign-submit-test".into(), false);
         let position = [-1, 3, -1];
@@ -1538,6 +1563,33 @@ mod client_settings_tests {
         assert_eq!(
             UiState::next_setting_value("damage_tilt_strength", Some(&json!(0.))),
             Some(json!(0.1))
+        );
+    }
+
+    #[test]
+    fn brightness_setting_loads_clamps_persists_and_defaults_to_half() {
+        let mut session = Session::new_mode("gamma-settings".into(), false);
+        session.apply_persisted_settings(BTreeMap::new());
+        assert_eq!(session.gamma, 0.5);
+        assert_eq!(UiState::default_setting_value("gamma"), Some(json!(0.5)));
+        session.apply_persisted_settings(BTreeMap::from([("gamma".into(), json!(1.))]));
+        assert_eq!(session.gamma, 1.);
+        assert_eq!(session.client_settings_snapshot()["gamma"], json!(1.));
+        session.apply_persisted_settings(BTreeMap::from([("gamma".into(), json!(7.))]));
+        assert_eq!(session.gamma, 1.);
+        session.apply_persisted_settings(BTreeMap::from([("gamma".into(), json!("dark"))]));
+        assert_eq!(session.gamma, 0.5);
+        let before = session.revision;
+        session.apply_client_setting("gamma", &json!(0.)).unwrap();
+        assert_eq!(session.gamma, 0.);
+        assert!(session.revision > before, "scene must rebuild the lightmap");
+        assert_eq!(
+            UiState::next_setting_value("gamma", Some(&json!(1.))),
+            Some(json!(0.))
+        );
+        assert_eq!(
+            UiState::next_setting_value("gamma", Some(&json!(0.5))),
+            Some(json!(0.6))
         );
     }
 }

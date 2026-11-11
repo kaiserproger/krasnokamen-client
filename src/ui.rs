@@ -5,6 +5,7 @@ mod catalogue;
 mod chat_tracking;
 mod clipping;
 mod commands;
+pub(crate) mod desktop;
 mod dialog;
 mod display;
 mod edit;
