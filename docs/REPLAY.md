@@ -242,6 +242,12 @@ WGPU_BACKEND=vulkan "$SOLARIS_CLIENT_BINARY" render-replay \
   --start 6 --end 7 --motion-samples 1 --data-dir /work/client-data
 ```
 
+Before the first frame the exporter prints the GPU it renders with to stderr,
+`render-replay adapter: {"name":…,"vendor":…,"device_type":…,"backend":…,"driver":…,"driver_info":…}`.
+On a hybrid laptop check it: the client asks for the high-performance adapter,
+but the Vulkan loader decides what is listed (`VK_DRIVER_FILES` restricts it to
+one driver manifest, for example `/usr/share/vulkan/icd.d/nvidia_icd.json`).
+
 Expect 60 frames, the chosen output dimensions and 60/1 fps. Inspect decoded
 frames for actual terrain, armour, animation and camera movement; ffprobe alone
 is not visual acceptance. Execute a second identical shot to a fresh filename

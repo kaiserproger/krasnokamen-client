@@ -116,6 +116,11 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     let mut replay=Player::open(&recording,true,timebase)?;
     replay.set_render_distance(render_distance)?;
     let mut renderer=pollster::block_on(Renderer::new_offscreen(width*2,height*2,artifacts.into()))?;
+    // Which GPU renders the shot: hybrid laptops also expose integrated and software adapters.
+    let metrics=renderer.metrics();
+    let adapter=&metrics["adapter"];
+    eprintln!("render-replay adapter: {}",serde_json::json!({"name":adapter["name"],"vendor":adapter["vendor"],
+        "device_type":adapter["device_type"],"backend":adapter["backend"],"driver":adapter["driver"],"driver_info":adapter["driver_info"]}));
     replay.set_crowd_instancing(renderer.crowd_supported());
     replay.session.enable_scene_profile(true);
     // Medium is the non-temporal HDR/shadows preset: TAA and its projection
