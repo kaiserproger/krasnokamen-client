@@ -21,20 +21,23 @@ from pathlib import Path
 from PIL import Image
 
 SIZE = (1280, 720)
-# GUI scale 3: hotbar (182x22 GUI px) and the held-item name above it, plus chat lines.
-HUD = [(360, 590, 920, 720), (0, 380, 640, 640)]
+# GUI scale 3: hotbar (182x22 GUI px) and the held-item name above it. Every item shot
+# waits for the chat lines to fade, and particle colours never match chat text.
+HUD = [(360, 590, 920, 720)]
 # Foreground: farther than this (sum of |dR|+|dG|+|dB|) from the median floor colour.
 FOREGROUND = 60
 # Lower-right corner holding the potion bottle in the particle shots.
 HELD_BOTTLE = (980, 470)
 
-# shot -> (row, region x0, y0, x1, y1, minimum IoU, allowed area ratio native/java)
+# check -> (row, region x0, y0, x1, y1, minimum IoU, allowed area ratio native/java);
+# a check named `<shot>:<part>` compares one part of the shot.
 SILHOUETTES = {
     "statue-sitting": ("MODEL-ITEM-POSE", (640, 200, 1280, 720), 0.55, (0.6, 1.6)),
     "statue-standing": ("MODEL-ITEM-POSE", (640, 200, 1280, 720), 0.55, (0.6, 1.6)),
     "head": ("MODEL-PLAYER-HEAD-PROFILE", (640, 200, 1280, 720), 0.55, (0.6, 1.6)),
     "held-map": ("NATIVE-MAP-MARKERS", (160, 160, 1120, 720), 0.6, (0.7, 1.4)),
-    "held-map-offhand": ("NATIVE-MAP-MARKERS", (0, 160, 1280, 720), 0.55, (0.6, 1.6)),
+    "held-map-offhand:offhand-item": ("MODEL-ITEM-POSE", (0, 160, 640, 720), 0.55, (0.6, 1.6)),
+    "held-map-offhand:map": ("NATIVE-MAP-MARKERS", (640, 160, 1280, 720), 0.55, (0.6, 1.6)),
     "framed-map": ("NATIVE-FRAMED-MAP", (440, 180, 840, 520), 0.6, (0.7, 1.4)),
 }
 # shot -> (row, colour predicate, region, allowed count ratio, minimum spread ratio)
@@ -96,13 +99,14 @@ def potion_pixels(image: Image.Image, region, colour: str) -> list[tuple[int, in
 
 def check(java: Path, native: Path) -> dict:
     results = {}
-    for shot, (row, region, min_iou, (low, high)) in SILHOUETTES.items():
+    for check_name, (row, region, min_iou, (low, high)) in SILHOUETTES.items():
+        shot = check_name.split(":")[0]
         frames = [load(receipt, shot) for receipt in (java, native)]
         masks = [foreground(frame, region, floor_colour(frame, region)) for frame in frames]
         union = len(masks[0] | masks[1])
         iou = len(masks[0] & masks[1]) / union if union else 1.0
         ratio = len(masks[1]) / len(masks[0]) if masks[0] else float("inf")
-        results[shot] = {
+        results[check_name] = {
             "row": row, "metric": "silhouette", "iou": round(iou, 3), "area_ratio": round(ratio, 3),
             "java_area": len(masks[0]), "native_area": len(masks[1]),
             "pass": bool(masks[0]) and iou >= min_iou and low <= ratio <= high,
@@ -125,7 +129,7 @@ def check(java: Path, native: Path) -> dict:
 
 def panels(java: Path, native: Path, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    for shot in [*SILHOUETTES, *PARTICLES]:
+    for shot in dict.fromkeys(name.split(":")[0] for name in [*SILHOUETTES, *PARTICLES]):
         pair = Image.new("RGB", (SIZE[0] * 2, SIZE[1]))
         pair.paste(load(java, shot), (0, 0))
         pair.paste(load(native, shot), (SIZE[0], 0))

@@ -95,6 +95,12 @@ The Java oracle runs NeoForge, whose first-person renderer treats any
 client but a blank two-handed map on the oracle, so map scenes must hold a map
 with a real ID.
 
+The floor frame sits two blocks ahead of the player: the oracle reported its
+crosshair hit three blocks away as out of entity reach (`target.type = miss`)
+and never inserted the map. Each item shot waits 220 ticks after its
+`item replace` so the chat lines and the selected-item name have faded on both
+clients before the silhouettes are compared.
+
 ### Mount inventory quick-move
 
 The session associates an opened mount screen with the already received entity
