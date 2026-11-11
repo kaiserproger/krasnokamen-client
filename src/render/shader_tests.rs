@@ -864,6 +864,47 @@ fn terrain_cpu_release_keeps_gpu_geometry_and_requires_fresh_payload() {
     assert_eq!(acks, [([0; 3], 2)]);
 }
 
+#[test]
+fn submitted_index_count_is_per_frame_not_cumulative() {
+    let _gpu_guard = crate::render::gpu_test_lock();
+    let mut renderer = pollster::block_on(Renderer::new_offscreen(
+        64,
+        64,
+        PathBuf::from(".analysis/index-count-per-frame"),
+    ))
+    .unwrap();
+    renderer.set_graphics_preset(GraphicsPreset::Low);
+    let mut scene = Scene {
+        camera_position: [0., 2., 0.],
+        pitch: 20.,
+        revision: 1,
+        ..Scene::default()
+    };
+    scene.chunks.insert(
+        [0; 3],
+        crate::api::ChunkDraw {
+            revision: 1,
+            origin: [0.; 3],
+            bounds_min: [-1., 0., 1.],
+            bounds_max: [1., 0., 4.],
+            visibility: visibility::ALL_OPEN,
+            geometry: Some(Arc::new(terrain_release_quad())),
+            fade_duration_ms: Some(0),
+        },
+    );
+    let mut expected = None;
+    for _ in 0..8 {
+        renderer.render(&scene, None, &observation()).unwrap();
+        renderer.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        }).unwrap();
+        let indices = renderer.stats.submitted_indices;
+        assert!(indices >= 6, "frame must submit the terrain quad");
+        assert_eq!(*expected.get_or_insert(indices), indices, "counts must reset each frame");
+    }
+}
+
 /// A newly uploaded section fades in over its fade duration and is see-through
 /// meanwhile; its column must keep far terrain unmasked until the fade ends,
 /// or the sky shows through a hole in the landscape.
