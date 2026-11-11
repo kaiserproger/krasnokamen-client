@@ -23,8 +23,9 @@ commit `f26bba5f6f`, MIT, copyright 2023 Pierre C; see
 for development and artwork, and Hahdrim for Iron Plate. Original texture copies
 are retained in `source-textures`. The Iron Plate equipment texture was modified
 by adding eight transparent rows above it, and its model UVs shifted accordingly,
-to retain a source cuboid with a negative V coordinate. Upstream animated
-decorations are represented at their rest pose.
+to retain a source cuboid with a negative V coordinate. Its red plume pixels were
+moved into a greyscale dyeable layer, `iron_plate_plume.png`, and replaced by grey
+in the base texture. Upstream animated decorations are represented at their rest pose.
 
 The red and blue surcoats, caparisons, heater shield sprites, and crested helm
 geometry and textures were created for Solaris. These resources have not yet

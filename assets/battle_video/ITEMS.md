@@ -7,8 +7,8 @@ pack directory; Loader delivery has not been implemented or exercised.
 | Appearance | Component | Resource identifier | Suggested vanilla carrier |
 |---|---|---|---|
 | Holy armor (all four slots) | equippable `{slot:…,asset_id:…}` | `solaris_battle:holy` | matching iron armor piece |
-| Iron Plate armor (all four slots) | equippable `{slot:…,asset_id:…}` | `solaris_battle:iron_plate` | matching iron armor piece |
-| Crested helm | equippable `{slot:head,asset_id:…}` | `solaris_battle:crested_helm` | `minecraft:iron_helmet` |
+| Iron Plate armor (all four slots) | equippable `{slot:…,asset_id:…}`; `dyed_color` tints the plume (undyed red) | `solaris_battle:iron_plate` | matching iron armor piece |
+| Crested helm | equippable `{slot:head,asset_id:…}`; `dyed_color` tints the crest (undyed red) | `solaris_battle:crested_helm` | `minecraft:iron_helmet` |
 | Red surcoat | equippable `{slot:chest,asset_id:…}` | `solaris_battle:red_surcoat` | `minecraft:iron_chestplate` |
 | Blue surcoat | equippable `{slot:chest,asset_id:…}` | `solaris_battle:blue_surcoat` | `minecraft:iron_chestplate` |
 | Red caparison | equippable `{slot:body,asset_id:…}` | `solaris_battle:red_caparison` | `minecraft:iron_horse_armor` |
@@ -24,6 +24,11 @@ pack directory; Loader delivery has not been implemented or exercised.
 | Halberd | item_model | `solaris_battle:iron_halberd` | `minecraft:iron_sword` |
 | Longbow, static | item_model | `solaris_battle:iron_longbow_standby` | `minecraft:bow` |
 | Heavy crossbow, static | item_model | `solaris_battle:iron_heavy_crossbow_standby` | `minecraft:crossbow` |
+
+The red crest of the crested helm and the red plume pixels of the Iron Plate
+humanoid texture are a separate dyeable layer (`crested_helm_plume`,
+`iron_plate_plume`, greyscale; the base textures keep a grey copy). Battle
+staging dyes it per side: red `0xB92529` for side 1, blue `0x294DB7` for side 2.
 
 Example for a core build containing the equippable codec, using its existing
 summon equipment path:
