@@ -537,6 +537,211 @@ pub fn transform(pivot: Vec3, rotation: Vec3, scale: Vec3) -> Mat4 {
         * Mat4::from_scale(scale)
 }
 
+/// Test-side selection inventory, not a second runtime catalog. Rows retain both the demanded
+/// key and the key actually selected by `material`, so a variant silently using its base rig
+/// cannot earn coverage merely because the base family exists.
+#[cfg(test)]
+pub(super) fn rig_selection_contract() -> Vec<Value> {
+    use super::{Metadata, Store, presentation};
+    use crate::protocol::{Reader, Writer, content::TextureRegion, packet_ids::play::clientbound};
+    use serde_json::json;
+    let doc = Models::parse().unwrap();
+    let mut content = Content::test_cube();
+    content.entity_names = doc.entities.iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+    let models = Models::load(&content).unwrap();
+    let mut textures = std::collections::BTreeSet::new();
+    fn collect(value: &Value, textures: &mut std::collections::BTreeSet<String>) {
+        match value {
+            Value::String(s) if s.contains("entity/") => {
+                let (namespace, path) = s.split_once(':').unwrap_or(("minecraft", s));
+                textures.insert(format!("{namespace}:{}",
+                    path.trim_start_matches("textures/").trim_end_matches(".png")));
+            }
+            Value::Object(fields) => fields.values().for_each(|v| collect(v, textures)),
+            Value::Array(values) => values.iter().for_each(|v| collect(v, textures)),
+            _ => {}
+        }
+    }
+    collect(&serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(), &mut textures);
+    // VillagerProfessionLayer computes these constructor-default paths rather than storing
+    // them in the facts. Keep fixture resource absence separate from selection coverage.
+    for family in ["villager", "zombie_villager"] {
+        for layer in ["type", "baby"] {
+            textures.insert(format!("minecraft:entity/{family}/{layer}/plains"));
+        }
+    }
+    let textures: Vec<_> = textures.into_iter().collect();
+    for (index, name) in textures.iter().enumerate() {
+        content.insert_test_texture(name.trim_end_matches(".png"), TextureRegion {
+            layer: index as u32 + 1, uv: [0., 0., 1., 1.], width: 64, height: 64,
+        });
+    }
+    let mut rows = Vec::new();
+    let mut store = Store::default();
+    for (registry, entries) in &models.builtin_variants {
+        store.registries.insert(registry.clone(), entries.iter()
+            .map(|(name, value)| (name.clone(), value.clone())).collect());
+    }
+    for (kind, schema) in &models.schemas {
+        let entity = || {
+            let mut fixture = Store::default();
+            let mut spawn = Writer::default();
+            spawn.var(1);
+            spawn.0.extend_from_slice(&[0; 16]);
+            spawn.var(schema.protocol_id as i32);
+            spawn.0.extend_from_slice(&[0; 29]);
+            fixture.apply(clientbound::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            fixture.slots.pop().unwrap()
+        };
+        let Some(family) = models.families.get(kind) else {
+            rows.push(json!({"id":format!("entity/{kind}"),"class":"non-family",
+                "entity":kind,"required_rig":null,"selected_rig":null,
+                "selection_error":"No facts family; special/resource-driven or unsupported route must be verified separately"}));
+            continue;
+        };
+        for (age, key) in std::iter::once(("adult", &family.rig))
+            .chain(family.baby_rig.as_ref().map(|key| ("baby", key)))
+        {
+            rows.push(json!({"id":format!("family/{kind}/{age}"),"class":"family",
+                "entity":kind,"age":age,"required_rig":key,"selected_rig":null,
+                "texture":family.texture,"materials":family.materials,
+                "scope":"declared family demand, including keys not reached by current selectors"}));
+        }
+        for baby in [false, true] {
+            // Inherited age metadata is not sufficient: the local 26.3
+            // ZombieNautilus.canBeABaby contract explicitly returns false.
+            if baby && (!schema.accessors.contains_key("DATA_BABY_ID")
+                || kind == "minecraft:zombie_nautilus") { continue; }
+            let base = if baby { family.baby_rig.as_ref().unwrap_or(&family.rig) } else { &family.rig };
+            let age = if baby { "baby" } else { "adult" };
+            let default_entity = entity();
+            let default_key = if kind == "minecraft:player"
+                && models.default_skin(Some(&default_entity.uuid)).unwrap().model == super::PlayerModel::Slim
+            {
+                "minecraft:player_slim#main".to_owned()
+            } else if kind == "minecraft:pufferfish" {
+                "minecraft:pufferfish_small#main".to_owned()
+            } else { base.clone() };
+            let mut cases = vec![("default".to_owned(), default_entity, default_key, None)];
+            if kind == "minecraft:wither_skull" {
+                let mut dangerous = entity();
+                dangerous.metadata.insert(models.accessor(kind, "DATA_DANGEROUS").unwrap(), Metadata::Bool(true));
+                cases.push(("DATA_DANGEROUS/true".into(), dangerous, base.clone(),
+                    family.materials["WITHER_INVULNERABLE_LOCATION"].as_str().map(str::to_owned)));
+                cases[0].3 = family.materials["WITHER_LOCATION"].as_str().map(str::to_owned);
+            }
+            if let Some(registry) = presentation::variant_registry(kind)
+                && let Some(entries) = store.registries.get(registry)
+            {
+                for (index, (name, data)) in entries.iter().enumerate() {
+                    let mut e = entity();
+                    let accessor = models.accessor(kind, "DATA_VARIANT_ID")
+                        .or_else(|| models.accessor(kind, "DATA_VARIANT")).unwrap();
+                    e.metadata.insert(accessor, Metadata::Int(index as i32));
+                    let expected = match data["model"].as_str() {
+                        Some(model) if !matches!(model, "normal" | "temperate") =>
+                            format!("minecraft:{model}_{}{}#main",
+                                kind.trim_start_matches("minecraft:"), if baby { "_baby" } else { "" }),
+                        _ => base.clone(),
+                    };
+                    let expected_texture = if data["assets"].is_object() {
+                        if baby && data["baby_assets"].is_object() {
+                            data["baby_assets"]["wild"].as_str()
+                        } else {
+                            data["assets"]["wild"].as_str()
+                        }
+                    } else if baby {
+                        data["baby_asset_id"].as_str().or(data["asset_id"].as_str())
+                    } else {
+                        data["asset_id"].as_str()
+                    }.map(str::to_owned);
+                    cases.push((format!("received/{name}"), e, expected, expected_texture));
+                }
+            }
+            // Only these numeric selectors change the rig in `material`.
+            let shape = match kind.as_str() {
+                "minecraft:pufferfish" => Some(("PUFF_STATE", vec![
+                    (0, "minecraft:pufferfish_small#main"),
+                    (1, "minecraft:pufferfish_medium#main"), (2, "minecraft:pufferfish#main")])),
+                "minecraft:tropical_fish" => Some(("DATA_ID_TYPE_VARIANT", vec![
+                    (0, base.as_str()), (1, "minecraft:tropical_fish_large#main")])),
+                _ => None,
+            };
+            if let Some((accessor, values)) = shape {
+                for (value, expected) in values {
+                    let mut e = entity();
+                    e.metadata.insert(models.accessor(kind, accessor).unwrap(), Metadata::Int(value));
+                    cases.push((format!("{accessor}/{value}"), e, expected.to_owned(), None));
+                }
+            }
+            for (case, mut e, expected, expected_texture) in cases {
+                if let Some(accessor) = models.accessor(kind, "DATA_BABY_ID") {
+                    e.metadata.insert(accessor, Metadata::Bool(baby));
+                }
+                let selected = presentation::material(&store, &models, &e, &content, 0);
+                let (key, selected_texture, error) = match selected {
+                    Ok(binding) => (Some(binding.rig),
+                        textures.get(binding.texture.layer.saturating_sub(1) as usize).cloned(), None),
+                    Err(error) => (None, None, Some(error)),
+                };
+                rows.push(json!({"id":format!("selection/{kind}/{age}/{case}"),
+                    "class":"selection","entity":kind,"age":age,"case":case,
+                    "required_rig":expected,"selected_rig":key,"selection_error":error,
+                    "required_texture":expected_texture,"selected_texture":selected_texture,
+                    "vanilla_reachability":if baby && family.baby_rig.is_none() {
+                        "unverified_inherited_baby_accessor"
+                    } else { "declared_family" }}));
+            }
+            // Poses share a rig, but each remains a distinct visual/animation obligation.
+            for (id, pose) in &models.poses {
+                rows.push(json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
+                    "entity":kind,"age":age,"pose":pose,"metadata_value":id,
+                    "required_rig":base,"selected_rig":null,
+                    "selection_error":null,"scope":"rig demand only; animation/pixels unverified",
+                    "vanilla_reachability":if baby && family.baby_rig.is_none() {
+                        "unverified_inherited_baby_accessor"
+                    } else { "declared_family" }}));
+            }
+        }
+        for (enum_name, values) in &schema.enum_ids {
+            for (id, value) in values {
+                rows.push(json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
+                    "entity":kind,"enum":enum_name,"metadata_value":id,"value":value,
+                    "required_rig":family.rig,"selected_rig":null,
+                    "scope":"facts inventory; received enum presentation unverified"}));
+            }
+        }
+        for texture in &family.textures {
+            rows.push(json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
+                "entity":kind,"texture":texture,"required_rig":family.rig,"selected_rig":null,
+                "scope":"declared material inventory, not evidence that a state selects it"}));
+        }
+    }
+    for (kind, armor) in &models.armor_models {
+        for (age, slots) in [("adult", &armor.adult), ("baby", &armor.baby)] {
+            for (slot, key) in slots {
+                rows.push(json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
+                    "entity":kind,"age":age,"slot":slot,"required_rig":key,"selected_rig":null,
+                    "scope":"facts armor key; reachability and equipped pixels unverified"}));
+            }
+        }
+    }
+    for (index, skin) in models.default_skins.iter().enumerate() {
+        rows.push(json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
+            "required_rig":if skin.model == super::PlayerModel::Slim {
+                "minecraft:player_slim#main"
+            } else { "minecraft:player#main" }, "selected_rig":null,
+            "scope":"default skin layout demand; profile publication and pixels unverified"}));
+    }
+    for (name, data) in &models.builtin_variants["minecraft:painting_variant"] {
+        rows.push(json!({"id":format!("painting/{name}"),"class":"painting-variant",
+            "required_rig":null,"selected_rig":null,"variant":data,
+            "scope":"resource-driven painting segments, not an authored entity rig"}));
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

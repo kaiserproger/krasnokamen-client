@@ -179,7 +179,6 @@ impl super::Store {
                     | "minecraft:chest"
                     | "minecraft:trapped_chest"
                     | "minecraft:ender_chest"
-                    | "minecraft:bed"
                     | "minecraft:bell"
                     | "minecraft:lectern"
                     | "minecraft:copper_golem_statue"
@@ -364,15 +363,6 @@ impl super::Store {
                     &mut self.transforms,
                     out,
                 ),
-                "minecraft:bed" => bed(
-                    block,
-                    models,
-                    content,
-                    &frame,
-                    root,
-                    &mut self.transforms,
-                    out,
-                ),
                 "minecraft:bell" => bell(
                     block,
                     models,
@@ -508,7 +498,6 @@ pub(crate) fn has_factory(name: &str) -> bool {
             | "minecraft:structure_block"
             | "minecraft:test_instance_block"
             | "minecraft:shulker_box"
-            | "minecraft:bed"
             | "minecraft:conduit"
             | "minecraft:bell"
             | "minecraft:campfire"
@@ -1015,66 +1004,6 @@ fn conduit(
             },
         )?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
     }
-    Ok(BlockRenderStatus::Rendered)
-}
-fn bed(
-    e: &BlockEntity,
-    m: &Models,
-    c: &Content,
-    f: &StaticBlockFrame,
-    root: Mat4,
-    t: &mut Vec<Mat4>,
-    out: &mut DynamicGeometry,
-) -> Result<BlockRenderStatus> {
-    let part = prop(e, c, "part").unwrap_or("foot");
-    let key = if part == "head" {
-        "minecraft:bed_head#main"
-    } else {
-        "minecraft:bed_foot#main"
-    };
-    let name = block_name(e, c)?;
-    let color = name
-        .trim_start_matches("minecraft:")
-        .trim_end_matches("_bed");
-    let mut light = f.light;
-    let d = match prop(e, c, "facing").unwrap_or("north") {
-        "north" => [0, 0, -1],
-        "south" => [0, 0, 1],
-        "west" => [-1, 0, 0],
-        _ => [1, 0, 0],
-    };
-    let position =
-        std::array::from_fn(|i| e.position[i] + d[i] * if part == "head" { -1 } else { 1 });
-    let other_state = f.world.block(position);
-    let other_properties = other_state.and_then(|s| c.state_properties(s));
-    if other_state.and_then(|s| c.name(s)) == Some(name)
-        && other_properties
-            .and_then(|p| p.get("facing"))
-            .map(String::as_str)
-            == prop(e, c, "facing")
-        && other_properties
-            .and_then(|p| p.get("part"))
-            .map(String::as_str)
-            == Some(if part == "head" { "foot" } else { "head" })
-        && f.blocks
-            .get(&position)
-            .is_some_and(|other| other.type_name == "minecraft:bed")
-    {
-        let Some(other) = (f.sample_light)(position.map(|v| f64::from(v) + 0.5))? else {
-            return Ok(BlockRenderStatus::WorldPending);
-        };
-        light = std::array::from_fn(|i| light[i].max(other[i]));
-    }
-    let root = root
-        * Mat4::from_translation(Vec3::new(0., 0.5625, 0.))
-        * Mat4::from_rotation_x(FRAC_PI_2)
-        * around(
-            Vec3::splat(0.5),
-            Mat4::from_rotation_z(
-                (180. + yaw(prop(e, c, "facing").unwrap_or("north"))).to_radians(),
-            ),
-        );
-    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/bed/{color}"))?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light }, t, out, |_, _, _| {})?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn piston(

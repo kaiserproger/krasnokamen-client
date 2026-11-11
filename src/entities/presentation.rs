@@ -301,6 +301,13 @@ pub(super) fn material(
             .get("DRAGON_TEXTURE_LOCATION")
             .and_then(Value::as_str)
             .map(str::to_owned)
+    } else if e.type_name == "minecraft:wither_skull" {
+        let key = if boolean(models, e, "DATA_DANGEROUS") {
+            "WITHER_INVULNERABLE_LOCATION"
+        } else {
+            "WITHER_LOCATION"
+        };
+        family.materials.get(key).and_then(Value::as_str).map(str::to_owned)
     } else {
         family.texture.clone()
     };
@@ -2321,20 +2328,6 @@ pub fn special_item(
             "minecraft:standing_banner#main",
             "entity/banner/banner_base".to_owned(),
         ),
-        "bed" => (
-            match special["part"].as_str() {
-                Some("head") => "minecraft:bed_head#main",
-                Some("foot") => "minecraft:bed_foot#main",
-                _ => return Err("bed item part must be head or foot".into()),
-            },
-            format!(
-                "entity/bed/{}",
-                special["texture"]
-                    .as_str()
-                    .unwrap_or("red")
-                    .trim_start_matches("minecraft:")
-            ),
-        ),
         "head" | "player_head" => {
             let kind = special["kind"].as_str().unwrap_or("player");
             match kind {
@@ -2437,8 +2430,8 @@ pub fn special_item(
             }
         }
     }
-    // Bed halves already use the half-local frame expected by the item graph.
-    // Banners instead use the standing model's feet-at-24 frame.
+    // Banners use the standing model's feet-at-24 frame.
+    // Trident orientation belongs to the resource item graph, not a second half-turn here.
     let item_root = if kind == "banner" {
         Mat4::from_translation(Vec3::new(0., -1.5, 0.))
     } else if kind == "chest" {
@@ -2851,28 +2844,32 @@ mod tests {
 
     #[test]
     fn authored_trident_prongs_join_crossbar_at_shaft_tip() {
+        // Local 26.3 TridentModel.createLayer: retained javap excerpt in the Q04 receipts.
         let model = super::super::solaris_models::ModelFile::parse(include_str!(
             "../../assets/solaris/models/entity/trident.json"
         )).unwrap();
-        let pole = model.bones.iter().find(|bone| bone.name == "pole").unwrap();
-        let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
-        let bar = &head.cubes[0];
-        let pole_tip = pole.pivot[1] + pole.cubes[0].origin[1];
-        let bar_bottom = head.pivot[1] + bar.origin[1];
-        assert_eq!(head.cubes.len(), 4);
-        assert!(bar_bottom > pole_tip);
-        for prong in &head.cubes[1..] {
-            assert_eq!(head.pivot[1] + prong.origin[1], pole_tip);
-            assert_eq!(head.pivot[1] + prong.origin[1] + prong.size[1], bar_bottom);
-            assert!(prong.origin[0] >= bar.origin[0]);
-            assert!(prong.origin[0] + prong.size[0] <= bar.origin[0] + bar.size[0]);
-        }
-        assert!(bar.origin[0] < 0. && bar.origin[0] + bar.size[0] > 0.);
-        // The default box unwrap samples transparent texels, visually severing the prongs.
-        // This rectangle is opaque in the trident entity texture.
-        use super::super::solaris_models::Face;
-        for face in [Face::Up, Face::Down, Face::Front, Face::Back, Face::Left, Face::Right] {
-            assert_eq!(bar.faces.get(&face), Some(&[0., 8., 4., 10.]), "{face:?}");
+        let pole = &model.bones[0];
+        assert_eq!(pole.name, "pole");
+        assert_eq!(pole.pivot, [0.; 3]);
+        assert_eq!(pole.cubes.len(), 1);
+        assert_eq!(pole.cubes[0].origin, [-0.5, 2., -0.5]);
+        assert_eq!(pole.cubes[0].size, [1., 25., 1.]);
+        assert_eq!(pole.cubes[0].uv, [0., 6.]);
+        assert!(pole.cubes[0].faces.is_empty());
+        let expected = [
+            ("base", [-1.5, 0., -0.5], [3., 2., 1.], [4., 0.], false),
+            ("left_spike", [-2.5, -3., -0.5], [1., 4., 1.], [4., 3.], false),
+            ("middle_spike", [-0.5, -4., -0.5], [1., 4., 1.], [0., 0.], false),
+            ("right_spike", [1.5, -3., -0.5], [1., 4., 1.], [4., 3.], true),
+        ];
+        assert_eq!(pole.bones.len(), expected.len());
+        for (part, (name, origin, size, uv, mirror)) in pole.bones.iter().zip(expected) {
+            assert_eq!(part.name, name);
+            assert_eq!(part.pivot, [0.; 3]);
+            assert_eq!(part.cubes.len(), 1);
+            let cube = &part.cubes[0];
+            assert_eq!((cube.origin, cube.size, cube.uv, cube.mirror), (origin, size, uv, mirror), "{name}");
+            assert!(cube.faces.is_empty(), "{name} uses the source box unwrap");
         }
     }
 
@@ -2890,6 +2887,19 @@ mod tests {
                 hi - lo
             };
             assert!(span(axis) > span(other) * 4., "{key}");
+            if bone_name == "pole" {
+                let (lo, hi) = bone.quads.iter().flatten().map(|vertex| vertex[1])
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                assert_eq!((lo, hi), (2. / 16., 27. / 16.), "thrown shaft uses the source grip frame");
+                let tip = rig.bones.iter().find(|bone| bone.name == "middle_spike").unwrap();
+                let tip_y = tip.quads.iter().flatten().map(|vertex| vertex[1]).fold(f32::INFINITY, f32::min);
+                assert_eq!(tip_y, -4. / 16.);
+                for yaw in [0., 90., 180., 270.] {
+                    let root = projectile_root(Vec3::ZERO, yaw, 0., true);
+                    let forward = projectile_root(Vec3::ZERO, yaw, 0., false).transform_vector3(Vec3::X);
+                    assert!((root.transform_point3(Vec3::new(0., tip_y, 0.)) - forward * 0.25).length() < 1e-5);
+                }
+            }
         }
         for yaw in [0., 90., 180., 270.] {
             for pitch in [0., 45., 270.] {
@@ -3258,45 +3268,6 @@ mod tests {
         assert!(lid_top > body_top && lid_top <= 1.);
     }
 
-    #[test]
-    fn bed_item_graph_joins_both_full_half_models() {
-        let (models, _) = fixture();
-        let mut content = Content::test_cube();
-        content.insert_test_texture(
-            "minecraft:entity/bed/red",
-            TextureRegion {
-                layer: 42,
-                uv: [0., 0., 1., 1.],
-                width: 64,
-                height: 64,
-            },
-        );
-        let stack = Stack::default();
-        let q = std::f32::consts::FRAC_1_SQRT_2;
-        // 26.1.2 red_bed special-node transforms, before the common display transform.
-        let rotation = Mat4::from_quat(glam::Quat::from_xyzw(0., -q, q, 0.));
-        for (part, graph_z, expected_z) in [
-            ("head", 1., [0., 1.]),
-            ("foot", 0., [-1., 0.]),
-        ] {
-            let special = serde_json::json!({"type":"minecraft:bed","part":part,"texture":"red"});
-            let model = special_item(&models, &content, &stack, &special).unwrap();
-            let graph = Mat4::from_translation(Vec3::new(1., 0.5625, graph_z)) * rotation;
-            let mut low = Vec3::splat(f32::INFINITY);
-            let mut high = Vec3::splat(f32::NEG_INFINITY);
-            for quad in &model.quads {
-                for position in quad.positions {
-                    let p = graph.transform_point3(Vec3::from_array(position));
-                    low = low.min(p);
-                    high = high.max(p);
-                }
-            }
-            let expected_low = Vec3::new(0., 0., expected_z[0]);
-            let expected_high = Vec3::new(1., 0.5625, expected_z[1]);
-            assert!((low - expected_low).abs().max_element() < 1e-5, "{part}: {low:?}");
-            assert!((high - expected_high).abs().max_element() < 1e-5, "{part}: {high:?}");
-        }
-    }
 
     #[test]
     fn breeze_wind_emits_wrapped_animated_texture_layer() {
@@ -3423,5 +3394,39 @@ mod tests {
         );
         let binding = material(&Store::default(), &models, &dragon, &content, 0).unwrap();
         assert_eq!(binding.texture.layer, 42);
+    }
+
+    #[test]
+    fn held_trident_preserves_coordinates_for_the_resource_item_graph() {
+        let (models, _) = fixture();
+        let mut content = Content::test_cube();
+        content.insert_test_texture("minecraft:entity/trident/trident", TextureRegion {
+            layer: 42, uv: [0., 0., 1., 1.], width: 32, height: 32,
+        });
+        let item = special_item(&models, &content, &Stack::default(),
+            &serde_json::json!({"type":"minecraft:trident"})).unwrap();
+        let rig = models.rig("minecraft:trident#main");
+        let pole = rig.bones.iter().find(|bone| bone.name == "pole").unwrap();
+        let (lo, hi) = pole.quads.iter().flatten().map(|vertex| vertex[1])
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        assert_eq!((lo, hi), (2. / 16., 27. / 16.), "held shaft keeps the local layer's grip frame");
+        // The resource item graph owns its Y/Z conversion. A second half-turn
+        // here reverses the prongs against the actual matched Java control.
+        let conversion = Mat4::IDENTITY;
+        let mut matrices = Vec::new();
+        let mut emitted = item.quads.iter();
+        for bone in &rig.bones {
+            let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(conversion)
+                * resources::transform(bone.pivot, bone.rotation, bone.scale);
+            matrices.push(matrix);
+            for source in &bone.quads {
+                let actual = emitted.next().unwrap();
+                for (vertex, point) in source.iter().zip(actual.positions) {
+                    let expected = matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
+                    assert!((Vec3::from_array(point) - expected).abs().max_element() < 1e-6);
+                }
+            }
+        }
+        assert!(emitted.next().is_none());
     }
 }
