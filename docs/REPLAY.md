@@ -317,6 +317,47 @@ expand the view or recover unrecorded entities.
 `terrain.cpu_mesh_resident_peak_bytes` is the largest CPU mesh payload held so
 far in the process (never above the budget).
 
+## Find the action: scan a take and plan shots
+
+`scan-replay` reads a take once with the replay decoder (no session, GPU or
+terrain meshing; a 20k take of 20 million packets scans in about 10 s) and
+writes a JSONL timeline for camera planning:
+
+```sh
+"$SOLARIS_CLIENT_BINARY" scan-replay --recording take.solrec --output timeline.jsonl \
+  --data-dir /work/client-data [--interval-ticks 10] [--min-y -64 --height 384]
+```
+
+- `sample` rows, one per interval of tick time (`t` in the tick seconds of
+  `--timebase tick`): live fighters per side; melee contact clusters (fighters
+  with an opposite-side fighter within 2.5 blocks, linked within 4 blocks:
+  count, centroid, extent, red-to-blue `normal`, contact `line`, length, swings
+  and fighter ids near the centroid); swing, hurt and death events; arrows per
+  side (in flight, launched, impacts, with flight/launch/impact areas; flight
+  follows the vanilla arrow ballistics from the last server position and
+  velocity, since the server rarely sends arrow movement); cavalry groups
+  (horses linked within 6 blocks: count, centroid, extent, velocity, ids).
+- `entity` rows for every fighter that reached contact and every horse: side,
+  weapon, rider, spawn, first contact, death and removal times (for
+  `attach_entity`).
+- `chunk` rows: per column the first free y above the top block (`surface`:
+  trees, leaves, grass) and above the top solid non-leaf block (`ground`),
+  computed from the chunk sections and later block updates.
+- a final `summary` row. Sides come from the staging loadout's
+  `solaris_battle:red_*`/`blue_*` item models and equippable assets
+  (`side_source: components`); takes from older pins fall back to the widest
+  gap between the two armies' spawn positions (`spawn_split`, lower half red).
+
+`tools/battle_shots.py plan timeline.jsonl --out DIR --name NAME` turns the
+timeline into kit cameras and a `bv-render.sh batch` shot list: low dollies
+along contact lines, over-the-shoulder `attach_entity` shots on fighters
+reaching contact, volleys followed from behind the archers to the impact,
+cavalry tracking, push-ins into the densest melee and at most one high oblique
+establishing shot. Cameras sit at a height above their own column's ground and
+are rejected when terrain or trees block the view or the column was not
+recorded. `battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
+per preview time through the kit's `bv-render.sh` (`BV_SIZE`, default 640x360).
+
 ## Focused checks and provenance
 
 `cargo test -p solaris-client --lib replay`,
@@ -328,8 +369,10 @@ unchanged live tick, tick timebase gaps/monotonic markers, replay radius,
 authoritative tick gaps/received health, camera endpoints/yaw wrap/attachment/
 easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain::`
 includes the replay settle beyond the CPU mesh budget (several upload rounds equal
-one round). These do not replace the captured real-world smoke shot or a full
-20k battle.
+one round). `cargo test -p solaris-client --lib replay::scan` covers side
+classification, contact clustering, terrain columns and arrow flight;
+`python3 -m unittest tools.test_battle_shots` the planner's terrain rules. These
+do not replace the captured real-world smoke shot or a full 20k battle.
 
 The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):
 

@@ -18,6 +18,8 @@ const HELP: &str = "Usage:
   solaris-client render-replay --recording take.solrec --camera shot.json
                  --output shot.mp4 [--size 1920x1080] [--start SECONDS --end SECONDS]
                  [--motion-samples 1..16] [--data-dir DIR]
+  solaris-client scan-replay --recording take.solrec --output timeline.jsonl
+                 [--data-dir DIR] [--interval-ticks 10]
   solaris-client doctor [--json]
   solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
   solaris-client mcp-schema              Export the live native MCP argument schemas
