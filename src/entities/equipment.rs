@@ -1,7 +1,7 @@
 //! Received humanoid armor uses activated, source-baked per-slot rigs, not item icons.
 //! Contracts: local 26.1.2 ArmorStandRenderer, HumanoidArmorLayer,
 //! ArmorStandArmorModel and EquipmentLayerRenderer javap (ignored QA receipts).
-use super::{presentation as p, Entity, Models};
+use super::{presentation as p, resources::Rig, Entity, Models};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     inventory::Stack,
