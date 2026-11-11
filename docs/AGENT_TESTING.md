@@ -274,6 +274,14 @@ The pure frame/painting orientation tests are under `entities::render_special`.
 Nonempty CPU geometry is not graphical acceptance: windowed evidence must
 separately check both placed and summoned entities against a visible control.
 
+Falling blocks retain their last received position for protocol deltas while
+their presented position advances under local gravity and collision between
+updates. `falling_block_moves_between_received_updates_and_lands` checks the
+trajectory, landing and received-position delta base. Capture metadata also
+includes the falling entity UUID, received position and movement-packet tick,
+and the presented position and sample tick from that frame; those observations
+are not themselves a pixel or real-client acceptance.
+
 Sign bodies in 26.3 are terrain block models; their block-entity pass emits only
 front/back text and needs no removed `entity/signs` texture or body rig.
 `cargo test --lib sign_text_mesh_needs_no_legacy_entity_texture_or_body_rig`

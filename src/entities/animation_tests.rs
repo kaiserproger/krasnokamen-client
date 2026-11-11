@@ -2076,3 +2076,70 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
         assert!(presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5), "{name}");
     }
 }
+
+#[test]
+fn falling_block_moves_between_received_updates_and_lands() {
+    use crate::protocol::world::{Chunk, Palette, Section, SurfaceHeightmap, World};
+    let (mut models, mut entity) = fixture();
+    let schema = models.schemas.remove("minecraft:pig").unwrap();
+    models.schemas.insert("minecraft:falling_block".into(), schema);
+    entity.type_name = "minecraft:falling_block".into();
+    entity.source = None;
+    entity.transform.position = [8.5, 10., 8.5];
+    entity.previous = entity.transform;
+    entity.position = entity.transform.position;
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    let id = entity.handle.network_id;
+    store.slots.push(entity);
+    store.ids.insert(id, 0);
+    store.physical_active.insert(id);
+    let palette = |size| Palette {
+        bits: 0, values: vec![0], words: Vec::new(), size,
+    };
+    let mut world = World::new(0, 16);
+    let content = Content::test_cube();
+    store.tick_presentation(1, false, &world, &content, 0).unwrap();
+    assert_eq!(store.get(id).unwrap().transform.position[1], 10.);
+    assert!(store.physical_active.contains(&id), "unloaded terrain must be retried");
+    world.insert([0, 0], Chunk {
+        sections: vec![Arc::new(Section {
+            blocks: palette(4096), biomes: palette(64), non_empty_block_count: 0,
+        })],
+        sky: BTreeMap::new(), block: BTreeMap::new(),
+        block_entities: crate::protocol::world::empty_block_entities(),
+        surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+        surface_heightmap_received: false,
+    }).unwrap();
+    world.set([8, 2, 8], 1, |state| Ok(state == 0)).unwrap();
+    let (mut y, mut velocity) = (10f64, 0f64);
+    for tick in 2..=4 {
+        store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        velocity -= 0.04;
+        y += velocity;
+        velocity *= f64::from(0.98f32);
+        let entity = store.get(id).unwrap();
+        let shown = entity.presented_transform(tick, 1.).position[1];
+        assert!((shown - y).abs() < 1e-9, "tick {tick}: {shown} vs {y}");
+        assert_eq!(entity.position[1], 10., "packet delta base stays server-owned");
+    }
+    // 26.3 relative movement deltas are based on the last received position,
+    // not the locally predicted transform.
+    let mut packet = crate::protocol::Writer::default();
+    packet.var(id);
+    packet.var(0); // one position step, not on ground
+    for delta in [0i16, -4096, 0] {
+        packet.0.extend_from_slice(&delta.to_be_bytes());
+    }
+    store.apply(
+        crate::protocol::packet_ids::play::clientbound::MOVE_ENTITY_POS,
+        &mut crate::protocol::Reader::new(&packet.0), &content, 4,
+    ).unwrap();
+    assert_eq!(store.get(id).unwrap().position[1], 9.);
+    assert_eq!(store.get(id).unwrap().transform.position[1], 9.);
+    for tick in 5..=61 {
+        store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+    }
+    let rest = store.get(id).unwrap().transform.position[1];
+    assert!((rest - 3.).abs() < 1e-9, "rests on the cube: {rest}");
+}

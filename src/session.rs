@@ -1183,11 +1183,21 @@ impl Session {
         }
         Ok(())
     }
-    /// Living animation inputs sampled after this capture's scene extraction.
+    /// Animation and falling-block positions sampled after this capture's scene extraction.
     pub(crate) fn capture_gait_frame(&self) -> Value {
         Value::Array(self.entities.received_entities().filter_map(|entity| {
-            let living = entity.source.as_ref()?.living.as_ref()?;
             let transform = entity.presented_transform(self.world_tick, self.presentation_partial);
+            if entity.type_name == "minecraft:falling_block" {
+                return Some(json!({
+                    "entity_uuid": entity.uuid,
+                    "entity_type": entity.type_name,
+                    "position": transform.position,
+                    "received_position": entity.position,
+                    "observed_tick": entity.observed_tick,
+                    "sample_tick": self.world_tick,
+                }));
+            }
+            let living = entity.source.as_ref()?.living.as_ref()?;
             Some(json!({
                 "entity_uuid": entity.uuid,
                 "entity_type": entity.type_name,
