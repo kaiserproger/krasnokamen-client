@@ -2,6 +2,7 @@
 pub(crate) mod clock;
 pub mod format;
 pub(crate) mod record;
+pub(crate) mod scan;
 mod roster;
 #[cfg(test)]
 mod seek_tests;
