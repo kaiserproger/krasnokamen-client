@@ -7,7 +7,7 @@ fn fixture_file() -> PathBuf {
     static SERIAL: AtomicU64=AtomicU64::new(0);
     let path=std::env::temp_dir().join(format!("solrec-test-{}-{}.solrec",std::process::id(),SERIAL.fetch_add(1,Ordering::Relaxed)));
     let file=std::fs::OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
-    let mut output=RecordingWriter::new(file,&Header {protocol_version:777,server_build:"authored-fixture".into(),seed:1,start_tick:9000,wall_time:0}).unwrap();
+    let mut output=RecordingWriter::new(file,&Header {protocol_version:777,server_build:"authored-fixture".into(),seed:1,start_tick:123,wall_time:0}).unwrap();
     let mut write=|ms,id,body:Vec<u8>| {let mut packet=Writer::default();packet.var(id);packet.0.extend(body);output.packet(&Packet {ms,bytes:packet.0}).unwrap();};
     let mut login_body=Writer(vec![0;16]);
     login_body.string("ReplayTest");login_body.var(0);login_body.0.extend([0;16]);
@@ -33,7 +33,7 @@ fn player(path:&Path) -> Player {
     let clock=VirtualClock::new();
     let mut input=RecordingReader::open(path).unwrap();
     let next=input.next_packet().unwrap();
-    Player {session:Session::replay_fixture(),input,next,path:path.into(),presentation:false,phase:Phase::Login,time:Duration::ZERO,next_tick:Duration::ZERO,last_packet:Duration::ZERO,last_tick:None,last_wall_ns:None,transcript:Sha256::new(),crowd_instancing:false,crowd_mesh_fingerprint:Default::default(),clock}
+    Player {session:Session::replay_fixture(),input,next,path:path.into(),presentation:false,phase:Phase::Login,time:Duration::ZERO,next_tick:Duration::ZERO,last_packet:Duration::ZERO,last_tick:None,timebase:Timebase::Wall,tick_origin:None,render_distance:None,seek_warmup_ticks:0,last_wall_ns:None,transcript:Sha256::new(),crowd_instancing:false,crowd_mesh_fingerprint:Default::default(),clock}
 }
 #[test]
 fn same_recording_produces_identical_cpu_frame_hashes_and_received_health() {
@@ -208,4 +208,86 @@ fn crowd_mesh_fingerprint_uses_content_not_process_global_revision() {
     assert_eq!(crowd_mesh_hash(&meshes),fingerprint);
     meshes.vertices.push(crate::entities::CrowdVertex::default());
     assert_ne!(crowd_mesh_hash(&meshes),fingerprint);
+}
+
+#[test]
+fn tick_timebase_uses_actual_markers_keeps_gaps_and_original_transcript() {
+    let path=fixture_file();
+    let mut replay=player(&path);
+    replay.timebase=Timebase::Tick;
+    replay.advance_to(Duration::ZERO).unwrap();
+    assert_eq!(replay.last_tick,Some(9000));
+    assert_eq!(replay.session.player.health,Some(5.),
+        "packets following marker 9000 belong to that tick, not their wall timestamp");
+    assert_eq!(replay.tick_origin,Some(9000));
+    replay.advance_to(Duration::from_millis(149)).unwrap();
+    assert_eq!(replay.last_tick,Some(9000),"a three-tick gap must not be compressed");
+    replay.advance_to(Duration::from_millis(150)).unwrap();
+    assert_eq!(replay.last_tick,Some(9003));
+    assert_eq!(replay.last_wall_ns,Some(450_150_000_000));
+    let transcript=replay.transcript.clone().finalize();
+    let mut wall=player(&path);
+    wall.advance_to(Duration::from_millis(500)).unwrap();
+    assert_eq!(wall.transcript.clone().finalize(),transcript,
+        "timeline mapping must not rewrite any received packet or timestamp");
+    assert_eq!(replay.tick_interval(),Duration::from_millis(50));
+    assert_eq!(replay.partial(),0.);
+    assert!(replay.advance_to(Duration::from_millis(151)).unwrap_err().contains("last packet"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn replay_radius_follows_recorded_server_unless_explicitly_overridden() {
+    let path=fixture_file();
+    let mut replay=player(&path);
+    let radius=|distance| {
+        let mut body=Writer::default();body.var(distance);
+        let mut bytes=Writer::default();bytes.var(play::clientbound::SET_CHUNK_CACHE_RADIUS);
+        bytes.0.extend(body.0);
+        Packet {ms:0,bytes:bytes.0}
+    };
+    replay.seek(Duration::from_millis(5)).unwrap();
+    replay.apply_packet(&radius(12)).unwrap();
+    assert_eq!(replay.session.render_distance(),12);
+    assert_eq!(replay.session.scene().render_distance,12);
+    replay.set_render_distance(Some(20)).unwrap();
+    replay.apply_packet(&radius(6)).unwrap();
+    assert_eq!(replay.session.render_distance(),20);
+    assert_eq!(replay.session.scene().render_distance,20);
+    assert!(replay.set_render_distance(Some(1)).is_err());
+    assert!(replay.set_render_distance(Some(33)).is_err());
+    replay.set_render_distance(None).unwrap();
+    assert_eq!(replay.session.render_distance(),6);
+    assert_eq!(replay.session.scene().render_distance,6);
+    assert_eq!("tick".parse::<Timebase>().unwrap(),Timebase::Tick);
+    assert_eq!("wall".parse::<Timebase>().unwrap(),Timebase::Wall);
+    assert!("server".parse::<Timebase>().is_err());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn both_timebases_reject_non_increasing_server_markers() {
+    let path=fixture_file();
+    let bad=path.with_extension("nonmonotonic.solrec");
+    let mut input=RecordingReader::open(&path).unwrap();
+    let output=std::fs::OpenOptions::new().write(true).create_new(true).open(&bad).unwrap();
+    let mut output=RecordingWriter::new(output,&input.header).unwrap();
+    let mut phase=Phase::Login;
+    while let Some(mut packet)=input.next_packet().unwrap() {
+        let (id,body)=packet.split().unwrap();
+        if format::tick_marker(phase,id,body).unwrap().is_some_and(|(tick,_)|tick==9003) {
+            let mut bytes=Writer::default();bytes.var(id);bytes.string("solaris:tick");
+            bytes.0.extend(9000u64.to_be_bytes());bytes.0.extend(450_000_000_000u64.to_be_bytes());
+            packet.bytes=bytes.0;
+        }
+        phase=format::phase_after(phase,id);
+        output.packet(&packet).unwrap();
+    }
+    output.finish().unwrap();
+    for timebase in [Timebase::Wall,Timebase::Tick] {
+        let mut replay=player(&bad);replay.timebase=timebase;
+        assert!(replay.advance_to(Duration::from_millis(150)).unwrap_err().contains("strictly increasing"));
+    }
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(bad).unwrap();
 }

@@ -1598,8 +1598,7 @@ mod destruction_tests {
         assert!(session.far_column_ready([0, 0]));
     }
 
-    #[test]
-    fn far_offer_does_not_extend_environment_fog_range() {
+    fn ready_presentation_session() -> Session {
         let mut session = session_with_cube([0, 0, 0], true);
         session.entities = crate::session::mining_start_tests::session().entities;
         let chunk = session.world.chunk([0, 0]).unwrap().clone();
@@ -1648,6 +1647,36 @@ mod destruction_tests {
         terrain.set_render_rules([1.; 6], false, 0, Some(0)).unwrap();
         session.terrain = Some(terrain);
         assert!(session.play_world_presentation_ready());
+        session
+    }
+
+    #[test]
+    fn replay_settling_admits_received_terrain_without_a_fade() {
+        let mut session = ready_presentation_session();
+        session.phase = "play".into();
+        session.replaying = true;
+        session.terrain.as_mut().unwrap()
+            .set_render_rules([1.; 6], false, 0, Some(750)).unwrap();
+        assert!(session.settle_replay_geometry().unwrap(), "one cube fits the CPU mesh budget");
+        assert!(
+            session.scene.chunks.values().any(|chunk| {
+                chunk.geometry.as_ref().is_some_and(|geometry| {
+                    geometry.indices.iter().any(|indices| !indices.is_empty())
+                })
+            }),
+            "the received cube must produce drawable terrain",
+        );
+        for chunk in session.scene.chunks.values() {
+            assert_eq!(
+                chunk.fade_duration_ms, Some(0),
+                "zero duration admits a replay mesh immediately; None is unknown, not no fade",
+            );
+        }
+    }
+
+    #[test]
+    fn far_offer_does_not_extend_environment_fog_range() {
+        let mut session = ready_presentation_session();
         session.refresh_scene().unwrap();
         let without_far = session.scene.environment.clone();
         let mut offer = vec![1, 0];

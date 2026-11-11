@@ -77,6 +77,7 @@ pub struct Session {
     presentation: bool,
     network: Option<Network>,
     replaying: bool,
+    replay_seek: Option<replay::SeekState>,
     recording: Option<crate::replay::format::RecordingOptions>,
     recording_tick: Option<u64>,
     cinematic_camera: Option<crate::capture::camera::Pose>,
@@ -200,6 +201,7 @@ impl Session {
             presentation,
             network: None,
             replaying: false,
+            replay_seek: None,
             recording: None,
             recording_tick: None,
             cinematic_camera: None,
@@ -460,6 +462,9 @@ impl Session {
     /// by the server's chunk radius once one arrived, as in vanilla. Fog and
     /// sky colour follow it, so a server with a short radius fogs closer.
     pub(super) fn effective_render_distance(&self) -> u32 {
+        // A cinematic override expands fog together with entity/terrain range;
+        // the default replay option already follows the recorded server radius.
+        if self.replaying { return self.render_distance; }
         self.server_view_distance
             .filter(|radius| *radius > 0)
             .map_or(self.render_distance, |radius| self.render_distance.min(radius))
@@ -990,6 +995,11 @@ impl Session {
             }
             self.tick_detail_ms[4] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
+            // Cut-in seeks retain packet/world clocks, not speculative local
+            // movement or per-tick scene extraction. Live play stays below.
+            if self.replaying && self.replay_seek.is_some() {
+                return self.tick_replay_seek(world_advances);
+            }
             self.player.tick(
                 crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
                 &self.keys,
