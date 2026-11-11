@@ -110,9 +110,12 @@ own held placement; no second item half-turn or fitted grip offset is added.
 Projectile tridents transform the source pole axis into the same orientation basis as
 arrows. Geometry, held grip frame and thrown tip/shaft axes have regression coverage;
 matched first-person, third-person and thrown frames are separate acceptance evidence.
-Projectile arrows and spectral arrows use the vanilla 26.3 `ArrowModel.createBodyLayer`
-geometry and box-unwrap UVs against the runtime vanilla projectile textures
-(`entity/projectiles/arrow*.png`), transcribed from local javap.
+Projectile arrows and spectral arrows transcribe the local 26.3 `ArrowModel.createBodyLayer`:
+a zero-width rear plane perpendicular to the shaft, the mesh root's 0.9 scale folded into each
+child pose, and the shaft's 0.8 texture-height scale as explicit face rectangles. A unit test
+compares their world-space vertices, UVs and winding with the vanilla pose chain. Close-up back,
+side and diagonal frames of a stuck bow arrow matched the 26.3 Java client's arrow pixels; a
+spectral arrow matched in shape and texture from the same views, at a slightly different stuck height.
 Enchanting tables render their animated book and conduits render their inactive shell or
 active cage, wind and camera-facing eye in the native scene. A dry inactive conduit and an
 enchanting table were visually exercised; active conduit and matched-vanilla parity were not.

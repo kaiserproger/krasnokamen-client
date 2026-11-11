@@ -2873,13 +2873,88 @@ mod tests {
         }
     }
 
+    /// Faces of a vanilla 26.3 `ModelPart.Cube` (texOffs 0,0) in model pixels with their UVs, transcribed
+    /// from local javap of `ModelPart$Cube.<init>` and `ModelPart$Polygon.<init>`: the constructor's
+    /// corners v0..v7, each face's corner order and UV rectangle; a polygon maps its corners to
+    /// (u1,v0), (u0,v0), (u0,v1), (u1,v1) over `texture`, the layer size times `CubeDefinition.texScale`.
+    fn vanilla_cube_faces(origin: Vec3, size: Vec3, texture: glam::Vec2) -> [[(Vec3, glam::Vec2); 4]; 6] {
+        let corner = |x: bool, y: bool, z: bool| origin + size * Vec3::new(
+            f32::from(u8::from(x)), f32::from(u8::from(y)), f32::from(u8::from(z)));
+        let v = [
+            corner(false, false, false), corner(true, false, false), corner(true, true, false),
+            corner(false, true, false), corner(false, false, true), corner(true, false, true),
+            corner(true, true, true), corner(false, true, true),
+        ];
+        let Vec3 { x: w, y: h, z: d } = size;
+        let (u1, u2, u22, u3, u4) = (d, d + w, d + w + w, d + w + d, d + w + d + w);
+        let (v1, v2) = (d, d + h);
+        [
+            ([5, 4, 0, 1], [u1, 0., u2, v1]),   // DOWN
+            ([2, 3, 7, 6], [u2, v1, u22, 0.]),  // UP
+            ([0, 4, 7, 3], [0., v1, u1, v2]),   // WEST
+            ([1, 0, 3, 2], [u1, v1, u2, v2]),   // NORTH
+            ([5, 1, 2, 6], [u2, v1, u3, v2]),   // EAST
+            ([4, 5, 6, 7], [u3, v1, u4, v2]),   // SOUTH
+        ]
+        .map(|(corners, [a0, b0, a1, b1])| {
+            let uv = [(a1, b0), (a0, b0), (a0, b1), (a1, b1)];
+            [0, 1, 2, 3].map(|i| (v[corners[i]], glam::Vec2::new(uv[i].0, uv[i].1) / texture))
+        })
+    }
+
+    #[test]
+    fn arrow_vertices_follow_vanilla_26_3_world_transform() {
+        // Local 26.3 javap (receipts/ArrowParity/REPORT.md): ArrowRenderer.submit rotates Y by yRot-90
+        // and Z by xRot; createBodyLayer scales the mesh root by 0.9; ModelPart.translateAndRotate
+        // applies the part offset, ZYX rotation and part scale. The shaft box has texScale (1, 0.8).
+        let position = Vec3::new(3., 5., -7.);
+        let vanilla_root = Mat4::from_translation(position)
+            * Mat4::from_rotation_y((-53_f32).to_radians())
+            * Mat4::from_rotation_z(21_f32.to_radians())
+            * Mat4::from_scale(Vec3::splat(0.9));
+        let shaft = (Vec3::new(-12., -2., 0.), Vec3::new(16., 4., 0.), glam::Vec2::new(32., 25.6));
+        let parts = [
+            ("back", Vec3::new(-11., 0., 0.), 45_f32, 0.8,
+                (Vec3::new(0., -2.5, -2.5), Vec3::new(0., 5., 5.), glam::Vec2::new(32., 32.))),
+            ("cross_1", Vec3::ZERO, 45., 1., shaft),
+            ("cross_2", Vec3::ZERO, 135., 1., shaft),
+        ];
+        let area = |face: &[(Vec3, glam::Vec2); 4]| (face[1].0 - face[0].0).cross(face[3].0 - face[0].0).length();
+        for key in ["minecraft:arrow#renderer/model", "minecraft:spectral_arrow#renderer/model"] {
+            let rig = super::super::solaris_models::authored(key).unwrap();
+            let mut matrices = Vec::new();
+            let root = projectile_root(position, 37., 21., false);
+            for bone in &rig.bones {
+                let parent = bone.parent.map(|i| matrices[i]).unwrap_or(root);
+                matrices.push(parent * resources::transform(bone.pivot, bone.rotation, bone.scale));
+            }
+            for (name, offset, angle, scale, (origin, size, texture)) in parts {
+                let pose = vanilla_root * Mat4::from_translation(offset / 16.)
+                    * Mat4::from_rotation_x(angle.to_radians()) * Mat4::from_scale(Vec3::splat(scale));
+                let expected: Vec<_> = vanilla_cube_faces(origin, size, texture).into_iter()
+                    .map(|face| face.map(|(p, uv)| (pose.transform_point3(p / 16.), uv)))
+                    .filter(|face| area(face) > 1e-9).collect();
+                let index = rig.part_by_name[name];
+                let actual: Vec<_> = rig.bones[index].quads.iter()
+                    .map(|quad| quad.map(|v| (matrices[index].transform_point3(Vec3::new(v[0], v[1], v[2])),
+                        glam::Vec2::new(v[3], v[4]))))
+                    .filter(|face| area(face) > 1e-9).collect();
+                assert_eq!(actual.len(), expected.len(), "{key} {name}: visible faces");
+                // Same corners, UVs and winding: equal up to a cyclic shift of the corner order.
+                let same = |a: &[(Vec3, glam::Vec2); 4], b: &[(Vec3, glam::Vec2); 4]| (0..4).any(|shift|
+                    (0..4).all(|i| a[(i + shift) % 4].0.distance(b[i].0) < 1e-4
+                        && a[(i + shift) % 4].1.distance(b[i].1) < 1e-4));
+                for face in &expected {
+                    assert!(actual.iter().any(|quad| same(quad, face)), "{key} {name}: missing face {face:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn authored_arrow_matches_vanilla_26_3_arrow_model_layer() {
-        // Vanilla ArrowModel.createBodyLayer (26.3 javap): a 16x4x0 shaft plane at
-        // texOffs(0,0) shared by cross_1 (xRot 45deg) and cross_2 (xRot 135deg), plus
-        // a 5x5x0 "back" fletching plane at offset x=-11 (mesh scaled 0.9 -> -9.9),
-        // xRot 45deg, part scale 0.8; 32x32 texture. Default box unwrap: the shaft
-        // front face samples the whole [0,0,16,4] strip, not the 1px brown row.
+        // The root's 0.9 scale is distributed over the child pivots and scales.
+        // Shaft V coordinates account for CubeDefinition's 0.8 texture-height scale.
         let model = super::super::solaris_models::ModelFile::parse(include_str!(
             "../../assets/solaris/models/entity/arrow.json"
         )).unwrap();
@@ -2889,26 +2964,26 @@ mod tests {
         let back = &model.bones[0];
         assert!((back.pivot[0] - -9.9).abs() < 1e-6, "mesh pose scale 0.9 on -11");
         assert_eq!(back.rotation, [45., 0., 0.]);
-        assert_eq!(back.scale, [0.8, 0.8, 0.8]);
+        assert_eq!(back.scale, [0.72, 0.72, 0.72]);
         assert_eq!(back.cubes.len(), 1);
         assert_eq!(back.cubes[0].origin, [0., -2.5, -2.5]);
-        assert_eq!(back.cubes[0].size, [5., 5., 0.]);
+        assert_eq!(back.cubes[0].size, [0., 5., 5.]);
         assert_eq!(back.cubes[0].uv, [0., 0.]);
         assert!(back.cubes[0].faces.is_empty(), "default box unwrap");
         for (index, (name, rotation)) in [("cross_1", 45.), ("cross_2", 135.)].iter().enumerate() {
             let bone = &model.bones[index + 1];
             assert_eq!(bone.name, *name);
             assert_eq!(bone.rotation, [*rotation, 0., 0.]);
+            assert_eq!(bone.scale, [0.9, 0.9, 0.9]);
             assert_eq!(bone.cubes.len(), 1);
             let cube = &bone.cubes[0];
             assert_eq!(cube.origin, [-12., -2., 0.]);
             assert_eq!(cube.size, [16., 4., 0.]);
             assert_eq!(cube.uv, [0., 0.]);
-            assert!(cube.faces.is_empty(), "{name} default box unwrap: the shaft must not override the front face with the 1px row");
+            assert_eq!(cube.faces.len(), 2, "{name} texture-height scaling");
         }
-        // The baked shaft front face samples the full 16x4 top strip of arrow.png.
         let rects = model.uv_rects();
-        assert!(rects.iter().any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 4.]));
+        assert!(rects.iter().any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 5.]));
         assert!(!rects.iter().any(|(_, rect)| *rect == [0., 2., 16., 3.]), "old hand-authored brown row");
     }
 
