@@ -609,7 +609,7 @@ fn read_complex(r: &mut Reader<'_>, c: &Content, name: &str, depth: u8) -> Resul
                 enum_value(
                     r,
                     &[
-                        "mainhand", "offhand", "feet", "legs", "chest", "head", "body", "saddle",
+                        "mainhand", "feet", "legs", "chest", "head", "offhand", "body", "saddle",
                     ],
                 )?,
             );

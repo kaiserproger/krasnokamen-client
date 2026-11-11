@@ -1,0 +1,9 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "solaris_battle:crested_helm"
+      }
+    ]
+  }
+}

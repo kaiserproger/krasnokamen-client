@@ -345,7 +345,12 @@ fn every_shipped_model_is_well_formed() {
                 assert!((length - 1.).abs() < 1e-5);
             }
         }
-        if let Some(root) = &textures {
+        if model.id.starts_with("battle_") {
+            let png = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/battle_video/assets/solaris_battle/textures").join(path);
+            assert!(png.is_file(), "{file}: battle texture {path} does not exist");
+            assert_eq!(png_size(&png), model.texture.size, "{file}: texture size");
+        } else if let Some(root) = &textures {
             let png = root.join(path);
             assert!(
                 png.is_file(),

@@ -1173,6 +1173,34 @@ mod tests {
     }
 
     #[test]
+    fn battle_shield_item_models_bake_from_received_item_model_id() {
+        let mut content = Content::test_cube();
+        content.insert_test_texture("solaris_battle:item/iron_tower_shield",
+            crate::protocol::content::TextureRegion { layer: 10, uv: [0., 0., 1., 1.], width: 64, height: 64 });
+        for (name, graph, geometry) in [
+            ("iron_kite_shield",
+                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_kite_shield.json")[..],
+                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_kite_shield.json")[..]),
+            ("iron_tower_shield",
+                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_tower_shield.json")[..],
+                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_tower_shield.json")[..]),
+        ] {
+            content.insert_test_resource(&format!("assets/solaris_battle/items/{name}.json"), graph);
+            content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}.json"), geometry);
+            let mut stack = Stack::default();
+            stack.id = 1;
+            stack.count = 1;
+            stack.components = Arc::new(BTreeMap::from([(
+                "minecraft:item_model".into(), json!(format!("solaris_battle:{name}")),
+            )]));
+            let mut models = ItemModels::new();
+            let baked = models.model(&content, &stack, "thirdperson_righthand").unwrap();
+            assert!(!baked.quads.is_empty(), "{name}");
+            assert!(baked.quads.iter().all(|quad| quad.texture_layer == 10), "{name}");
+        }
+    }
+
+    #[test]
     fn thirdperson_left_display_mirrors_shield_and_preserves_first_person_and_sword() {
         let mut content = Content::test_cube();
         content.insert_test_texture("minecraft:entity/shield/shield_base_nopattern",

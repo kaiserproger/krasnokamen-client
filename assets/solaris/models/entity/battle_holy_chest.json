@@ -1,0 +1,1116 @@
+{
+  "schema": 1,
+  "id": "battle_holy_chest",
+  "texture": {
+    "path": "entity/equipment/humanoid/holy.png",
+    "size": [
+      128,
+      128
+    ]
+  },
+  "roles": {
+    "right_arm": [
+      "right_arm"
+    ],
+    "left_arm": [
+      "left_arm"
+    ]
+  },
+  "bones": [
+    {
+      "name": "body",
+      "pivot": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            0,
+            28
+          ],
+          "mirror": false,
+          "origin": [
+            -4.5,
+            -0.5,
+            -2.5
+          ],
+          "size": [
+            9.0,
+            13.0,
+            5.0
+          ],
+          "inflate": -0.2
+        }
+      ],
+      "bones": [
+        {
+          "name": "chestEffectBig",
+          "pivot": [
+            0.0,
+            -2.5,
+            7.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                66,
+                0
+              ],
+              "mirror": false,
+              "origin": [
+                -15.5,
+                -15.5,
+                0.0
+              ],
+              "size": [
+                31.0,
+                31.0,
+                0.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": [
+            {
+              "name": "chestEffectBigRotated",
+              "pivot": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                45.00010522957485
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    90,
+                    31
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -9.5,
+                    -9.5,
+                    0.0
+                  ],
+                  "size": [
+                    19.0,
+                    19.0,
+                    0.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "chestEffectMiddle",
+          "pivot": [
+            0.0,
+            -2.5,
+            8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                63
+              ],
+              "mirror": false,
+              "origin": [
+                -8.5,
+                -8.5,
+                0.01
+              ],
+              "size": [
+                17.0,
+                17.0,
+                0.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestEffectMiddleRotated",
+          "pivot": [
+            0.0,
+            -2.5,
+            8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                80
+              ],
+              "mirror": false,
+              "origin": [
+                -6.5,
+                -6.5,
+                0.0
+              ],
+              "size": [
+                13.0,
+                13.0,
+                0.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestEffectSmall",
+          "pivot": [
+            0.0,
+            -2.5,
+            9.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                83,
+                50
+              ],
+              "mirror": false,
+              "origin": [
+                -4.5,
+                -4.5,
+                0.0
+              ],
+              "size": [
+                9.0,
+                9.0,
+                0.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestEffectSmallRotated",
+          "pivot": [
+            0.0,
+            -2.5,
+            9.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                101,
+                50
+              ],
+              "mirror": false,
+              "origin": [
+                -4.5,
+                -4.5,
+                0.01
+              ],
+              "size": [
+                9.0,
+                9.0,
+                0.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestBack",
+          "pivot": [
+            0.0,
+            6.2,
+            2.5
+          ],
+          "rotation": [
+            -5.001921551492087,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                46
+              ],
+              "mirror": false,
+              "origin": [
+                -3.5,
+                -6.5,
+                -1.7
+              ],
+              "size": [
+                7.0,
+                12.0,
+                2.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestPecRight",
+          "pivot": [
+            0.5,
+            4.0,
+            -0.5
+          ],
+          "rotation": [
+            -11.499262948275621,
+            0.0,
+            -15.00003507652495
+          ],
+          "cubes": [
+            {
+              "uv": [
+                37,
+                45
+              ],
+              "mirror": true,
+              "origin": [
+                -4.0,
+                -5.0,
+                -2.9
+              ],
+              "size": [
+                4.0,
+                5.0,
+                4.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestPecLeft",
+          "pivot": [
+            -0.5,
+            4.0,
+            -0.5
+          ],
+          "rotation": [
+            -11.499262948275621,
+            0.0,
+            15.00003507652495
+          ],
+          "cubes": [
+            {
+              "uv": [
+                37,
+                45
+              ],
+              "mirror": false,
+              "origin": [
+                0.0,
+                -5.0,
+                -2.9
+              ],
+              "size": [
+                4.0,
+                5.0,
+                4.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "chestCore",
+          "pivot": [
+            0.0,
+            4.5,
+            -3.6
+          ],
+          "rotation": [
+            -9.998113525032863,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                19
+              ],
+              "mirror": false,
+              "origin": [
+                -1.0,
+                -3.5,
+                0.0
+              ],
+              "size": [
+                2.0,
+                3.0,
+                1.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": [
+            {
+              "name": "chestEffectFrontA",
+              "pivot": [
+                0.0,
+                -1.0,
+                0.3
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    34,
+                    70
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -2.5,
+                    -2.5,
+                    0.01
+                  ],
+                  "size": [
+                    5.0,
+                    5.0,
+                    0.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            },
+            {
+              "name": "chestEffectFrontB",
+              "pivot": [
+                0.0,
+                -1.0,
+                0.3
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    34,
+                    75
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -2.5,
+                    -2.5,
+                    0.0
+                  ],
+                  "size": [
+                    5.0,
+                    5.0,
+                    0.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "abs",
+          "pivot": [
+            0.0,
+            4.7,
+            -3.3
+          ],
+          "rotation": [
+            5.001921551492087,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                18,
+                48
+              ],
+              "mirror": false,
+              "origin": [
+                -3.5,
+                -1.0,
+                0.3
+              ],
+              "size": [
+                7.0,
+                8.0,
+                1.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        }
+      ]
+    },
+    {
+      "name": "right_arm",
+      "pivot": [
+        -5.0,
+        2.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            46,
+            28
+          ],
+          "mirror": true,
+          "origin": [
+            -3.5,
+            -2.0,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            12.0,
+            5.0
+          ],
+          "inflate": -0.19
+        }
+      ],
+      "bones": [
+        {
+          "name": "armRightShoulderA",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            9.998113525032863
+          ],
+          "cubes": [
+            {
+              "uv": [
+                25,
+                21
+              ],
+              "mirror": true,
+              "origin": [
+                -4.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                6.0,
+                5.0,
+                7.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armRightShoulderB",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            35.00199170454199
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                19
+              ],
+              "mirror": true,
+              "origin": [
+                -6.2,
+                -2.0,
+                -4.0
+              ],
+              "size": [
+                8.0,
+                1.0,
+                8.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armRightElbow",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                44,
+                20
+              ],
+              "mirror": true,
+              "origin": [
+                -3.5,
+                3.3,
+                -3.0
+              ],
+              "size": [
+                5.0,
+                2.0,
+                6.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": [
+            {
+              "name": "armRightElbowDetail",
+              "pivot": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    6
+                  ],
+                  "mirror": true,
+                  "origin": [
+                    -4.0,
+                    3.8,
+                    -1.1
+                  ],
+                  "size": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            },
+            {
+              "name": "armRightWing",
+              "pivot": [
+                -3.401,
+                4.3,
+                -1.6
+              ],
+              "rotation": [
+                9.998113525032863,
+                -17.498131063295343,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    0
+                  ],
+                  "mirror": true,
+                  "origin": [
+                    -0.099,
+                    -1.0,
+                    0.0
+                  ],
+                  "size": [
+                    0.0,
+                    2.0,
+                    4.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "armRightGlove",
+          "pivot": [
+            -1.0,
+            9.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -5.001921551492087
+          ],
+          "cubes": [
+            {
+              "uv": [
+                47,
+                48
+              ],
+              "mirror": true,
+              "origin": [
+                -2.5,
+                -1.5,
+                0.0
+              ],
+              "size": [
+                5.0,
+                3.0,
+                6.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armRightEffect",
+          "pivot": [
+            -3.0,
+            5.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -57.29577951308232
+          ],
+          "cubes": [
+            {
+              "uv": [
+                34,
+                56
+              ],
+              "mirror": true,
+              "origin": [
+                0.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                0.0,
+                7.0,
+                7.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armRightEffectRotated",
+          "pivot": [
+            -3.0,
+            5.0,
+            0.0
+          ],
+          "rotation": [
+            -45.00010522957485,
+            0.0,
+            -57.29577951308232
+          ],
+          "cubes": [
+            {
+              "uv": [
+                34,
+                56
+              ],
+              "mirror": true,
+              "origin": [
+                0.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                0.0,
+                7.0,
+                7.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        }
+      ]
+    },
+    {
+      "name": "left_arm",
+      "pivot": [
+        5.0,
+        2.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            46,
+            28
+          ],
+          "mirror": false,
+          "origin": [
+            -1.5,
+            -2.0,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            12.0,
+            5.0
+          ],
+          "inflate": -0.19
+        }
+      ],
+      "bones": [
+        {
+          "name": "armLeftShoulderA",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -9.998113525032863
+          ],
+          "cubes": [
+            {
+              "uv": [
+                25,
+                21
+              ],
+              "mirror": false,
+              "origin": [
+                -2.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                6.0,
+                5.0,
+                7.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armLeftShoulderB",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -35.00199170454199
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                19
+              ],
+              "mirror": false,
+              "origin": [
+                -1.8,
+                -2.0,
+                -4.0
+              ],
+              "size": [
+                8.0,
+                1.0,
+                8.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armLeftElbow",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                44,
+                20
+              ],
+              "mirror": false,
+              "origin": [
+                -1.5,
+                3.3,
+                -3.0
+              ],
+              "size": [
+                5.0,
+                2.0,
+                6.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": [
+            {
+              "name": "armLeftElbowDetail",
+              "pivot": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    6
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    3.0,
+                    3.8,
+                    -1.1
+                  ],
+                  "size": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            },
+            {
+              "name": "armLeftWing",
+              "pivot": [
+                3.401,
+                4.3,
+                -1.6
+              ],
+              "rotation": [
+                9.998113525032863,
+                17.498131063295343,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    0
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    0.099,
+                    -1.0,
+                    0.0
+                  ],
+                  "size": [
+                    0.0,
+                    2.0,
+                    4.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "armLeftGlove",
+          "pivot": [
+            1.0,
+            9.0,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            5.001921551492087
+          ],
+          "cubes": [
+            {
+              "uv": [
+                47,
+                48
+              ],
+              "mirror": false,
+              "origin": [
+                -2.5,
+                -1.5,
+                0.0
+              ],
+              "size": [
+                5.0,
+                3.0,
+                6.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armLeftEffect",
+          "pivot": [
+            3.0,
+            5.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            57.29577951308232
+          ],
+          "cubes": [
+            {
+              "uv": [
+                34,
+                56
+              ],
+              "mirror": false,
+              "origin": [
+                0.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                0.0,
+                7.0,
+                7.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "armLeftEffectRotated",
+          "pivot": [
+            3.0,
+            5.0,
+            0.0
+          ],
+          "rotation": [
+            -45.00010522957485,
+            0.0,
+            57.29577951308232
+          ],
+          "cubes": [
+            {
+              "uv": [
+                34,
+                56
+              ],
+              "mirror": false,
+              "origin": [
+                0.0,
+                -3.5,
+                -3.5
+              ],
+              "size": [
+                0.0,
+                7.0,
+                7.0
+              ],
+              "inflate": 0.01
+            }
+          ],
+          "bones": []
+        }
+      ]
+    }
+  ]
+}

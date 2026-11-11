@@ -1,14 +1,16 @@
 # Solaris entity models
 
-Entity and block-entity geometry is **authored by Solaris** and shipped inside the client binary
+Entity and block-entity geometry is shipped inside the client binary
 (`assets/solaris/models/entity/<id>.json`, embedded by `build.rs`, baked by
-`src/entities/solaris_models.rs`). Entity metadata (protocol ids, dimensions, metadata accessors,
+`src/entities/solaris_models.rs`). Most geometry is authored by Solaris; the
+third-party battle armor conversions are identified in
+`assets/battle_video/ATTRIBUTION.md`. Entity metadata (protocol ids, dimensions, metadata accessors,
 texture/variant selection, head/body turn limits) is the Solaris-owned data table
 `assets/solaris/entities/entity-facts.json`, embedded via `include_str!` in
 `src/entities/resources.rs`. Nothing is read from `dist/entities` any more.
 
-Models are UV-compatible with the vanilla entity textures, which the player supplies at runtime.
-Most boxes were authored from the unwrapped regions of the vanilla PNG. The
+Vanilla-family models are UV-compatible with vanilla entity textures, which the player supplies
+at runtime. Most vanilla-family boxes were authored from the unwrapped regions of the vanilla PNG. The
 previous cushion and sulfur-cube candidate rigs and rendering-specific facts
 were removed pending independently authored replacements.
 Sleeping living entities use received pose and sleeping-position metadata with the facing of
@@ -37,6 +39,12 @@ Adult horse body armor and saddles use separate independently authored overlay r
 received equippable asset's `horse_body` and `horse_saddle` texture layers. Overlay joints
 follow the corresponding authored horse bones; unsupported species and missing resources stay
 explicitly unrendered. The candidate's native equip/strip replay and movement remain unverified.
+The optional battle resource pack includes `solaris_battle:holy` and
+`solaris_battle:iron_plate` equipment assets mapped to converted Armor of the
+Ages rigs for adult humanoid armor slots.
+The source and license are recorded in `assets/battle_video/ATTRIBUTION.md`.
+These rigs and their rest-pose decorative elements require graphical validation;
+the pack is not automatically delivered by Loader.
 Adult wolf body armor uses an independently authored overlay rig and the received equippable
 asset's `wolf_body` layers, including dyeable layers. A natural equip/strip candidate replay,
 armor damage crack overlays, and matched vanilla visuals remain unverified.
@@ -135,8 +143,9 @@ effects are Solaris approximations of the minecraft.wiki descriptions, not game 
 * Lengths are pixels (1/16 block), +Y down, feet at `y = 24`, front is -Z, model -X is the
   entity's right. `pivot` is relative to the parent bone; cube `origin` relative to its bone;
   rotations are degrees (Z, then Y, then X).
-* `texture.path` is relative to `assets/minecraft/textures/` and names the model's default vanilla
-  texture; `size` must equal the PNG size. Runtime texture choice for variants (colour, profession,
+* `texture.path` is relative to `assets/minecraft/textures/` for vanilla-family models;
+  battle armor paths are relative to the battle pack's `assets/solaris_battle/textures/`.
+  `size` must equal the PNG size. Runtime texture choice for variants (colour, profession,
   baby, tamed...) stays with the family/variant code and only needs the same layout.
 * Cubes use the classic box unwrap (`uv` + size `w x h x d`); `mirror` mirrors the cube about its
   centre keeping texel assignment; `inflate` grows the box; `faces` replaces a face's rectangle

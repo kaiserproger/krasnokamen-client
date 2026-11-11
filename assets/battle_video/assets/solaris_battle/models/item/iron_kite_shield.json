@@ -1,0 +1,333 @@
+{
+  "textures": {
+    "shield": "solaris_battle:item/iron_tower_shield"
+  },
+  "elements": [
+    {
+      "from": [
+        2,
+        -3,
+        6
+      ],
+      "to": [
+        14,
+        19,
+        7
+      ],
+      "faces": {
+        "up": {
+          "texture": "#shield",
+          "uv": [
+            0.25,
+            0.0,
+            3.25,
+            0.25
+          ]
+        },
+        "down": {
+          "texture": "#shield",
+          "uv": [
+            3.25,
+            0.0,
+            6.25,
+            0.25
+          ]
+        },
+        "west": {
+          "texture": "#shield",
+          "uv": [
+            0.0,
+            0.25,
+            0.25,
+            5.75
+          ]
+        },
+        "north": {
+          "texture": "#shield",
+          "uv": [
+            0.25,
+            0.25,
+            3.25,
+            5.75
+          ]
+        },
+        "east": {
+          "texture": "#shield",
+          "uv": [
+            3.25,
+            0.25,
+            3.5,
+            5.75
+          ]
+        },
+        "south": {
+          "texture": "#shield",
+          "uv": [
+            3.5,
+            0.25,
+            6.5,
+            5.75
+          ]
+        }
+      }
+    },
+    {
+      "from": [
+        7,
+        5,
+        7
+      ],
+      "to": [
+        9,
+        11,
+        13
+      ],
+      "faces": {
+        "up": {
+          "texture": "#shield",
+          "uv": [
+            8.0,
+            0.0,
+            8.5,
+            1.5
+          ]
+        },
+        "down": {
+          "texture": "#shield",
+          "uv": [
+            8.5,
+            0.0,
+            9.0,
+            1.5
+          ]
+        },
+        "west": {
+          "texture": "#shield",
+          "uv": [
+            6.5,
+            1.5,
+            8.0,
+            3.0
+          ]
+        },
+        "north": {
+          "texture": "#shield",
+          "uv": [
+            8.0,
+            1.5,
+            8.5,
+            3.0
+          ]
+        },
+        "east": {
+          "texture": "#shield",
+          "uv": [
+            8.5,
+            1.5,
+            10.0,
+            3.0
+          ]
+        },
+        "south": {
+          "texture": "#shield",
+          "uv": [
+            10.0,
+            1.5,
+            10.5,
+            3.0
+          ]
+        }
+      }
+    },
+    {
+      "from": [
+        0.1499999999999999,
+        -1.2119999999999997,
+        6.01
+      ],
+      "to": [
+        4.15,
+        18.788,
+        7.01
+      ],
+      "faces": {
+        "up": {
+          "texture": "#shield",
+          "uv": [
+            13.25,
+            0.0,
+            14.25,
+            0.25
+          ]
+        },
+        "down": {
+          "texture": "#shield",
+          "uv": [
+            14.25,
+            0.0,
+            15.25,
+            0.25
+          ]
+        },
+        "west": {
+          "texture": "#shield",
+          "uv": [
+            13.0,
+            0.25,
+            13.25,
+            5.25
+          ]
+        },
+        "north": {
+          "texture": "#shield",
+          "uv": [
+            13.25,
+            0.25,
+            14.25,
+            5.25
+          ]
+        },
+        "east": {
+          "texture": "#shield",
+          "uv": [
+            14.25,
+            0.25,
+            14.5,
+            5.25
+          ]
+        },
+        "south": {
+          "texture": "#shield",
+          "uv": [
+            14.5,
+            0.25,
+            15.5,
+            5.25
+          ]
+        }
+      },
+      "rotation": {
+        "origin": [
+          2,
+          8,
+          8
+        ],
+        "axis": "z",
+        "angle": 11.247
+      }
+    },
+    {
+      "from": [
+        11.85,
+        -1.2119999999999997,
+        6.01
+      ],
+      "to": [
+        15.85,
+        18.788,
+        7.01
+      ],
+      "faces": {
+        "up": {
+          "texture": "#shield",
+          "uv": [
+            10.75,
+            0.0,
+            11.75,
+            0.25
+          ]
+        },
+        "down": {
+          "texture": "#shield",
+          "uv": [
+            11.75,
+            0.0,
+            12.75,
+            0.25
+          ]
+        },
+        "west": {
+          "texture": "#shield",
+          "uv": [
+            10.5,
+            0.25,
+            10.75,
+            5.25
+          ]
+        },
+        "north": {
+          "texture": "#shield",
+          "uv": [
+            10.75,
+            0.25,
+            11.75,
+            5.25
+          ]
+        },
+        "east": {
+          "texture": "#shield",
+          "uv": [
+            11.75,
+            0.25,
+            12.0,
+            5.25
+          ]
+        },
+        "south": {
+          "texture": "#shield",
+          "uv": [
+            12.0,
+            0.25,
+            13.0,
+            5.25
+          ]
+        }
+      },
+      "rotation": {
+        "origin": [
+          14,
+          8,
+          8
+        ],
+        "axis": "z",
+        "angle": -11.247
+      }
+    }
+  ],
+  "display": {
+    "thirdperson_righthand": {
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ]
+    },
+    "firstperson_righthand": {
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.5,
+        0.5,
+        0.5
+      ]
+    }
+  }
+}

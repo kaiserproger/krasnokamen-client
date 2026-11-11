@@ -184,12 +184,16 @@ impl Cache {
         let (key, kind) = if let Some((key, kind)) = overlay {
             (Some(key), kind)
         } else {
-            let key = if stand {
+            let key = if !baby {
+                battle_armor_rig(asset, slot)
+            } else {
+                None
+            }.or_else(|| if stand {
                 // Small stands scale the whole adult rig about their feet, including equipment.
                 armor_rig(slot)
             } else {
                 humanoid_rig(models, e, slot, baby)
-            };
+            });
             let kind = if baby {
                 "humanoid_baby"
             } else if slot == 3 {
@@ -411,6 +415,21 @@ pub(super) fn armor_asset(stack: &Stack, slot: usize) -> Option<&str> {
     (equippable["slot"].as_str()? == name).then_some(())?;
     equippable["asset_id"].as_str()
 }
+fn battle_armor_rig(asset: &str, slot: usize) -> Option<&'static str> {
+    Some(match (asset, slot) {
+        ("solaris_battle:holy", 2) => "minecraft:battle_holy_feet#main",
+        ("solaris_battle:holy", 3) => "minecraft:battle_holy_legs#main",
+        ("solaris_battle:holy", 4) => "minecraft:battle_holy_chest#main",
+        ("solaris_battle:holy", 5) => "minecraft:battle_holy_head#main",
+        ("solaris_battle:iron_plate", 2) => "minecraft:battle_iron_plate_feet#main",
+        ("solaris_battle:iron_plate", 3) => "minecraft:battle_iron_plate_legs#main",
+        ("solaris_battle:iron_plate", 4) => "minecraft:battle_iron_plate_chest#main",
+        ("solaris_battle:iron_plate", 5) => "minecraft:battle_iron_plate_head#main",
+        ("solaris_battle:crested_helm", 5) => "minecraft:battle_crested_helm#main",
+        _ => return None,
+    })
+}
+
 fn armor_rig(slot: usize) -> Option<&'static str> {
     Some(match slot {
         2 => "minecraft:armor_stand#boots",
@@ -1074,6 +1093,52 @@ mod tests {
             serde_json::json!({"slot":"head"}),
         )]));
         assert_eq!(armor_asset(&stack, 5), None);
+    }
+
+    #[test]
+    fn battle_equipment_selects_each_embedded_slot_rig() {
+        for (asset, slot, key) in [
+            ("solaris_battle:holy", 2, "minecraft:battle_holy_feet#main"),
+            ("solaris_battle:holy", 3, "minecraft:battle_holy_legs#main"),
+            ("solaris_battle:holy", 4, "minecraft:battle_holy_chest#main"),
+            ("solaris_battle:holy", 5, "minecraft:battle_holy_head#main"),
+            ("solaris_battle:iron_plate", 2, "minecraft:battle_iron_plate_feet#main"),
+            ("solaris_battle:iron_plate", 3, "minecraft:battle_iron_plate_legs#main"),
+            ("solaris_battle:iron_plate", 4, "minecraft:battle_iron_plate_chest#main"),
+            ("solaris_battle:iron_plate", 5, "minecraft:battle_iron_plate_head#main"),
+            ("solaris_battle:crested_helm", 5, "minecraft:battle_crested_helm#main"),
+        ] {
+            assert_eq!(battle_armor_rig(asset, slot), Some(key));
+            assert!(super::super::solaris_models::authored(key).is_some());
+        }
+        assert_eq!(battle_armor_rig("solaris_battle:holy", 6), None);
+        assert_eq!(battle_armor_rig("solaris_battle:red_surcoat", 4), None);
+    }
+
+    #[test]
+    fn battle_flat_equipment_assets_resolve_matching_slots_and_layers() {
+        let mut content = Content::test_cube();
+        for (name, kind, slot_name, slot, bytes) in [
+            ("red_surcoat", "humanoid", "chest", 4, &include_bytes!("../../assets/battle_video/assets/solaris_battle/equipment/red_surcoat.json")[..]),
+            ("blue_surcoat", "humanoid", "chest", 4, &include_bytes!("../../assets/battle_video/assets/solaris_battle/equipment/blue_surcoat.json")[..]),
+            ("red_caparison", "horse_body", "body", 6, &include_bytes!("../../assets/battle_video/assets/solaris_battle/equipment/red_caparison.json")[..]),
+            ("blue_caparison", "horse_body", "body", 6, &include_bytes!("../../assets/battle_video/assets/solaris_battle/equipment/blue_caparison.json")[..]),
+        ] {
+            let id = format!("solaris_battle:{name}");
+            content.insert_test_resource(&format!("assets/solaris_battle/equipment/{name}.json"), bytes);
+            content.insert_test_texture(&format!("solaris_battle:entity/equipment/{kind}/{name}"), TextureRegion {
+                layer: 7, uv: [0., 0., 1., 1.], width: 64, height: if slot == 4 { 32 } else { 64 },
+            });
+            let mut stack = Stack::default();
+            stack.components = Arc::new(BTreeMap::from([(
+                "minecraft:equippable".into(), serde_json::json!({"slot":slot_name,"asset_id":id}),
+            )]));
+            assert_eq!(armor_asset(&stack, slot), Some(id.as_str()));
+            assert!(armor_asset(&stack, if slot == 4 { 6 } else { 4 }).is_none());
+            let layers = load_asset(&content, &id, kind).unwrap().unwrap();
+            assert_eq!(layers.len(), 1);
+            assert_eq!(layers[0].texture.layer, 7);
+        }
     }
 
     #[test]

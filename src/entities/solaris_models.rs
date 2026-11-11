@@ -1,8 +1,9 @@
-//! Solaris-authored entity geometry (`assets/solaris/models/entity/*.json`).
+//! Entity geometry (`assets/solaris/models/entity/*.json`).
 //!
 //! Model files are embedded at build time (`build.rs`) and baked into [`Rig`]s on first use.
-//! Geometry is authored by the Solaris project and is UV-compatible with the vanilla entity
-//! texture layouts, which the player supplies at runtime. Nothing here reads Mojang data.
+//! Vanilla-family geometry is Solaris-authored and UV-compatible with runtime vanilla textures.
+//! Third-party battle armor model provenance is in `assets/battle_video/ATTRIBUTION.md`.
+//! Nothing here reads Mojang model data.
 //!
 //! Coordinate conventions (identical to the renderer's model space):
 //! * lengths are pixels (1/16 block); +Y points down; the entity's feet are at `y = 24`;
@@ -40,7 +41,7 @@ pub(crate) struct ModelFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TextureSpec {
-    /// Path below `assets/minecraft/textures/`, including `.png`.
+    /// Texture path relative to the model's source namespace, including `.png`.
     pub path: String,
     pub size: [u32; 2],
 }

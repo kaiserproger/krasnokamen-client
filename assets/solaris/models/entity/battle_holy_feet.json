@@ -1,0 +1,267 @@
+{
+  "schema": 1,
+  "id": "battle_holy_feet",
+  "texture": {
+    "path": "entity/equipment/humanoid/holy.png",
+    "size": [
+      128,
+      128
+    ]
+  },
+  "roles": {
+    "right_leg": [
+      "right_leg"
+    ],
+    "left_leg": [
+      "left_leg"
+    ]
+  },
+  "bones": [
+    {
+      "name": "left_leg",
+      "pivot": [
+        1.9,
+        12.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            66,
+            31
+          ],
+          "mirror": false,
+          "origin": [
+            -2.5,
+            -0.7,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            13.0,
+            5.0
+          ],
+          "inflate": -0.2
+        },
+        {
+          "uv": [
+            48,
+            57
+          ],
+          "mirror": false,
+          "origin": [
+            -2.5,
+            10.3,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            2.0,
+            5.0
+          ],
+          "inflate": 0.0
+        },
+        {
+          "uv": [
+            25,
+            43
+          ],
+          "mirror": false,
+          "origin": [
+            -2.5,
+            5.3,
+            -2.6
+          ],
+          "size": [
+            5.0,
+            2.0,
+            3.0
+          ],
+          "inflate": 0.0
+        },
+        {
+          "uv": [
+            0,
+            6
+          ],
+          "mirror": false,
+          "origin": [
+            2.0,
+            5.8,
+            -1.1
+          ],
+          "size": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "inflate": 0.0
+        }
+      ],
+      "bones": [
+        {
+          "name": "leg_left_wing",
+          "pivot": [
+            2.501,
+            6.3,
+            -1.6
+          ],
+          "rotation": [
+            -20.00195662801704,
+            17.498131063295343,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                55
+              ],
+              "mirror": false,
+              "origin": [
+                0.0,
+                -2.3,
+                0.0
+              ],
+              "size": [
+                0.0,
+                3.0,
+                5.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        }
+      ]
+    },
+    {
+      "name": "right_leg",
+      "pivot": [
+        -1.9,
+        12.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            66,
+            31
+          ],
+          "mirror": true,
+          "origin": [
+            -2.5,
+            -0.7,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            13.0,
+            5.0
+          ],
+          "inflate": -0.2
+        },
+        {
+          "uv": [
+            48,
+            57
+          ],
+          "mirror": true,
+          "origin": [
+            -2.5,
+            10.3,
+            -2.5
+          ],
+          "size": [
+            5.0,
+            2.0,
+            5.0
+          ],
+          "inflate": 0.0
+        },
+        {
+          "uv": [
+            25,
+            43
+          ],
+          "mirror": true,
+          "origin": [
+            -2.5,
+            5.3,
+            -2.6
+          ],
+          "size": [
+            5.0,
+            2.0,
+            3.0
+          ],
+          "inflate": 0.0
+        },
+        {
+          "uv": [
+            0,
+            6
+          ],
+          "mirror": false,
+          "origin": [
+            -3.0,
+            5.8,
+            -1.1
+          ],
+          "size": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "inflate": 0.0
+        }
+      ],
+      "bones": [
+        {
+          "name": "leg_right_wing",
+          "pivot": [
+            -2.501,
+            6.3,
+            -1.6
+          ],
+          "rotation": [
+            -9.998113525032863,
+            -17.498131063295343,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                0,
+                55
+              ],
+              "mirror": true,
+              "origin": [
+                0.0,
+                -2.3,
+                0.0
+              ],
+              "size": [
+                0.0,
+                3.0,
+                5.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        }
+      ]
+    }
+  ]
+}
