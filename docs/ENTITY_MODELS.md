@@ -103,9 +103,11 @@ Experience orbs render as camera-facing sprites using received XP value and acti
 resources, with a camera-rotated lighting normal. A native-client scene exercised one
 received value-1 orb from two views against a no-orb control. The sprite was small in
 these views; texture details, other values and matched-vanilla appearance remain unverified.
-Projectile tridents transform their authored pole axis into the same orientation basis as
-arrows. A received downward-pitch state was visually checked; flight and vanilla parity
-remain unverified.
+Projectile arrows, spectral arrows and tridents use the vanilla 26.3
+`ArrowModel.createBodyLayer` / `TridentModel.createLayer` geometry and box-unwrap
+UVs against the runtime vanilla projectile textures (`entity/projectiles/arrow*.png`,
+`entity/trident/trident.png`), transcribed from local javap; the authored pole axis
+transforms into the same orientation basis as the arrow cross planes.
 Enchanting tables render their animated book and conduits render their inactive shell or
 active cage, wind and camera-facing eye in the native scene. A dry inactive conduit and an
 enchanting table were visually exercised; active conduit and matched-vanilla parity were not.
