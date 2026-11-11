@@ -316,7 +316,8 @@ def volley_shots(tl, terrain):
             hit = max(later, key=lambda x: x["arrows"][side]["impacts"])
             impact = hit["arrows"][side]["impact"]["centroid"]
             d = unit([impact[0] - launch[0], impact[2] - launch[2]])
-            t0, t1, t3 = s["t"] - 1.0, s["t"] + 0.5, min(tl.end - 0.1, hit["t"] + 0.5)
+            # The sample at s["t"] holds the launches of the half second before it: open on the release.
+            t0, t1, t3 = s["t"] - 0.3, s["t"] + 0.5, min(tl.end - 0.1, hit["t"] + 0.5)
             t2 = (t1 + t3) / 2
             if t3 - t0 < 3.0 or t3 - t0 > 6.5 or t2 - t1 < 0.5:
                 continue
@@ -324,7 +325,10 @@ def volley_shots(tl, terrain):
             if None in flights:
                 continue
             f1, f2 = flights[0]["centroid"], flights[1]["centroid"]
-            p0 = place(terrain, add(launch, flat(d), -8.0), 1.8)
+            # Behind the archers' rear rank (launch area depth along the volley), not among them.
+            lo, hi = a["launch"]["min"], a["launch"]["max"]
+            depth = abs(d[0]) * (hi[0] - lo[0]) / 2 + abs(d[1]) * (hi[2] - lo[2]) / 2
+            p0 = place(terrain, add(launch, flat(d), -(depth + 5.0)), 2.5)
             p1 = place(terrain, add(launch, flat(d), -4.0), 7.0)
             g2 = terrain.ground(f2[0] - 20 * d[0], f2[2] - 20 * d[1])
             p2 = None if g2 is None else place(terrain, add(f2, flat(d), -20.0), max(6.0, f2[1] - 4.0 - g2))
@@ -429,8 +433,9 @@ def choose(candidates, seconds):
         for c in pool:
             if len(mine) == quota:
                 break
-            # Same kind: 8 s apart, or 3 s apart and more than 30 blocks apart.
-            if any(abs(c.start - m.start) < 3.0 or (abs(c.start - m.start) < 8.0 and dist2(c.where, m.where) < 900) for m in mine):
+            # Same kind: 8 s apart within 30 blocks, 3 s within 60; farther ones are other places.
+            if any((abs(c.start - m.start) < 3.0 and dist2(c.where, m.where) < 3600)
+                   or (abs(c.start - m.start) < 8.0 and dist2(c.where, m.where) < 900) for m in mine):
                 continue
             mine.append(c)
         picked.extend(mine)
