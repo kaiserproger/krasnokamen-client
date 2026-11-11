@@ -171,7 +171,7 @@ impl UiState {
             Screen::SingleplayerStarting => self.local_start_tree()?,
         }
         self.rich_overlays(content)?;
-        Ok(())
+        self.toast_tree()
     }
     /// The list keeps the existing 40-pixel rows; received root buttons wrap
     /// instead of assuming the five built-in vanilla tabs.

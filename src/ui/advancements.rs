@@ -527,4 +527,73 @@ mod tests {
         );
         assert_eq!(state.scroll, 6);
     }
+
+    /// NATIVE-TOASTS-MISSING: ClientAdvancements.update raises an
+    /// AdvancementToast for each advancement a non-reset, toast-showing
+    /// update completes, in the client's progress-map (HashMap) order; the
+    /// ToastManager stacks them in 32-pixel slots at the right edge.
+    #[test]
+    fn completed_show_toast_advancements_raise_stacked_toasts() {
+        let (mut state, content) = state();
+        state.resize(1280, 720, 1.);
+        let ids = [
+            ("minecraft:story/mine_stone", "Stone Age"),
+            ("minecraft:story/upgrade_tools", "Getting an Upgrade"),
+            ("minecraft:story/smelt_iron", "Acquire Hardware"),
+            ("test:quiet", "No toast flag"),
+        ];
+        for (id, title) in ids {
+            let mut advancement = advancement(None, true);
+            advancement.display = Some(json!({"text": title}));
+            advancement.flags = if id == "test:quiet" { 0 } else { 2 };
+            advancement.requirements = vec![vec!["done".into()]];
+            state.advancements.insert(id.into(), advancement);
+        }
+        let packet = |show: u8| {
+            let mut packet = Writer::default();
+            packet.byte(0); // no reset
+            packet.var(0); // no additions
+            packet.var(0); // no removals
+            packet.var(ids.len() as i32);
+            for (id, _) in ids {
+                packet.string(id);
+                packet.var(1);
+                packet.string("done");
+                packet.byte(1);
+                packet.i64(1234);
+            }
+            packet.byte(show);
+            packet.0
+        };
+        let inventory = crate::inventory::InventoryStore::default();
+        let toasts = |state: &mut UiState| {
+            // Three frames: the update that slots the queued toasts, the first
+            // instance update and one after the 600 ms slide.
+            for now in [10., 10.1, 10.8] {
+                state.advance_animations(now);
+            }
+            state.rebuild_for_test(&inventory, &content).unwrap();
+            state
+                .nodes
+                .iter()
+                .filter(|node| node.id.starts_with("toast/") && node.role == "status")
+                .map(|node| (node.label.lines().last().unwrap().to_owned(), node.bounds))
+                .collect::<Vec<_>>()
+        };
+        // A packet that does not show advancements raises nothing.
+        state.apply(133, &mut Reader::new(&packet(0)), &content).unwrap();
+        assert!(state.advancements["minecraft:story/mine_stone"].done);
+        assert!(toasts(&mut state).is_empty());
+        state.apply(133, &mut Reader::new(&packet(1)), &content).unwrap();
+        // JDK HashMap order of the four keys (java-oracle/Order3.java):
+        // smelt_iron, test:quiet (no show_toast flag), upgrade_tools, mine_stone.
+        assert_eq!(
+            toasts(&mut state),
+            [
+                ("Acquire Hardware".to_owned(), [267., 0., 160., 32.]),
+                ("Getting an Upgrade".to_owned(), [267., 32., 160., 32.]),
+                ("Stone Age".to_owned(), [267., 64., 160., 32.]),
+            ]
+        );
+    }
 }

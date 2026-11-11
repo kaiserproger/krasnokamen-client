@@ -439,6 +439,9 @@ pub struct InventoryStore {
     pub sign_editor: Option<([i32; 3], bool)>,
     pub recipes: BTreeMap<i32, Recipe>,
     pub recipe_book_settings: [(bool, bool); 4],
+    /// Entries of received `recipe_book_add` packets flagged as notifications,
+    /// in packet order, until the session raises their recipe toasts.
+    pub recipe_notifications: Vec<i32>,
     pub recipe_property_sets: BTreeMap<String, Vec<u32>>,
     pub stonecutter_recipes: Vec<StonecutterRecipe>,
     pub ghost_recipe: Option<(i32, Value)>,
@@ -474,6 +477,7 @@ impl Default for InventoryStore {
             sign_editor: None,
             recipes: BTreeMap::new(),
             recipe_book_settings: [(false, false); 4],
+            recipe_notifications: Vec::new(),
             recipe_property_sets: BTreeMap::new(),
             stonecutter_recipes: Vec::new(),
             ghost_recipe: None,
