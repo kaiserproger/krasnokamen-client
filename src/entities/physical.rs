@@ -18,6 +18,8 @@ pub(crate) struct AnimationState {
     pub lerp_duration: u8,
     pub lerp_span: i64,
     pub frozen: bool,
+    /// Local falling-block motion, separate from the last received velocity.
+    pub falling_velocity: Option<[f64; 3]>,
     pub peek: f32,
     pub peek_old: f32,
     pub bear_stand: f32,
@@ -40,6 +42,7 @@ impl Default for AnimationState {
             lerp_duration: 3,
             lerp_span: 0,
             frozen: false,
+            falling_velocity: None,
             peek: 0.,
             peek_old: 0.,
             bear_stand: 0.,
@@ -762,6 +765,12 @@ impl Store {
                 0
             };
             self.remove_motion_span(span);
+            if self.get(*id).is_some_and(|e| e.type_name == "minecraft:falling_block") {
+                let mut colliders = std::mem::take(&mut self.falling_colliders);
+                let result = self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
+                self.falling_colliders = colliders;
+                result?;
+            }
             if effects.sky_flash || effects.lightning_sound_pitches.is_some() {
                 self.event(serde_json::json!({
                     "type": "source_lightning", "entity": id,
@@ -777,12 +786,53 @@ impl Store {
                     || super::display::is_display(e)
                     || matches!(
                         e.type_name.as_str(),
-                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon"
+                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
                     )
             })
         });
         self.physical_active = active;
         self.tick_blocks(frozen)?;
+        Ok(())
+    }
+    /// Vanilla 26.3 FallingBlockEntity ticks gravity, collision and air drag on
+    /// the client between the server's position updates.
+    fn tick_falling_block(
+        &mut self, id: i32, models: &Models, world: &World, content: &Content,
+        tick: u64, colliders: &mut Vec<Bounds>,
+    ) -> Result<()> {
+        let Some(entity) = self.get(id) else { return Ok(()) };
+        let mut velocity = entity.physical.falling_velocity.unwrap_or(entity.velocity);
+        if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
+            velocity[1] -= 0.04;
+        }
+        let position = entity.transform.position;
+        let body = Bounds {
+            min: [position[0] - 0.49, position[1], position[2] - 0.49],
+            max: [position[0] + 0.49, position[1] + 0.98, position[2] + 0.49],
+        };
+        let swept = Bounds {
+            min: std::array::from_fn(|i| body.min[i] + velocity[i].min(0.)),
+            max: std::array::from_fn(|i| body.max[i] + velocity[i].max(0.)),
+        };
+        // Collision cannot be predicted until the surrounding chunks arrive.
+        // Keep this entity active so the next tick can use the received terrain.
+        match collision::gather(world, content, self, tick, swept, colliders) {
+            Err(error) if error == "unloaded_collision_neighborhood" => return Ok(()),
+            result => result?,
+        }
+        let moved = collision::collide(body, colliders, velocity);
+        let entity = self.get_mut(id).unwrap();
+        entity.previous = entity.transform;
+        for i in 0..3 {
+            entity.transform.position[i] += moved[i];
+            if moved[i] != velocity[i] {
+                velocity[i] = 0.;
+            }
+        }
+        entity.physical.falling_velocity = Some(velocity.map(|v| v * f64::from(0.98f32)));
+        entity.physical.lerp_progress = 0;
+        entity.physical.lerp_duration = 1;
+        entity.physical.lerp_phase = 0.;
         Ok(())
     }
     fn root_has_player(&self, id: i32, models: &Models, depth: usize) -> Result<bool> {

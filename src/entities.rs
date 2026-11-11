@@ -229,6 +229,7 @@ impl Entity {
         self.position = target.position;
         if let Some(v) = velocity {
             self.velocity = v;
+            self.physical.falling_velocity = None;
         }
         self.on_ground = ground;
         self.observed_tick = tick;
@@ -267,6 +268,7 @@ pub struct Store {
     pub(crate) local_uuid: Option<String>,
     pub(crate) visible_ids: Vec<i32>,
     pub(crate) physical_active: BTreeSet<i32>,
+    pub(crate) falling_colliders: Vec<crate::player::Bounds>,
     pub(crate) redirectable_projectiles: BTreeSet<u32>,
     pub(crate) spatial_padding: f64,
     /// Login entity id of the local player and the metadata rows the server sent for it.
@@ -987,8 +989,12 @@ impl Store {
                 };
                 r.done()?;
                 if let Some(e) = self.get(target) {
+                    let received_position = e.position;
                     let mut transform = e.transform;
                     if let Some(d) = delta {
+                        // Position deltas use the last received position, not
+                        // a falling block's locally simulated transform.
+                        transform.position = e.position;
                         for i in 0..3 {
                             transform.position[i] += d[i];
                         }
@@ -999,6 +1005,9 @@ impl Store {
                     }
                     self.revision += 1;
                     self.move_entity(target, transform, None, ground, tick, false);
+                    if delta.is_none() {
+                        self.get_mut(target).unwrap().position = received_position;
+                    }
                 }
             }
             cb::ENTITY_POSITION_SYNC => {
@@ -1154,6 +1163,7 @@ impl Store {
                 let revision = self.revision;
                 if let Some(e) = self.get_mut(target) {
                     e.velocity = velocity;
+                    e.physical.falling_velocity = None;
                     e.revision = revision;
                 }
             }
