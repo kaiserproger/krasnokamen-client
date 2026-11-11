@@ -1,6 +1,7 @@
 //! Native protocol-777 remote presentation. Session remains the local physics/health owner.
 //! Derived model data is explicitly activated; no Java process is used by the client.
 use crate::protocol::packet_ids::play::clientbound as cb;
+mod animation;
 mod block_components;
 mod blocks;
 pub(crate) mod clip_pose;
@@ -905,6 +906,40 @@ impl Store {
                 }
                 self.event(json!({"type":"entity_animation","entity":target,"animation":action,"tick":tick.to_string(),"origin":"server_observed"}));
             }
+            // 26.3 ClientboundSwingAnimationPacket (javap, receipts/ProtocolChain
+            // .../ClientboundSwingAnimationPacket-26.3.txt): VarInt entity id, InteractionHand
+            // (VarInt id: 0 main, 1 off), SwingAnimation = SwingAnimationType (VarInt id:
+            // 0 none, 1 whack, 2 stab) + VarInt duration in ticks.
+            cb::SWING_ANIMATION => {
+                let target = r.var()?;
+                let hand = r.var()?;
+                let kind = animation::SwingKind::from_wire(r.var()?)?;
+                let duration = r.var()?;
+                r.done()?;
+                let hand = u8::try_from(hand).ok().filter(|hand| *hand < 2)
+                    .ok_or_else(|| format!("swing_animation hand {hand}"))?;
+                let duration = u32::try_from(duration)
+                    .map_err(|_| format!("swing_animation duration {duration}"))?;
+                self.revision += 1;
+                let revision = self.revision;
+                let models = self.models.clone();
+                let played = self.get_mut(target).map(|e| {
+                    e.revision = revision;
+                    animation::receive_swing(e, models.as_deref(), content, hand, kind, duration, tick)
+                });
+                if let Some(animation::Swing::Clip(_, Some(mount))) = played
+                    && let Some(vehicle) = self.get_mut(mount.network_id)
+                    && vehicle.handle == mount
+                {
+                    vehicle.physical.combat.arm();
+                }
+                let clip = match played {
+                    Some(animation::Swing::Clip(name, _)) => json!(name),
+                    Some(animation::Swing::Vanilla) => json!("vanilla"),
+                    _ => Value::Null,
+                };
+                self.event(json!({"type":"entity_swing","entity":target,"hand":hand,"swing":kind.name(),"duration":duration,"clip":clip,"tick":tick.to_string(),"origin":"server_observed"}));
+            }
             cb::ENTITY_EVENT => {
                 let target = r.i32()?;
                 let event = r.u8()?;
@@ -920,6 +955,7 @@ impl Store {
                     }
                     if event == 3 {
                         e.death_tick = Some(tick);
+                        animation::on_death(e, tick);
                     }
                     e.revision = revision;
                 }
@@ -1311,6 +1347,7 @@ impl Store {
                 self.revision += 1;
                 if let Some(e) = self.get_mut(target) {
                     e.damage_tick = Some(tick);
+                    animation::on_hurt(e, tick);
                     if let Some(living) = e.source.as_mut().and_then(|s| s.living.as_mut()) {
                         living.on_damage();
                     }
@@ -1324,6 +1361,7 @@ impl Store {
                 self.revision += 1;
                 if let Some(e) = self.get_mut(target) {
                     e.damage_tick = Some(tick);
+                    animation::on_hurt(e, tick);
                     e.hurt_direction = yaw;
                     if let Some(living) = e.source.as_mut().and_then(|s| s.living.as_mut()) {
                         living.on_damage();

@@ -1477,9 +1477,11 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
     let gait = equipped_arm_rotations(e, models, content, head,
         [(phase + std::f32::consts::PI).cos() * amplitude, phase.cos() * amplitude], age, partial);
+    // A received `swing_animation` without a clip sets the vanilla swing's duration.
+    let swing_ticks = e.physical.combat.vanilla_ticks().max(1) as f32;
     let attack = e
         .animation
-        .map(|(_, start)| (tick.saturating_sub(start) as f32 + partial) / 6.)
+        .map(|(_, start)| (tick.saturating_sub(start) as f32 + partial) / swing_ticks)
         .filter(|f| *f < 1.);
     let zombie_arms = matches!(
         e.type_name.as_str(),

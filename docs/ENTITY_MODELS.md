@@ -270,6 +270,36 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   when vanilla textures are available under `SOLARIS_CLIENT_RESOURCE_ROOT` or `dist/resources` -
   the texture exists with the declared size).
 
+## Combat animation clips
+
+Attack, guard and reaction poses for battles come from keyframe clips (`src/entities/animation/`),
+sampled by both entity render paths through `entities/clip_pose.rs`.
+
+* **Files.** `assets/solaris/animations/humanoid.animation.json` and `horse.animation.json`
+  are embedded at build time. They use the Bedrock entity-animation layout (`loop`,
+  `animation_length`, `override_previous_animation`, `timeline`, per-bone `rotation` /
+  `position` keys with `linear`, `catmullrom` or `step` interpolation as Blockbench evaluates
+  them), with Solaris rig values (degrees applied Z, Y, X; pixels, +Y down, -Z front), the bones
+  `root body head right_arm left_arm right_leg left_leg right_item left_item`, and one
+  `timeline` instruction, `"contact"`. Unknown bones and MoLang strings fail at load. The clips
+  are authored for Solaris; none are copied from Better Combat, PlayerAnimator or Epic Fight.
+* **Selection.** A received `swing_animation` (entity, hand, `none`/`whack`/`stab`, duration)
+  picks the clip from the item in the swinging hand: a sword `whack` cycles a three-hit combo
+  (`sword_slash`, `sword_backhand`, `sword_overhead`; `mounted_sword` when riding), spears and
+  tridents play `spear_thrust` (`lance_strike` when riding), mace and axes `mace_overhead`, a
+  shield `shield_block`, bows and crossbows their shot clips, and `none` with a melee weapon
+  plays `stagger`. The clip is stretched to the received duration, so its authored contact
+  frame lands at the same fraction of the swing. Other `whack`/`stab` swings play the vanilla
+  arm swing over the received duration; other `none` swings play nothing.
+* **Reactions.** An entity that has played a clip adds the `hurt` flinch on hurt packets and
+  plays the held `death` clip instead of the vanilla tip-over; its mount does the same with
+  `horse.hurt` / `horse.death`. An entity that never received a swing keeps the vanilla look.
+* **Tests.** `entities::animation::tests` covers parsing, interpolation, baking, selection,
+  the received-packet path and every shipped clip's contract (lengths, contact frames, legs
+  following the gait during attacks, mounted clips keeping the seat).
+* **Limit.** The death clip needs the server to keep a dead mob for vanilla's 20 death ticks
+  (`LivingEntity.tickDeath`); a server that removes it in the death tick shows only the drops.
+
 ## Coverage and known limits
 
 * Authored models cover players (wide/slim), the humanoid and skeleton families, illagers/villagers,
