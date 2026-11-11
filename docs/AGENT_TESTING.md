@@ -4,6 +4,21 @@
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+
+### Frame and villager regressions
+
+`render::shader_tests::submitted_index_count_is_per_frame_not_cumulative`
+exercises repeated offscreen `Renderer::render` calls over an unchanged terrain
+quad and requires a nonzero, constant submitted-index count. It checks the
+per-frame accounting boundary, not a real-window camera sweep or visual parity.
+The focused test and its reset-removal negative control must be run before this
+source-phase regression is treated as evidence.
+
+`entities::solaris_models::tests::villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe`
+checks the adult villager's authored leg/robe geometry and box unwrap. It is not
+an opacity or walking-animation screenshot check; its historical-rig negative
+control and real-client moving-leg comparison remain separate evidence.
+
 ### Main hand setting
 
 Controls exposes Main hand as Left or Right. The selection is saved with
