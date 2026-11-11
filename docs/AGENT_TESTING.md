@@ -266,6 +266,15 @@ checks that dependency boundary with received NBT and actual text material indic
 including non-glowing text. A real window must additionally show edited text on
 both faces and after reconnect; a visible wooden board alone proves nothing.
 
+The placed shulker-box rig uses the full lid depth of the authored shulker
+shell. `shulker_box_closed_shell_matches_the_authored_shulker_shell` checks
+both shell parts in rest space; graphical parity of opening and all faces
+still needs matched native and Java captures.
+
+The standing banner flag and crossbar placement is a provisional visual fit;
+`standing_banner_flag_covers_the_crossbar_from_the_front` guards the layout.
+Fresh isolated graphical comparison, patterned and wall-banner views remain required.
+
 Creative tab buttons retain their full semantic label while painting a fitted
 single-line name. Hover uses the existing rich tooltip overlay to expose the full
 name, and leaving the tab removes it. `cargo test --lib creative_tab` exercises
