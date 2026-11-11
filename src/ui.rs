@@ -40,6 +40,7 @@ mod statistics;
 pub mod text;
 mod theme;
 mod tint;
+mod toasts;
 mod ttf;
 mod unihex;
 mod widgets;

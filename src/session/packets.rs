@@ -287,6 +287,16 @@ impl Session {
                 let entity = self.entities.get(entity_id).ok_or("mount screen entity not received")?;
                 self.inventory.configure_mount(entity_id, &entity.type_name)?;
             }
+            if id == cb::RECIPE_BOOK_ADD {
+                // ClientPacketListener.handleRecipeBookAdd: RecipeToast.addOrUpdate
+                // for each notification entry, in packet order.
+                let notifications = std::mem::take(&mut self.inventory.recipe_notifications);
+                if let Some(ui) = &mut self.ui {
+                    for recipe in notifications.iter().filter_map(|id| self.inventory.recipes.get(id)) {
+                        ui.raise_recipe_toast(recipe, content)?;
+                    }
+                }
+            }
             self.container_packet_version += 1;
             handled = true;
         }
@@ -365,13 +375,23 @@ impl Session {
                 r.bool()?;
                 r.bool()?;
                 self.spawn_info(r)?;
-                r.bool()?;
-                r.bool()?;
+                r.bool()?; // onlineMode
+                r.bool()?; // enforcesSecureChat
                 r.done()?;
                 self.initialize_player_attributes()?;
                 if let Some(uuid) = self.player.uuid.as_deref() {
                     self.entities
                         .set_local_player(self.player.entity_id, uuid)?;
+                }
+                // ClientPacketListener.handleLogin warns once per connection to a
+                // server (serverData; the local singleplayer server has none) whose
+                // chat is not secure: enforcesSecureChat() needs the client to
+                // validate profile keys AND the server flag. No Mojang services key
+                // set reaches the native session, so it is false whatever the flag.
+                if self.local_server.is_none()
+                    && let Some(ui) = &mut self.ui
+                {
+                    ui.raise_unsecure_server_toast()?;
                 }
             }
             cb::SET_CHUNK_CACHE_RADIUS => {
@@ -1995,7 +2015,12 @@ mod tests {
     #[test]
     fn p1_review_block_updates_create_native_default_block_entities() {
         let position = [-1, 3, -1];
+        // Every 26.3 BlockEntityTypes entry a block update builds (the moving piston, whose
+        // newBlockEntity is null, has its own test below). Beds have no block entity since
+        // 26.3: BedBlock is not an EntityBlock and BlockEntityTypes has no BED.
         for kind in [
+            "minecraft:sign",
+            "minecraft:hanging_sign",
             "minecraft:chest",
             "minecraft:trapped_chest",
             "minecraft:ender_chest",
@@ -2005,7 +2030,7 @@ mod tests {
             "minecraft:banner",
             "minecraft:decorated_pot",
             "minecraft:skull",
-            "minecraft:bed",
+            "minecraft:potent_sulfur",
             "minecraft:bell",
             "minecraft:conduit",
             "minecraft:campfire",

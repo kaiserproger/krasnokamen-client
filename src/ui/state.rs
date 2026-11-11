@@ -400,6 +400,8 @@ pub(crate) enum Paint {
     LoaderMap(Vec<[f64; 2]>),
     LoaderPreview(Arc<crate::loader::previews::WorldPreview>),
     Solid([f32; 3], f32),
+    /// One vanilla toast, painted after the screen from `UiState::toasts`.
+    Toast(u64),
 }
 struct PlayerPreview {
     texture: crate::protocol::content::TextureRegion,
@@ -521,6 +523,9 @@ pub struct UiState {
     pub(crate) slider_drag: Option<String>,
     pub(crate) dialogs: super::dialog::DialogHost,
     pub(crate) anim: super::anim::UiAnim,
+    pub(crate) toasts: super::toasts::ToastManager,
+    /// `seenInsecureChatWarning` of this connection (a UiState lives for one).
+    pub(crate) insecure_chat_warned: bool,
 }
 impl UiState {
     pub fn new(content: &Content) -> Result<Self> {
@@ -650,6 +655,8 @@ impl UiState {
             slider_drag: None,
             dialogs: Default::default(),
             anim: super::anim::UiAnim::default(),
+            toasts: Default::default(),
+            insecure_chat_warned: false,
         })
     }
     pub fn set_item_context(&mut self, context: ItemContext) {
@@ -3502,7 +3509,7 @@ impl UiState {
                 )?;
             }
         }
-        Ok(())
+        self.paint_toasts(content, out, transform)
     }
     /// The darkness vignette lies under the whole HUD. Its dedicated overlay
     /// partition multiplies the frame by `1 - texel * colour`, so the quad
@@ -3579,7 +3586,7 @@ impl UiState {
                 render_layer: RenderLayer::Translucent,
             };
             match &node.paint {
-                Paint::Text | Paint::HitRegion => {}
+                Paint::Text | Paint::HitRegion | Paint::Toast(_) => {}
                 Paint::LoaderPreview(preview) => {
                     p.solid(node.bounds, [0.06, 0.09, 0.13], 0.95);
                     let mesh = &self
@@ -3924,6 +3931,7 @@ impl UiState {
                     | Paint::Split { .. }
                     | Paint::Frame
                     | Paint::Crosshair(_)
+                    | Paint::Toast(_)
             ) {
                 ""
             } else {
@@ -4160,13 +4168,25 @@ fn append_stack_item(
     parent: Mat4,
     out: &mut MeshGeometry,
 ) -> Result<()> {
+    append_fake_item(content, stack, model, bounds, parent, out)?;
+    item_bars::append(content, stack, bounds, parent, out)
+}
+/// `GuiGraphicsExtractor.fakeItem`: the item and its foil, no decorations.
+pub(super) fn append_fake_item(
+    content: &Content,
+    stack: &crate::inventory::Stack,
+    model: &crate::protocol::models::BakedModel,
+    bounds: [f32; 4],
+    parent: Mat4,
+    out: &mut MeshGeometry,
+) -> Result<()> {
     let foil = super::items::foil_texture(content, stack)?;
     let start = out.vertices.len();
     append_item(model, bounds, parent, out)?;
     if let Some(texture) = foil {
         super::items::mark_foil(&mut out.vertices[start..], texture);
     }
-    item_bars::append(content, stack, bounds, parent, out)
+    Ok(())
 }
 
 fn append_item(

@@ -1142,7 +1142,7 @@ impl Session {
         if ui.synchronize(&self.inventory, content).is_err() {
             return;
         }
-        let result = if ui.advance_animations(now) {
+        let mut result = if ui.advance_animations(now) {
             self.scene.overlay.vertices.clear();
             for indices in &mut self.scene.overlay.indices {
                 indices.clear();
@@ -1154,6 +1154,20 @@ impl Session {
         } else {
             Ok(())
         };
+        // ToastManager plays its sounds as SimpleSoundInstance.forUI(event, 1, 1).
+        for event in ui.take_toast_sounds() {
+            if let (Ok(()), Some(audio)) = (&result, &self.audio) {
+                result = audio
+                    .play(crate::audio::SoundRequest::relative(
+                        event,
+                        crate::audio::SoundCategory::Ui,
+                        1.,
+                        1.,
+                        0,
+                    ))
+                    .map(|_| ());
+            }
+        }
         if self.dimension.is_none() && ui.shell_screen_active() {
             // Slow +-12 degree pan (about 40 s period) over the dimmed scene.
             self.scene.yaw = self.player.yaw + 12. * (now * 0.157).sin() as f32;
