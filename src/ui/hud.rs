@@ -1,6 +1,7 @@
 //! Canonical scoreboard and waypoint state from the pinned 26.1.2 producers.
 //! Wire layouts: Clientbound{SetObjective,SetDisplayObjective,SetScore,ResetScore,
-//! SetPlayerTeam,TrackedWaypoint}Packet and their local javap codec captures.
+//! TrackedWaypoint}Packet and their local javap codec captures; SetPlayerTeam is the
+//! 26.3 layout (local javap of ClientboundSetPlayerTeamPacket and its Parameters).
 use crate::protocol::{Reader, Result};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -8,6 +9,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+
+/// `ChatFormatting.RESET`: the stored `TeamParameters::formatting` for a team without a color.
+const TEAM_COLOR_NONE: u8 = 21;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum NumberFormat {
@@ -305,8 +309,14 @@ fn decode<'a>(
             let name = r.string(32767)?;
             let method = r.u8()?;
             let parameters = if matches!(method, 0 | 2) {
+                // 26.3 `ClientboundSetPlayerTeamPacket.Parameters.STREAM_CODEC` (javap):
+                // display, prefix, suffix, Team$Visibility, Team$CollisionRule,
+                // Optional<TeamColor>, options byte. The three enums are
+                // `ByteBufCodecs.idMapper` VarInts over `ByIdMap.continuous(.., ZERO)`:
+                // an out-of-range id decodes to id 0.
                 let display = Arc::new(r.nbt()?);
-                let options = r.u8()?;
+                let prefix = Arc::new(r.nbt()?);
+                let suffix = Arc::new(r.nbt()?);
                 let visibility = match r.var()? {
                     1 => TeamVisibility::Never,
                     2 => TeamVisibility::HideForOtherTeams,
@@ -319,18 +329,24 @@ fn decode<'a>(
                     3 => TeamCollision::PushOwnTeam,
                     _ => TeamCollision::Always,
                 };
-                let formatting = r.var()?;
-                if !(0..22).contains(&formatting) {
-                    return Err("invalid_team_formatting".into());
-                }
+                // TeamColor ids 0..=15 share ChatFormatting's color ordinals; an absent
+                // Optional is "no team color", stored as ChatFormatting.RESET (21).
+                let formatting = if r.bool()? {
+                    match r.var()? {
+                        id @ 0..=15 => id as u8,
+                        _ => 0,
+                    }
+                } else {
+                    TEAM_COLOR_NONE
+                };
                 Some(TeamParameters {
                     display,
-                    options,
+                    options: r.u8()?,
                     visibility,
                     collision,
-                    formatting: formatting as u8,
-                    prefix: Arc::new(r.nbt()?),
-                    suffix: Arc::new(r.nbt()?),
+                    formatting,
+                    prefix,
+                    suffix,
                 })
             } else {
                 None

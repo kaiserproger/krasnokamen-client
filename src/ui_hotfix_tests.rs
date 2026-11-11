@@ -57,6 +57,88 @@ fn rc1_hud_scoreboard_packets_reach_sidebar_state() {
     assert!(ui.scoreboard().sidebar_objective(None).is_none());
 }
 
+/// Exact 26.3 `ClientboundSetPlayerTeamPacket` bytes (javap `javap26_3.txt` in
+/// receipts/ClientTeamPacket): name, method byte, then for methods 0/2
+/// `Parameters.STREAM_CODEC` = display, prefix, suffix, visibility VarInt,
+/// collision VarInt, `Optional<TeamColor>` (bool + VarInt), options byte; then
+/// for methods 0/3/4 a VarInt-counted player list.
+#[test]
+fn team_packet_decodes_exact_26_3_layout_for_every_method() {
+    use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+    use crate::ui::{TeamCollision, TeamVisibility};
+    let (content, _, mut ui) = state();
+    let text = |w: &mut Writer, s: &str| {
+        w.0.extend([8, 0, s.len() as u8]);
+        w.0.extend(s.as_bytes());
+    };
+    let packet = |method: u8, params: Option<(i32, i32, Option<i32>, u8)>, players: Option<&[&str]>| {
+        let mut w = Writer::default();
+        w.string("t");
+        w.0.push(method);
+        if let Some((visibility, collision, color, options)) = params {
+            text(&mut w, "D");
+            text(&mut w, "P");
+            text(&mut w, "S");
+            w.var(visibility);
+            w.var(collision);
+            match color {
+                Some(color) => {
+                    w.0.push(1);
+                    w.var(color);
+                }
+                None => w.0.push(0),
+            }
+            w.0.push(options);
+        }
+        if let Some(players) = players {
+            w.var(players.len() as i32);
+            for player in players {
+                w.string(player);
+            }
+        }
+        w.0
+    };
+    let send = |ui: &mut UiState, bytes: Vec<u8>| ui.apply(cb::SET_PLAYER_TEAM, &mut Reader::new(&bytes), &content);
+
+    // 0 = add: parameters (RED = TeamColor id 12) + players.
+    assert!(send(&mut ui, packet(0, Some((2, 3, Some(12), 3)), Some(&["p"]))).unwrap());
+    let team = &ui.scoreboard().teams["t"];
+    assert_eq!(*team.parameters.display, serde_json::json!("D"));
+    assert_eq!(*team.parameters.prefix, serde_json::json!("P"));
+    assert_eq!(*team.parameters.suffix, serde_json::json!("S"));
+    assert_eq!(team.parameters.visibility, TeamVisibility::HideForOtherTeams);
+    assert_eq!(team.parameters.collision, TeamCollision::PushOwnTeam);
+    assert_eq!(team.parameters.formatting, 12);
+    assert_eq!(team.parameters.options, 3);
+    assert_eq!(ui.scoreboard().membership["p"], "t");
+
+    // 2 = change: parameters only, absent Optional<TeamColor> = no color (RESET).
+    assert!(send(&mut ui, packet(2, Some((1, 0, None, 0)), None)).unwrap());
+    let team = &ui.scoreboard().teams["t"];
+    assert_eq!(team.parameters.visibility, TeamVisibility::Never);
+    assert_eq!(team.parameters.collision, TeamCollision::Always);
+    assert_eq!(team.parameters.formatting, 21);
+    assert_eq!(team.parameters.options, 0);
+    assert_eq!(ui.scoreboard().membership["p"], "t");
+
+    // 3 = join, 4 = leave: player list only.
+    assert!(send(&mut ui, packet(3, None, Some(&["q"]))).unwrap());
+    assert_eq!(ui.scoreboard().membership["q"], "t");
+    assert!(send(&mut ui, packet(4, None, Some(&["p"]))).unwrap());
+    assert!(!ui.scoreboard().membership.contains_key("p"));
+    assert_eq!(ui.scoreboard().teams["t"].members.len(), 1);
+
+    // 1 = remove: name and method byte only.
+    assert!(send(&mut ui, packet(1, None, None)).unwrap());
+    assert!(ui.scoreboard().teams.is_empty());
+    assert!(ui.scoreboard().membership.is_empty());
+
+    // Trailing bytes after a valid layout stay a hard error (the old decoder's failure mode).
+    let mut trailing = packet(1, None, None);
+    trailing.extend([0, 0, 0, 0]);
+    assert!(send(&mut ui, trailing).is_err());
+}
+
 #[test]
 fn rc1_hud_chat_wraps_without_overlap_in_game_and_history() {
     use crate::ui::UiIntent;
