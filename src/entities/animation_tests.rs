@@ -1610,6 +1610,42 @@ fn animation_modern_action_timers_change_parts_and_return_to_rest() {
 }
 
 #[test]
+fn animation_armadillo_roll_and_warden_roar_reach_part_matrices() {
+    use render_living::Modern;
+    // Armadillo: received ARMADILLO_STATE rolled (2) tucks head, legs and tail into the shell.
+    {
+        let (models, mut e, content) = action_fixture("minecraft:armadillo");
+        let rig = solaris_models::authored("minecraft:armadillo#main").unwrap();
+        e.source.as_mut().unwrap().age = 5;
+        let idle = action_pose(&models, &e, &content, rig);
+        e.metadata.insert(19, Metadata::Int(2));
+        let rolled = action_pose(&models, &e, &content, rig);
+        for name in ["head", "tail", "right_front_leg", "left_hind_leg"] {
+            assert_ne!(idle[rig.part_by_name[name]], rolled[rig.part_by_name[name]],
+                "armadillo {name} must tuck when rolled");
+        }
+        e.metadata.insert(19, Metadata::Int(0));
+        assert_eq!(idle, action_pose(&models, &e, &content, rig), "unrolling restores the pose");
+    }
+    // Warden: the roar timer drives head pitch and arm spread.
+    {
+        let (models, mut e, content) = action_fixture("minecraft:warden");
+        let rig = solaris_models::authored("minecraft:warden#main").unwrap();
+        e.source.as_mut().unwrap().age = 5;
+        let idle = action_pose(&models, &e, &content, rig);
+        match &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+            Modern::Warden { roar, .. } => roar.start(0),
+            _ => panic!("fixture modern kind"),
+        }
+        let roaring = action_pose(&models, &e, &content, rig);
+        for name in ["head", "right_arm", "left_arm"] {
+            assert_ne!(idle[rig.part_by_name[name]], roaring[rig.part_by_name[name]],
+                "warden {name} must move during roar");
+        }
+    }
+}
+
+#[test]
 fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
     use crate::ui::{item_dynamic::ItemWorldContext, items::{ItemContext, ItemModels}};
     let (models, mut e, mut content) = action_fixture("minecraft:player");

@@ -400,7 +400,7 @@ pub(crate) fn model_id(key: &str) -> String {
             _ => return None,
         })
     };
-    let baby_set = qualifier.contains("babyModelSet") || name == "armor_stand_small";
+    let baby_set = qualifier.contains("babyModelSet");
     if let Some(slot) = slot(qualifier).filter(|_| {
         qualifier.contains("/modelSet/")
             || qualifier.contains("/babyModelSet/")

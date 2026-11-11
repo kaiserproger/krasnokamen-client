@@ -50,6 +50,25 @@ fn rc2_authored_village_models_have_coherent_body_parts() {
 }
 
 #[test]
+fn magma_cube_eye_texels_occupy_adjacent_upper_face_slices() {
+    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "magma_cube.json").unwrap();
+    let model = ModelFile::parse(source).unwrap();
+    // The runtime texture has orange and yellow eye texels in these two rows.
+    // The matched 26.3 front frame places them together in the upper half.
+    for (name, row) in [("segment2", 26.), ("segment3", 35.)] {
+        let bone = model.bones.iter().find(|bone| bone.name == name).unwrap();
+        let front = face_rects(&bone.cubes[0]).into_iter()
+            .find(|(face, _)| *face == Face::Front).unwrap().1;
+        assert_eq!(front, [8., row, 16., row + 1.], "{name}");
+    }
+    let upper = model.bones.iter().find(|bone| bone.name == "segment2").unwrap();
+    let lower = model.bones.iter().find(|bone| bone.name == "segment3").unwrap();
+    let top = model.bones.iter().find(|bone| bone.name == "segment0").unwrap();
+    assert_eq!(upper.pivot[1] - top.pivot[1], 2.);
+    assert_eq!(upper.pivot[1] + upper.cubes[0].size[1], lower.pivot[1]);
+}
+
+#[test]
 fn goat_horn_spacing_tracks_observed_front_silhouette() {
     let rig = authored("minecraft:goat#main").unwrap();
     let right = rig.bones[rig.part_by_name["right_horn"]].pivot.x;
@@ -234,7 +253,6 @@ fn rig_key_resolution() {
         ("minecraft:breeze_wind_charge#renderer/model", "wind_charge"),
         ("minecraft:zombie#layer3/modelSet/head", "armor_head"),
         ("minecraft:armor_stand#boots", "armor_feet"),
-        ("minecraft:armor_stand_small#chestplate", "armor_baby_chest"),
         ("minecraft:armor_stand#renderer_main", "armor_stand"),
         ("minecraft:double_chest_left#main", "double_chest_left"),
         ("minecraft:poplar_boat#renderer/model", "boat"),
@@ -899,9 +917,123 @@ fn baby_zombie_and_shared_husk_armor_keep_child_body_proportions() {
     for bone in &chest.bones {
         assert_eq!(bone.cubes[0].inflate, 0.5, "outer shell follows the child scale");
         if bone.name.ends_with("_arm") {
-            // The supplied child equipment atlas has three opaque shoulder rows
-            // followed by transparent forearm rows, not a solid leg-texture strip.
-            assert_eq!(bone.cubes[0].faces[&Face::Front], [28., 20., 32., 28.]);
+            // The child equipment atlas has opaque shoulder rows above the forearm
+            // rows; the arm front samples a 1:1 (2x4) texel region of that area.
+            assert_eq!(bone.cubes[0].faces[&Face::Front], [28., 20., 30., 24.]);
+        }
+    }
+}
+
+#[test]
+fn baby_zombie_and_husk_chest_shoulders_use_covered_atlas_region() {
+    let reference = embedded("armor_baby_piglin_chest");
+    let zombie = embedded("armor_baby_zombie_chest");
+    for part in ["right_arm", "left_arm"] {
+        let cube = &zombie.bones.iter().find(|bone| bone.name == part).unwrap().cubes[0];
+        let reference_cube = &reference.bones.iter().find(|bone| bone.name == part).unwrap().cubes[0];
+        // The family-shared baby equipment atlas has opaque armor in the region
+        // already used by the piglin cap; the former zombie region is transparent.
+        // Origins match; each rect stays 1:1 with its own arm cube's top face.
+        let up = |cube: &CubeSpec| face_rects(cube).into_iter()
+            .find(|(face, _)| *face == Face::Up).unwrap().1;
+        let (zu, pu) = (up(cube), up(reference_cube));
+        assert_eq!(zu[..2], pu[..2], "{part} shoulder cap atlas origin");
+        assert_eq!([zu[2] - zu[0], zu[3] - zu[1]], [cube.size[0], cube.size[2]], "{part} 1:1 cap");
+        assert_eq!([pu[2] - pu[0], pu[3] - pu[1]], [reference_cube.size[0], reference_cube.size[2]], "piglin 1:1 cap");
+    }
+    for kind in ["zombie", "husk"] {
+        assert_eq!(model_id(&format!("minecraft:{kind}#layer3/babyModelSet/chest")),
+            "armor_baby_zombie_chest");
+    }
+}
+
+#[test]
+fn camel_husk_rig_stays_geometry_identical_to_camel() {
+    // Vanilla CamelHuskRenderer bakes ModelLayers.CAMEL (AdultCamelModel), so the husk
+    // rig must remain geometry-identical to the camel rig; only id and texture differ.
+    let husk = embedded("camel_husk");
+    let camel = embedded("camel");
+    assert_eq!(format!("{:?}", husk.bones), format!("{:?}", camel.bones));
+}
+
+#[test]
+fn glow_squid_tentacle_yaw_matches_vanilla_ring() {
+    // Vanilla SquidModel: tentacle i sits at (cos,sin)(i*45°)*5, y=15, yRot=-i*45°+90°.
+    let model = embedded("glow_squid");
+    for i in 0..8usize {
+        let bone = model.bones.iter().find(|b| b.name == format!("tentacle{i}")).unwrap();
+        let ang = i as f32 * std::f32::consts::PI / 4.;
+        assert!((bone.pivot[0] - ang.cos() * 5.).abs() < 0.01, "tentacle{i} x");
+        assert!((bone.pivot[2] - ang.sin() * 5.).abs() < 0.01, "tentacle{i} z");
+        assert_eq!(bone.pivot[1], 15., "tentacle{i} y");
+        let want = 90. - i as f32 * 45.;
+        assert!((bone.rotation[1] - want).abs() < 0.01,
+            "tentacle{i} yaw {} != {want}", bone.rotation[1]);
+    }
+}
+
+#[test]
+fn cow_and_mooshroom_front_legs_match_vanilla_quadruped() {
+    for name in ["cow", "mooshroom"] {
+        let model = embedded(name);
+        for (bone_name, px, mirror) in [("right_front_leg", -4., false), ("left_front_leg", 4., true)] {
+            let bone = model.bones.iter().find(|b| b.name == bone_name).unwrap();
+            assert_eq!(bone.pivot, [px, 12., -5.], "{name} {bone_name} pivot");
+            let cube = &bone.cubes[0];
+            assert_eq!((cube.origin, cube.size, cube.uv, cube.mirror),
+                ([-2., 0., -2.], [4., 12., 4.], [0., 16.], mirror), "{name} {bone_name} cube");
+        }
+    }
+}
+
+#[test]
+fn bed_has_no_legacy_entity_rig_with_mirrored_leg() {
+    // Beds render from the vanilla block models (template_bed_head/foot); the old
+    // entity bed_head/bed_foot rigs (whose leg_right was mirrored) must stay removed.
+    assert!(authored("bed_head").is_none());
+    assert!(authored("bed_foot").is_none());
+}
+
+#[test]
+fn baby_leggings_stay_visible_above_boots_in_every_family() {
+    for kind in ["drowned", "husk", "piglin", "zombie", "zombie_villager", "zombified_piglin"] {
+        let legs = embedded(&model_id(&format!("minecraft:{kind}#layer3/babyModelSet/legs")));
+        let feet = embedded(&model_id(&format!("minecraft:{kind}#layer3/babyModelSet/feet")));
+        for side in ["right_leg", "left_leg"] {
+            let lb = legs.bones.iter().find(|b| b.name == side).unwrap();
+            let fb = feet.bones.iter().find(|b| b.name == side).unwrap();
+            let lc = &lb.cubes[0];
+            let fc = &fb.cubes[0];
+            // Model +Y points down: the visible leggings band on the leg is the
+            // boot shell's top edge minus the leggings shell's top edge.
+            let leg_top = lb.pivot[1] + lc.origin[1] - lc.inflate;
+            let boot_top = fb.pivot[1] + fc.origin[1] - fc.inflate;
+            assert!(boot_top - leg_top >= 1.,
+                "{kind} {side}: leggings band only {} px", boot_top - leg_top);
+        }
+    }
+}
+
+#[test]
+fn baby_armor_shell_faces_sample_texels_1_to_1() {
+    let dims = |face: Face, [w, h, d]: [f32; 3]| match face {
+        Face::Up | Face::Down => (w, d),
+        Face::Front | Face::Back => (w, h),
+        Face::Right | Face::Left => (d, h),
+    };
+    for kind in ["drowned", "husk", "piglin", "zombie", "zombie_villager", "zombified_piglin"] {
+        for part in ["head", "chest", "legs", "feet"] {
+            let id = model_id(&format!("minecraft:{kind}#layer3/babyModelSet/{part}"));
+            let model = embedded(&id);
+            for bone in &model.bones {
+                for cube in &bone.cubes {
+                    for (face, rect) in face_rects(cube) {
+                        let (fw, fh) = dims(face, cube.size);
+                        assert_eq!([(rect[2] - rect[0]).abs(), (rect[3] - rect[1]).abs()], [fw, fh],
+                            "{id} bone {} face {face:?}", bone.name);
+                    }
+                }
+            }
         }
     }
 }
