@@ -19,6 +19,11 @@ impl Session {
         self.apply_persisted_settings(saved);
     }
 
+    /// Routes eligible humanoid mobs and horses to the renderer's GPU crowd path.
+    pub(crate) fn set_crowd_instancing(&mut self, enabled: bool) {
+        self.entities.set_crowd_instancing(enabled);
+    }
+
     pub fn input(&mut self, intent: InputIntent) -> Result<Value> {
         match intent {
             InputIntent::ReleaseAll => {

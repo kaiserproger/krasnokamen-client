@@ -1,5 +1,6 @@
 //! Resource item graphs evaluated against actual stack and presentation context.
 use crate::{
+    api::{EntityMaterial, RenderLayer},
     entities,
     inventory::Stack,
     protocol::{
@@ -120,12 +121,17 @@ pub(crate) fn item_model_location(id: &str) -> (&str, &str) {
 pub struct ItemModels {
     definitions: BTreeMap<String, Arc<Value>>,
     baked: BTreeMap<String, BakedModel>,
+    /// Retained selections with their geometry shape (see `model_shape`).
     selected: BTreeMap<
         (u32, usize, String, Vec<usize>),
-        (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6]),
+        (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64),
     >,
+    /// Shape of each distinct selected geometry, keyed by everything entity emission reads.
+    shapes: BTreeMap<Vec<u32>, u64>,
     entities: Option<Arc<entities::Models>>,
 }
+/// Shape identities are process-unique, so a cleared cache can never alias an old one.
+static NEXT_SHAPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 impl ItemModels {
     pub fn new() -> Self {
         Self::default()
@@ -151,6 +157,8 @@ impl ItemModels {
         self.definitions.clear();
         self.baked.clear();
         self.selected.clear();
+        // Texture layers and UVs in the keys refer to the released atlas.
+        self.shapes.clear();
     }
     /// GUI/icon variant of `model_with`: an item whose model cannot be baked is logged once per
     /// item/error and drawn as an empty icon. A single bad item must never end the session.
@@ -196,6 +204,26 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, [f32; 6])> {
+        self.select(c, s, ctx).map(|selected| (&selected.1, selected.2))
+    }
+    /// `model_with` plus the selection's shape: equal shapes mean identical entity geometry
+    /// (display transform of `ctx`, quad positions, UVs, colours, layers, materials, alpha
+    /// and emission), whichever stack or graph produced it.
+    pub(crate) fn model_shape<'a>(
+        &'a mut self,
+        c: &Content,
+        s: &Stack,
+        ctx: &ItemContext,
+    ) -> Result<(&'a BakedModel, u64)> {
+        self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
+    }
+    #[expect(clippy::type_complexity, reason = "the retained selection entry")]
+    fn select<'a>(
+        &'a mut self,
+        c: &Content,
+        s: &Stack,
+        ctx: &ItemContext,
+    ) -> Result<&'a (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64)> {
         if s.empty() {
             return Err("empty stack has no item model".into());
         }
@@ -317,16 +345,40 @@ impl ItemModels {
             if self.selected.len() >= 4096 {
                 self.selected.clear();
             }
-            let bounds = model_bounds(&result, display_matrix(&result, &ctx.display));
-            let selected =
-                self.selected
-                    .entry(key)
-                    .or_insert((Arc::clone(&s.components), result, bounds));
-            return Ok((&selected.1, selected.2));
+            if self.shapes.len() >= 4096 {
+                self.shapes.clear();
+            }
+            let display = display_matrix(&result, &ctx.display);
+            let bounds = model_bounds(&result, display);
+            let shape = *self.shapes.entry(shape_key(&result, display)).or_insert_with(|| {
+                NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            });
+            return Ok(self
+                .selected
+                .entry(key)
+                .or_insert((Arc::clone(&s.components), result, bounds, shape)));
         }
-        let selected = &self.selected[&key];
-        Ok((&selected.1, selected.2))
+        Ok(&self.selected[&key])
     }
+}
+/// Everything entity emission (`presentation::append_baked`) reads from a selection in one
+/// display context, as bits: equal keys draw identical triangles.
+fn shape_key(model: &BakedModel, display: Mat4) -> Vec<u32> {
+    let mut key = Vec::with_capacity(16 + model.quads.len() * 25);
+    key.extend(display.to_cols_array().map(f32::to_bits));
+    for q in &model.quads {
+        let color = match q.tint {
+            TintKind::Constant(color) => color,
+            _ => [1.; 3],
+        };
+        let material = q.entity_material.unwrap_or(match q.layer {
+            RenderLayer::Opaque | RenderLayer::Cutout => EntityMaterial::ItemCutout,
+            RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
+        });
+        key.extend(q.positions.iter().flatten().chain(q.uv.iter().flatten()).chain(&color).map(|v| v.to_bits()));
+        key.extend([q.alpha.to_bits(), q.texture_layer, material as u32, u32::from(q.light_emission)]);
+    }
+    key
 }
 // GUI overlays have no depth buffer. Keep the cutout material and its foil
 // semantics, but paint special head faces far-to-near in GUI display space.

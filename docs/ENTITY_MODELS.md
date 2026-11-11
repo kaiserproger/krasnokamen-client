@@ -214,6 +214,46 @@ inventing a local look target for a stationary oracle fixture.
 The automation entity listing exposes the current living walk position and speed
 when source animation state exists; missing state is reported as null.
 
+## GPU crowd instancing
+
+Large battles exceed what the CPU entity path can emit per frame (`MAX_DYNAMIC_VERTICES`).
+Zombies, husks, skeletons, wither skeletons, pillagers, vindicators and the three horse kinds
+are therefore drawn by the GPU crowd renderer (`entities/crowd.rs`,
+`render/entity_instancing.rs`) whenever the adapter has compute shaders, indirect draws and
+vertex-stage storage buffers. `SOLARIS_CLIENT_CROWD=0` keeps every entity on the CPU path
+(same-executable A/B).
+
+* **Composites.** Each distinct appearance (main rig and texture, worn armour layers and
+  trims, held and head items) becomes one static mesh in bone-local space plus a bone table.
+  Items are shared by their *shape* (`ItemModels::model_shape`: identical display transform
+  and quads, whichever stack or item graph produced them), so equal equipment on thousands of
+  soldiers yields one composite.
+* **Per frame** each entity contributes one 144-byte instance: model root
+  (`presentation::root_matrix`, including death fall and the clip `Root` channel), role pose
+  (`presentation::role_pose`), clip layers (`clip_pose`), light and hurt flash.
+* **GPU.** `crowd_prepare` culls every instance's pose-independent bounding sphere against the
+  camera and each shadow cascade, picks a detail level from its projected diameter (level 1
+  below 32 px drops thin item extrusion quads, level 2 below 13 px also drops armour trims)
+  and evaluates its bones with the rules of `evaluate_posed_rig` and `clip_pose`;
+  `crowd_args` writes the indirect draws. Vertices leave through `source_out` and the same
+  Source material pipelines as CPU-emitted entities (`ArmorCutoutNoCull`,
+  `ArmorDecalCutoutNoCull`, `EntitySolid`, `EntityCutout`, `ItemCutout`), and cast cascade
+  shadows.
+* **Eligibility.** An entity is routed only when the CPU path would draw exactly the
+  composite: standing pose, not invisible or glowing, no villager layers or anger texture,
+  no enchantment glint, held items drawn item cutout or entity solid (plain models, shields
+  without banner patterns, tridents). Everything else (players,
+  burning-fire quads, nameplates, other kinds) stays on the CPU path. `PresentationStats::crowd`
+  counts routed entities and `crowd_fallback` counts crowd-kind entities left on the CPU path
+  per kind and reason (both in the observation's `entity_extraction`); render metrics report
+  `crowd_instances`, `crowd_draw_calls` and `crowd_upload_bytes`.
+* **Tests.** `entities::crowd::tests` compares the crowd vertices (through a CPU mirror of the
+  bone pass) with the CPU path's vertices for an armoured, walking, attacking, hurt zombie
+  holding an item and a shield,
+  and the clip pose with `evaluate_posed_rig`; `render::entity_instancing_tests` renders the
+  same zombie both ways on a real adapter (Low and Medium with shadows), and a 4 x 4 grid of
+  two composites with interleaved bone ranges, and compares frames.
+
 ## Missing models
 
 `Models::rig(key)` never fails. A key with no authored model renders a **magenta, entity-sized

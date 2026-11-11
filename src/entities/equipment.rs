@@ -1,7 +1,7 @@
 //! Received humanoid armor uses activated, source-baked per-slot rigs, not item icons.
 //! Contracts: local 26.1.2 ArmorStandRenderer, HumanoidArmorLayer,
 //! ArmorStandArmorModel and EquipmentLayerRenderer javap (ignored QA receipts).
-use super::{presentation as p, Entity, Models};
+use super::{presentation as p, resources::Rig, Entity, Models};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     inventory::Stack,
@@ -152,23 +152,23 @@ impl Cache {
     }
 
 
-    pub(super) fn append(
+    /// What `slot` draws for `e`, shared by the CPU emitter and the crowd baker.
+    pub(super) fn resolve<'a>(
         &mut self,
         e: &Entity,
         slot: usize,
-        stack: &Stack,
-        frame: Frame<'_>,
-        out: &mut DynamicGeometry,
-    ) -> Result<bool> {
-        let Frame { models, content, root, tick, partial, light } = frame;
+        stack: &'a Stack,
+        models: &'a Models,
+        content: &Content,
+    ) -> Result<Worn<'a>> {
         let Some(asset) = armor_asset(stack, slot) else {
-            return Ok(false);
+            return Ok(Worn::NotWorn);
         };
         // Player back layers have their own profile-aware draw hook.
         if e.type_name == "minecraft:player" && slot == 4
             && self.wings_asset(stack, content)?.is_some()
         {
-            return Ok(true);
+            return Ok(Worn::Omitted);
         }
         let stand = e.type_name == "minecraft:armor_stand";
         let baby = !stand && p::boolean(models, e, "DATA_BABY_ID");
@@ -176,7 +176,7 @@ impl Cache {
         let animal = overlay.is_some();
         // WolfArmorLayer and the received-item branch of LlamaDecorLayer omit babies.
         if baby && overlay.is_some_and(|(_, kind)| matches!(kind, "wolf_body" | "llama_body")) {
-            return Ok(true);
+            return Ok(Worn::Omitted);
         }
         if animal && baby {
             return Err("baby animal equipment overlay is not available".into());
@@ -200,21 +200,19 @@ impl Cache {
             (key, kind)
         };
         let Some(key) = key else {
-            return Ok(false);
+            return Ok(Worn::NotWorn);
         };
         if animal && !models.has_authored_rig(key) {
             return Err(format!("animal equipment rig not activated: {key}"));
         }
-        let rig = models.rig(key);
         self.activate(content, asset, kind);
-        let Some(layers) = self.assets[asset][kind].as_ref().map_err(Clone::clone)? else {
+        if self.assets[asset][kind].as_ref().map_err(Clone::clone)?.is_none() {
             if animal {
                 return Err(format!("equipment asset {asset} has no {kind} layer"));
             }
             // Equipment without this layer type is also omitted by HumanoidArmorLayer.
-            return Ok(true);
-        };
-        p::evaluate_rig(rig, e, models, content, tick, partial, root, &mut self.transforms);
+            return Ok(Worn::Omitted);
+        }
         let dyed = stack
             .component("minecraft:dyed_color")
             .and_then(serde_json::Value::as_i64)
@@ -229,20 +227,69 @@ impl Cache {
                     .and_then(serde_json::Value::as_object)
                     .is_some_and(|v| !v.is_empty())
             });
-        let mut glint_pending = foil;
-        for layer in layers {
-            let Some(color) = layer.color(dyed) else {
+        // Source EquipmentLayerRenderer omits trim for the humanoid-baby layer.
+        let trim = match stack.component("minecraft:trim") {
+            Some(trim) if !baby && !animal => Some(trim_texture(content, trim, asset, kind)?),
+            _ => None,
+        };
+        Ok(Worn::Layers(WornLayers { rig: models.rig(key), asset, kind, dyed, foil, trim }))
+    }
+
+    /// Rig styles of `worn` in source emission order: each colored layer, the glint
+    /// after the first of them (`ArmorEntityGlint`, wrapped coordinates), then the trim.
+    pub(super) fn parts(&self, worn: &WornLayers<'_>, glint: Option<TextureRegion>) -> Vec<WornPart> {
+        let layers = self.assets[worn.asset][worn.kind].as_ref().ok().and_then(Option::as_ref);
+        let mut parts = Vec::new();
+        let mut glint_pending = worn.foil;
+        for layer in layers.into_iter().flatten() {
+            let Some(color) = layer.color(worn.dyed) else {
                 continue;
             };
-            p::emit_rig(rig, &self.transforms, p::RigStyle { tex: layer.texture, color, layer: EntityMaterial::ArmorCutoutNoCull, alpha: 1., light }, out)?;
-            if glint_pending {
-                let texture = content
-                    .texture("minecraft:misc/enchanted_glint_armor")
-                    .ok_or("armor glint texture not activated")?;
-                let start = out.vertices.len();
-                p::emit_rig(rig, &self.transforms, p::RigStyle { tex: texture, color, layer: EntityMaterial::ArmorEntityGlint, alpha: 1., light }, out)?;
+            parts.push(WornPart { texture: layer.texture, color, material: EntityMaterial::ArmorCutoutNoCull });
+            if glint_pending && let Some(texture) = glint {
+                parts.push(WornPart { texture, color, material: EntityMaterial::ArmorEntityGlint });
+                glint_pending = false;
+            }
+        }
+        if let Some((texture, decal)) = worn.trim {
+            parts.push(WornPart { texture, color: [1.; 3], material: if decal {
+                EntityMaterial::ArmorDecalCutoutNoCull
+            } else {
+                EntityMaterial::ArmorCutoutNoCull
+            } });
+        }
+        parts
+    }
+
+    pub(super) fn append(
+        &mut self,
+        e: &Entity,
+        slot: usize,
+        stack: &Stack,
+        frame: Frame<'_>,
+        out: &mut DynamicGeometry,
+    ) -> Result<bool> {
+        let Frame { models, content, root, tick, partial, light } = frame;
+        let worn = match self.resolve(e, slot, stack, models, content)? {
+            Worn::NotWorn => return Ok(false),
+            Worn::Omitted => return Ok(true),
+            Worn::Layers(worn) => worn,
+        };
+        let glint = if worn.foil {
+            Some(content
+                .texture("minecraft:misc/enchanted_glint_armor")
+                .ok_or("armor glint texture not activated")?)
+        } else {
+            None
+        };
+        p::evaluate_rig(worn.rig, e, models, content, tick, partial, root, &mut self.transforms);
+        for part in self.parts(&worn, glint) {
+            let start = out.vertices.len();
+            p::emit_rig(worn.rig, &self.transforms, p::RigStyle { tex: part.texture, color: part.color, layer: part.material, alpha: 1., light }, out)?;
+            if part.material == EntityMaterial::ArmorEntityGlint {
                 // The wrapped material expects local coordinates and an atlas rectangle,
                 // not the atlas-space UV and NO_OVERLAY values emitted by the rig.
+                let texture = part.texture;
                 let size = [texture.uv[2] - texture.uv[0], texture.uv[3] - texture.uv[1]];
                 let scroll = ((tick % 24000) as f32 + partial) / 600.;
                 for vertex in &mut out.vertices[start..] {
@@ -253,22 +300,35 @@ impl Cache {
                     vertex.overlay_uv = [texture.uv[0], texture.uv[1]];
                     vertex.overlay_tint = [size[0], size[1], 0.];
                 }
-                glint_pending = false;
             }
-        }
-        // Source EquipmentLayerRenderer omits trim for the humanoid-baby layer.
-        if !baby && !animal
-            && let Some(trim) = stack.component("minecraft:trim")
-        {
-            let (texture, decal) = trim_texture(content, trim, asset, kind)?;
-            p::emit_rig(rig, &self.transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: if decal {
-                EntityMaterial::ArmorDecalCutoutNoCull
-            } else {
-                EntityMaterial::ArmorCutoutNoCull
-            }, alpha: 1., light }, out)?;
         }
         Ok(true)
     }
+}
+
+/// Resolution of one equipment slot.
+pub(super) enum Worn<'a> {
+    /// Not worn equipment for this slot: drawn as a held/head item, or reported.
+    NotWorn,
+    /// Worn, with nothing to draw (vanilla omits it).
+    Omitted,
+    Layers(WornLayers<'a>),
+}
+
+/// A worn slot's rig and the inputs of its layer styles (`Cache::parts`).
+pub(super) struct WornLayers<'a> {
+    pub rig: &'a Rig,
+    asset: &'a str,
+    kind: &'static str,
+    dyed: i32,
+    pub foil: bool,
+    trim: Option<(TextureRegion, bool)>,
+}
+
+pub(super) struct WornPart {
+    pub texture: TextureRegion,
+    pub color: [f32; 3],
+    pub material: EntityMaterial,
 }
 
 fn trim_holder<'a>(content: &'a Content, value: &'a serde_json::Value, registry: &str) -> Result<&'a serde_json::Value> {

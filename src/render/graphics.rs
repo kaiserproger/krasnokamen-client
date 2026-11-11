@@ -38,12 +38,14 @@ pub(super) struct Features {
 /// Shadow cascades never exceed this; `shader.wgsl` mirrors it.
 pub(super) const MAX_CASCADES: usize = 3;
 
-/// `shader.wgsl` plus the shared atmosphere functions it calls.
+/// `shader.wgsl` plus the shared atmosphere functions it calls and the GPU crowd
+/// vertex stages (`entity_instancing.wgsl`), which leave through its `source_out`.
 pub(super) fn main_shader_source() -> String {
     format!(
-        "{}\n{}",
+        "{}\n{}\n{}",
         include_str!("../shader.wgsl"),
-        include_str!("atmosphere.wgsl")
+        include_str!("atmosphere.wgsl"),
+        super::entity_instancing::vertex_source()
     )
 }
 

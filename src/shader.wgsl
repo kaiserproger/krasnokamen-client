@@ -618,8 +618,12 @@ fn source_light(light: vec2<f32>) -> f32 {
     @location(2) uv: vec2<f32>, @location(3) overlay_uv: vec2<f32>, @location(4) overlay_tint: vec3<f32>,
     @location(5) alpha: f32, @location(6) layer: u32, @location(7) origin: vec4<f32>,
     @location(8) light: vec2<f32>, @location(9) normal: vec3<f32>) -> SceneOut {
+    return source_out(position + origin.xyz, color, uv, overlay_uv, overlay_tint, alpha, layer, light, normal);
+}
+// Shared by `source_vertex` and the GPU crowd vertex stage (`entity_instancing.wgsl`).
+fn source_out(relative: vec3<f32>, color: vec3<f32>, uv: vec2<f32>, overlay_uv: vec2<f32>,
+    overlay_tint: vec3<f32>, alpha: f32, layer: u32, light: vec2<f32>, normal: vec3<f32>) -> SceneOut {
     var out: SceneOut;
-    let relative = position + origin.xyz;
     out.relative = relative; out.normal = normal; out.block_class = 0u;
     out.position = camera.view_projection * vec4<f32>(relative * source_view_scale, 1.0);
     out.fog_distance = vec2<f32>(length(relative), max(length(relative.xz), abs(relative.y)));

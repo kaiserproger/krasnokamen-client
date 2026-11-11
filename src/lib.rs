@@ -1113,6 +1113,7 @@ impl ApplicationHandler for App {
             }
         };
         self.session.set_software_renderer(renderer.software_adapter());
+        self.session.set_crowd_instancing(renderer.crowd_supported());
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.renderer

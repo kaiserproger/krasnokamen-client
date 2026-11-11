@@ -453,6 +453,8 @@ pub struct Scene {
     pub texture_patches: Vec<AtlasPatch>,
     pub chunks: BTreeMap<[i32; 3], ChunkDraw>,
     pub dynamic: DynamicGeometry,
+    /// Humanoid mobs and horses drawn by the GPU crowd renderer (not in `dynamic`).
+    pub crowd: crate::entities::CrowdScene,
     /// Camera-held arms/items, composed after the world with independent depth.
     /// Never world occluders or shadow casters; still depth-test against each other.
     pub first_person: DynamicGeometry,
