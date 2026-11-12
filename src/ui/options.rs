@@ -32,12 +32,18 @@ pub(super) const TABS: [&str; 4] = ["Video", "Controls", "Audio", "Interface"];
 /// Tab shown for the Accessibility entry of the pause menu.
 pub(super) const INTERFACE_TAB: usize = 3;
 
-const VIDEO: [Row; 6] = [
+const VIDEO: [Row; 7] = [
     row(
         "fov",
         "Field of view",
         Kind::Slider,
         "Wider view shows more but stretches the edges.",
+    ),
+    row(
+        "gamma",
+        "Brightness",
+        Kind::Slider,
+        "Lifts the darkest light. Moody to Bright.",
     ),
     row(
         "render_distance",
@@ -70,7 +76,7 @@ const VIDEO: [Row; 6] = [
         "Low fast vanilla; Medium rich; High max.",
     ),
 ];
-const CONTROLS: [Row; 3] = [
+const CONTROLS: [Row; 4] = [
     row(
         "mouse_sensitivity",
         "Sensitivity",
@@ -89,8 +95,14 @@ const CONTROLS: [Row; 3] = [
         Kind::Choice,
         "Choose which hand holds the main-hand item.",
     ),
+    row(
+        "desktop_computer",
+        "Desktop computer",
+        Kind::Toggle,
+        "Show a desktop window on monitor blocks",
+    ),
 ];
-const AUDIO: [Row; 2] = [
+const AUDIO: [Row; 7] = [
     row(
         "volume",
         "Master volume",
@@ -102,6 +114,36 @@ const AUDIO: [Row; 2] = [
         "Subtitles",
         Kind::Toggle,
         "Show captions for sounds that play nearby.",
+    ),
+    row(
+        "voice_chat",
+        "Voice chat",
+        Kind::Toggle,
+        "Proximity voice. Hold V to talk.",
+    ),
+    row(
+        "voice_mute",
+        "Mute microphone",
+        Kind::Toggle,
+        "Others cannot hear you, even while holding V.",
+    ),
+    row(
+        "voice_deafen",
+        "Deafen",
+        Kind::Toggle,
+        "Stops receiving other players' voices.",
+    ),
+    row(
+        "voice_volume",
+        "Voice volume",
+        Kind::Slider,
+        "Loudness of other players' voices.",
+    ),
+    row(
+        "voice_mic_volume",
+        "Microphone volume",
+        Kind::Slider,
+        "Gain applied to your microphone before sending.",
     ),
 ];
 const INTERFACE: [Row; 8] = [
@@ -178,7 +220,9 @@ fn spec(key: &str) -> Option<Spec> {
         // 30..=260 in tens, then one extra stop for Unlimited (value 0).
         "max_fps" => (30., 10., 25),
         "ui_scale" => (0., 1., 5),
-        "volume" | "damage_tilt_strength" | "text_background_opacity" => (0., 0.05, 21),
+        "volume" | "damage_tilt_strength" | "text_background_opacity" | "voice_volume" | "voice_mic_volume" => {
+            (0., 0.05, 21)
+        }
         _ => return None,
     };
     Some(Spec {
@@ -254,7 +298,7 @@ pub(super) fn value_text(key: &str, value: Option<&Value>) -> String {
         },
         "mouse_sensitivity" => pct(num.unwrap_or(1.)),
         "damage_tilt_strength" => pct(num.unwrap_or(1.)),
-        "volume" => pct(num.unwrap_or(1.)),
+        "volume" | "voice_volume" | "voice_mic_volume" => pct(num.unwrap_or(1.)),
         "text_background_opacity" => pct(num.unwrap_or(0.5)),
         "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) { "Right" } else { "Left" }.into(),
         "narrator" => ["Off", "All", "Chat", "System"]
@@ -826,6 +870,9 @@ mod tests {
         assert_eq!(value_text("fullscreen", None), "Off");
         assert_eq!(value_text("narrator", Some(&json!(2))), "Chat");
         assert_eq!(value_text("volume", Some(&json!(0.5))), "50%");
+        assert_eq!(value_text("gamma", None), "50%");
+        assert_eq!(value_text("gamma", Some(&json!(0.))), "Moody");
+        assert_eq!(value_text("gamma", Some(&json!(1.))), "Bright");
     }
 
     #[test]

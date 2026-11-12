@@ -181,6 +181,14 @@ three `export` lines in section 2), else `alsa-sys` fails to configure.
 | F5 | cycle first-person / third-person rear / third-person front |
 | Window close | disconnect + quit cleanly |
 
+On servers that admit the computer content, use a monitor to choose a desktop
+source. Other players must request access; the owner explicitly allows or
+denies sharing of the picture and available app audio. F8 revokes viewers when
+you own a screen, or cancels/leaves a screen you are viewing. Shift+Esc closes
+the local capture. Linux portal window capture does not share system audio.
+Voice chat requires a server with voice enabled; microphone and voice volume
+are controlled in Options.
+
 Windowed agent playthrough (2026-10-16, `survival --client native
 --windowed`, artifact `20261016T090849-survival-o9kznayi`): hearts/HUD →
 F3 → inventory preview → chat → pause/Options with applied GUI scale →

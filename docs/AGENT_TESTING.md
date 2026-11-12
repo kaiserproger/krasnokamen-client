@@ -207,6 +207,11 @@ interact before `in_play` or evidence of a completed graphical frame by themselv
 During singleplayer startup and on its world list, `minecraft_observe.singleplayer`
 exposes the displayed startup status or failure text so graphical probes can
 distinguish a live wait from an actual failure.
+`minecraft_observe.voice` exposes only connection negotiation and listen state;
+it does not prove microphone capture or playback. `screen_sharing` reports
+announced monitor identities, pending pictures and the process-wide decoded
+frame counter; `screen_audio` reports capture and per-monitor decode counters.
+These are diagnostics, not substitutes for checking presented frames or audible output.
 
 
 ### Local interaction failures versus wire failures

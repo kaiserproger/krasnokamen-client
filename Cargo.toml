@@ -22,6 +22,9 @@ bytemuck = { version = "=1.25.0", features = ["derive"] }
 glam = "=0.30.10"
 libm = "=0.2.16"
 png = "=0.18.1"
+# Screen sharing video (ADR 0018): Cisco OpenH264 compiled from its bundled C++ source, so the
+# same encoder and decoder build for Linux and x86_64-pc-windows-gnu with no system library.
+openh264 = { version = "=0.9.9", default-features = false, features = ["source"] }
 flate2 = "=1.1.9"
 uuid = { version = "=1.21.0", features = ["v4", "serde"] }
 sha2 = { version = "=0.10.9", features = ["oid"] }
@@ -31,6 +34,8 @@ md5 = "=0.7.0"
 rodio = { version = "=0.21.1", default-features = false, features = ["playback", "vorbis"] }
 symphonia = { version = "=0.5.5", default-features = false, features = ["ogg", "vorbis"] }
 parking_lot = "=0.12.5"
+cpal = "=0.16.0"
+unsafe-libopus = "=0.2.0"
 base64 = "=0.22.1"
 unicode-bidi = "=0.3.18"
 zip = { version = "=2.4.2", default-features = false, features = ["deflate"] }
@@ -48,10 +53,55 @@ libc = "=0.2.189"
 [dev-dependencies]
 # Same naga wgpu 27 uses: WGSL validation and backend translation tests.
 naga = { version = "=27.0.3", features = ["wgsl-in", "spv-out", "hlsl-out", "msl-out"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "=0.13.13", default-features = false, features = ["tokio", "remote_desktop", "screencast"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+# Nested Wayland compositor that hosts apps launched into a monitor (src/computer/nested.rs).
+smithay = { version = "=0.7.0", default-features = false, features = ["wayland_frontend", "desktop"] }
+
+# Windows desktop capture for the in-world computer (src/computer/windows.rs).
+# Pinned to the `windows` 0.58.0 already locked for wgpu-hal; all features are
+# in-crate, so no extra system libraries are needed on MSVC or GNU targets.
+[target.'cfg(windows)'.dependencies]
+windows-core = "=0.58.0"
+windows = { version = "=0.58.0", features = [
+    "implement",
+    "Foundation",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_System_Threading",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.dev]
 debug = 1
 incremental = false
+
+# The pure-Rust Opus codec is far too slow unoptimized for 20 ms real-time frames.
+[profile.dev.package.unsafe-libopus]
+opt-level = 3
+
+# OpenH264 is C++ and far too slow at -O0 for real-time screen encoding.
+[profile.dev.package.openh264-sys2]
+opt-level = 3
+[profile.dev.package.openh264]
+opt-level = 3
 
 [workspace]
 members = [".", "launcher", "paths"]

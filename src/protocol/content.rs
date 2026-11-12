@@ -17,6 +17,7 @@ use std::{
 
 mod loader_resources;
 mod palettes;
+mod loader_blocks;
 mod placement;
 
 const BLOCK_REPORTS_VERSION: &str = "26.3";
@@ -890,6 +891,9 @@ pub struct Content {
     dynamic: Mutex<DynamicAtlas>,
     loader_base: Option<loader_resources::BaseResources>,
     loader_items: BTreeMap<String, crate::loader::items::ItemDefinition>,
+    loader_blocks: Vec<Value>,
+    loader_carriers: BTreeMap<u32, loader_blocks::CarrierBlock>,
+    loader_model_base: Option<usize>,
 }
 fn registry(v: &Value, name: &str) -> BTreeMap<u32, String> {
     v[format!("minecraft:{name}")]["entries"]
@@ -1046,7 +1050,7 @@ impl Content {
             let entries = self.loader_items.values().map(|item| {
                 serde_json::json!({"id": item.id, "base_item": item.base_item, "name": item.name})
             }).collect::<Vec<_>>();
-            staging.activate_loader_resources(&loader_paths, &entries)?;
+            staging.activate_loader_resources(&loader_paths, &entries, &self.loader_blocks)?;
         }
         if self
             .resource_bytes_used()
@@ -1393,6 +1397,9 @@ impl Content {
             tags: Arc::new(BTreeMap::new()),
             loader_base: None,
             loader_items: BTreeMap::new(),
+            loader_blocks: Vec::new(),
+            loader_carriers: BTreeMap::new(),
+            loader_model_base: None,
         })
     }
     pub fn model_for(&self, state: u32) -> Result<Option<&BakedModel>> {
@@ -2482,6 +2489,9 @@ impl Content {
             }),
             loader_base: None,
             loader_items: BTreeMap::new(),
+            loader_blocks: Vec::new(),
+            loader_carriers: BTreeMap::new(),
+            loader_model_base: None,
         }
     }
     /// Appends a non-occluding leaves state (`minecraft:oak_leaves`, cutout
