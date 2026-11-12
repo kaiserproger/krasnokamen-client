@@ -1142,6 +1142,14 @@ impl Renderer {
                 .post(&mut encoder, &self.targets.color_view, &self.timing);
             self.stats.draw_calls += 5;
         }
+        if let Some(desktop) = &self.desktop {
+            desktop.draw(&self.queue, &mut encoder, &self.targets.color_view,
+                &self.targets.depth_view, scene.camera_position, view_projection);
+        }
+        for desktop in self.shared_screens.values() {
+            desktop.draw(&self.queue, &mut encoder, &self.targets.color_view,
+                &self.targets.depth_view, scene.camera_position, view_projection);
+        }
         if self.first_person.ranges.iter().any(|range| !range.is_empty()) {
             // Vanilla 26.1.2 GameRenderer renders the hand after the level with
             // cleared depth. Keep world depth intact for occlusion/post consumers.

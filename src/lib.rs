@@ -5,6 +5,7 @@ pub mod capture;
 mod controls;
 #[cfg(test)]
 mod controls_tests;
+pub mod computer;
 mod content_paths;
 pub mod entities;
 pub mod environment;
@@ -29,6 +30,7 @@ mod singleplayer;
 pub mod terrain;
 mod terrain_wait;
 pub mod ui;
+mod voice;
 #[cfg(test)]
 mod ui_hotfix_tests;
 
@@ -270,6 +272,8 @@ struct App {
     native_modifiers: crate::ui::Modifiers,
     ime_composing: bool,
     hotbar_wheel: hotbar_wheel::HotbarWheel,
+    computer: computer::native::Computer,
+    voice: voice::Client,
     next_tick: Instant,
     tick_interval: Duration,
     next_frame: Instant,
@@ -345,6 +349,8 @@ impl App {
             native_modifiers: crate::ui::Modifiers::default(),
             ime_composing: false,
             hotbar_wheel: hotbar_wheel::HotbarWheel::default(),
+            computer: computer::native::Computer::default(),
+            voice: Default::default(),
             next_tick: replay::clock::now(),
             tick_interval,
             next_frame: replay::clock::now(),
@@ -375,7 +381,12 @@ impl App {
         let publish_start = Instant::now();
         // Synchronize derived UI state before building the snapshot. An idle
         // publication gate cannot rely on another turn to publish these nodes.
-        if self.debug_overlay {
+        let desktop_dialog = self.computer.dialog();
+        if let Some(ui) = self.session.ui_mut() { ui.set_desktop_dialog(desktop_dialog); }
+        if self.computer.has_overlay() {
+            let lines = self.computer.lines();
+            if let Some(ui) = self.session.ui_mut() { ui.set_debug_lines(lines); }
+        } else if self.debug_overlay {
             let render = self.shared.observation.lock().unwrap_or_else(|e| e.into_inner())
                 .data["render"].clone();
             let lines = self.session.debug_lines(&render);
@@ -430,6 +441,8 @@ impl App {
             "renderable":self.renderer.is_some()&&size.width>0&&size.height>0&&!self.occluded})
     }
     fn release(&mut self, reason: &str) {
+        self.voice_focus_lost();
+        self.computer.release_input();
         let tasks = std::mem::take(&mut self.pending_tasks);
         for (request, mut task) in tasks {
             if request.automation_fence.is_some() {
@@ -632,6 +645,18 @@ impl App {
                             window.request_redraw();
                         }
                     }
+                }
+                Command::Minecraft { name, arguments } if name == "client_screen_share" => {
+                    // Screen sharing state lives on the App owner beside the desktop
+                    // computer; the verb runs the player's own request/consent/F8 paths.
+                    let busy = request.automation_fence.is_some()
+                        && self.pending_tasks.iter().any(|(pending, _)| pending.automation_fence.is_some());
+                    let result = if busy {
+                        Err("writer_action_busy".into())
+                    } else {
+                        self.screen_share_command(arguments)
+                    };
+                    let _ = request.reply.send(result);
                 }
                 Command::Minecraft { name, arguments }
                     if name == "minecraft_toggle_debug_overlay" =>
@@ -996,6 +1021,8 @@ impl App {
             self.next_tick = now + self.tick_interval;
         }
         self.complete_terrain_wait();
+        self.update_computer();
+        self.update_voice();
         // No task can have changed state after the publication below when
         // the queue is empty; avoid rebuilding the entire observation twice.
         if self.pending_tasks.is_empty() {
@@ -1017,6 +1044,15 @@ impl App {
             self.session.native_setting("vsync").and_then(serde_json::Value::as_bool).unwrap_or(true),
             self.session.native_setting("max_fps").and_then(serde_json::Value::as_u64).unwrap_or(120),
         )
+    }
+
+    fn release_mouse_button(session: &mut Session, button: MouseButton) {
+        let key = match button {
+            MouseButton::Left => "attack",
+            MouseButton::Right => "use",
+            _ => return,
+        };
+        let _ = session.input(InputIntent::Key { key: key.into(), pressed: false });
     }
 
     fn sync_native_window(&mut self) {
@@ -1041,7 +1077,10 @@ impl App {
         }
         let game_input = self.focused && !self.occluded && self.session.phase() == "play"
             && self.session.screen() == "game" && !self.session.chat_open()
-            && !self.session.dialog_screen_active();
+            && !self.session.dialog_screen_active() && !self.computer.has_modal();
+        if !game_input && self.cursor_locked {
+            let _ = self.session.input(InputIntent::ReleaseAll);
+        }
         match pointer_grab_change(game_input, self.cursor_locked) {
             Some(false) => {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
@@ -1057,6 +1096,7 @@ impl App {
             }
             _ => {}
         }
+
     }
 
     fn deadline(&self) -> Instant {
@@ -1141,8 +1181,15 @@ impl ApplicationHandler for App {
     ) {
         self.input_only_wakeup = false;
         if self.window.as_ref().is_none_or(|w| w.id() != window_id) {
+            // Events from other windows never acquire local desktop control.
             return;
         }
+        // A press may place a monitor under the pointer. Its release must clear
+        // vanilla held-use even if the newly hit monitor or a modal consumes it.
+        if let WindowEvent::MouseInput { state: ElementState::Released, button, .. } = &event {
+            Self::release_mouse_button(&mut self.session, *button);
+        }
+        if self.computer_event(&event) { return; }
         match event {
             WindowEvent::CloseRequested => {
                 self.release("window_close");
@@ -1237,6 +1284,7 @@ impl ApplicationHandler for App {
                     return;
                 };
                 let pressed = event.state == ElementState::Pressed;
+                self.voice_key(code, pressed);
                 if pressed && self.capture_binding(controls::Binding::Key(code)) {
                     return;
                 }
@@ -1403,6 +1451,9 @@ impl ApplicationHandler for App {
                 // Options sliders drag across Move events: keep real edges there too.
                 let inventory_screen = self.session.screen() == "inventory"
                     || self.session.ui_preserves_pointer_edges();
+                if self.cursor_locked {
+                    let _ = self.session.input(InputIntent::ReleaseAll);
+                }
                 self.cursor_locked = false;
                 if let Some(window) = &self.window {
                     let _ = window.set_cursor_grab(CursorGrabMode::None);
@@ -1444,6 +1495,7 @@ impl ApplicationHandler for App {
                 if self.focused && self.session.screen() == "game" =>
             {
                 if state == ElementState::Pressed && !self.cursor_locked {
+                    let _ = self.session.input(InputIntent::ReleaseAll);
                     let window = self.window.as_ref().unwrap();
                     if window
                         .set_cursor_grab(CursorGrabMode::Locked)

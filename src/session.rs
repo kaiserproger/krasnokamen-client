@@ -72,6 +72,21 @@ pub(crate) const TICK_DETAIL_NAMES: [&str; 11] = [
     "ui_synchronize", "commands_effects_atlas", "refresh_scene",
 ];
 
+#[derive(Default)]
+pub(crate) struct ScreenAudioStats {
+    pub packets: u64,
+    /// Opus frames the mixer decoded for this screen, and the loudest sample seen.
+    pub decoded_frames: u64,
+    pub peak: f32,
+}
+/// Owner-side counters of the shared source's audio capture.
+#[derive(Default)]
+pub(crate) struct ScreenAudioOwner {
+    pub capturing: bool,
+    pub packets_sent: u64,
+    pub unavailable: bool,
+}
+
 pub struct Session {
     instance_id: String,
     presentation: bool,
@@ -97,6 +112,11 @@ pub struct Session {
     /// Monotonic epoch of the UI animation clock (frame time, never sleeps).
     ui_clock: std::time::Instant,
     loader: crate::loader::Loader,
+    pub(crate) screen_relay: crate::computer::relay::Relay,
+    /// Per-screen audio counters for observation (viewer side, owner's own monitor).
+    pub(crate) screen_audio_owner: ScreenAudioOwner,
+    pub(crate) screen_audio: std::collections::BTreeMap<crate::computer::relay::Id, ScreenAudioStats>,
+    pub(crate) voice_net: crate::voice::Net,
     environment: Environment,
     terrain: Option<Terrain>,
     /// Far terrain beyond the loaded chunks (Krasnokamen `[lod]` servers).
@@ -168,6 +188,8 @@ pub struct Session {
     fov_deg: f32,
     mouse_sensitivity: f32,
     damage_tilt_strength: f64,
+    /// Vanilla Brightness option fed to the lightmap gamma (0 Moody .. 1 Bright).
+    gamma: f32,
     volume: f32,
     presentation_settings: BTreeMap<String, Value>,
     client_defaults: actions::ClientDefaults,
@@ -222,6 +244,10 @@ impl Session {
             ui_viewport: None,
             ui_clock: crate::replay::clock::now(),
             loader: crate::loader::Loader::default(),
+            screen_relay: Default::default(),
+            screen_audio: Default::default(),
+            screen_audio_owner: Default::default(),
+            voice_net: Default::default(),
             environment: Environment::new(),
             terrain: None,
             far: crate::far::Far::default(),
@@ -280,6 +306,7 @@ impl Session {
             fov_deg: UiState::DEFAULT_FOV_DEG,
             mouse_sensitivity: UiState::DEFAULT_MOUSE_SENSITIVITY,
             damage_tilt_strength: UiState::DEFAULT_DAMAGE_TILT_STRENGTH,
+            gamma: UiState::DEFAULT_GAMMA as f32,
             volume: UiState::DEFAULT_VOLUME,
             presentation_settings: BTreeMap::new(),
             client_defaults: actions::ClientDefaults::default(),
@@ -632,6 +659,10 @@ impl Session {
         self.network = None;
         self.loading = None;
         self.loader.reset();
+        self.screen_relay = Default::default();
+        self.screen_audio.clear();
+        // Voice capability, registration and LISTEN belong to one connection.
+        self.reset_voice();
         self.content = None;
         if let Some(audio) = &self.audio {
             audio.stop();
@@ -812,6 +843,120 @@ impl Session {
         payload.string(outgoing.channel);
         payload.0.extend(outgoing.payload);
         self.send(id, payload)
+    }
+    pub(crate) fn screen_dimension(&self) -> Option<u8> {
+        match self.dimension.as_deref()? {
+            "minecraft:overworld" => Some(0),
+            "minecraft:the_nether" => Some(1),
+            "minecraft:the_end" => Some(2),
+            _ => None,
+        }
+    }
+    /// Live overworld Play whose serverbound payloads are accepted and dropped (replay
+    /// mode): App-level tests of serverbound paths without a network.
+    #[cfg(test)]
+    pub(crate) fn enter_offline_play_for_test(&mut self) {
+        self.replaying = true;
+        self.phase = "play".into();
+        self.dimension = Some("minecraft:overworld".into());
+    }
+    pub(crate) fn register_screens(&mut self) -> Result<()> {
+        if !self.screen_relay.registered && self.phase == "play" {
+            self.send_loader(crate::loader::Outgoing {
+                channel: "minecraft:register",
+                payload: crate::computer::relay::CHANNEL.as_bytes().to_vec(),
+            })?;
+            self.screen_relay.registered = true;
+        }
+        Ok(())
+    }
+    /// HUD microphone indicator; `None` hides it.
+    pub(crate) fn set_voice_mic(&mut self, mic: Option<(&'static str, [f32; 3])>) {
+        if let Some(ui) = &mut self.ui {
+            ui.set_voice_mic(mic);
+        }
+    }
+    pub(crate) fn reset_voice(&mut self) {
+        self.voice_net = Default::default();
+        if let Some(audio) = &self.audio {
+            audio.voice().clear();
+        }
+    }
+    pub(crate) fn audio(&self) -> Option<&Audio> {
+        self.audio.as_ref()
+    }
+    pub(crate) fn register_voice(&mut self) -> Result<()> {
+        if !self.voice_net.registered && self.phase == "play" {
+            self.send_loader(crate::loader::Outgoing {
+                channel: "minecraft:register",
+                payload: crate::voice::CHANNEL.as_bytes().to_vec(),
+            })?;
+            self.voice_net.registered = true;
+        }
+        Ok(())
+    }
+    pub(crate) fn send_voice(&self, payload: Vec<u8>) -> Result<()> {
+        if self.phase != "play" || payload.len() > 32767 {
+            return Err("voice payload requires live Play and bounded size".into());
+        }
+        self.send_loader(crate::loader::Outgoing { channel: crate::voice::CHANNEL, payload })
+    }
+    /// Decode a relayed voice payload; state changes are applied, audio goes to the mixer.
+    pub(crate) fn receive_voice(&mut self, payload: &[u8]) -> Result<()> {
+        match crate::voice::parse(payload)? {
+            crate::voice::Incoming::State { enabled, range } => {
+                self.voice_net.enabled = enabled;
+                if let Some(audio) = &self.audio {
+                    audio.voice().set_range(f32::from(range));
+                }
+            }
+            crate::voice::Incoming::Audio { speaker, position, seq, opus } => {
+                if self.voice_net.listening
+                    && let Some(audio) = &self.audio
+                {
+                    audio.voice().push(speaker, position, None, seq, opus)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Hear one screen's Opus packet at the monitor rectangle's centre (silent beyond 32 blocks).
+    pub(crate) fn play_screen_audio(&mut self, screen: crate::computer::relay::Id, seq: u32, opus: &[u8]) -> Result<()> {
+        let Some(audio) = &self.audio else { return Ok(()) };
+        let centre = screen.face.centre().map(|v| v as f32);
+        audio.voice().push(screen.speaker(), centre, Some(crate::computer::relay::AUDIO_RANGE), seq, opus)?;
+        let stats = self.screen_audio.entry(screen).or_default();
+        stats.packets += 1;
+        if let Some((frames, peak)) = audio.voice().speaker_stats(screen.speaker()) {
+            stats.decoded_frames = frames;
+            stats.peak = stats.peak.max(peak);
+        }
+        Ok(())
+    }
+    /// Observation of monitor audio: what this client captured and what it heard.
+    pub(crate) fn screen_audio_observation(&self) -> Value {
+        let heard: Vec<_> = self.screen_audio.iter().map(|(id, stats)| {
+            json!({"block": id.face.block, "side": id.face.side, "packets": stats.packets,
+                "decoded_frames": stats.decoded_frames, "peak": stats.peak})
+        }).collect();
+        json!({"capturing": self.screen_audio_owner.capturing, "packets_sent": self.screen_audio_owner.packets_sent,
+            "unavailable": self.screen_audio_owner.unavailable, "heard": heard})
+    }
+    /// Deliver relayed screen audio queued by the relay to the mixer.
+    pub(crate) fn pump_screen_audio(&mut self) {
+        let dimension = self.screen_dimension();
+        while let Some(packet) = self.screen_relay.audio.pop_front() {
+            if Some(packet.screen.dimension) != dimension { continue; }
+            if let Err(error) = self.play_screen_audio(packet.screen, packet.seq, &packet.opus) {
+                self.event(json!({"type":"screen_audio_rejected","error":error}));
+            }
+        }
+    }
+    pub(crate) fn send_screen(&self, payload: Vec<u8>) -> Result<()> {
+        if self.phase != "play" || payload.len() > 32767 {
+            return Err("screen payload requires live Play and bounded size".into());
+        }
+        self.send_loader(crate::loader::Outgoing { channel: crate::computer::relay::CHANNEL, payload })
     }
     pub(crate) fn resize_ui(&mut self, width: u32, height: u32, scale: f64) {
         if width == 0 || height == 0 || !scale.is_finite() || scale <= 0. {
@@ -1201,7 +1346,7 @@ impl Session {
             .as_mut()
             .ok_or("Loader activation requires loaded content")?;
         content
-            .activate_loader_resources(self.loader.verified_paths(), self.loader.item_entries())?;
+            .activate_loader_resources(self.loader.verified_paths(), self.loader.item_entries(), self.loader.block_entries())?;
         self.loader.validate_previews(content, self.presentation)?;
         self.resource_epoch += 1;
         self.player.clear_visual_resources();
@@ -1394,6 +1539,23 @@ mod title_connection_tests {
             assert!(session.scene.indices.is_empty());
             assert!(session.scene.revision > scene_revision, "renderer must observe cleared geometry");
         }
+    }
+    #[test]
+    fn disconnect_forgets_the_previous_server_voice_negotiation() {
+        let mut session = Session::new_mode("disconnect-voice".into(), false);
+        session.voice_net.registered = true;
+        session.voice_net.enabled = true;
+        session.voice_net.listening = true;
+        assert_eq!(session.minecraft_observation()["voice"], json!({
+            "registered": true, "server_enabled": true, "listening": true
+        }));
+        session.disconnect();
+        assert!(!session.voice_net.registered);
+        assert!(!session.voice_net.enabled);
+        assert!(!session.voice_net.listening);
+        assert_eq!(session.minecraft_observation()["voice"], json!({
+            "registered": false, "server_enabled": false, "listening": false
+        }));
     }
 
     #[test]

@@ -355,6 +355,7 @@ pub(crate) enum NodeAction {
     Generate,
     Loader(super::loader::LoaderControl),
     Dialog(super::dialog::DialogControl),
+    Desktop(super::desktop::DesktopAction),
 }
 #[derive(Clone, Debug, Default)]
 pub(crate) enum Paint {
@@ -498,6 +499,8 @@ pub struct UiState {
     pub(crate) selected_slot: u8,
     pub(crate) selected_name_tick: u64,
     pub(crate) debug_lines: Vec<String>,
+    pub(crate) desktop_dialog: Option<super::desktop::DesktopDialog>,
+    pub(crate) desktop_action: Option<super::desktop::DesktopAction>,
     pub(crate) title_error: Option<String>,
     pub(crate) last_server: Option<String>,
     pub(crate) last_username: Option<String>,
@@ -520,6 +523,8 @@ pub struct UiState {
     pub(crate) options_tab: usize,
     /// Language IDs the resource stack has a lang file for, sorted (Options > Language).
     pub(crate) languages: Vec<String>,
+    /// Voice-chat microphone HUD indicator: `(label, rgb)`; `None` hides it.
+    pub(crate) voice_mic: Option<(&'static str, [f32; 3])>,
     pub(crate) options_footer: [f32; 4],
     pub(crate) slider_drag: Option<String>,
     pub(crate) dialogs: super::dialog::DialogHost,
@@ -630,6 +635,8 @@ impl UiState {
             selected_slot: 0,
             selected_name_tick: u64::MAX,
             debug_lines: Vec::new(),
+            desktop_dialog: None,
+            desktop_action: None,
             title_error: None,
             last_server: None,
             last_username: None,
@@ -650,6 +657,7 @@ impl UiState {
             disconnect_title: None,
             options_tab: 0,
             languages: content.language_ids(),
+            voice_mic: None,
             options_footer: [0.; 4],
             slider_drag: None,
             dialogs: Default::default(),
@@ -673,6 +681,8 @@ impl UiState {
     pub const MAX_MOUSE_SENSITIVITY: f32 = 3.;
     pub const MOUSE_SENSITIVITY_STEP: f32 = 0.25;
     pub const DEFAULT_DAMAGE_TILT_STRENGTH: f64 = 1.;
+    /// Vanilla Brightness (`gamma` in options.txt): 0 Moody .. 1 Bright.
+    pub const DEFAULT_GAMMA: f64 = 0.5;
     pub const DEFAULT_VOLUME: f32 = 1.;
     pub const MAX_VOLUME: f32 = 1.;
     pub const VOLUME_STEP: f32 = 0.1;
@@ -684,6 +694,7 @@ impl UiState {
         "fov",
         "mouse_sensitivity",
         "damage_tilt_strength",
+        "gamma",
         "volume",
         "ui_scale",
         "fullscreen",
@@ -693,6 +704,13 @@ impl UiState {
         "main_arm_right",
         "language",
         "key_bindings",
+        "desktop_computer",
+        "voice_chat",
+        "voice_mute",
+        "voice_deafen",
+        "voice_volume",
+        "voice_mic_volume",
+        "monitor_apps",
     ];
     fn setting_f64(value: &Value) -> Option<f64> {
         value.as_f64().or_else(|| value.as_u64().map(|v| v as f64))
@@ -702,13 +720,24 @@ impl UiState {
     pub fn sanitize_setting_value(key: &str, value: &Value) -> Option<Value> {
         match key {
             "key_bindings" => crate::controls::Bindings::from_value(value).map(|bindings| bindings.value()),
-            "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" => value.as_bool().map(|v| json!(v)),
+            "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => value.as_bool().map(|v| json!(v)),
             "language" => value
                 .as_str()
                 .filter(|id| super::text::valid_language_id(id))
                 .map(|id| json!(id)),
             "graphics_preset" => {
                 GraphicsPreset::from_setting(value).map(|preset| json!(preset.as_str()))
+            }
+            "monitor_apps" => {
+                if value.is_null() { return Some(Value::Null); }
+                let valid = value.as_array()?.iter().all(|entry| match entry {
+                    Value::String(command) => !command.trim().is_empty(),
+                    Value::Array(argv) => !argv.is_empty()
+                        && argv.first().and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+                        && argv.iter().all(Value::is_string),
+                    _ => false,
+                });
+                valid.then(|| value.clone())
             }
             "max_fps" => value
                 .as_u64()
@@ -751,7 +780,7 @@ impl UiState {
                     Self::MAX_MOUSE_SENSITIVITY as f64
                 )))
             }
-            "volume" | "damage_tilt_strength" => {
+            "volume" | "damage_tilt_strength" | "voice_volume" | "voice_mic_volume" => {
                 let f = Self::setting_f64(value)?;
                 if !f.is_finite() {
                     return None;
@@ -773,7 +802,9 @@ impl UiState {
     pub fn default_setting_value(key: &str) -> Option<Value> {
         match key {
             "key_bindings" => Some(crate::controls::Bindings::default().value()),
-            "fullscreen" => Some(json!(false)),
+            "monitor_apps" => Some(Value::Null),
+            "fullscreen" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => Some(json!(false)),
+            "voice_volume" | "voice_mic_volume" => Some(json!(Self::DEFAULT_VOLUME)),
             "vsync" => Some(json!(true)),
             "main_arm_right" => Some(json!(true)),
             "language" => Some(json!(super::text::DEFAULT_LANGUAGE)),
@@ -783,6 +814,7 @@ impl UiState {
             "fov" => Some(json!(Self::DEFAULT_FOV_DEG)),
             "mouse_sensitivity" => Some(json!(Self::DEFAULT_MOUSE_SENSITIVITY)),
             "damage_tilt_strength" => Some(json!(Self::DEFAULT_DAMAGE_TILT_STRENGTH)),
+            "gamma" => Some(json!(Self::DEFAULT_GAMMA)),
             "volume" => Some(json!(Self::DEFAULT_VOLUME)),
             "ui_scale" => Some(json!(Self::DEFAULT_UI_SCALE)),
             _ => None,
@@ -793,9 +825,9 @@ impl UiState {
     pub fn next_setting_value(key: &str, current: Option<&Value>) -> Option<Value> {
         let sane = |v: &Value| Self::sanitize_setting_value(key, v);
         match key {
-            "fullscreen" | "vsync" => Some(json!(!current
+            "fullscreen" | "vsync" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => Some(json!(!current
                 .and_then(Value::as_bool)
-                .unwrap_or(key != "fullscreen"))),
+                .unwrap_or(!matches!(key, "fullscreen" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen")))),
             "main_arm_right" => Some(json!(!current.and_then(Value::as_bool).unwrap_or(true))),
             "graphics_preset" => {
                 let current = current
@@ -845,7 +877,7 @@ impl UiState {
                     stepped.min(Self::MAX_MOUSE_SENSITIVITY as f64)
                 }))
             }
-            "volume" | "damage_tilt_strength" => {
+            "volume" | "damage_tilt_strength" | "voice_volume" | "voice_mic_volume" => {
                 let Some(cur) = current.and_then(sane).and_then(|v| Self::setting_f64(&v)) else {
                     return Some(json!(Self::DEFAULT_VOLUME));
                 };
@@ -872,6 +904,12 @@ impl UiState {
         }
         self.invalidate();
         Ok(())
+    }
+    pub fn set_voice_mic(&mut self, mic: Option<(&'static str, [f32; 3])>) {
+        if self.voice_mic != mic {
+            self.voice_mic = mic;
+            self.invalidate();
+        }
     }
     pub fn setting(&self, key: &str) -> Option<&Value> {
         self.settings.get(key)
@@ -2862,6 +2900,7 @@ impl UiState {
             NodeAction::None => return Err("target_not_interactive".into()),
             NodeAction::Loader(control) => self.activate_loader(control, e)?,
             NodeAction::Dialog(control) => self.activate_dialog(control, e)?,
+            NodeAction::Desktop(action) => self.activate_desktop(action)?,
             NodeAction::Focus(id) => {
                 self.focus = Some(id);
                 self.invalidate();
@@ -4518,6 +4557,17 @@ mod client_settings_tests {
             UiState::next_setting_value("graphics_preset", Some(&json!("high"))),
             Some(json!("low"))
         );
+    }
+    #[test]
+    fn monitor_apps_preserves_argv_and_supports_defaults_or_no_apps() {
+        for value in [Value::Null, json!([]), json!([["ptyxis", "-s"], "foot"])] {
+            assert_eq!(UiState::sanitize_setting_value("monitor_apps", &value), Some(value));
+        }
+        for value in [json!(false), json!([[]]), json!([["", "-s"]]), json!([["foot", 2]]), json!([" "])] {
+            assert!(UiState::sanitize_setting_value("monitor_apps", &value).is_none());
+        }
+        assert_eq!(UiState::default_setting_value("monitor_apps"), Some(Value::Null));
+        assert!(UiState::MANAGED_SETTING_KEYS.contains(&"monitor_apps"));
     }
     #[test]
     fn sanitize_clamps_ranges() {

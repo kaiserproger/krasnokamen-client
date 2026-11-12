@@ -192,7 +192,12 @@ impl Session {
                             "origin":"received_optional_payload"})),
                     }
                 }
-                _ => return Err(format!("unsupported Loader channel or phase: {channel}")),
+                "krasnokamen:loader/manifest" | "krasnokamen:loader/artifact" | "krasnokamen:loader/view" => {
+                    return Err(format!("unsupported Loader channel or phase: {channel}"));
+                }
+                // Unnegotiated/future plugin channels are optional custom payloads,
+                // including the server's capability probe. Never infer activation.
+                _ => self.event(json!({"type":"optional_custom_payload_ignored","channel":channel})),
             }
         } else if channel.starts_with("krasnokamen:lod/") && self.phase == "play" {
             let payload = r.take(r.bytes.len() - r.offset)?;
@@ -210,6 +215,22 @@ impl Session {
                 self.event(
                     json!({"type":"far_terrain_payload_rejected","channel":channel,"error":error}),
                 );
+            }
+            for packet in std::mem::take(&mut self.screen_relay.outbox) {
+                if let Err(error) = self.send_screen(packet) {
+                    self.event(json!({"type":"screen_key_request_failed","error":error}));
+                }
+            }
+            self.pump_screen_audio();
+        } else if channel == crate::voice::CHANNEL && self.phase == "play" {
+            let payload = r.take(r.bytes.len() - r.offset)?;
+            if let Err(error) = self.receive_voice(payload) {
+                self.event(json!({"type":"voice_payload_rejected","error":error}));
+            }
+        } else if channel == crate::computer::relay::CHANNEL && self.phase == "play" {
+            let payload = r.take(r.bytes.len() - r.offset)?;
+            if let Err(error) = self.screen_relay.receive(payload) {
+                self.event(json!({"type":"screen_payload_rejected","error":error}));
             }
         } else if channel != "minecraft:brand" {
             self.event(json!({"type":"optional_custom_payload_ignored","channel":channel}));
@@ -600,6 +621,9 @@ impl Session {
                 self.phase = "configuration".into();
                 self.loader.reset();
                 self.far.disconnect();
+                self.screen_relay = Default::default();
+                self.screen_audio.clear();
+                self.reset_voice();
                 self.clear_loader_content()?;
                 self.keys.clear();
                 self.player.reset_dimension(false);
@@ -728,6 +752,10 @@ impl Session {
             .set_interaction_seed(u64::from_ne_bytes(entropy));
         self.inventory.game_mode = mode;
         self.flat_world = flat;
+        if self.dimension.as_deref() != Some(dimension.as_str()) {
+            self.screen_relay = Default::default();
+            self.screen_audio.clear();
+        }
         self.dimension = Some(dimension.clone());
         self.far
             .enter_dimension(&dimension, self.address.as_deref());
@@ -915,6 +943,39 @@ fn chunk_key(p: [i32; 3]) -> [i32; 2] {
 mod tests {
     use super::*;
     use crate::protocol::world::{Palette, Section, SurfaceHeightmap};
+
+    #[test]
+    fn same_dimension_respawn_keeps_active_screen_catalog() {
+        let mut session = Session::new_mode("respawn-screens".into(), false);
+        let mut content = Content::test_cube();
+        content.set_registries(BTreeMap::from([(
+            "minecraft:dimension_type".to_owned(),
+            vec![("minecraft:overworld".to_owned(),
+                json!({"min_y": 0, "height": 16, "has_skylight": true, "has_ceiling": false, "attributes": {}}))],
+        )]));
+        session.content = Some(content);
+        session.phase = "play".into();
+        let respawn = |dimension: &str| {
+            let mut w = Writer::default();
+            w.var(0);
+            w.string(dimension);
+            w.i64(0);
+            w.0.extend_from_slice(&[0, 0, 0, 0, 0]); // modes, debug, flat, no death location
+            w.var(0);
+            w.var(63);
+            w.byte(1);
+            w.0
+        };
+        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld")).unwrap();
+        let mut active = vec![1, 6];
+        active.extend_from_slice(&[0; 12]);
+        active.extend_from_slice(&[2, 1, 1, 0, 1]);
+        session.screen_relay.receive(&active).unwrap();
+        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld")).unwrap();
+        assert_eq!(session.screen_relay.active.len(), 1);
+        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:the_nether")).unwrap();
+        assert!(session.screen_relay.active.is_empty());
+    }
 
     #[test]
     fn received_mount_screen_quick_moves_player_cargo() {

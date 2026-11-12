@@ -69,6 +69,27 @@ impl Session {
         value["using"] = self.player.using_observation(self.client_tick).unwrap_or(Value::Null);
         value["loader"] = self.loader.observation();
         value["far_terrain"] = self.far.metrics();
+        value["screen_audio"] = self.screen_audio_observation();
+        value["screen_sharing"] = json!({
+            "registered": self.screen_relay.registered,
+            "decoded_frames": crate::computer::relay::stats::RX_DECODED.load(std::sync::atomic::Ordering::Relaxed),
+            // Viewer side: every FRAME the server relayed here, decodable or not.
+            "received_frames": crate::computer::relay::stats::RX_FRAMES.load(std::sync::atomic::Ordering::Relaxed),
+            "permission_answers": {
+                "allowed": self.screen_relay.permission_answers[0],
+                "denied": self.screen_relay.permission_answers[1],
+            },
+            "cancelled_grants_left": self.screen_relay.cancelled_grants_left,
+            "screens": self.screen_relay.active.iter().map(|(id, remote)| json!({
+                "block": id.face.block, "side": id.face.side, "dimension": id.dimension,
+                "frame_pending": remote.frame.is_some()
+            })).collect::<Vec<_>>()
+        });
+        value["voice"] = json!({
+            "registered": self.voice_net.registered,
+            "server_enabled": self.voice_net.enabled,
+            "listening": self.voice_net.listening
+        });
         if let Some(error) = &self.error {
             value["disconnect_reason"] = json!(error);
         }
@@ -785,6 +806,7 @@ impl Session {
                     .is_some(),
                 entity_tick: self.world_tick,
                 flat_world: self.flat_world,
+                gamma: self.gamma,
                 ..Default::default()
             };
             self.scene.environment = self.environment.evaluate(

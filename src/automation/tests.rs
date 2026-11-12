@@ -60,6 +60,21 @@ fn entity_census_schema_export_matches_live_validation() {
         assert_eq!(tool["inputSchema"]["properties"]["cursor"]["maxLength"], 20);
     }
 }
+#[test]
+fn screen_share_is_a_native_presentation_writer_tool() {
+    use super::catalog;
+    assert!(catalog::validate("client_screen_share", &json!({"action": "answer", "allow": true})).is_ok());
+    assert!(catalog::validate("client_screen_share", &json!({"action": "request"})).is_ok());
+    assert!(catalog::validate("client_screen_share", &json!({"action": "leave"})).is_ok());
+    assert!(catalog::validate("client_screen_share", &json!({"action": "watch"})).is_err());
+    assert!(catalog::validate("client_screen_share", &json!({"allow": true})).is_err());
+    assert!(catalog::validate("client_screen_share", &json!({"action": "leave", "screen": 1})).is_err());
+    assert!(!catalog::state_supported("client_screen_share"), "needs the App owner, not a state-only client");
+    let exported = super::schema();
+    assert!(exported["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "client_screen_share"));
+    assert!(!exported["headless_tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "client_screen_share"));
+    assert_eq!(catalog::definition("client_screen_share").unwrap()["annotations"]["readOnlyHint"], false);
+}
 
 #[test]
 fn authenticated_transport_writer_is_exclusive_and_context_fenced() {
