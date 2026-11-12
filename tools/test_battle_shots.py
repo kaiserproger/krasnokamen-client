@@ -3,7 +3,7 @@ standoff / terrain / framing checks every pose of a shot must pass."""
 import math
 import unittest
 
-from tools.battle_shots import (STANDOFF, Terrain, Timeline, Vet, crowding, dolly_shots, keyed, off_centre, place,
+from tools.battle_shots import (HIGH, STANDOFF, Terrain, Timeline, Vet, crowding, dolly_shots, keyed, off_centre, place,
                                 pose, terrain_view)
 
 
@@ -104,6 +104,14 @@ class StandoffTests(unittest.TestCase):
         group = {"centroid": [0, 70, 0], "min": [-5, 70, -5], "max": [5, 70, 5], "count": 40, "side": "red"}
         self.assertIsNotNone(crowding(t, [0.0, 72.8, 6.5], [0.0, 71.0, 0.0], sample(0, cavalry=[group])))
         self.assertIsNone(crowding(t, [0.0, 72.8, 10.5], [0.0, 71.0, 0.0], sample(0, cavalry=[group])))
+
+    def test_inside_an_army_the_lens_rides_above_every_possible_helmet(self):
+        t = field()
+        army = {"centroid": [0, 70, 0], "min": [-40, 70, -40], "max": [40, 72, 40]}
+        s = {"t": 0, "contacts": [], "cavalry": [], "armies": {"red": army}}
+        self.assertIn("within", crowding(t, [0.0, 72.8, 0.0], [0.0, 70.5, 10.0], s), "rear ranks are not in the timeline")
+        self.assertIsNone(crowding(t, [0.0, 70 + HIGH, 0.0], [0.0, 70.5, 10.0], s))
+        self.assertIsNone(crowding(t, [46.0, 72.8, 0.0], [40.0, 70.5, 0.0], s), "outside the army a low lens is fine")
 
     def test_dolly_moves_its_camera_out_of_a_deep_contact_line(self):
         t = field()

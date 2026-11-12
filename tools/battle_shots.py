@@ -13,9 +13,10 @@ Every camera sits at a height above the ground of its own column and looks at fi
 chest height. A placement is checked at every STEP seconds of the shot, on the pose the
 client renders (camera.rs: uniform Catmull-Rom, smoothstep easing), and moved (the next
 placement of its kind) or rejected when any check fails:
-- standoff: no fighter the timeline places (contact clusters: their xz box and contact-line
-  rectangle; cavalry groups: their box) within STANDOFF blocks of the lens in 3D, and none
-  across the first NEAR_RAY blocks of the view ray;
+- standoff: no fighter within STANDOFF blocks of the lens in 3D, and none across the first
+  NEAR_RAY blocks of the view ray. The timeline places contact clusters (xz box and
+  contact-line rectangle) and cavalry groups (box); every other fighter may stand anywhere
+  in its army's box, so a lens inside an army's box rides HIGH above the ground;
 - terrain: the look target is in line of sight over the terrain and trees, the lens is
   LENS_CLEARANCE above the ground within 3 blocks (no bank or slope rising beside it), a
   fighter shot does not look up, and the lower and side quarters of the frame are not
@@ -37,7 +38,7 @@ NEAR_RAY = 4.0        # the first blocks of the view ray pass over every body
 BODY = 2.2            # helmet top above a fighter's feet
 RIDER = 2.8           # rider top above the ground
 LENS_CLEARANCE = 1.0  # lens above the ground of every column within 3 blocks
-SHOULDER_UP = BODY + STANDOFF  # attach cameras ride above every neighbour of the fighter
+HIGH = BODY + STANDOFF + 0.3  # lens height that clears every possible helmet by STANDOFF (+0.3 for uneven ground)
 
 
 def load(path):
@@ -217,7 +218,9 @@ def crowding(terrain, eye, look, sample):
     """Why bodies crowd the lens (standoff, or a body across the near view ray), else None."""
     near = []
     ground = terrain.ground(eye[0], eye[2])
-    for g, height in [(c, BODY) for c in sample["contacts"]] + [(c, RIDER) for c in sample["cavalry"]]:
+    # Contact clusters and cavalry are placed; any other fighter stands somewhere in its army's box.
+    armies = list(sample.get("armies", {}).values())
+    for g, height in [(c, BODY) for c in sample["contacts"]] + [(c, RIDER) for c in sample["cavalry"]] + [(a, BODY) for a in armies]:
         h = region_distance(g, eye[0], eye[2])
         if h >= STANDOFF + NEAR_RAY:
             continue
@@ -343,7 +346,9 @@ def chest(c, height=1.2):
     return c[1] + height
 
 
-DOLLY_PLACES = ((2.8, 6.0), (2.8, 5.0), (2.8, 7.0), (2.8, 8.0), (2.8, 10.0), (4.0, 8.0), (4.0, 10.0), (4.0, 12.0))
+# (height, blocks off the line); inside an army's box only the HIGH ones keep the standoff.
+DOLLY_PLACES = ((2.8, 6.0), (2.8, 5.0), (2.8, 7.0), (2.8, 8.0), (2.8, 10.0), (4.0, 8.0), (4.0, 10.0), (4.0, 12.0),
+                (HIGH, 6.0), (HIGH, 8.0), (HIGH, 10.0), (HIGH, 12.0))
 
 
 def dolly_shots(tl, terrain, vet):
@@ -392,7 +397,8 @@ def dolly_shots(tl, terrain, vet):
 
 
 def push_shots(tl, terrain, vet):
-    """Push-in from 13 blocks farther to 5-11 blocks from the densest melee (the nearest the standoff allows)."""
+    """Push-in from 13 blocks farther to 5-11 blocks from the densest melee (the nearest the standoff
+    allows), descending 5.5 -> 4 -> 2.6 above the ground, or HIGH+3 -> HIGH+1.5 -> HIGH inside an army."""
     out = []
     for s in tl.samples:
         if not s["contacts"] or s["t"] < 4.5:
@@ -407,24 +413,24 @@ def push_shots(tl, terrain, vet):
         if len(path) < 3:
             continue
         done = False
-        for stop in (5.0, 7.0, 9.0, 11.0):
+        for stop, rise in [(stop, rise) for rise in (0.0, HIGH - 2.6) for stop in (5.0, 7.0, 9.0, 11.0)]:
             for sign in (-1.0, 1.0):
                 first, last = path[0], path[-1]
                 n = flat(c["normal"])
-                far = place(terrain, add(first[1], n, sign * (stop + 13.0)), 5.5)
-                near = place(terrain, add(last[1], n, sign * stop), 2.6)
+                far = place(terrain, add(first[1], n, sign * (stop + 13.0)), 5.5 + rise)
+                near = place(terrain, add(last[1], n, sign * stop), 2.6 + rise)
                 if far is None or near is None:
                     continue
                 mid_t = (first[0] + last[0]) / 2
                 mid_c = min(path, key=lambda p: abs(p[0] - mid_t))[1]
-                mid = place(terrain, add(mid_c, n, sign * (stop + 6.0)), 4.0)
+                mid = place(terrain, add(mid_c, n, sign * (stop + 6.0)), 4.0 + rise)
                 if mid is None:
                     continue
                 keys = keyed([first[0], mid_t, last[0]], [far, mid, near],
                              [[p[0], chest(p, 0.3), p[2]] for p in (first[1], mid_c, last[1])], [FOV, 66.0, 60.0])
                 if vet(keys):
                     out.append(Shot("push-in", first[0], last[0], keys,
-                                    f"densest melee ({c['count']} in contact, {c['swings']} swings) at t {s['t']}, push to {stop:g} blocks",
+                                    f"densest melee ({c['count']} in contact, {c['swings']} swings) at t {s['t']}, push to {stop:g} blocks, {2.6 + rise:g} up",
                                     c["count"] * 1.5 + c["swings"], where=c["centroid"]))
                     done = True
                     break
@@ -436,7 +442,7 @@ def push_shots(tl, terrain, vet):
 def shoulder_shots(tl, terrain, entities, vet):
     """Over the shoulder of a front-line fighter walking into contact (attach_entity).
 
-    The timeline has no per-fighter positions, so the camera rides SHOULDER_UP above the
+    The timeline has no per-fighter positions, so the camera rides HIGH above the
     fighter's feet: every neighbour's helmet stays STANDOFF below the lens. The checks
     follow the fighter's contact cluster."""
     out = []
@@ -462,7 +468,7 @@ def shoulder_shots(tl, terrain, entities, vet):
                         path = smooth(tl.track(tc - 2.5, end, c["centroid"])) or [(tc, c["centroid"], c)]
                     d = [c["normal"][0] * sign, c["normal"][1] * sign]
                     right = [-d[1], d[0]]
-                    back = lambda k: [-k * d[0] + 0.9 * right[0], SHOULDER_UP, -k * d[1] + 0.9 * right[1]]
+                    back = lambda k: [-k * d[0] + 0.9 * right[0], HIGH, -k * d[1] + 0.9 * right[1]]
                     look = [6.0 * d[0], 0.3, 6.0 * d[1]]  # about 30 degrees down: the clash, not the sky
                     keys = keyed([tc - 2.5, tc, end], [back(3.0), back(2.4), back(2.0)], [look] * 3, [FOV, 68.0, 64.0])
                     if not vet(keys, attach=following(path)):
@@ -510,7 +516,7 @@ def volley_shots(tl, terrain, vet):
             p3 = place(terrain, add(impact, flat(d), -40.0), 15.0)
             if None in (p1, p2, p3):
                 continue
-            for back, height in ((5.0, 2.5), (5.0, 4.0), (8.0, 4.0)):
+            for back, height in ((5.0, 2.5), (5.0, 4.0), (8.0, 4.0), (5.0, HIGH), (8.0, HIGH)):
                 p0 = place(terrain, add(launch, flat(d), -(depth + back)), height)
                 if p0 is None:
                     continue
@@ -561,7 +567,7 @@ def cavalry_shots(tl, terrain, front, vet):
                 edge = abs(perp[0]) * (g["max"][0] - g["min"][0]) / 2 + abs(perp[1]) * (g["max"][2] - g["min"][2]) / 2
             follow = following([(t, grp["centroid"], grp) for t, grp in track if grp is not None])
             subject = lambda t: add(follow(t), [0.0, 1.4, 0.0])  # the group as recorded, not the smoothed path
-            for height, off in ((2.6, 7.0), (4.0, 7.0), (4.0, 10.0)):
+            for height, off in ((2.6, 7.0), (4.0, 7.0), (4.0, 10.0), (HIGH, 7.0), (HIGH, 10.0)):
                 times, pos, look, ok = [], [], [], True
                 for t, centroid, _ in path[::2]:
                     cam = place(terrain, add(centroid, flat(perp), edge + off), height)
