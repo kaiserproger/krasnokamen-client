@@ -37,11 +37,15 @@ impl Session {
         ui.singleplayer_active = self.local_server.is_some();
         self.ui = Some(ui);
         // A render must not depend on settings on the render-farm account.
-        if !self.replaying { self.apply_persisted_settings(crate::local_config::load_client_settings()); }
+        if !self.replaying {
+            self.apply_persisted_settings(crate::local_config::load_client_settings());
+            self.check_language_override()?;
+        }
         self.network = loaded.network;
         if let Some(network) = self.network.as_ref() {
             network.set_view_distance(self.render_distance.clamp(UiState::MIN_RENDER_DISTANCE, UiState::MAX_RENDER_DISTANCE) as u8);
             network.set_main_arm_right(self.main_arm_right);
+            network.set_language(&self.language);
         }
         if self.presentation && self.terrain.is_none() { self.terrain = Some(Terrain::new(self.wake_callback())?); }
         self.phase = "status".into();

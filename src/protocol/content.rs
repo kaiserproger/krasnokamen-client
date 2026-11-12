@@ -601,6 +601,34 @@ impl ResourceSource {
     pub fn resource_root(&self) -> &Path {
         &self.roots[0]
     }
+    /// IDs of every `assets/minecraft/lang/<id>.json` in the pack roots, the verified
+    /// asset index and loader resources, sorted. Only IDs `Language::load` accepts.
+    pub fn language_ids(&self) -> Vec<String> {
+        const DIR: &str = "assets/minecraft/lang/";
+        let mut ids = BTreeSet::new();
+        let mut add = |file: &str| {
+            if let Some(id) = file.strip_suffix(".json")
+                && crate::ui::text::valid_language_id(id)
+            {
+                ids.insert(id.to_owned());
+            }
+        };
+        for root in &self.roots {
+            if let Ok(entries) = fs::read_dir(root.join(DIR)) {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str() {
+                        add(name);
+                    }
+                }
+            }
+        }
+        for name in self.indexed.keys().chain(self.loader.keys()) {
+            if let Some(file) = name.strip_prefix(DIR) {
+                add(file);
+            }
+        }
+        ids.into_iter().collect()
+    }
     pub fn bytes(&self, relative: &str) -> Result<Vec<u8>> {
         safe_relative(relative)?;
         if let Some(bytes) = self.loader.get(relative) {
@@ -1475,6 +1503,10 @@ impl Content {
     }
     pub fn resource_bytes(&self, path: &str) -> Result<Vec<u8>> {
         self.source.bytes(path)
+    }
+    /// Language IDs with a lang file in the resource stack, sorted.
+    pub fn language_ids(&self) -> Vec<String> {
+        self.source.language_ids()
     }
     /// Decoded `(width, height, RGBA8)` of a verified resource texture, read
     /// at runtime from the active resource stack like any other asset.

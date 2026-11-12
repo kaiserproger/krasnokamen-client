@@ -148,7 +148,7 @@ fn socket_handoff_records_every_packet_and_graceful_stop_flushes_the_take() {
         login.take(65536).read_to_end(&mut outbound).unwrap();
     });
     let (send,wake)=mpsc::sync_channel(16);
-    let network=Network::connect(address,"SocketRecorder".into(),8,true,
+    let network=Network::connect(address,"SocketRecorder".into(),8,true,"en_us",
         Arc::new(move || {let _=send.try_send(());}),
         Some(format::RecordingOptions {path:target.clone(),header})).unwrap();
     let deadline=Instant::now()+Duration::from_secs(10);

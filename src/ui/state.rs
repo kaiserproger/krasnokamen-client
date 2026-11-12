@@ -347,6 +347,7 @@ pub(crate) enum NodeAction {
     /// Slider row: activation cycles like `Setting`; pointer/keys/wheel set exact stops.
     Slider(&'static str),
     OptionsTab(usize),
+    SelectLanguage(usize),
     Rebind(&'static str),
     ResetBinding(&'static str),
     ResetBindings,
@@ -517,6 +518,8 @@ pub struct UiState {
     pause_requested: bool,
     pub(crate) disconnect_title: Option<String>,
     pub(crate) options_tab: usize,
+    /// Language IDs the resource stack has a lang file for, sorted (Options > Language).
+    pub(crate) languages: Vec<String>,
     pub(crate) options_footer: [f32; 4],
     pub(crate) slider_drag: Option<String>,
     pub(crate) dialogs: super::dialog::DialogHost,
@@ -646,6 +649,7 @@ impl UiState {
             pause_requested: false,
             disconnect_title: None,
             options_tab: 0,
+            languages: content.language_ids(),
             options_footer: [0.; 4],
             slider_drag: None,
             dialogs: Default::default(),
@@ -687,6 +691,7 @@ impl UiState {
         "max_fps",
         "graphics_preset",
         "main_arm_right",
+        "language",
         "key_bindings",
     ];
     fn setting_f64(value: &Value) -> Option<f64> {
@@ -698,6 +703,10 @@ impl UiState {
         match key {
             "key_bindings" => crate::controls::Bindings::from_value(value).map(|bindings| bindings.value()),
             "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" => value.as_bool().map(|v| json!(v)),
+            "language" => value
+                .as_str()
+                .filter(|id| super::text::valid_language_id(id))
+                .map(|id| json!(id)),
             "graphics_preset" => {
                 GraphicsPreset::from_setting(value).map(|preset| json!(preset.as_str()))
             }
@@ -767,6 +776,7 @@ impl UiState {
             "fullscreen" => Some(json!(false)),
             "vsync" => Some(json!(true)),
             "main_arm_right" => Some(json!(true)),
+            "language" => Some(json!(super::text::DEFAULT_LANGUAGE)),
             "graphics_preset" => Some(json!(GraphicsPreset::default().as_str())),
             "max_fps" => Some(json!(120)),
             "render_distance" => Some(json!(Self::DEFAULT_RENDER_DISTANCE)),
@@ -1083,8 +1093,15 @@ impl UiState {
         }
         self.invalidate();
     }
+    /// Language the client text is translated in (the saved Options value, `en_us` until chosen).
+    pub fn language(&self) -> &str {
+        self.settings
+            .get("language")
+            .and_then(Value::as_str)
+            .unwrap_or(super::text::DEFAULT_LANGUAGE)
+    }
     pub fn reset_resources(&mut self, content: &Content) -> Result<()> {
-        let text = TextRenderer::load(content)?;
+        let text = TextRenderer::load_language(content, self.language(), false, false)?;
         let labels = self.prepare_map_labels(&text)?;
         self.text = Rc::new(text);
         self.commit_map_labels(labels);
@@ -1117,6 +1134,7 @@ impl UiState {
         let labels = self.prepare_map_labels(&text)?;
         self.text = Rc::new(text);
         self.commit_map_labels(labels);
+        self.settings.insert("language".into(), json!(language));
         self.hud_sidebar = None;
         self.hud_level = None;
         self.recipe_names.clear();
@@ -3275,6 +3293,11 @@ impl UiState {
                 self.commit_setting(key, value, e);
             }
             NodeAction::OptionsTab(tab) => self.select_options_tab(tab),
+            NodeAction::SelectLanguage(index) => {
+                if let Some(id) = self.languages.get(index) {
+                    self.commit_setting("language", json!(id), e);
+                }
+            }
             NodeAction::Rebind(id) => {
                 self.rebind = Some(id);
                 self.invalidate();

@@ -151,6 +151,20 @@ pub fn apply_exe_defaults() -> LocalDefaults {
         }),
     }
 }
+/// `KRASNOKAMEN_CLIENT_LANGUAGE`: a language for this run that wins over the saved Options
+/// value without being saved (automation, harnesses). `Err` when it is not a language ID.
+pub(crate) fn language_override() -> Result<Option<String>, String> {
+    parse_language_override(std::env::var("KRASNOKAMEN_CLIENT_LANGUAGE"))
+}
+fn parse_language_override(value: Result<String, std::env::VarError>) -> Result<Option<String>, String> {
+    match value {
+        Ok(id) if id.is_empty() => Ok(None),
+        Ok(id) if crate::ui::text::valid_language_id(&id) => Ok(Some(id)),
+        Ok(id) => Err(format!("KRASNOKAMEN_CLIENT_LANGUAGE={id:?} is not a language ID such as en_us")),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(format!("KRASNOKAMEN_CLIENT_LANGUAGE: {error}")),
+    }
+}
 /// Options use the selected data root unless explicitly overridden.
 pub fn client_settings_path() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os("KRASNOKAMEN_CLIENT_SETTINGS").filter(|v| !v.is_empty()) {
@@ -245,6 +259,17 @@ pub fn save_client_settings_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_override_accepts_only_language_ids() {
+        use std::env::VarError::NotPresent;
+        assert_eq!(parse_language_override(Err(NotPresent)), Ok(None));
+        assert_eq!(parse_language_override(Ok(String::new())), Ok(None));
+        assert_eq!(parse_language_override(Ok("ru_ru".into())), Ok(Some("ru_ru".into())));
+        for bad in ["ru-RU", "ru_ru.json", "../ru_ru", " ru_ru"] {
+            assert!(parse_language_override(Ok(bad.into())).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn settings_follow_selected_data_root_and_explicit_override() {
