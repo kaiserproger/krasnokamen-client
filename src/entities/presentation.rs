@@ -442,7 +442,7 @@ pub(super) fn material(
         anger: anger(models, e, game_time),
     })
 }
-// All four Solaris-authored boat/raft rigs share a hull bottom at model Y=18
+// All four Krasnokamen-authored boat/raft rigs share a hull bottom at model Y=18
 // pixels. Anchor that surface to the received entity position, not to water.
 fn boat_root(position: Vec3, yaw: f32) -> Mat4 {
     Mat4::from_translation(position + Vec3::new(0., 18. / 16., 0.))
@@ -1127,7 +1127,7 @@ pub(super) fn draw_entity(
                                 if baby && entity.type_name == "minecraft:wolf" {
                                     static PUPPY_COLLAR: std::sync::LazyLock<Option<&'static Rig>> =
                                         std::sync::LazyLock::new(|| {
-                                            super::solaris_models::authored("minecraft:wolf_baby_collar#main")
+                                            super::krasnokamen_models::authored("minecraft:wolf_baby_collar#main")
                                         });
                                     let collar_rig = PUPPY_COLLAR.ok_or("missing puppy collar rig")?;
                                     let body = rig.bones.iter().position(|bone| bone.name == "body")
@@ -1162,13 +1162,13 @@ pub(super) fn draw_entity(
                         stats.unrendered.insert(format!("{}:outer", entity.type_name), reason);
                     }
                     if entity.type_name == "minecraft:slime" {
-                        let shell = super::solaris_models::authored("minecraft:slime_outer#main")
+                        let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
                             .ok_or("missing authored slime outer rig")?;
                         evaluate_rig(shell, entity, models, content, tick, partial, matrix, store.transforms);
                         emit_rig(shell, store.transforms, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)?;
                     }
                     if entity.type_name == "minecraft:breeze" {
-                        let wind = super::solaris_models::authored("minecraft:breeze_wind#main")
+                        let wind = super::krasnokamen_models::authored("minecraft:breeze_wind#main")
                             .ok_or("missing authored breeze wind rig")?;
                         let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
                         evaluate_rig(wind, entity, models, content, tick, partial, matrix, store.transforms);
@@ -1699,7 +1699,7 @@ pub(super) fn evaluate_posed_rig(
             rotation.z += roll;
         }
         if pet_sitting {
-            // These are Solaris-authored poses for the embedded rigs: lower the
+            // These are Krasnokamen-authored poses for the embedded rigs: lower the
             // hindquarters and fold the rear legs while the head stays upright.
             match bone.name.as_str() {
                 "body" => {
@@ -2383,7 +2383,7 @@ pub fn special_item(
         ),
         _ => return Err(format!("unknown special item render family {kind}")),
     };
-    // Solaris-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
+    // Krasnokamen-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
     // resolves both. A key with neither renders the placeholder box (logged once) rather than
     // failing the GUI/hand item bake and with it the session.
     if !models.has_authored_rig(rig) {
@@ -2738,7 +2738,7 @@ mod tests {
             models.schemas.insert(kind.into(), schema);
             entity.metadata.insert(16, Metadata::Bool(baby));
             entity.metadata.insert(18, Metadata::Byte(4));
-            let rig = super::super::solaris_models::authored(key).unwrap();
+            let rig = super::super::krasnokamen_models::authored(key).unwrap();
             let mut standing = Vec::new();
             evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut standing);
             entity.metadata.insert(18, Metadata::Byte(5));
@@ -2760,7 +2760,7 @@ mod tests {
 
     #[test]
     fn goat_and_sheep_rigs_have_no_overlapping_same_facing_coplanar_faces() {
-        use super::super::solaris_models::{BoneSpec, ModelFile};
+        use super::super::krasnokamen_models::{BoneSpec, ModelFile};
         use glam::{Mat4, Vec3};
         // Rest-pose cube corners in pixels; bit 0/1/2 of the index select the x/y/z maximum.
         fn corners(bone: &BoneSpec, parent: Mat4, out: &mut Vec<[Vec3; 8]>) {
@@ -2801,12 +2801,12 @@ mod tests {
                 .collect()
         }
         for (name, source) in [
-            ("goat", include_str!("../../assets/solaris/models/entity/goat.json")),
-            ("goat_baby", include_str!("../../assets/solaris/models/entity/goat_baby.json")),
-            ("sheep", include_str!("../../assets/solaris/models/entity/sheep.json")),
-            ("sheep_baby", include_str!("../../assets/solaris/models/entity/sheep_baby.json")),
-            ("sheep_wool", include_str!("../../assets/solaris/models/entity/sheep_wool.json")),
-            ("sheep_wool_baby", include_str!("../../assets/solaris/models/entity/sheep_wool_baby.json")),
+            ("goat", include_str!("../../assets/krasnokamen/models/entity/goat.json")),
+            ("goat_baby", include_str!("../../assets/krasnokamen/models/entity/goat_baby.json")),
+            ("sheep", include_str!("../../assets/krasnokamen/models/entity/sheep.json")),
+            ("sheep_baby", include_str!("../../assets/krasnokamen/models/entity/sheep_baby.json")),
+            ("sheep_wool", include_str!("../../assets/krasnokamen/models/entity/sheep_wool.json")),
+            ("sheep_wool_baby", include_str!("../../assets/krasnokamen/models/entity/sheep_wool_baby.json")),
         ] {
             let model = ModelFile::parse(source).unwrap();
             let mut cubes = Vec::new();
@@ -2841,9 +2841,9 @@ mod tests {
 
     #[test]
     fn allay_head_face_uv_contains_both_atlas_eyes() {
-        use super::super::solaris_models::Face;
-        let model = super::super::solaris_models::ModelFile::parse(include_str!(
-            "../../assets/solaris/models/entity/allay.json"
+        use super::super::krasnokamen_models::Face;
+        let model = super::super::krasnokamen_models::ModelFile::parse(include_str!(
+            "../../assets/krasnokamen/models/entity/allay.json"
         )).unwrap();
         let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
         let cube = &head.cubes[0];
@@ -2857,8 +2857,8 @@ mod tests {
     #[test]
     fn authored_trident_prongs_join_crossbar_at_shaft_tip() {
         // Local 26.3 TridentModel.createLayer: retained javap excerpt in the Q04 receipts.
-        let model = super::super::solaris_models::ModelFile::parse(include_str!(
-            "../../assets/solaris/models/entity/trident.json"
+        let model = super::super::krasnokamen_models::ModelFile::parse(include_str!(
+            "../../assets/krasnokamen/models/entity/trident.json"
         )).unwrap();
         let pole = &model.bones[0];
         assert_eq!(pole.name, "pole");
@@ -2891,7 +2891,7 @@ mod tests {
             ("minecraft:arrow#renderer/model", "shaft", 0, 1),
             ("minecraft:trident#renderer/model", "pole", 1, 0),
         ] {
-            let rig = super::super::solaris_models::authored(key).unwrap();
+            let rig = super::super::krasnokamen_models::authored(key).unwrap();
             let bone = rig.bones.iter().find(|bone| bone.name == bone_name).unwrap();
             let span = |index: usize| {
                 let (lo, hi) = bone.quads.iter().flatten().map(|vertex| vertex[index])
@@ -2937,7 +2937,7 @@ mod tests {
         }
         let special = serde_json::json!({"type":"minecraft:decorated_pot"});
         let mut stack = Stack::default();
-        let sides = super::super::solaris_models::authored("minecraft:decorated_pot_sides#main").unwrap();
+        let sides = super::super::krasnokamen_models::authored("minecraft:decorated_pot_sides#main").unwrap();
         let side_count: usize = sides.bones.iter().map(|bone| bone.quads.len()).sum();
         let back_count = sides.bones.iter().find(|bone| bone.name == "back").unwrap().quads.len();
         assert!(back_count > 0 && side_count > back_count);
@@ -2964,7 +2964,7 @@ mod tests {
             "minecraft:bamboo_raft#renderer/model",
             "minecraft:bamboo_chest_raft#renderer/model",
         ] {
-            let rig = super::super::solaris_models::authored(key).unwrap();
+            let rig = super::super::krasnokamen_models::authored(key).unwrap();
             let bottom = rig.bones.iter().find(|bone| bone.name == "bottom").unwrap();
             for yaw in [0., 90., 180., 270.] {
                 let mut matrices = Vec::new();
@@ -3283,7 +3283,7 @@ mod tests {
 
     #[test]
     fn breeze_wind_emits_wrapped_animated_texture_layer() {
-        let rig = super::super::solaris_models::authored("minecraft:breeze_wind#main").unwrap();
+        let rig = super::super::krasnokamen_models::authored("minecraft:breeze_wind#main").unwrap();
         let transforms = vec![Mat4::IDENTITY; rig.bones.len()];
         let tex = TextureRegion {
             layer: 42,
@@ -3388,7 +3388,7 @@ mod tests {
         let (mut models, mut dragon) = fixture();
         dragon.type_name = "minecraft:ender_dragon".into();
         let facts: Value = serde_json::from_str(include_str!(
-            "../../assets/solaris/entities/entity-facts.json"
+            "../../assets/krasnokamen/entities/entity-facts.json"
         ))
         .unwrap();
         let family = serde_json::from_value(facts["families"]["minecraft:ender_dragon"].clone())

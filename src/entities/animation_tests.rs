@@ -2131,11 +2131,11 @@ fn zombie_arm_rotation_matches_the_26_3_animate_zombie_arms_formula() {
 }
 
 /// ISSUE-1-19: the rig's legs carry exactly the source `SpiderModel.setupAnim` offsets on top
-/// of their rest rotation (red against the Solaris-authored alternating swing).
+/// of their rest rotation (red against the Krasnokamen-authored alternating swing).
 #[test]
 fn spider_rig_legs_carry_the_26_3_walk_offsets() {
     let (models, mut entity) = fixture();
-    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:spider#main").unwrap();
     entity.type_name = "minecraft:spider".into();
     tick_walk(&models, &mut entity, 0.2);
     tick_walk(&models, &mut entity, 0.4);

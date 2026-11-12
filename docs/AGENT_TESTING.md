@@ -14,7 +14,7 @@ per-frame accounting boundary, not a real-window camera sweep or visual parity.
 The focused test and its reset-removal negative control must be run before this
 source-phase regression is treated as evidence.
 
-`entities::solaris_models::tests::villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe`
+`entities::krasnokamen_models::tests::villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe`
 checks the adult villager's authored leg/robe geometry and box unwrap. It is not
 an opacity or walking-animation screenshot check; its historical-rig negative
 control and real-client moving-leg comparison remain separate evidence.
