@@ -990,7 +990,14 @@ fn hud_selected_name_shows_then_expires() {
 /// `debug/panel` backing, even when HUD is hidden; empty lines draw nothing.
 #[test]
 fn f3_debug_lines_render_above_hidden_hud() {
-    let (content, inventory, mut ui) = state();
+    let mut content = Content::test_cube();
+    content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
+    // Exercise the real layout path with the production missing-glyph font,
+    // rather than asking a state-only UI (which has no fonts) to render text.
+    content.insert_test_font("minecraft:default", &serde_json::json!({"providers":[]}));
+    content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");
+    let inventory = InventoryStore::default();
+    let mut ui = UiState::new(&content).expect("font-backed UI must construct");
     ui.set_debug_lines(vec![
         "60 fps (16.67 ms)".into(),
         "XYZ: 1.500 / 2.000 / 3.500".into(),

@@ -787,6 +787,13 @@ impl UiState {
                 }
                 Some(json!(f.clamp(0., Self::MAX_VOLUME as f64)))
             }
+            "gamma" => {
+                let f = Self::setting_f64(value)?;
+                if !f.is_finite() {
+                    return None;
+                }
+                Some(json!(f.clamp(0., 1.)))
+            }
             "ui_scale" => {
                 let f = Self::setting_f64(value)?;
                 if f.is_finite() && (0.0..=4.0).contains(&f) && f.fract() == 0. {
@@ -887,6 +894,13 @@ impl UiState {
                 } else {
                     stepped.min(Self::MAX_VOLUME as f64)
                 }))
+            }
+            "gamma" => {
+                let Some(cur) = current.and_then(sane).and_then(|v| Self::setting_f64(&v)) else {
+                    return Some(json!(Self::DEFAULT_GAMMA));
+                };
+                let stepped = ((cur + Self::VOLUME_STEP as f64) * 10.).round() / 10.;
+                Some(json!(if cur >= 1. - 1e-9 { 0. } else { stepped.min(1.) }))
             }
             _ => None,
         }
