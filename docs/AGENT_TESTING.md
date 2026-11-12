@@ -102,7 +102,7 @@ the server's disconnect reason is displayed normally. The focused
 `session::packets::tests::resource_pack_push_declined_in_both_phases` test checks
 both response packets and subsequent packet handling. The ignored
 `resource_pack_live_optional_join` test requires pinned local client content and
-`SOLARIS_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
+`KRASNOKAMEN_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
 optional pack; it waits for the real headless session to reach a ready world.
 
 ### Complete entity census
@@ -121,7 +121,7 @@ Use small pages to respect the MCP transport's byte limit; never treat a
 truncated page as a complete resident baseline. The civilization gate drains
 every page across the original 128-block radius and still requires the new
 baby's received UUID, received baby metadata, targeted screenshot, birth audit
-and final authoritative checkpoint. `solaris-client mcp-schema` exports the
+and final authoritative checkpoint. `krasnokamen-client mcp-schema` exports the
 same native definitions as the live transport; Java schemas remain those
 exported by Loader, without assuming native-only pagination support.
 
@@ -175,7 +175,7 @@ receiver. A send that races with termination reports that same error rather than
 masking EOF with a generic closed-queue error; the terminal event remains
 available for the session to consume.
 
-`cargo test -p solaris-client --lib protocol::network` covers partial-frame
+`cargo test -p krasnokamen-client --lib protocol::network` covers partial-frame
 handoff, idle/EOF/shutdown termination and dropping a backpressured reader.
 Windows additionally checks that the real `Network::connect` play socket has
 no read timeout; existing phase/radius and terminal-event tests exercise the
@@ -219,15 +219,15 @@ fabricated successful prediction. The server remains authoritative for growth,
 inventory debit and world changes. Genuine server-packet decoding errors still
 propagate through the session failure path.
 
-Focused regressions: `cargo test -p solaris-client --lib disconnects_` covers
+Focused regressions: `cargo test -p krasnokamen-client --lib disconnects_` covers
 bone-meal dispatch, empty writable-book component decoding/editor opening,
 prediction/UI error isolation, and the 26.3 player-command ordinals. Sneak state
-is sent only in player input; glide uses action 6. `cargo test -p solaris-client
+is sent only in player input; glide uses action 6. `cargo test -p krasnokamen-client
 --lib wire_263_` also covers real raid-omen entity metadata and all 106 simple
 option-less particle types from the local 26.3 registry. State-only/headless
 models must load these particle facts just like rendered models.
 
-`cargo test -p solaris-client --lib rc1_book_` covers received writable books,
+`cargo test -p krasnokamen-client --lib rc1_book_` covers received writable books,
 ordinary editor opening, typed pages, Done/sign submission and the real session
 packet encoder. The 26.3 `edit_book` slot is a player-inventory index: selected
 hotbar `0..8` or offhand `40`, not player-menu slots `36..44` or `45` (local
@@ -236,9 +236,9 @@ evidence: a live write/reopen/sign check must observe the server-returned book
 components and reopen that authoritative stack.
 
 The opt-in `rc1_book_live_write_reopen_sign` test connects the real headless
-Session to `SOLARIS_BOOK_SMOKE_SERVER` (loopback only), using the normal pinned
+Session to `KRASNOKAMEN_BOOK_SMOKE_SERVER` (loopback only), using the normal pinned
 content environment. Provision one writable book in `BookFix`'s first hotbar
-slot, then run `cargo test -p solaris-client --lib
+slot, then run `cargo test -p krasnokamen-client --lib
 rc1_book_live_write_reopen_sign -- --ignored --nocapture`. It uses ordinary
 item activation and editor submission, waits on network wakes, checks received
 book components, reopens without rewriting, signs, and reopens read-only with
@@ -253,7 +253,7 @@ checks. `CushionItem`, `FireChargeItem`, and `EndCrystalItem` remain known
 prediction gaps for rc.1: their wire action is sent without local prediction,
 and their unsupported local owner must not end the session.
 
-`cargo test -p solaris-client --lib entity_render_rc1_` feeds actual received
+`cargo test -p krasnokamen-client --lib entity_render_rc1_` feeds actual received
 ADD_ENTITY packets into scene extraction with owned model/texture fixtures:
 empty frame/glow-frame bodies, painting mesh at its packet anchor, and minecart
 vertices above the rail. These checks are independent of whether the server
@@ -281,12 +281,12 @@ and nonselected tabs.
 These are **proposed specification commands, not verified installed CLI**:
 
 ```text
-solaris-client play --profile <profile>
-solaris-client play --profile <test-profile> --automation --mcp-http 127.0.0.1:0
-solaris-client mcp attach --instance <instance-id> --stdio
-solaris-client mcp config --instance <instance-id> --format <host-format>
-solaris-client doctor --json
-solaris-client test run <scenario-id> --artifact-dir <controlled-dir>
+krasnokamen-client play --profile <profile>
+krasnokamen-client play --profile <test-profile> --automation --mcp-http 127.0.0.1:0
+krasnokamen-client mcp attach --instance <instance-id> --stdio
+krasnokamen-client mcp config --instance <instance-id> --format <host-format>
+krasnokamen-client doctor --json
+krasnokamen-client test run <scenario-id> --artifact-dir <controlled-dir>
 ```
 
 Register the generated configuration in the selected MCP host explicitly; no automatic global agent-setting changes. Host integration must be independently exercised, eventually with at least two independent MCP hosts. A new agent learns the interface from repository docs and live discovery, not model memory. No LLM provider/API key is needed to operate the client or its MCP.
@@ -296,10 +296,10 @@ Register the generated configuration in the selected MCP host explicitly; no aut
 The integration owner exercised these command paths against the real application:
 
 ```text
-solaris-client doctor --json
-solaris-client play --profile fixture --automation --mcp-http 127.0.0.1:0 --artifact-dir <project-.analysis-directory>
-solaris-client play --profile offline-test --server <HOST:PORT> --username <NAME> --automation --mcp-http 127.0.0.1:0 --artifact-dir <project-.analysis-directory>
-solaris-client mcp attach --descriptor <FILE> --stdio
+krasnokamen-client doctor --json
+krasnokamen-client play --profile fixture --automation --mcp-http 127.0.0.1:0 --artifact-dir <project-.analysis-directory>
+krasnokamen-client play --profile offline-test --server <HOST:PORT> --username <NAME> --automation --mcp-http 127.0.0.1:0 --artifact-dir <project-.analysis-directory>
+krasnokamen-client mcp attach --descriptor <FILE> --stdio
 ```
 
 Same-instance `mcp attach --instance <ID> --stdio` is also implemented. `fixture` is the default play profile; automation is opt-in, HTTP is loopback, and artifact directories are restricted to project `.analysis`. `offline-test` is an explicitly permitted test identity, not official authentication evidence. `doctor` proves device creation/buffer roundtrip, **not native-window verification**. Proposed `mcp config` and `test run` commands are not implemented.
@@ -393,9 +393,9 @@ senders/dispatch use the named constants in `src/protocol/packet_ids.rs`.
 Run the one table test against the exact locally verified report:
 
 ```sh
-SOLARIS_CLIENT_PACKETS_REPORT=/path/to/26.3/reports/packets.json \
+KRASNOKAMEN_CLIENT_PACKETS_REPORT=/path/to/26.3/reports/packets.json \
 CARGO_INCREMENTAL=0 /home/kaiserroman/solaris/.analysis/tools/mem-run.sh -m 12G \
-env RUSTC_WRAPPER= cargo test -p solaris-client --lib protocol::packet_ids::tests::all_packet_ids_match_26_3_report -- --ignored --exact --nocapture
+env RUSTC_WRAPPER= cargo test -p krasnokamen-client --lib protocol::packet_ids::tests::all_packet_ids_match_26_3_report -- --ignored --exact --nocapture
 ```
 
 The test covers all 255 names in both directions. It is explicitly ignored in
@@ -494,17 +494,17 @@ Locked builds and all nine controller/action/event-boundary, transport-saturatio
 
 The accepted `.analysis/evidence/C01/acceptance-receipt.json` and passing independent review link the real fixture window, 13-tool authenticated discovery, ordinary camera input, GPU capture, causal 1854×1011 resize, PNG resource roundtrip, cancellation, focus-loss release, physical Escape release, same-instance stdio and transport rejection. The initial independent finding and before/after saturation receipts preserve the cleanup-starvation defect and fix; no independent review is silently assumed.
 
-C02 evidence is under `.analysis/evidence/C02/vanilla-native/`, `solaris-native/` and `solaris-native-cached/`. Both official 26.1.2 vanilla and Solaris ran ordinary SURVIVAL movement, block mining, pickup, server-observed inventory, hotbar selection and placement without `give` or teleport. Vanilla additionally has a read-only server-console inventory oracle; Solaris has an independent persisted player NBT receipt. GPU images and fresh native-window screenshots show the mined item count and placed block.
+C02 evidence is under `.analysis/evidence/C02/vanilla-native/`, `solaris-native/` and `solaris-native-cached/`. Both official 26.1.2 vanilla and Krasnokamen ran ordinary SURVIVAL movement, block mining, pickup, server-observed inventory, hotbar selection and placement without `give` or teleport. Vanilla additionally has a read-only server-console inventory oracle; Krasnokamen has an independent persisted player NBT receipt. GPU images and fresh native-window screenshots show the mined item count and placed block.
 
-The initial Solaris dirty-world remesh caused a 10-second action-predicate timeout followed by a committed block/pickup effect. That failure is retained, not retried blindly or hidden by a larger timeout. After the chunk-local cache fix, ordinary mining/ack completed in 1632.165 ms and placement/inventory consumption in 823.526 ms with 81 resident chunks; a separate ordinary jump-placement took 632.593 ms. These are scenario elapsed times including gameplay/server/transport, **not source-apply frame latency, FPS or a performance gate**. Actual snow-hit input additionally proved unchanged audio submission count with an explicit unsupported event.
+The initial Krasnokamen dirty-world remesh caused a 10-second action-predicate timeout followed by a committed block/pickup effect. That failure is retained, not retried blindly or hidden by a larger timeout. After the chunk-local cache fix, ordinary mining/ack completed in 1632.165 ms and placement/inventory consumption in 823.526 ms with 81 resident chunks; a separate ordinary jump-placement took 632.593 ms. These are scenario elapsed times including gameplay/server/transport, **not source-apply frame latency, FPS or a performance gate**. Actual snow-hit input additionally proved unchanged audio submission count with an explicit unsupported event.
 
 Main authorized temporary PipeWire null-sink capture routed **only** from the native stream because the laptop's physical output was muted at night. Both servers' ordinary break actions produced non-silent monitor PCM correlated with newly submitted hit events; receipts identify module IDs, routing, sample format/window and successful unload. Physical sink mute/volume were never changed. This proves actual isolated mixer output, **not hardware audibility** or full audio completeness.
 
-The initial C02 independent review found incorrect solid-cell light sampling and a terminal error lost behind a full incoming queue. The failing-before receipts are preserved. After correction, real CPU mesh vertices passed positive/negative chunk and received extra-layer boundary assertions; real local TCP saturation exercised both EOF and malformed frames without sleeps. The corrected native binary reconnected to the same Solaris build/world with 81 chunks, rendered the lit terrain to the real window/GPU target, and applied ordinary look/hotbar inputs. A separately labeled Configuration-EOF peer then caused the real application to report the original `server closed connection`, clear held inputs and retain no active lease. See `reviewfix-validation.json` and `reviewfix-native/` for these additional proofs; the synthetic peer is not a vanilla compatibility oracle.
+The initial C02 independent review found incorrect solid-cell light sampling and a terminal error lost behind a full incoming queue. The failing-before receipts are preserved. After correction, real CPU mesh vertices passed positive/negative chunk and received extra-layer boundary assertions; real local TCP saturation exercised both EOF and malformed frames without sleeps. The corrected native binary reconnected to the same Krasnokamen build/world with 81 chunks, rendered the lit terrain to the real window/GPU target, and applied ordinary look/hotbar inputs. A separately labeled Configuration-EOF peer then caused the real application to report the original `server closed connection`, clear held inputs and retain no active lease. See `reviewfix-validation.json` and `reviewfix-native/` for these additional proofs; the synthetic peer is not a vanilla compatibility oracle.
 
 C02 is now accepted by the parent-owned `acceptance-receipt.json` and passing `independent-review.json`, with the initial changes receipt retained unchanged. This combines earlier complete two-server survival/isolated-audio evidence and the targeted corrected-binary proofs above; it does not claim the entire survival/audio sequence was repeated on that final binary. C03–C10, broader feature domains and external-provider prerequisites remain unaccepted.
 
-For local offline reruns, supply `SOLARIS_CLIENT_DATA_DIR` (verified local metadata), `SOLARIS_CLIENT_RESOURCE_ROOT` (locally extracted verified archive `assets/`), `SOLARIS_CLIENT_ASSET_ROOT` (verified indexed objects) and `SOLARIS_CLIENT_ASSET_INDEX` (pinned index JSON). These caches are ignored and not distributed Mojang bytes. Use a fresh live descriptor/private token, not an evidence instance ID. `python3 tools/acceptance.py --descriptor <live-descriptor> --artifact-dir <matching-project-.analysis-directory>` exercises authenticated endpoint/input/capture assertions; native resize/focus/emergency release/gameplay/audio are separately linked proofs.
+For local offline reruns, supply `KRASNOKAMEN_CLIENT_DATA_DIR` (verified local metadata), `KRASNOKAMEN_CLIENT_RESOURCE_ROOT` (locally extracted verified archive `assets/`), `KRASNOKAMEN_CLIENT_ASSET_ROOT` (verified indexed objects) and `KRASNOKAMEN_CLIENT_ASSET_INDEX` (pinned index JSON). These caches are ignored and not distributed Mojang bytes. Use a fresh live descriptor/private token, not an evidence instance ID. `python3 tools/acceptance.py --descriptor <live-descriptor> --artifact-dir <matching-project-.analysis-directory>` exercises authenticated endpoint/input/capture assertions; native resize/focus/emergency release/gameplay/audio are separately linked proofs.
 
 ### Current C03/C04 working tree: native startup/survival proof, full P0 graphical gates pending
 
@@ -757,7 +757,7 @@ The subsequent `.analysis/evidence/C03/world-storage-metadata-proof.json` exerci
 
 This proof used the real world source and wire helpers with existing dependency libraries, **not the current full client build**. Session routing/registry activation, the new mesh pipeline, GPU rendering, profile textures, inventory/UI, effects and complete gameplay remain unaccepted until integrated and exercised. Source files or isolated tests do not advance the C03/C04 cursor or advertise executable capabilities.
 
-For the local source-derived collision table, explicitly set `SOLARIS_CLIENT_COLLISION_SHAPES=/home/kaiserroman/solaris/crates/mc-data/data/block_collision_shapes_26_1_2.bin`; the versioned filename differs from the default metadata report filename. `SOLARIS_CLIENT_TERRAIN_FACTS` must likewise point to the actual pinned 26.1.2 terrain-facts oracle output. These are local proof inputs, not distributed Mojang bytes or a runtime fallback.
+For the local source-derived collision table, explicitly set `KRASNOKAMEN_CLIENT_COLLISION_SHAPES=/home/kaiserroman/solaris/crates/mc-data/data/block_collision_shapes_26_1_2.bin`; the versioned filename differs from the default metadata report filename. `KRASNOKAMEN_CLIENT_TERRAIN_FACTS` must likewise point to the actual pinned 26.1.2 terrain-facts oracle output. These are local proof inputs, not distributed Mojang bytes or a runtime fallback.
 
 The actual pinned Java interaction oracle now covers all 1,168 blocks, 1,506 item holders, 1,026 block-item associations, 20 boat entity types, 115 compostable items and the exact bucket/liquid/redstone declaring owners. `.analysis/evidence/C04/player-interaction-facts-proof.json` records its exact Java commands and output. The bound item-property capture in `.analysis/inventory-contract/item-properties.json` additionally covers container eligibility, banner/bundle identity, brewing ingredients and the five canonical crafting-remainder templates; it is a private runtime report, not shipped Mojang data.
 
@@ -771,7 +771,7 @@ The actual pinned Java interaction oracle now covers all 1,168 blocks, 1,506 ite
 
 The current terrain oracle captures all actual inside-block shapes and redstone-conductor flags. Only powder snow is explicitly contextual; its source inside-shape inversion is computed by the movement provider. Static inside boxes are block-local **without** random block offsets: every offset-bearing block inherits the source default full-block inside shape. This oracle report supersedes the earlier terrain-facts digest and remains ignored.
 
-Local metadata loading now also needs `SOLARIS_CLIENT_BLOCK_USE_FACTS`, `SOLARIS_CLIENT_ITEM_USE_FACTS`, `SOLARIS_CLIENT_INTERACTION_FACTS`, `SOLARIS_CLIENT_ITEM_PROPERTIES`, `SOLARIS_CLIENT_CREATIVE_TABS` and `SOLARIS_CLIENT_BLOCK_STATE_PREDICATES`, or their matching private `reports/` files. The state-predicate report must cover all actual states with source-derived `is_air` and `is_signal_source` values; the retained pinned capture contains 29,873 states, including three air and 2,621 signal-source states. All inputs must come from the pinned target source captures. These source-only proofs do not establish a compiling current client, integrated prediction, GPU materials, full inventory/UI/entity rendering, native profile resolution, or C03/C04 acceptance. Keep the long-term acceptance cursor at C02 until the complete integrated scenario and independent review pass.
+Local metadata loading now also needs `KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS`, `KRASNOKAMEN_CLIENT_ITEM_USE_FACTS`, `KRASNOKAMEN_CLIENT_INTERACTION_FACTS`, `KRASNOKAMEN_CLIENT_ITEM_PROPERTIES`, `KRASNOKAMEN_CLIENT_CREATIVE_TABS` and `KRASNOKAMEN_CLIENT_BLOCK_STATE_PREDICATES`, or their matching private `reports/` files. The state-predicate report must cover all actual states with source-derived `is_air` and `is_signal_source` values; the retained pinned capture contains 29,873 states, including three air and 2,621 signal-source states. All inputs must come from the pinned target source captures. These source-only proofs do not establish a compiling current client, integrated prediction, GPU materials, full inventory/UI/entity rendering, native profile resolution, or C03/C04 acceptance. Keep the long-term acceptance cursor at C02 until the complete integrated scenario and independent review pass.
 
 ### Swarm-driven MCP behaviour notes (live-server swarm, Oct 2026)
 
@@ -1004,7 +1004,7 @@ the run selection and `render::shader_tests` proves exact pixels with and
 without the partition (including the shadow map) on a real GPU.
 
 For same-executable A/B measurements, launch separate instances with
-`SOLARIS_CLIENT_GREEDY=0 SOLARIS_CLIENT_OCCLUSION=0` for the baseline and unset
+`KRASNOKAMEN_CLIENT_GREEDY=0 KRASNOKAMEN_CLIENT_OCCLUSION=0` for the baseline and unset
 both variables for the optimized path. These settings are captured at process
 startup. Interleave A/B/A/B at the same saved player pose, look, window size and
 view distance; wait for mesh completion and section fade before recording.
@@ -1101,7 +1101,7 @@ the WebGPU frustum. Per-section origin/fade data uses `first_instance`.
 The pinned wgpu 27 API no longer exposes `MULTI_DRAW_INDIRECT`; enabling
 `MULTI_DRAW_INDIRECT_COUNT` guarantees native, non-loop-emulated multi-draw.
 The fast path requires that feature plus `INDIRECT_FIRST_INSTANCE` and compute
-support. `SOLARIS_CLIENT_MDI=0` disables it for same-executable comparison.
+support. `KRASNOKAMEN_CLIENT_MDI=0` disables it for same-executable comparison.
 Unsupported adapters retain the direct indexed terrain path. Captured
 `terrain_multi_draw_indirect` and `terrain_indirect_candidates` identify the
 actual path; whole-frame `draw_calls` still includes translucent/entities/UI.
@@ -1136,7 +1136,7 @@ culling plus the Hi-Z passes, then recovers next frame. Translucent terrain, ent
 and the shadow pass are **not** occlusion culled (shadow casters can hide behind
 camera occluders and still shade visible ground).
 
-Switches: `SOLARIS_CLIENT_HIZ=0` frustum-only (same executable A/B), `cold` forgets
+Switches: `KRASNOKAMEN_CLIENT_HIZ=0` frustum-only (same executable A/B), `cold` forgets
 history every frame (diagnostic worst case; every section takes phase 2). Hi-Z is
 disabled automatically without MDI or when the adapter lacks a write-only
 `r32float` storage texture; `capabilities.hiz_occlusion_enabled` reports it.
@@ -1265,7 +1265,7 @@ keep their own deadlines. This avoids a past `WaitUntil` spinning while a Waylan
 frame callback is pending. Raw-motion-only wakes apply the look immediately but
 do not repeat network/scene owner work before a real deadline or owner event.
 
-For a pacing regression, retain `SOLARIS_CLIENT_FRAME_TRACE=/absolute/path.tsv`,
+For a pacing regression, retain `KRASNOKAMEN_CLIENT_FRAME_TRACE=/absolute/path.tsv`,
 the exact executable hash, native display/backend and adapter, window size,
 settings, route and walking interval. Compare `submitted_frame_interval_ms`
 percentiles only within that interval, separately from CPU/GPU work and
@@ -1322,7 +1322,7 @@ older synchronous baseline binaries may use `--legacy-synchronous-trace`; that
 mode retains their original SIGTERM teardown after measurement and records the
 exit status separately. It does not validate graceful shutdown of the baseline.
 Run repetitions under Main's approved `mem-run.sh -p` measurement lane. The
-harness records `pgrep -a solaris-client` at both ends and marks overlapping
+harness records `pgrep -a krasnokamen-client` at both ends and marks overlapping
 runs discarded. A private compositor is not evidence of physical scanout or a
 reproduction of the owner's Mutter scheduling. The original baseline needs the
 same 8-bit native-Wayland surface-format correction as HEAD on RADV; retain that
@@ -1331,12 +1331,12 @@ common delta in the executable provenance instead of claiming identical bytes.
 For cross-protocol integration comparisons, `--server-data` and `--client-data`
 select explicit content caches without changing the stopped-world fixture.
 Use one compatible server binary/configuration on both sides; an offline legacy
-server may also require `SOLARIS_LEGACY_CONTENT_CACHE`. These paths are retained
+server may also require `KRASNOKAMEN_LEGACY_CONTENT_CACHE`. These paths are retained
 in the result alongside binary hashes, rather than silently using the current
 checkout's content.
 For a versioned launcher bundle, extract it into a private directory and pass
 `--client-root` plus its `--client-data` directory. Set
-`SOLARIS_CLIENT_COLLISION_SHAPES` to that bundle's versioned facts file; do not
+`KRASNOKAMEN_CLIENT_COLLISION_SHAPES` to that bundle's versioned facts file; do not
 modify the owner's default profile or relabel an older collision cache.
 
 ## RC.1 inventory input and beacon regression scope
@@ -1359,7 +1359,7 @@ passed before the inventory-input fixes. The reported s7-01 authoritative
 bundle swap is owned by the server repair, not hidden by a client workaround.
 
 Run the focused resource-free scope with
-`cargo test -p solaris-client --lib inventory -- --nocapture` under the required
+`cargo test -p krasnokamen-client --lib inventory -- --nocapture` under the required
 memory/build envelope. Local failing-first and final receipts are retained in
 `/run/media/kaiserroman/games/solaris-work/qa-armada/fixes/client-inventory-fixes/`.
 These are headless input/state/wire tests, not real-window acceptance.

@@ -1,4 +1,6 @@
-# Solaris Native Client agent route
+# Krasnokamen Native Client agent route
+
+Formerly Solaris (renamed Krasnokamen on 2026-11-12). Historical documents (`SPECIFICATION.md`, `COMPATIBILITY_MATRIX.md`, the dated audits and release-note drafts, `compatibility.lock`) keep the old name where they quote the past.
 
 **Binding for every agent: [Agent Constitution](../solaris/docs/AGENT_CONSTITUTION.md); it overrides task prompts.**
 

@@ -1,5 +1,7 @@
 # Compatibility and acceptance matrix
 
+> Naming: formerly Solaris (renamed Krasnokamen on 2026-11-12). Row text and ids quote the immutable ledger in `SPECIFICATION.md` and keep the original wording.
+
 Target: Minecraft Java Edition **26.3**, protocol **777**. Protocol number/layouts must come from local version-specific wire-probe/javap evidence and `compatibility.lock`, never memory. Proposed spec API/CLI versions are not existence claims.
 
 Rows begin `not_started`; integration updates only against exact receipts. C00/C01/C02 stage gates below now have exercised parent receipts and independent read-only review; broader domain and completeness rows are not implicitly accepted by those gates. Status progression is `not_started → implemented → oracle_verified → integrated → accepted`; `unsupported` is an honest development condition but cannot close a mandatory gate. Record supported variants, test/scenario IDs, oracle, platform/backend, target build/settings, source IDs and artifact links on every promotion.

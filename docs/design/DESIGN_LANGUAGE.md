@@ -1,8 +1,8 @@
-# Solaris design language
+# Krasnokamen design language
 
 **Status:** R&D proposal, 2026-10-23. Nothing here is implemented. It is the target for the implementation slices in §11. Every mockup value is illustrative unless it cites a capture or source line.
 **Authors:** DesignOpus (visual language, audit captures, icons, mockups, this consolidation) and DesignAstra (interaction/IA, accessibility, flows, cited slop research; full argument in [`2026-10-23-astra-ux-review.md`](2026-10-23-astra-ux-review.md)). The two drafts were written independently, then cross-reviewed. §12 lists where they disagreed and what we recommend.
-**Covers:** the native launcher, the native client's own UI, Solaris Loader UI on Fabric, plugin-provided views, the server operator dashboard, and future Solaris web pages. **Vanilla Minecraft screens stay vanilla** (§2).
+**Covers:** the native launcher, the native client's own UI, Krasnokamen Loader UI on Fabric, plugin-provided views, the server operator dashboard, and future Krasnokamen web pages. **Vanilla Minecraft screens stay vanilla** (§2).
 
 | File | What it is |
 |---|---|
@@ -11,7 +11,7 @@
 | [`icons.svg`](icons.svg) · [png](icons.png) | 58-icon sketch on a 16×16 pixel grid (original artwork) |
 | [`mockups/launcher-play.svg`](mockups/launcher-play.svg) · [png](mockups/launcher-play.png) | Launcher, game installed, server selected |
 | [`mockups/launcher-install.svg`](mockups/launcher-install.svg) · [png](mockups/launcher-install.png) | First run while installing, plus every action-bar state |
-| [`mockups/client-options.svg`](mockups/client-options.svg) · [png](mockups/client-options.png) | In-game Options (Solaris-owned) at GUI scale 3 |
+| [`mockups/client-options.svg`](mockups/client-options.svg) · [png](mockups/client-options.png) | In-game Options (Krasnokamen-owned) at GUI scale 3 |
 | [`mockups/client-monitor.svg`](mockups/client-monitor.svg) · [png](mockups/client-monitor.png) | Monitor viewing consent and owner panel, GUI scale 2 |
 | [`mockups/client-plugin-view.svg`](mockups/client-plugin-view.svg) · [png](mockups/client-plugin-view.png) | A Loader schema-2 plugin view in the shared language |
 | [`mockups/dashboard.svg`](mockups/dashboard.svg) · [png](mockups/dashboard.png) | Prospective operator dashboard (web) |
@@ -22,7 +22,7 @@
 
 ## 1. Point of view
 
-Solaris is **an instrument, not a skin.** Our UI has three jobs: get the player into the right world, say plainly what is happening, and let them change it safely. The world is the hero. When our UI is open it should feel calm, exact and slightly industrial, like a well-made tool. It should not look like a SaaS landing page, a sci-fi cockpit or a recoloured Minecraft theme.
+Krasnokamen is **an instrument, not a skin.** Our UI has three jobs: get the player into the right world, say plainly what is happening, and let them change it safely. The world is the hero. When our UI is open it should feel calm, exact and slightly industrial, like a well-made tool. It should not look like a SaaS landing page, a sci-fi cockpit or a recoloured Minecraft theme.
 
 Five principles, in priority order:
 
@@ -40,17 +40,17 @@ Five principles, in priority order:
 |---|---|---|
 | Native launcher | Everything in the window | OS dialogs, browser/Microsoft auth |
 | Native client | Options (our categories and controls); monitor picker, consent, owner panel; sharing/voice HUD chips; toasts; Loader view renderer; our error **copy** shown inside vanilla screens | Title, Multiplayer, Direct Connect, Pause, Disconnected chrome; inventory and every container; recipe book; book and quill; hotbar, hearts, hunger, XP; chat; advancements; statistics; F3 |
-| Fabric Solaris Loader | Permission prompt copy; the custom view layout and copy; Solaris overlays | Minecraft widgets: use vanilla `Button`, `EditBox`, `TabNavigationBar` and list widgets as they are |
+| Fabric Krasnokamen Loader | Permission prompt copy; the custom view layout and copy; Krasnokamen overlays | Minecraft widgets: use vanilla `Button`, `EditBox`, `TabNavigationBar` and list widgets as they are |
 | Plugins | View titles, labels, action wording, data layout in custom views | Vanilla container chrome when a plugin uses inventory menus (for example basic-economy) |
 | Server | Operator dashboard and future web pages | Prometheus/JSON payload formats, terminals, browser chrome |
 
-**Joint recommendation:** move Title, Multiplayer, Direct Connect, Pause and Disconnected back to vanilla chrome. Today they are re-skinned in amber (§3.3). Solaris branding on Title appears only as the wordmark in the logo slot. This changes a lot of what the client looks like now, so it needs the owner's confirmation (§12, D1).
+**Joint recommendation:** move Title, Multiplayer, Direct Connect, Pause and Disconnected back to vanilla chrome. Today they are re-skinned in amber (§3.3). Krasnokamen branding on Title appears only as the wordmark in the logo slot. This changes a lot of what the client looks like now, so it needs the owner's confirmation (§12, D1).
 
 ---
 
 ## 3. Audit of what ships today
 
-Unless marked otherwise, captures are from frozen release **`d90b9c2`** (`solaris-launcher` sha256 `4800e1f2…`, `solaris-client` `2f9425ef…`). Byte-identical copies ran on a private Xvfb `:163` with `WAYLAND_DISPLAY` unset, never on the owner's desktop. Source citations use the form `d90b9c2:path:line` (`git show d90b9c2:…`), because the working tree keeps moving under other agents.
+Unless marked otherwise, captures are from frozen release **`d90b9c2`** (`krasnokamen-launcher` sha256 `4800e1f2…`, `krasnokamen-client` `2f9425ef…`). Byte-identical copies ran on a private Xvfb `:163` with `WAYLAND_DISPLAY` unset, never on the owner's desktop. Source citations use the form `d90b9c2:path:line` (`git show d90b9c2:…`), because the working tree keeps moving under other agents.
 
 **Where the images are stored.** Launcher captures contain only our own pixels, so they live in `audit/`. Client captures contain Mojang-derived pixels (font and textures). They therefore stay as local, git-ignored evidence in `../../.analysis/design-audit/` and are linked here rather than copied.
 
@@ -78,7 +78,7 @@ Unless marked otherwise, captures are from frozen release **`d90b9c2`** (`solari
 | L9 | "Sign in with Microsoft" is a disabled full-width button with "coming later" under it. | Promoting something that can't be done. | `ui.rs:545-550` |
 | L10 | Settings duplicates game settings (render distance), and the next line says the other options are in game. The raw content-manifest URL is an editable field next to "Start in fullscreen". | Two sources of truth, and a trust-critical developer option sits next to everyday ones. | `ui.rs:603-651` |
 | L11 | Layout: a 210 px sidebar for three items, panels with min-height 380 that are half empty, and a 120 px action bar for one button. | Wasted width where the server list needs it, and nothing guides the eye. | first-run capture |
-| L12 | Launcher and client keep **separate server lists**: the launcher uses `<root>/launcher.json`, the client uses `servers.json` beside its settings. The client's Multiplayer screen said "No saved servers" while the launcher listed "Solaris test". The two captures used different data roots; the split itself is proven by source. | The player maintains two lists that diverge. | `d90b9c2:launcher/src/config.rs:1`, `d90b9c2:launcher/src/paths.rs:73-74`, `d90b9c2:src/ui/menus.rs:16-21` |
+| L12 | Launcher and client keep **separate server lists**: the launcher uses `<root>/launcher.json`, the client uses `servers.json` beside its settings. The client's Multiplayer screen said "No saved servers" while the launcher listed "Krasnokamen test". The two captures used different data roots; the split itself is proven by source. | The player maintains two lists that diverge. | `d90b9c2:launcher/src/config.rs:1`, `d90b9c2:launcher/src/paths.rs:73-74`, `d90b9c2:src/ui/menus.rs:16-21` |
 
 ### 3.2 Native client: our own screens
 
@@ -103,11 +103,11 @@ Local captures are in `../../.analysis/design-audit/`: `client-options-{video,co
 * Title, Multiplayer, Direct Connect, Pause and Disconnected all use the amber shell theme (C9).
 * The recipe book and book screens replace vanilla sprites with text buttons (C5).
 
-### 3.4 Fabric Solaris Loader and plugin views (source audit, DesignAstra)
+### 3.4 Fabric Krasnokamen Loader and plugin views (source audit, DesignAstra)
 
 | # | Problem | Where |
 |---|---|---|
-| F1 | The permission prompt joins raw wire permission names into one sentence with generic Allow/Deny. Denying disconnects, and the prompt doesn't say so. | `../solaris-loader/loader-fabric/.../SolarisFabricLoader.java:357-376`, README:70-79 |
+| F1 | The permission prompt joins raw wire permission names into one sentence with generic Allow/Deny. Denying disconnects, and the prompt doesn't say so. | `../solaris-loader/loader-fabric/.../KrasnokamenFabricLoader.java:357-376`, README:70-79 |
 | F2 | The selected tab is drawn as `"[Label]"` in brackets. Debug-looking lines such as `reason: …` and `Select: <actionId>` (a raw id) reach players. | `LoaderViewScreen.java:203-206, 232-234, 336-337` |
 | F3 | Two different paginators on one screen: "Page 1 of 3" for model pages and "2 / 4" for layout overflow. | `LoaderViewScreen.java:138-167, 203-206` |
 | F4 | Tables are space-padded strings in a proportional font, so columns don't line up. Resource panels become lines like "Label entry: value". | `LoaderViewScreen.java:308-320, 283-288` |
@@ -139,7 +139,7 @@ Third-party images are linked, not copied. A palette, a font or a component libr
 
 **Never ship** (each line traces to an audit item):
 
-| Never | Why it fails for Solaris | Instead |
+| Never | Why it fails for Krasnokamen | Instead |
 |---|---|---|
 | Words crammed into icon-sized or round buttons (C5) | Neither readable text nor a recognisable icon, and it breaks the moment it's translated | Vanilla sprites in vanilla screens; in ours, an authored 16 px icon plus a tooltip on hover and focus; a full text button for decisions |
 | A border or rim around every container (L2, C1) | Everything is equally loud, so there is no hierarchy | Tone steps (ink0→ink3), hairline dividers, whitespace |
@@ -208,8 +208,8 @@ Compared with today: `TEXT_OFF #7A6650` measures 3.55:1 on the panel and `RIM #7
 
 | Style | Size/line | Weight | Use |
 |---|---|---|---|
-| Wordmark | Solaris Pixel 5×7, 3–4 px cells | — | The "SOLARIS" wordmark and splash. Never headings, dialogs or consent text |
-| H1 | 22/28 | SemiBold 600 | Screen or detail title ("Solaris test") |
+| Wordmark | Krasnokamen Pixel 5×7, 3–4 px cells | — | The "KRASNOKAMEN" wordmark and splash. Never headings, dialogs or consent text |
+| H1 | 22/28 | SemiBold 600 | Screen or detail title ("Krasnokamen test") |
 | H2 | 16/22 | SemiBold 600 | Section ("Servers") |
 | Body | 14/20 | Regular 400 | Default |
 | Small | 12/16 | Regular | Meta, hints, "Applies next launch" |
@@ -217,7 +217,7 @@ Compared with today: `TEXT_OFF #7A6650` measures 3.55:1 on the panel and `RIM #7
 
 Sentence case everywhere. Tabular numerals for anything that updates. Body lines are at most 72 characters.
 
-**In game:** the vanilla font only, so there is no second face in the world. Sizes are 1× (line 10 GUI px). 2× is allowed only for the Title logo slot. Hierarchy comes from colour (`text1/2/3`), position and spacing. No non-integer scaling and no fake bold. Mockups draw text with *Solaris Pixel*, an original 5×7 face, as a stand-in, so that no Mojang glyphs are copied.
+**In game:** the vanilla font only, so there is no second face in the world. Sizes are 1× (line 10 GUI px). 2× is allowed only for the Title logo slot. Hierarchy comes from colour (`text1/2/3`), position and spacing. No non-integer scaling and no fake bold. Mockups draw text with *Krasnokamen Pixel*, an original 5×7 face, as a stand-in, so that no Mojang glyphs are copied.
 
 ### 6.3 Grid and spacing
 
@@ -259,7 +259,7 @@ One quiet click when an action is accepted, in the vanilla UI-click category so 
 
 ### 6.8 Voice
 
-Plain, specific, calm. Use the verb plus its object ("Join Solaris test", "Revoke all viewers", "Force close game…"). An ellipsis means the action asks a follow-up question. Units always appear with values. Times are local, 24 h. Names come from the source (server name, player name, window title); ids appear only under Details.
+Plain, specific, calm. Use the verb plus its object ("Join Krasnokamen test", "Revoke all viewers", "Force close game…"). An ellipsis means the action asks a follow-up question. Units always appear with values. Times are local, 24 h. Names come from the source (server name, player name, window title); ids appear only under Details.
 
 ---
 
@@ -295,12 +295,12 @@ Specimen: [`components.svg`](components.svg). Every component defines default, h
 Full rationale is in DesignAstra's draft, §4. The rules below are binding, and they hold for both the happy and the unhappy path.
 
 **F1 First run and download** ([`launcher-install`](mockups/launcher-install.png)).
-1. Before any work starts, show version, size estimate, sources (Mojang assets, Adoptium Java, Solaris data) and the install location with "Change…". Once installing has started, the location can't be changed; the notice says "Cancel to change location".
-2. The primary action captures intent: **"Install and join Solaris test"**. Selecting a server never starts network work. If the player selects a different server during the install, the captured destination is kept (or the player is asked); the queued action is never silently reinterpreted.
+1. Before any work starts, show version, size estimate, sources (Mojang assets, Adoptium Java, Krasnokamen data) and the install location with "Change…". Once installing has started, the location can't be changed; the notice says "Cancel to change location".
+2. The primary action captures intent: **"Install and join Krasnokamen test"**. Selecting a server never starts network work. If the player selects a different server during the install, the captured destination is kept (or the player is asked); the queued action is never silently reinterpreted.
 3. Named stages: Check · Java · Game data · Assets · Verify. Bytes and speed appear only when the total is known. Measured inactivity is stated in words (warn colour): "No data received for 30 s. Download is still pending." The 30 s threshold is a proposed UI policy, not observed behaviour. Say "retrying" only if the installer actually reports a retry; never infer a cause.
 4. **Cancel install** → "Canceling…" → a neutral "Installation stopped. You can try installing again." Never auto-join after cancel. Steps that already ran may have written files, so retention or "nothing changed" is claimed only when the installer reports it.
 5. Failure stays in the action bar: a one-line summary, **Retry** as primary, and **Details** with the raw chain (selectable, copyable, secrets redacted). Generic copy is "Installation did not finish. See details or retry." Say "Nothing new was installed" only when the failure provably happened before any write (for example, the manifest fetch). For an unreachable manifest, the remedy points to **Settings › Advanced**.
-6. "Starting game" is not "Joined". A running game shows "Solaris is running", and the only control is **Force close game…** (with a confirmation naming the unsaved-progress risk) until graceful quit exists.
+6. "Starting game" is not "Joined". A running game shows "Krasnokamen is running", and the only control is **Force close game…** (with a confirmation naming the unsaved-progress risk) until graceful quit exists.
 7. Closing the launcher during install asks "Keep downloading / Cancel and close".
 
 **F2 Server selection and connection** ([`launcher-play`](mockups/launcher-play.png)).
@@ -309,7 +309,7 @@ Full rationale is in DesignAstra's draft, §4. The rules below are binding, and 
 * Status is shown only from a real probe: "Online · 42 ms", "Not checked yet", "No answer at 19:41". A version mismatch names both versions and doesn't offer a Join that can't work.
 * One server list shared by the launcher and the client (fixes L12).
 * Connecting can be cancelled, and a success that arrives after cancel must not open a session. Timeout or refusal returns to the same selection; retry is always an explicit choice, never an automatic loop.
-* Connection failure in game: Disconnected keeps vanilla chrome but our copy. Title "Couldn't connect" (not "Connection Lost" when nothing was connected), body "Solaris test (135.106.208.217) refused the connection. The server may be offline.", actions **Retry** and **Back to servers**. The raw OS error goes under Details.
+* Connection failure in game: Disconnected keeps vanilla chrome but our copy. Title "Couldn't connect" (not "Connection Lost" when nothing was connected), body "Krasnokamen test (135.106.208.217) refused the connection. The server may be offline.", actions **Retry** and **Back to servers**. The raw OS error goes under Details.
 
 **F3 Settings** ([`client-options`](mockups/client-options.png)).
 * Categories: Video · Controls · Audio · Interface · **Accessibility** · **Privacy** (desktop capture, voice and monitor permissions live here).
@@ -335,10 +335,10 @@ Full rationale is in DesignAstra's draft, §4. The rules below are binding, and 
 
 | Situation | Copy | Actions |
 |---|---|---|
-| Content manifest unreachable (failure before any write) | "Could not reach the Solaris content server. Nothing new was installed." | Retry · Details · Settings › Advanced |
+| Content manifest unreachable (failure before any write) | "Could not reach the Krasnokamen content server. Nothing new was installed." | Retry · Details · Settings › Advanced |
 | Install failed mid-way | "Installation did not finish. See details or retry." | Retry · Details |
 | Disk full | "Not enough space to install game files (needs 670 MB, 210 MB free)." Numbers only if measured | Change location · Details |
-| Version mismatch | "Solaris test needs Minecraft 26.1.1; you have 26.1.2." | Back to servers |
+| Version mismatch | "Krasnokamen test needs Minecraft 26.1.1; you have 26.1.2." | Back to servers |
 | Viewing denied | "Alex didn't allow viewing." Neutral, not red | Back |
 | Capture ended by the OS | "Window capture ended. Viewers no longer get new pictures." | Choose window · Dismiss |
 | Stale plugin action (explicit refusal) | "This view changed before the action could be applied." | Refresh |
@@ -365,7 +365,7 @@ These are release gates, not claims that we meet them today.
 
 All are original SVG artwork with PNG previews. The world backdrop in the in-game mockups is flat placeholder art. Values are illustrative.
 
-1. **Launcher · Play** ([svg](mockups/launcher-play.svg)): top bar with wordmark, tabs and profile chip; server list (select only) beside a detail panel (version match, server content, who you play as); honest status per row; a single **Join Solaris test**.
+1. **Launcher · Play** ([svg](mockups/launcher-play.svg)): top bar with wordmark, tabs and profile chip; server list (select only) beside a detail panel (version match, server content, who you play as); honest status per row; a single **Join Krasnokamen test**.
 2. **Launcher · First run / states** ([svg](mockups/launcher-install.svg)): installing while the list stays usable, plus the six action-bar states in the same 72 px slot: first run, downloading, stalled, failed, canceled, running.
 3. **In game · Options** ([svg](mockups/client-options.svg)): category list with icons, including Accessibility and Privacy; rows without boxes; value next to its control; segmented choice; focus ring vs selection bar; explanatory footer; fixed Done.
 4. **In game · Monitor** ([svg](mockups/client-monitor.svg)): consent with the scope in the button and focus on Deny; owner panel grouped as Source / Your control / Viewers; persistent sharing chip.
@@ -385,7 +385,7 @@ Each slice is independently shippable and has its own captures as evidence (same
 | **S2 Client theme and Options** | `src/ui/theme.rs`, `widgets.rs`, `options.rs`: remove `pixel_glow`, the sheen and the banded backdrop/vignette; tokens replace the hardcoded ARGB; rows with hairlines; switch without duplicate text; segmented control (Narrator, Shaders); focus ring separate from selection; Accessibility and Privacy categories ("Desktop computer" moves to Privacy); footer with a scoped Reset | `client-options-*` re-captured at GUI scales 2 and 3, 320×240 and 427×240. Semantic-tree tests for new control roles. Reduced motion means no animation. No amber outside the four roles |
 | **S3 Vanilla boundary** | Inventory/containers and hotbar back to vanilla GUI sprites from the installed resources; recipe book with vanilla tab sprites and item icons and the vanilla filter toggle; book page-turn sprites; Title/Multiplayer/Direct Connect/Pause/Disconnected on vanilla chrome (wordmark in the Title logo slot only); our copy on Disconnected (F2) | Side-by-side captures against official vanilla 26.1.2 for the inventory, crafting table with recipe book open, hotbar, book and pause. No text-in-tab buttons remain (`catalogue.rs`, `screens.rs`). A refused connect shows "Couldn't connect" + Retry |
 | **S4 Monitor privacy surfaces** | `src/ui/desktop.rs`, `src/computer/native.rs`, `native/sharing.rs`, `wayland.rs` copy: consent dialog (equal-weight buttons, focus on Deny), owner panel groups, picker copy without app ids, the HUD sharing chip, bindings-driven hints; fix the glyph bleed | Grant, deny, Esc, revoke one, revoke all, close capture, source change and disconnect all have captures plus server-observed effects. The chip survives Hide HUD. The 320×240 layout keeps every action reachable |
-| **S5 Loader and plugin views** | `../solaris-loader` `LoaderViewScreen`/`SolarisFabricLoader` (vanilla `TabNavigationBar`, a list widget for tables, a single labelled pager, deny reasons visible, no raw ids, permission prompt copy and Details) and the native renderer `src/ui/loader.rs` with the same structure | Each schema-2 widget is captured on both Fabric and native. A refresh while typing keeps a *compatible* draft (same stable field identity), and a refresh that changes the field's meaning visibly invalidates it. Both cases are tested. A stale action is refused visibly and an unknown outcome is labelled unknown. Long permission lists wrap |
+| **S5 Loader and plugin views** | `../solaris-loader` `LoaderViewScreen`/`KrasnokamenFabricLoader` (vanilla `TabNavigationBar`, a list widget for tables, a single labelled pager, deny reasons visible, no raw ids, permission prompt copy and Details) and the native renderer `src/ui/loader.rs` with the same structure | Each schema-2 widget is captured on both Fabric and native. A refresh while typing keeps a *compatible* draft (same stable field identity), and a refresh that changes the field's meaning visibly invalidates it. Both cases are tested. A stale action is refused visibly and an unknown outcome is labelled unknown. Long permission lists wrap |
 | **S6 Dashboard (prospective)** | `../solaris/crates/mc-edge`: a single static read-only HTML page at `GET /` using the token CSS, reading the existing `/stats` and `/load-metrics`; no controls without real actions | Stream-loss and overrun show gaps, not zeros. Every number shows its unit and source. Keyboard navigable. Reflows at 1024 px |
 | **S7 Accessibility and localisation gate** | Cross-cutting checks from §9 on every slice | A Narrator pass, a keyboard-only pass, Russian and German strings, contrast measured on captures |
 
@@ -397,9 +397,9 @@ Highest value first: **S3 + S2** answer the owner's direct complaint (text-in-bu
 
 | # | Topic | DesignOpus draft | DesignAstra draft | Resolution |
 |---|---|---|---|---|
-| D1 | Shell screens (Title, Multiplayer, Pause, Disconnected) | Revert to vanilla chrome, Solaris wordmark only in the logo slot | Don't re-organise vanilla pages to impose brand | **Joint recommendation: vanilla chrome + our copy.** Needs the owner's confirmation because it removes much of today's amber shell |
+| D1 | Shell screens (Title, Multiplayer, Pause, Disconnected) | Revert to vanilla chrome, Krasnokamen wordmark only in the logo slot | Don't re-organise vanilla pages to impose brand | **Joint recommendation: vanilla chrome + our copy.** Needs the owner's confirmation because it removes much of today's amber shell |
 | D2 | Compact control size | 24 px compact allowed | 24 is the WCAG floor, not a target | **Astra's position:** 32/36/40–44; 24 only in dense tables with separation |
-| D3 | Pixel face for headings | Solaris Pixel for wordmark and H1 | Hurts reading clarity; never in dialogs | **Astra's position:** Plex SemiBold headings; pixel face only for the wordmark and splash |
+| D3 | Pixel face for headings | Krasnokamen Pixel for wordmark and H1 | Hurts reading clarity; never in dialogs | **Astra's position:** Plex SemiBold headings; pixel face only for the wordmark and splash |
 | D4 | Focus vs selection | Both amber | Amber is OK only with distinct geometry | **Agreed:** 2 px offset ring vs 3 px bar + fill |
 | D5 | Sharing colour | Red "LIVE" dot | Red conflicts with danger; don't claim live watching | **Astra's position:** signal blue, broadcast icon, "Sharing · N allowed"; "Watching now" only when observed |
 | D6 | Launcher render distance | Remove (one owner, in game) | One owner for each setting; if it is exposed in the launcher at all, label it "Applies next launch" | **Recommend remove** (compatible with both positions); if the owner wants it kept, label it. Low stakes |
@@ -417,5 +417,5 @@ Open questions for the owner: D1 (vanilla shell chrome), and whether the operato
 
 * **Captures.** Release `d90b9c2` binaries were copied byte-identically (hashes match `receipt.yaml`) into a scratch directory on the games disk, which was deleted after the run along with every temporary data root. They ran on private Xvfb `:163` with `WAYLAND_DISPLAY` unset. Launcher states came from `--tab`, from `--manifest http://127.0.0.1:9/…` (the error), and from a real first-run download that was killed after the capture. Client states were driven through the client's MCP automation (`minecraft_click_screen_button`, `minecraft_open_pause_menu`, `minecraft_open_inventory`) after X11 focus was acquired. One short join to the test server (`135.106.208.217:25565`, username `DesignAudit`) was made for the HUD, pause and inventory captures, then disconnected. The monitor captures are earlier agents' receipts from the nested-compositor branch and are labelled as such.
 * **Sources.** All client citations are pinned to `d90b9c2`. Loader and plugin citations come from the read-only `../solaris-loader` and `../solaris-default-plugins` working trees as of 2026-10-23.
-* **Artwork.** All SVGs are original. Text uses IBM Plex (loaded from jsDelivr fontsource when viewed in a browser, with a system sans fallback otherwise) and *Solaris Pixel*, an original 5×7 face. The SVGs are the source of truth and can be edited by hand. They were drawn by throwaway Python generators kept outside the repository in `/run/media/kaiserroman/games/solaris-work/design-audit/gen/`; Main may delete that directory. PNG previews were rendered with headless Chromium.
+* **Artwork.** All SVGs are original. Text uses IBM Plex (loaded from jsDelivr fontsource when viewed in a browser, with a system sans fallback otherwise) and *Krasnokamen Pixel*, an original 5×7 face. The SVGs are the source of truth and can be edited by hand. They were drawn by throwaway Python generators kept outside the repository in `/run/media/kaiserroman/games/solaris-work/design-audit/gen/`; Main may delete that directory. PNG previews were rendered with headless Chromium.
 * **No code was changed.** No build was run. This document makes no compatibility or acceptance claim.

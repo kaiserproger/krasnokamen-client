@@ -1,5 +1,7 @@
 # Solaris Native Client specification
 
+> Naming: this product was called Solaris until 2026-11-12 and is now Krasnokamen (the name collided with Oracle and Atari SOLARIS trademarks). This immutable ledger keeps its original wording and line numbers; read "Solaris" as Krasnokamen.
+
 ## Authority and immutable requirement IDs
 
 Authority: `/home/kaiserroman/Downloads/SOLARIS_NATIVE_CLIENT_SPEC_FOR_OPUS.md`, edition 2026-10-01, SHA-256 `645ca42ff3f3083b561acc84a707ea5d4a27fcd383da1cfdc57ab6276f008c2a`, 1116 lines. The complete original text is retained below without omissions, including proposed contracts, tables, code examples, constraints, sources, and non-acceptance caveats. Russian wording is authoritative; introductions in English do not narrow it.

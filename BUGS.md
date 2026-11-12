@@ -6,7 +6,7 @@ The 2026-10-28 protocol-777 cutover and the known-green full-suite baseline
 `f5ac9a4` both report **428 library / 452 library-test errors** under:
 
 ```sh
-cargo clippy --release -p solaris-client --all-targets --message-format=json -- -D warnings
+cargo clippy --release -p krasnokamen-client --all-targets --message-format=json -- -D warnings
 ```
 
 Both commands used the same toolchain/build-support environment and the required
@@ -24,7 +24,7 @@ historical evidence in `.analysis/clippy-base.log` and `.analysis/clippy.log`.
 Strict Clippy is **not green**.
 
 Parity-polish checkpoint (2026-10-30, base `0b00d98`): the required debug
-`cargo clippy -p solaris-client --all-targets --message-format=json -- -D warnings`
+`cargo clippy -p krasnokamen-client --all-targets --message-format=json -- -D warnings`
 still fails with **419 library / 444 library-test errors**. No primary diagnostic
 intersects the added or changed parity-polish portions; this is not a green
 strict-lint result and no warnings were suppressed. Exact output and the

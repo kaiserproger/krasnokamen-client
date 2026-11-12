@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080" role="img" aria-labelledby="title desc">
-  <title id="title">Solaris monitor interaction contract — proposed states, not a runtime screenshot</title>
+  <title id="title">Krasnokamen monitor interaction contract — proposed states, not a runtime screenshot</title>
   <desc id="desc">Three separate authorities: local capture, local input control and another player's viewing. Consent defaults to Deny and discloses the current all-open-screens scope. Owner management separates Revoke all viewers from Close capture. A lower matrix describes pending, canceled, denied, revoked and failed states.</desc>
   <defs>
     <style>
