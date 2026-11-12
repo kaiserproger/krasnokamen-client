@@ -645,6 +645,18 @@ impl App {
                         }
                     }
                 }
+                Command::Minecraft { name, arguments } if name == "client_screen_share" => {
+                    // Screen sharing state lives on the App owner beside the desktop
+                    // computer; the verb runs the player's own request/consent/F8 paths.
+                    let busy = request.automation_fence.is_some()
+                        && self.pending_tasks.iter().any(|(pending, _)| pending.automation_fence.is_some());
+                    let result = if busy {
+                        Err("writer_action_busy".into())
+                    } else {
+                        self.screen_share_command(arguments)
+                    };
+                    let _ = request.reply.send(result);
+                }
                 Command::Minecraft { name, arguments }
                     if name == "minecraft_toggle_debug_overlay" =>
                 {

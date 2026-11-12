@@ -131,6 +131,10 @@ pub(crate) struct Relay {
     pub requests: VecDeque<Request>,
     /// Owner answers to this viewer's requests; the app knows which are still wanted.
     pub answers: VecDeque<(Id, bool)>,
+    /// Owner answers the server delivered to this viewer: [allowed, denied].
+    pub permission_answers: [u64; 2],
+    /// Allows for requests this viewer had already cancelled (F8), which it then left.
+    pub cancelled_grants_left: u64,
     pub notice: Option<String>,
     /// Screens the server asked this owner to start a key frame for (consumed by the encoder).
     pub key_wanted: BTreeSet<Id>,
@@ -240,6 +244,7 @@ impl Relay {
                     return Err("screen permission answer bound".into());
                 }
                 self.answers.push_back((id, allow));
+                self.permission_answers[usize::from(!allow)] += 1;
             }
             6 => {
                 let on = r.bool()?;
@@ -440,6 +445,20 @@ mod tests {
         assert!(relay.demand.is_empty());
         active.push(0);
         assert!(relay.receive(&active).is_err());
+    }
+    #[test]
+    fn owner_answers_are_queued_with_their_screen_and_counted() {
+        let mut relay = Relay::default();
+        let answer = |allow: u8| { let mut packet = id().packet(5); packet.push(allow); packet };
+        relay.receive(&answer(1)).unwrap();
+        relay.receive(&answer(0)).unwrap();
+        relay.receive(&answer(1)).unwrap();
+        assert_eq!(relay.answers.pop_front(), Some((id(), true)));
+        assert_eq!(relay.answers.pop_front(), Some((id(), false)));
+        assert_eq!(relay.permission_answers, [2, 1], "[allowed, denied] delivered by the server");
+        assert!(relay.notice.is_none(), "the app decides whether an answer is still wanted");
+        assert!(relay.receive(&id().packet(5)).is_err(), "an answer carries its allow byte");
+        assert_eq!(relay.permission_answers, [2, 1]);
     }
     /// The server forwards owner parts as one FRAME: id, seq/size/codec/key header, joined data.
     fn relayed(packets: &[Vec<u8>]) -> Vec<u8> {

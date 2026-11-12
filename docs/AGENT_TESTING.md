@@ -209,9 +209,18 @@ exposes the displayed startup status or failure text so graphical probes can
 distinguish a live wait from an actual failure.
 `minecraft_observe.voice` exposes only connection negotiation and listen state;
 it does not prove microphone capture or playback. `screen_sharing` reports
-announced monitor identities, pending pictures and the process-wide decoded
-frame counter; `screen_audio` reports capture and per-monitor decode counters.
+announced monitor identities, pending pictures, the process-wide decoded and
+received (`received_frames`, every relayed FRAME, decodable or not) frame
+counters, the owner answers the server delivered to this viewer
+(`permission_answers.allowed`/`denied`) and `cancelled_grants_left`, the Allows
+for requests this viewer had already cancelled with F8 (each is answered with
+LEAVE); `screen_audio` reports capture and per-monitor decode counters.
 These are diagnostics, not substitutes for checking presented frames or audible output.
+The native-only tool `client_screen_share` drives sharing through the player's
+own paths: `action: "request"` is the right-click on the active remote monitor
+under the crosshair, `"answer"` with `allow` answers the pending consent dialog,
+`"leave"` is F8 (revoke this player's viewers, leave or cancel every watched
+screen). It needs a presentation client in the game screen.
 
 
 ### Local interaction failures versus wire failures

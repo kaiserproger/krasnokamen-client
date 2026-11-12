@@ -55,6 +55,15 @@ pub(super) fn tools() -> &'static Vec<Value> {
             },"required":["expected_screen_class","expected_title","action","x","y"],"additionalProperties":false},
             "annotations":{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true}
         }));
+        tools.push(serde_json::json!({
+            "name":"client_screen_share",
+            "description":"Screen sharing through the player's own paths: request asks the owner of the active remote monitor under the crosshair (right-click), answer allows or denies the pending consent dialog, leave revokes this player's viewers and leaves or cancels every watched screen (F8). Viewer counters are in observe screen_sharing.",
+            "inputSchema":{"type":"object","properties":{
+                "action":{"type":"string","enum":["request","answer","leave"]},
+                "allow":{"type":"boolean","description":"Required for answer."}
+            },"required":["action"],"additionalProperties":false},
+            "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true}
+        }));
         tools
     });
     &TOOLS
@@ -65,6 +74,7 @@ pub(super) fn state_supported(name: &str) -> bool {
         name,
         "client_capture"
             | "client_pointer"
+            | "client_screen_share"
             | "minecraft_screenshot"
             | "minecraft_click_confirmation_button"
             | "minecraft_click_screen_button"

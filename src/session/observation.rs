@@ -73,6 +73,13 @@ impl Session {
         value["screen_sharing"] = json!({
             "registered": self.screen_relay.registered,
             "decoded_frames": crate::computer::relay::stats::RX_DECODED.load(std::sync::atomic::Ordering::Relaxed),
+            // Viewer side: every FRAME the server relayed here, decodable or not.
+            "received_frames": crate::computer::relay::stats::RX_FRAMES.load(std::sync::atomic::Ordering::Relaxed),
+            "permission_answers": {
+                "allowed": self.screen_relay.permission_answers[0],
+                "denied": self.screen_relay.permission_answers[1],
+            },
+            "cancelled_grants_left": self.screen_relay.cancelled_grants_left,
             "screens": self.screen_relay.active.iter().map(|(id, remote)| json!({
                 "block": id.face.block, "side": id.face.side, "dimension": id.dimension,
                 "frame_pending": remote.frame.is_some()

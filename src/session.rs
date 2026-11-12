@@ -847,6 +847,14 @@ impl Session {
             _ => None,
         }
     }
+    /// Live overworld Play whose serverbound payloads are accepted and dropped (replay
+    /// mode): App-level tests of serverbound paths without a network.
+    #[cfg(test)]
+    pub(crate) fn enter_offline_play_for_test(&mut self) {
+        self.replaying = true;
+        self.phase = "play".into();
+        self.dimension = Some("minecraft:overworld".into());
+    }
     pub(crate) fn register_screens(&mut self) -> Result<()> {
         if !self.screen_relay.registered && self.phase == "play" {
             self.send_loader(crate::loader::Outgoing {

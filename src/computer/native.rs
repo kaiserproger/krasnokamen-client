@@ -186,6 +186,20 @@ impl App {
             _ => None,
         }
     }
+    /// The whole monitor rectangle a crosshair hit belongs to, or the message telling the
+    /// player why it is not one (missing blocks, wrong side).
+    fn monitor_face(&self, hit: &BlockHit) -> Result<Face, String> {
+        Face::rectangle(hit.position, hit.face, |p| self.session.world.block(p) == Some(hit.state)).map_err(|error| {
+            let actual_side = match error {
+                super::RectangleError::Missing(position) => self.session.world.block(position)
+                    .and_then(|state| self.session.content.as_ref()?.loader_block(state))
+                    .filter(|(name, _)| *name == "computer:monitor")
+                    .map(|(_, side)| side),
+                _ => None,
+            };
+            error.message(hit.face, actual_side)
+        })
+    }
     pub(crate) fn update_computer(&mut self) {
         let enabled = self
             .session
@@ -303,7 +317,8 @@ impl App {
             DesktopAction::CancelPicker if !self.computer.picker.is_empty() => {
                 if self.computer.source.is_some() { self.computer.picker.clear(); } else { self.computer.close(); }
             }
-            DesktopAction::ViewPermission { request, allow } => self.answer_screen_request(request, allow),
+            // The dialog shows a failure through the computer message.
+            DesktopAction::ViewPermission { request, allow } => { let _ = self.answer_screen_request(request, allow); }
             DesktopAction::DismissMenu => self.computer.managing = false,
             DesktopAction::ChangeWindow if self.computer.managing => self.pick_computer_window(),
             DesktopAction::StopCapture if self.computer.managing => self.computer.close(),
@@ -482,17 +497,10 @@ impl App {
                 if !pressed {
                     return true;
                 }
-                let face = match Face::rectangle(hit.position, hit.face, |p| self.session.world.block(p) == Some(hit.state)) {
+                let face = match self.monitor_face(&hit) {
                     Ok(face) => face,
-                    Err(error) => {
-                        let actual_side = match error {
-                            super::RectangleError::Missing(position) => self.session.world.block(position)
-                                .and_then(|state| self.session.content.as_ref()?.loader_block(state))
-                                .filter(|(name, _)| *name == "computer:monitor")
-                                .map(|(_, side)| side),
-                            _ => None,
-                        };
-                        self.computer.message = error.message(hit.face, actual_side);
+                    Err(message) => {
+                        self.computer.message = message;
                         self.publish_session();
                         return true;
                     }
