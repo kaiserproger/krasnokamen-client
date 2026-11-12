@@ -570,8 +570,12 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
   the launcher needs no JDK or runtime extraction. The trident layer above was translated
   offline from local 26.3 class data; it is an explicit exception to independent geometry authoring.
-* Spider legs use a Solaris-authored alternating swing driven by received displacement;
-  they ease back to their authored resting pose when movement stops. The adult spider rig
-  now uses single sloped leg bars rather than added vertical feet, based on a Java
-  capture. A post-build native screenshot was inspected, but movement phase was not
-  matched to Java; this is not a claim of vanilla gait parity.
+* Spider and cave spider legs follow 26.3 `SpiderModel.setupAnim` (`presentation::spider_leg_swing`,
+  from `javap`): per leg pair a yaw offset -(cos(2 pos 0.6662 + shift) 0.4) speed and a roll offset
+  abs(sin(pos 0.6662 + shift) 0.4) speed, shifts 0, pi, pi/2, 3pi/2 from the hind pair forward, left
+  legs mirrored; they return to the rest pose when the walk speed decays. The adult spider rig
+  uses single sloped leg bars rather than added vertical feet, based on a Java capture.
+* Zombie family arms (`zombie`, `husk`, `drowned`, `giant`, `zombie_villager`, `zombified_piglin`)
+  follow 26.3 `ZombieModel.setupAttackAnimation` -> `AnimationUtils.animateZombieArms` plus the
+  `bobModelPart` pair (`presentation::zombie_arm_rotation`, from `javap`): the arms are assigned
+  (80 degrees forward, 120 aggressive, hanging for a baby that holds an item), never walk-swung.

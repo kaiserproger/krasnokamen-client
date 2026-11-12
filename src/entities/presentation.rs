@@ -1466,6 +1466,41 @@ impl AxisMap {
 /// Leg pitch of seated passengers.
 pub(super) const RIDING_LEG_PITCH: f32 = -1.4137167;
 
+/// Source `ZombieModel.setupAttackAnimation` -> `AnimationUtils.animateZombieArms` (26.3, javap), then
+/// the `bobModelPart` pair of `HumanoidModel.setupAnim`: both arms are assigned, never walk-swung.
+/// `raised` is false only for a baby that holds an item (arms hang, the swing terms flip sign).
+/// `side` is +1 for the right arm and -1 for the left; `attack` is the swing progress.
+pub(super) fn zombie_arm_rotation(
+    side: f32,
+    (raised, aggressive): (bool, bool),
+    age: f32,
+    attack: Option<f32>,
+) -> Vec3 {
+    use std::f32::consts::PI;
+    let direction = if raised { 1. } else { -1. };
+    let (swing, recover) = attack.map_or((0., 0.), |a| {
+        (direction * (a * PI).sin(), ((1. - (1. - a) * (1. - a)) * PI).sin())
+    });
+    let base = if raised { -PI / if aggressive { 1.5 } else { 2.25 } } else { 0. };
+    Vec3::new(
+        base + swing * 1.2 - recover * 0.4 + side * (age * 0.067).sin() * 0.05,
+        -direction * side * (0.1 - swing * 0.6),
+        side * ((age * 0.09).cos() * 0.05 + 0.05),
+    )
+}
+
+/// Source `SpiderModel.setupAnim` (26.3, javap): yaw and roll offsets of leg `legN` (N = 0..8, right
+/// and left legs of the pairs from the hind pair to the front pair). `phase` is walk position * 0.6662.
+pub(super) fn spider_leg_swing(name: &str, phase: f32, speed: f32) -> Option<(f32, f32)> {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let index: usize = name.strip_prefix("leg")?.parse().ok().filter(|i| *i < 8)?;
+    let shift = [0., PI, FRAC_PI_2, 3. * FRAC_PI_2][index / 2];
+    let side = if index % 2 == 0 { 1. } else { -1. };
+    let yaw = -((phase * 2. + shift).cos() * 0.4) * speed;
+    let roll = ((phase + shift).sin() * 0.4).abs() * speed;
+    Some((side * yaw, side * roll))
+}
+
 /// Entity-level pose of the role-driven bones: the part of `evaluate_rig` that depends
 /// on a bone's role only. The GPU crowd renderer replays it per bone of every part.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1542,22 +1577,9 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         {
             map.offset.x -= (a * std::f32::consts::PI).sin() * 1.2;
         }
-        if zombie_arms_raised {
-            // Observed vanilla idle silhouette is 80 degrees forward, not horizontal.
+        if zombie_arms {
             let side = if arm == 0 { 1. } else { -1. };
-            let bob = (age * 0.07).sin() * 0.05 * side;
-            let mut rotation = Vec3::new(
-                if aggressive { -120_f32.to_radians() } else { -80_f32.to_radians() } + bob,
-                -side * 0.1,
-                side * ((age * 0.09).cos() + 1.) * 0.05,
-            );
-            if let Some(a) = attack {
-                let swing = (a * std::f32::consts::PI).sin();
-                let recover = ((1. - (1. - a).powi(2)) * std::f32::consts::PI).sin();
-                rotation.x += swing * 1.1 - recover * 0.35;
-                rotation.y += side * swing * 0.6;
-            }
-            map = AxisMap::set(rotation);
+            map = AxisMap::set(zombie_arm_rotation(side, (zombie_arms_raised, aggressive), age, attack));
         }
         if trident && (arm == 1) == left_main {
             map.scale.x *= 0.5;
@@ -1670,21 +1692,11 @@ pub(super) fn evaluate_posed_rig(
             }
             BoneRole::Nose | BoneRole::CrossedArms | BoneRole::Fixed => {}
         }
-        if matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider") {
-            // Solaris-authored alternating leg swing, driven by received
-            // displacement and eased to the authored rest pose when stopped.
-            let leg = match bone.name.as_str() {
-                "leg0" | "leg4" => Some((1., 1.)),
-                "leg1" | "leg5" => Some((-1., -1.)),
-                "leg2" | "leg6" => Some((1., -1.)),
-                "leg3" | "leg7" => Some((-1., 1.)),
-                _ => None,
-            };
-            if let Some((side, phase_sign)) = leg {
-                let swing = phase.sin() * amplitude * phase_sign;
-                rotation.y += side * swing * 0.3;
-                rotation.z += side * swing * 0.15;
-            }
+        if matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider")
+            && let Some((yaw, roll)) = spider_leg_swing(&bone.name, phase, amplitude)
+        {
+            rotation.y += yaw;
+            rotation.z += roll;
         }
         if pet_sitting {
             // These are Solaris-authored poses for the embedded rigs: lower the
