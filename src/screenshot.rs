@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn rc1_screenshot_timestamp_and_collision_suffixes_preserve_existing_files() {
-        let dir = std::env::temp_dir().join(format!("solaris-screenshot-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("krasnokamen-screenshot-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let stamp = "2026-10-29_12.34.56";
         let first = path(&dir, stamp, [].iter());

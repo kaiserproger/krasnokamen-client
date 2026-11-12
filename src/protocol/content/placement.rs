@@ -125,25 +125,25 @@ impl PlacementFacts {
     ) -> Result<Self> {
         let placement: PlacementReport = report(
             data,
-            "SOLARIS_CLIENT_PLACEMENT_FACTS",
+            "KRASNOKAMEN_CLIENT_PLACEMENT_FACTS",
             "placement_state_facts.json",
             32 << 20,
         )?;
         let items: ItemPlacementReport = report(
             data,
-            "SOLARIS_CLIENT_ITEM_PLACEMENT_FACTS",
+            "KRASNOKAMEN_CLIENT_ITEM_PLACEMENT_FACTS",
             "item_placement_facts.json",
             2 << 20,
         )?;
         let actions: ActionReport = report(
             data,
-            "SOLARIS_CLIENT_ACTION_STATE_FACTS",
+            "KRASNOKAMEN_CLIENT_ACTION_STATE_FACTS",
             "action_state_facts.json",
             16 << 20,
         )?;
         let entity_use: Value = report(
             data,
-            "SOLARIS_CLIENT_ENTITY_USE_STATIC",
+            "KRASNOKAMEN_CLIENT_ENTITY_USE_STATIC",
             "entity_use_static.json",
             2 << 20,
         )?;

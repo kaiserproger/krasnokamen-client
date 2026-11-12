@@ -246,7 +246,7 @@ mod tests {
     fn received_frame_anchor_and_metadata_direction_define_pop_box() {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let facts: Value = serde_json::from_str(include_str!(
-            "../../../../assets/solaris/entities/entity-facts.json")).unwrap();
+            "../../../../assets/krasnokamen/entities/entity-facts.json")).unwrap();
         let mut content = Content::test_cube();
         content.entity_names = facts["entities"].as_object().unwrap().iter()
             .map(|(name, schema)| (schema["protocol_id"].as_u64().unwrap() as u32, name.clone()))

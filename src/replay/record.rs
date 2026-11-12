@@ -153,7 +153,7 @@ mod tests {
         }}));
         for tick in [9000,9003] {
             let mut body=crate::protocol::Writer::default();
-            body.string("solaris:tick");body.i64(tick);body.i64(0);
+            body.string("krasnokamen:tick");body.i64(tick);body.i64(0);
             session.receive_packet(crate::protocol::network::Phase::Play,
                 crate::protocol::packet_ids::play::clientbound::CUSTOM_PAYLOAD,&body.0).unwrap();
         }

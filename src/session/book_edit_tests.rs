@@ -103,7 +103,7 @@ fn rc1_book_live_write_reopen_sign() {
         ui.synchronize(&session.inventory, session.content.as_ref().unwrap()).unwrap();
         ui.context(&session.inventory)
     }
-    let address = std::env::var("SOLARIS_BOOK_SMOKE_SERVER").expect("controlled book server");
+    let address = std::env::var("KRASNOKAMEN_BOOK_SMOKE_SERVER").expect("controlled book server");
     assert!(address.parse::<std::net::SocketAddr>().unwrap().ip().is_loopback());
     let mut session = Session::new_mode("rc1-book-live".into(), false);
     let owner = thread::current();

@@ -1,4 +1,4 @@
-//! Opt-in frame pacing trace: `SOLARIS_CLIENT_FRAME_TRACE=<file>` writes one
+//! Opt-in frame pacing trace: `KRASNOKAMEN_CLIENT_FRAME_TRACE=<file>` writes one
 //! tab-separated line per submitted frame, read from the same render metrics
 //! the observation publishes. Unset (the default) costs nothing.
 
@@ -147,7 +147,7 @@ pub(crate) struct FrameTrace {
 
 impl FrameTrace {
     pub(crate) fn from_env() -> Option<Self> {
-        let path = std::env::var_os("SOLARIS_CLIENT_FRAME_TRACE")?;
+        let path = std::env::var_os("KRASNOKAMEN_CLIENT_FRAME_TRACE")?;
         let out = match File::create(&path) {
             Ok(file) => file,
             Err(error) => {
@@ -177,7 +177,7 @@ impl FrameTrace {
         let writer_dropped = dropped.clone();
         let writer = std::thread::Builder::new().name("frame-trace".into()).spawn(move || {
             let mut out = LineWriter::new(out);
-            writeln!(out, "# solaris_frame_profile\t{header}")?;
+            writeln!(out, "# krasnokamen_frame_profile\t{header}")?;
             writeln!(out, "t_ms\tframe_id\t{}\tlook_events\tprevious_trace_record_ms\tskipped_draw_attempts\tskipped_draw_ms\tskipped_advance_ms", COLUMNS.join("\t"))?;
             let mut summary = Summary::default();
             for line in receiver {
@@ -377,14 +377,14 @@ mod tests {
 
     #[test]
     fn profile_header_identifies_format_and_version() {
-        let path = std::env::temp_dir().join(format!("solaris-profile-header-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!("krasnokamen-profile-header-{}.tsv", std::process::id()));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
         trace.metadata(&json!({"adapter":{"name":"test GPU","driver":"test driver"},
             "resolution":[1920,1080],"graphics_preset":"high","render_distance":8}));
         drop(trace);
         let text = std::fs::read_to_string(&path).unwrap();
         std::fs::remove_file(path).unwrap();
-        assert!(text.starts_with("# solaris_frame_profile\t"));
+        assert!(text.starts_with("# krasnokamen_frame_profile\t"));
         assert!(text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.contains("\"name\":\"test GPU\""));
         assert!(text.contains("\"render_distance\":8"));
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn truncated_profile_can_be_summarized() {
-        let path = std::env::temp_dir().join(format!("solaris-truncated-profile-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!("krasnokamen-truncated-profile-{}.tsv", std::process::id()));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
         trace.record(&json!({"submitted_frame_id":"1","frame_wall_ms":8.0,
             "gpu_timestamps":{"frame_id":"1","passes_ms":{"opaque":2.0}}}), 0);
@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn trace_preserves_completed_gpu_frame_identity_and_draw_phases() {
-        let path = std::env::temp_dir().join(format!("solaris-frame-trace-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!("krasnokamen-frame-trace-{}.tsv", std::process::id()));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
         let gpu = json!({"frame_id":"39","passes_ms":{"opaque":2.5},"total_ms":2.5});
         let mut render = json!({

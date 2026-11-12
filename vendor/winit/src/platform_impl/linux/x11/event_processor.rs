@@ -1132,7 +1132,7 @@ impl EventProcessor {
                 button: MouseButton::Right,
             },
 
-            // SOLARIS PATCH: a core-protocol wheel notch (buttons 4..=7) is a press plus a
+            // KRASNOKAMEN PATCH: a core-protocol wheel notch (buttons 4..=7) is a press plus a
             // release. Upstream turns both into `MouseWheel`, doubling every notch. The
             // press is the notch (as in GLFW); the release carries no movement.
             4..=7 if state == ElementState::Released => return,

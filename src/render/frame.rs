@@ -642,7 +642,7 @@ impl Renderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Solaris complete frame"),
+                label: Some("Krasnokamen complete frame"),
             });
         self.timing.begin();
         let hiz = !self.reference_mode && self.mdi.as_ref().is_some_and(mdi::Indirect::hiz);

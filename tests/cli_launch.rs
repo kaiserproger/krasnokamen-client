@@ -1,9 +1,9 @@
 use std::{path::PathBuf, process::Command};
 
 fn client() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_solaris-client"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_krasnokamen-client"));
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("SOLARIS_CLIENT_") {
+        if key.to_string_lossy().starts_with("KRASNOKAMEN_CLIENT_") {
             command.env_remove(key);
         }
     }
@@ -66,13 +66,13 @@ fn direct_join_needs_no_explicit_profile_or_username() {
     ] {
         let output = client()
             .args(args)
-            .args(["--data-dir", "/nonexistent/solaris-cli-direct"])
+            .args(["--data-dir", "/nonexistent/krasnokamen-cli-direct"])
             .output()
             .unwrap();
         let error = String::from_utf8(output.stderr).unwrap();
         assert!(!output.status.success());
         assert!(
-            error.contains("missing content file: /nonexistent/solaris-cli-direct/facts/"),
+            error.contains("missing content file: /nonexistent/krasnokamen-cli-direct/facts/"),
             "{error}"
         );
     }
@@ -80,12 +80,12 @@ fn direct_join_needs_no_explicit_profile_or_username() {
 
 #[test]
 fn setup_names_missing_source_before_populating_root() {
-    let root = std::env::temp_dir().join(format!("solaris-cli-setup-test-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("krasnokamen-cli-setup-test-{}", std::process::id()));
     let output = client()
         .args([
             "setup",
             "--from-dist",
-            "/nonexistent/solaris-dist",
+            "/nonexistent/krasnokamen-dist",
             "--assets",
             "/nonexistent/prism-assets",
             "--data-dir",
@@ -96,17 +96,17 @@ fn setup_names_missing_source_before_populating_root() {
     assert!(!output.status.success());
     assert!(!root.exists());
     let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("/nonexistent/solaris-dist/facts"), "{error}");
+    assert!(error.contains("/nonexistent/krasnokamen-dist/facts"), "{error}");
 }
 
 #[test]
 fn xdg_default_and_explicit_environment_override_are_respected() {
-    let root = std::env::temp_dir().join(format!("solaris-cli-xdg-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("krasnokamen-cli-xdg-{}", std::process::id()));
     let output = client().env("XDG_DATA_HOME", &root).output().unwrap();
     let error = String::from_utf8(output.stderr).unwrap();
     assert!(
         error.contains(
-            root.join("solaris-client/facts/block_collision_shapes_26_3.bin")
+            root.join("krasnokamen-client/facts/block_collision_shapes_26_3.bin")
                 .to_str()
                 .unwrap()
         ),
@@ -114,7 +114,7 @@ fn xdg_default_and_explicit_environment_override_are_respected() {
     );
     let override_path = root.join("custom-collision.bin");
     let output = client()
-        .env("SOLARIS_CLIENT_COLLISION_SHAPES", &override_path)
+        .env("KRASNOKAMEN_CLIENT_COLLISION_SHAPES", &override_path)
         .output()
         .unwrap();
     let error = String::from_utf8(output.stderr).unwrap();
@@ -124,7 +124,7 @@ fn xdg_default_and_explicit_environment_override_are_respected() {
 #[cfg(unix)]
 #[test]
 fn setup_links_existing_caches_and_is_repeatable() {
-    let base = std::env::temp_dir().join(format!("solaris-cli-links-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("krasnokamen-cli-links-{}", std::process::id()));
     let dist = base.join("dist");
     let assets = base.join("prism");
     let root = base.join("installed");

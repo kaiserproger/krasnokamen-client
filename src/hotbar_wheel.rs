@@ -8,7 +8,7 @@
 //!
 //! X11 core-protocol wheels (buttons 4..=7: XTest/Xvfb, Xwayland, VNC) send a
 //! press and a release per notch. The vendored winit (`vendor/winit`, see its
-//! `SOLARIS_PATCH.md`) ignores the release at the source, so every `MouseWheel`
+//! `KRASNOKAMEN_PATCH.md`) ignores the release at the source, so every `MouseWheel`
 //! that reaches this module is a real notch and none is deduplicated here.
 
 /// Pixel-delta units that make up one wheel notch (touchpad scrolling).

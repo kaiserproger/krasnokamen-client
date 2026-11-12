@@ -31,7 +31,7 @@ pub struct Job {
 
 pub fn client() -> Result<Client> {
     Client::builder()
-        .user_agent(concat!("solaris-launcher/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("krasnokamen-launcher/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
         // blocking reqwest has no per-read timeout; bound each request instead
         // (an interrupted attempt resumes from its `.partial` file).

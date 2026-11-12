@@ -301,11 +301,11 @@ pub mod play {
 mod tests {
     use super::*;
     #[test]
-    #[ignore = "needs SOLARIS_CLIENT_PACKETS_REPORT=<26.3 packets.json>"]
+    #[ignore = "needs KRASNOKAMEN_CLIENT_PACKETS_REPORT=<26.3 packets.json>"]
     fn all_packet_ids_match_26_3_report() {
-        let path = std::env::var_os("SOLARIS_CLIENT_PACKETS_REPORT")
+        let path = std::env::var_os("KRASNOKAMEN_CLIENT_PACKETS_REPORT")
             .map(std::path::PathBuf::from)
-            .expect("set SOLARIS_CLIENT_PACKETS_REPORT=<26.3 packets.json> to run this acceptance test");
+            .expect("set KRASNOKAMEN_CLIENT_PACKETS_REPORT=<26.3 packets.json> to run this acceptance test");
         let report: serde_json::Value = serde_json::from_slice(
             &std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read 26.3 packet report {}: {e}", path.display()))
         ).expect("26.3 packet report JSON");

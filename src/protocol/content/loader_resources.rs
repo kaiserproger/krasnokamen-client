@@ -27,7 +27,7 @@ impl ResourceSource {
                 .split_once('/')
                 .ok_or("Loader resource namespace missing")?;
             split_id(&format!("{ns}:{resource}"))?;
-            if ns == "minecraft" || ns == "solaris" {
+            if ns == "minecraft" || ns == "krasnokamen" {
                 return Err(format!(
                     "Loader resource cannot override built-in namespace {ns}"
                 ));
@@ -233,7 +233,7 @@ impl Content {
             }
         }
         for (name, region) in &atlas.textures {
-            if name == "solaris:white" || name == "minecraft:missingno" {
+            if name == "krasnokamen:white" || name == "minecraft:missingno" {
                 continue;
             }
             let mut region = *region;

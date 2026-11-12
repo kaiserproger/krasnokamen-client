@@ -29,7 +29,7 @@ def png(path, alpha):
 
 
 def main():
-    assets = ROOT / 'assets' / 'solaris_fixture'
+    assets = ROOT / 'assets' / 'krasnokamen_fixture'
     png(assets / 'textures' / 'block' / 'checker.png', False)
     png(assets / 'textures' / 'block' / 'cutout.png', True)
     sound = assets / 'sounds' / 'confirmation.wav'
@@ -50,13 +50,13 @@ def main():
                     '-q:a', '4', '-fflags', '+bitexact', '-flags:a', '+bitexact',
                     str(sound.with_suffix('.ogg'))], check=True)
     (assets / 'sounds.json').write_text(json.dumps({
-        'confirmation': {'sounds': ['solaris_fixture:confirmation']}
+        'confirmation': {'sounds': ['krasnokamen_fixture:confirmation']}
     }, indent=2) + '\n')
     (ROOT / 'pack.mcmeta').write_text(json.dumps({
-        'pack': {'description': 'Solaris original redistributable fixtures',
+        'pack': {'description': 'Krasnokamen original redistributable fixtures',
                  'min_format': [84, 0], 'max_format': [84, 0]}
     }, indent=2) + '\n')
-    model = {'textures': {'all': 'solaris_fixture:block/checker'}, 'elements': [
+    model = {'textures': {'all': 'krasnokamen_fixture:block/checker'}, 'elements': [
         {'from': [0, 0, 0], 'to': [16, 16, 16], 'faces': {
             face: {'uv': [0, 0, 16, 16], 'texture': '#all', 'cullface': face}
             for face in ('down', 'up', 'north', 'south', 'west', 'east')}}]}
@@ -69,8 +69,8 @@ def main():
             data = path.read_bytes()
             files.append({'path': str(path.relative_to(ROOT)), 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
     (ROOT / 'provenance.json').write_text(json.dumps({
-        'schema': 1, 'namespace': 'solaris_fixture', 'license': 'MIT OR Apache-2.0',
-        'copyright': '2026 Solaris Client contributors',
+        'schema': 1, 'namespace': 'krasnokamen_fixture', 'license': 'MIT OR Apache-2.0',
+        'copyright': '2026 Krasnokamen Client contributors',
         'origin': 'Original procedural checker/cutout image, authored cuboid model and mathematical synthesized tone; no Mojang input bytes.',
         'generator': 'generate.py', 'texture': {'width': 16, 'height': 16, 'format': 'RGBA8 PNG'},
         'sound': {'formats': ['PCM16 WAV', 'Vorbis OGG'], 'sample_rate': 48000, 'channels': 1, 'samples': 12000},

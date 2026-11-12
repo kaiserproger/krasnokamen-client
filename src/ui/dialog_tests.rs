@@ -104,14 +104,14 @@ fn sample(extra: Vec<(&str, Nbt)>) -> Nbt {
             list(vec![
                 button(
                     "Found",
-                    Some(custom("solaris:settlement/found", vec![("v", Nbt::Int(2))])),
+                    Some(custom("krasnokamen:settlement/found", vec![("v", Nbt::Int(2))])),
                 ),
                 button("Plain", None),
             ]),
         ),
         (
             "exit_action",
-            button("Close", Some(custom("solaris:settlement/cancel", vec![]))),
+            button("Close", Some(custom("krasnokamen:settlement/cancel", vec![]))),
         ),
     ];
     for (key, value) in extra {
@@ -256,7 +256,7 @@ fn button_click_sends_typed_inputs_merged_over_additions_and_closes() {
     rebuild(&mut ui, &content, &inventory);
     let effects = click(&mut ui, &content, &mut inventory, "dialog/action/0");
     let (id, payload) = sent(&effects);
-    assert_eq!(id, "solaris:settlement/found");
+    assert_eq!(id, "krasnokamen:settlement/found");
     assert_eq!(
         payload.get("v"),
         Some(&Nbt::Int(2)),
@@ -347,7 +347,7 @@ fn escape_runs_exit_action_unless_the_dialog_cannot_be_closed() {
             &content,
         )
         .unwrap();
-    assert_eq!(sent(&effects).0, "solaris:settlement/cancel");
+    assert_eq!(sent(&effects).0, "krasnokamen:settlement/cancel");
     assert_eq!(ui.screen(), Screen::Game);
 
     let (content, mut inventory, mut ui) = state();
@@ -379,8 +379,8 @@ fn notice_and_confirmation_use_footer_buttons_and_escape_picks_the_cancel_side()
         ("type", s("minecraft:confirmation")),
         ("title", s("Sure?")),
         ("pause", Nbt::Byte(0)),
-        ("yes", button("Yes", Some(custom("solaris:x/yes", vec![])))),
-        ("no", button("No", Some(custom("solaris:x/no", vec![])))),
+        ("yes", button("Yes", Some(custom("krasnokamen:x/yes", vec![])))),
+        ("no", button("No", Some(custom("krasnokamen:x/no", vec![])))),
     ]);
     show(&mut ui, &confirm).unwrap();
     rebuild(&mut ui, &content, &inventory);
@@ -409,7 +409,7 @@ fn notice_and_confirmation_use_footer_buttons_and_escape_picks_the_cancel_side()
             &content,
         )
         .unwrap();
-    assert_eq!(sent(&effects).0, "solaris:x/no");
+    assert_eq!(sent(&effects).0, "krasnokamen:x/no");
 
     // Notice without an action shows a default OK that just closes.
     let notice = compound(vec![
@@ -430,7 +430,7 @@ fn after_action_none_keeps_the_dialog_and_wait_for_response_blocks_until_cleared
     show(&mut ui, &sample(vec![("after_action", s("none"))])).unwrap();
     rebuild(&mut ui, &content, &inventory);
     let effects = click(&mut ui, &content, &mut inventory, "dialog/action/0");
-    assert_eq!(sent(&effects).0, "solaris:settlement/found");
+    assert_eq!(sent(&effects).0, "krasnokamen:settlement/found");
     assert_eq!(ui.screen(), Screen::ServerDialog);
 
     let (content, mut inventory, mut ui) = state();
@@ -716,7 +716,7 @@ fn mcp_button_click_scrolls_an_off_screen_dialog_button_into_view() {
         .map(|i| {
             button(
                 &format!("Go {i}"),
-                Some(custom(&format!("solaris:t/{i}"), vec![])),
+                Some(custom(&format!("krasnokamen:t/{i}"), vec![])),
             )
         })
         .collect();
@@ -743,7 +743,7 @@ fn mcp_button_click_scrolls_an_off_screen_dialog_button_into_view() {
     assert!(ui.scroll > 0);
     assert!(node(&ui, "dialog/action/15").visible);
     let effects = ui.execute(intent, &mut inventory, &content).unwrap();
-    assert_eq!(sent(&effects).0, "solaris:t/15");
+    assert_eq!(sent(&effects).0, "krasnokamen:t/15");
 
     // And back up again for a button scrolled above the viewport.
     show(&mut ui, &dialog).unwrap();
@@ -834,12 +834,12 @@ fn body_click_event(ui: &UiState) -> Value {
 
 #[test]
 fn body_custom_click_payload_keeps_its_nbt_types_in_a_slot() {
-    let notice = map_notice("close", custom_click("solaris:settlement/buildings"));
+    let notice = map_notice("close", custom_click("krasnokamen:settlement/buildings"));
     let dialog = ServerDialog::parse(&notice).unwrap().unwrap();
     let BodyItem::Text { contents, .. } = &dialog.body[0];
     assert_eq!(
         contents["extra"][0]["click_event"],
-        json!({"action": "custom", "id": "solaris:settlement/buildings", "payload_slot": 0})
+        json!({"action": "custom", "id": "krasnokamen:settlement/buildings", "payload_slot": 0})
     );
     assert_eq!(dialog.click_payloads, vec![map_payload()]);
     // `Identifier.CODEC` fails the whole dialog on a malformed custom id.
@@ -849,16 +849,16 @@ fn body_custom_click_payload_keeps_its_nbt_types_in_a_slot() {
 #[test]
 fn body_click_runs_like_a_static_button_then_the_dialog_after_action() {
     let (_content, _inventory, mut ui) = state();
-    show(&mut ui, &map_notice("close", custom_click("solaris:settlement/buildings"))).unwrap();
+    show(&mut ui, &map_notice("close", custom_click("krasnokamen:settlement/buildings"))).unwrap();
     let mut effects = UiEffects::default();
     ui.dialog_component_click(&body_click_event(&ui), &mut effects)
         .unwrap();
     let (id, payload) = sent(&effects);
-    assert_eq!(id, "solaris:settlement/buildings");
+    assert_eq!(id, "krasnokamen:settlement/buildings");
     assert_eq!(payload, &map_payload(), "typed payload, not its JSON shadow");
     assert_eq!(ui.screen(), Screen::Game, "after_action close");
 
-    show(&mut ui, &map_notice("wait_for_response", custom_click("solaris:x"))).unwrap();
+    show(&mut ui, &map_notice("wait_for_response", custom_click("krasnokamen:x"))).unwrap();
     let event = body_click_event(&ui);
     ui.dialog_component_click(&event, &mut UiEffects::default())
         .unwrap();
@@ -934,7 +934,7 @@ fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
     use crate::ui::PointerPhase::{Down, Move, Up};
     let (content, mut inventory, mut ui) = rendered();
     // after_action none keeps the dialog for the click; closing is covered state-only above.
-    show(&mut ui, &map_notice("none", custom_click("solaris:settlement/buildings"))).unwrap();
+    show(&mut ui, &map_notice("none", custom_click("krasnokamen:settlement/buildings"))).unwrap();
     rebuild(&mut ui, &content, &inventory);
     let bounds = |ui: &UiState, id: &str| {
         ui.nodes
@@ -965,7 +965,7 @@ fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
     pointer(&mut ui, &content, &mut inventory, Move, [link[0] + 1., link[1] + 4.]);
     let effects = pointer(&mut ui, &content, &mut inventory, Down, [link[0] + 1., link[1] + 4.]);
     let (id, payload) = sent(&effects);
-    assert_eq!(id, "solaris:settlement/buildings");
+    assert_eq!(id, "krasnokamen:settlement/buildings");
     assert_eq!(payload, &map_payload());
     pointer(&mut ui, &content, &mut inventory, Up, [link[0] + 1., link[1] + 4.]);
     assert_eq!(ui.screen(), Screen::ServerDialog);
@@ -975,7 +975,7 @@ fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
 fn client_pointer_gates_on_the_exact_screen_and_emits_cursor_edges() {
     use crate::ui::{PointerButton::Left, PointerPhase};
     let (content, inventory, mut ui) = state();
-    show(&mut ui, &map_notice("close", custom_click("solaris:x"))).unwrap();
+    show(&mut ui, &map_notice("close", custom_click("krasnokamen:x"))).unwrap();
     rebuild(&mut ui, &content, &inventory);
     let class = "net.minecraft.client.gui.screens.dialog.SimpleDialogScreen";
     assert!(

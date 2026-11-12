@@ -1,4 +1,4 @@
-//! Drowned clothing layer, using Solaris-authored rigs and the activated entity textures.
+//! Drowned clothing layer, using Krasnokamen-authored rigs and the activated entity textures.
 use super::{Entity, Models, presentation as p};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},

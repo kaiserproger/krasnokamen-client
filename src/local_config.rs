@@ -17,29 +17,29 @@ pub struct LocalDefaults {
 
 /// Path-valued `client.toml [resources]` keys mapped to their env var.
 const RESOURCE_VARS: &[(&str, &str)] = &[
-    ("data_dir", "SOLARIS_CLIENT_DATA_DIR"),
-    ("resource_root", "SOLARIS_CLIENT_RESOURCE_ROOT"),
-    ("asset_root", "SOLARIS_CLIENT_ASSET_ROOT"),
-    ("asset_index", "SOLARIS_CLIENT_ASSET_INDEX"),
-    ("collision_shapes", "SOLARIS_CLIENT_COLLISION_SHAPES"),
-    ("terrain_facts", "SOLARIS_CLIENT_TERRAIN_FACTS"),
+    ("data_dir", "KRASNOKAMEN_CLIENT_DATA_DIR"),
+    ("resource_root", "KRASNOKAMEN_CLIENT_RESOURCE_ROOT"),
+    ("asset_root", "KRASNOKAMEN_CLIENT_ASSET_ROOT"),
+    ("asset_index", "KRASNOKAMEN_CLIENT_ASSET_INDEX"),
+    ("collision_shapes", "KRASNOKAMEN_CLIENT_COLLISION_SHAPES"),
+    ("terrain_facts", "KRASNOKAMEN_CLIENT_TERRAIN_FACTS"),
     (
         "block_state_predicates",
-        "SOLARIS_CLIENT_BLOCK_STATE_PREDICATES",
+        "KRASNOKAMEN_CLIENT_BLOCK_STATE_PREDICATES",
     ),
-    ("block_use_facts", "SOLARIS_CLIENT_BLOCK_USE_FACTS"),
-    ("item_use_facts", "SOLARIS_CLIENT_ITEM_USE_FACTS"),
-    ("interaction_facts", "SOLARIS_CLIENT_INTERACTION_FACTS"),
-    ("item_properties", "SOLARIS_CLIENT_ITEM_PROPERTIES"),
-    ("creative_tabs", "SOLARIS_CLIENT_CREATIVE_TABS"),
-    ("placement_facts", "SOLARIS_CLIENT_PLACEMENT_FACTS"),
+    ("block_use_facts", "KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS"),
+    ("item_use_facts", "KRASNOKAMEN_CLIENT_ITEM_USE_FACTS"),
+    ("interaction_facts", "KRASNOKAMEN_CLIENT_INTERACTION_FACTS"),
+    ("item_properties", "KRASNOKAMEN_CLIENT_ITEM_PROPERTIES"),
+    ("creative_tabs", "KRASNOKAMEN_CLIENT_CREATIVE_TABS"),
+    ("placement_facts", "KRASNOKAMEN_CLIENT_PLACEMENT_FACTS"),
     (
         "item_placement_facts",
-        "SOLARIS_CLIENT_ITEM_PLACEMENT_FACTS",
+        "KRASNOKAMEN_CLIENT_ITEM_PLACEMENT_FACTS",
     ),
-    ("action_state_facts", "SOLARIS_CLIENT_ACTION_STATE_FACTS"),
-    ("entity_use_static", "SOLARIS_CLIENT_ENTITY_USE_STATIC"),
-    ("resource_packs", "SOLARIS_CLIENT_RESOURCE_PACKS"),
+    ("action_state_facts", "KRASNOKAMEN_CLIENT_ACTION_STATE_FACTS"),
+    ("entity_use_static", "KRASNOKAMEN_CLIENT_ENTITY_USE_STATIC"),
+    ("resource_packs", "KRASNOKAMEN_CLIENT_RESOURCE_PACKS"),
 ];
 
 fn exe_dir() -> Option<PathBuf> {
@@ -132,10 +132,10 @@ pub fn apply_exe_defaults() -> LocalDefaults {
         }
     }
     // Non-path scalar passthrough (env still wins).
-    if std::env::var_os("SOLARIS_CLIENT_LOADER_PERMISSIONS").is_none() {
+    if std::env::var_os("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS").is_none() {
         if let Some(value) = config.get("resources.loader_permissions") {
             if !value.is_empty() {
-                unsafe { std::env::set_var("SOLARIS_CLIENT_LOADER_PERMISSIONS", value) };
+                unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS", value) };
             }
         }
     }
@@ -153,7 +153,7 @@ pub fn apply_exe_defaults() -> LocalDefaults {
 }
 /// Options use the selected data root unless explicitly overridden.
 pub fn client_settings_path() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("SOLARIS_CLIENT_SETTINGS").filter(|v| !v.is_empty()) {
+    if let Some(explicit) = std::env::var_os("KRASNOKAMEN_CLIENT_SETTINGS").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(explicit));
     }
     crate::content_paths::selected_root().ok().map(|root| root.join("client-settings.json"))
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn settings_follow_selected_data_root_and_explicit_override() {
-        const CHILD: &str = "SOLARIS_SETTINGS_PATH_TEST_CHILD";
+        const CHILD: &str = "KRASNOKAMEN_SETTINGS_PATH_TEST_CHILD";
         if let Some(case) = std::env::var_os(CHILD) {
             let root = if case == "explicit-root" {
                 PathBuf::from("/tmp/selected-client-root")
@@ -272,10 +272,10 @@ mod tests {
                 .env("HOME", "/tmp/client-test-home")
                 .env("XDG_DATA_HOME", "/tmp/client-test-xdg")
                 .env("APPDATA", "/tmp/client-test-appdata")
-                .env_remove("SOLARIS_CLIENT_SETTINGS")
-                .env_remove("SOLARIS_CLIENT_ROOT");
+                .env_remove("KRASNOKAMEN_CLIENT_SETTINGS")
+                .env_remove("KRASNOKAMEN_CLIENT_ROOT");
             if case == "settings-override" {
-                child.env("SOLARIS_CLIENT_SETTINGS", "/tmp/custom-settings.json");
+                child.env("KRASNOKAMEN_CLIENT_SETTINGS", "/tmp/custom-settings.json");
             }
             let output = child.output().unwrap();
             assert!(output.status.success(), "{case}: {}", String::from_utf8_lossy(&output.stdout));
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn settings_round_trip_keeps_managed_keys_only() {
         let dir = std::env::temp_dir().join(format!(
-            "solaris-settings-test-{}",
+            "krasnokamen-settings-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn legacy_fancy_shaders_migrates_to_graphics_preset() {
         let dir = std::env::temp_dir().join(format!(
-            "solaris-settings-migrate-{}",
+            "krasnokamen-settings-migrate-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

@@ -1,9 +1,9 @@
-//! Embeds entity models (`assets/solaris/models/entity/*.json`).
+//! Embeds entity models (`assets/krasnokamen/models/entity/*.json`).
 use std::{env, fmt::Write as _, fs, path::PathBuf};
 
 fn main() {
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let dir = root.join("assets/solaris/models/entity");
+    let dir = root.join("assets/krasnokamen/models/entity");
     println!("cargo:rerun-if-changed={}", dir.display());
     println!("cargo:rerun-if-changed=build.rs");
     let mut names: Vec<String> = match fs::read_dir(&dir) {
@@ -26,6 +26,6 @@ fn main() {
         .unwrap();
     }
     out.push_str("];\n");
-    let target = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("solaris_models_embedded.rs");
+    let target = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("krasnokamen_models_embedded.rs");
     fs::write(target, out).unwrap();
 }

@@ -38,7 +38,7 @@ fn equippable_wire_payload_preserves_battle_asset_id() {
     bytes.var(3);
     bytes.var(1);
     bytes.byte(1);
-    bytes.string("solaris_battle:holy");
+    bytes.string("krasnokamen_battle:holy");
     bytes.byte(0);
     bytes.byte(1);
     bytes.var(3);
@@ -48,7 +48,7 @@ fn equippable_wire_payload_preserves_battle_asset_id() {
     bytes.var(2);
     fixture("equippable", &bytes.0, H::record([
         ("slot", H::string("chest")),
-        ("asset_id", H::string("solaris_battle:holy")),
+        ("asset_id", H::string("krasnokamen_battle:holy")),
         ("allowed_entities", H::List(vec![H::string("test:first"), H::string("test:second")])),
     ]));
 }

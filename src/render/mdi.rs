@@ -128,7 +128,7 @@ pub(super) struct Indirect {
     reduce: wgpu::ComputePipeline,
     pyramid: Pyramid,
     hiz: bool,
-    /// Diagnostic (`SOLARIS_CLIENT_HIZ=cold`): forget last frame's visibility
+    /// Diagnostic (`KRASNOKAMEN_CLIENT_HIZ=cold`): forget last frame's visibility
     /// every frame, so every section takes the phase-2 path as after the
     /// worst possible quick turn. Pixels must still be identical.
     cold: bool,

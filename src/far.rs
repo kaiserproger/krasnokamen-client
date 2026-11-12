@@ -1,4 +1,4 @@
-//! Far terrain beyond the server view distance (Solaris `[lod]`, overworld).
+//! Far terrain beyond the server view distance (Krasnokamen `[lod]`, overworld).
 //!
 //! The world is cut into tiles of 16x16 point samples spaced `1 << level`
 //! blocks (levels 0..=6: 1 to 64 blocks). Tiles nearer the camera are finer:
@@ -242,7 +242,7 @@ impl Tile {
     }
 }
 
-/// What the server announced in `solaris:lod/hello`.
+/// What the server announced in `krasnokamen:lod/hello`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ServerLod {
     pub max_distance: u32,
@@ -736,7 +736,7 @@ impl Far {
         self.tiles.get_mut(&key).expect("inserted above")
     }
 
-    /// One `solaris:lod/tile` answer.
+    /// One `krasnokamen:lod/tile` answer.
     pub(crate) fn tile(&mut self, payload: &[u8], content: &Content) -> Result<()> {
         let (key, samples) = decode_tile(payload)?;
         self.inflight.remove(&key);

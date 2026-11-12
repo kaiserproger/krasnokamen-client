@@ -3,36 +3,36 @@ use std::{path::PathBuf, sync::Arc};
 use winit::event_loop::EventLoop;
 
 const HELP: &str = "Usage:
-  solaris-client                         Open the title screen
-  solaris-client --server HOST[:PORT] [--username NAME]
+  krasnokamen-client                         Open the title screen
+  krasnokamen-client --server HOST[:PORT] [--username NAME]
                  [--width W --height H] [--fullscreen] [--data-dir DIR]
-  solaris-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
-  solaris-client play [launch options] [--profile fixture|offline-test]
+  krasnokamen-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
+  krasnokamen-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
                  [--artifact-dir DIR] [--runtime-dir DIR]
-  solaris-client record --server HOST:PORT --username NAME --output take.solrec
+  krasnokamen-client record --server HOST:PORT --username NAME --output take.solrec
                  --header header.json --duration SECONDS [--ready-file FILE] [--data-dir DIR]
                  [--ready-entity-uuids roster.txt |
                   --roster-file roster.txt --roster-ready-file roster.ready]
                  [--roster-timeout SECONDS]
-  solaris-client render-replay --recording take.solrec --camera shot.json
+  krasnokamen-client render-replay --recording take.solrec --camera shot.json
                  --output shot.mp4 [--size 1920x1080] [--start SECONDS --end SECONDS]
                  [--motion-samples 1..16] [--data-dir DIR]
-  solaris-client doctor [--json]
-  solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
-  solaris-client mcp-schema              Export the live native MCP argument schemas
+  krasnokamen-client doctor [--json]
+  krasnokamen-client mcp attach --instance ID --stdio [--descriptor FILE]
+  krasnokamen-client mcp-schema              Export the live native MCP argument schemas
 
-Default data: Linux `$XDG_DATA_HOME/solaris-client` (or `~/.local/share/solaris-client`),
-Windows `%APPDATA%\\solaris-client`, macOS `~/Library/Application Support/solaris-client`;
+Default data: Linux `$XDG_DATA_HOME/krasnokamen-client` (or `~/.local/share/krasnokamen-client`),
+Windows `%APPDATA%\\krasnokamen-client`, macOS `~/Library/Application Support/krasnokamen-client`;
 relative --artifact-dir/--runtime-dir resolve there (defaults artifacts/, runtime/).
-SOLARIS_CLIENT_* environment variables optionally override individual content paths.
+KRASNOKAMEN_CLIENT_* environment variables optionally override individual content paths.
 Default username: Player. Server port defaults to 25565. --help / -h prints this text.
 WASD move, Space jump, Shift sneak, Ctrl sprint, mouse look, left break/right use,
 1–9 hotbar, E inventory, Escape menu.";
 
 fn help() -> String {
     format!(
-        "Solaris native client (Minecraft Java {} offline preview)\n{HELP}",
+        "Krasnokamen native client (Minecraft Java {} offline preview)\n{HELP}",
         crate::singleplayer::GAME_VERSION
     )
 }

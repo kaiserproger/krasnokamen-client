@@ -1,4 +1,4 @@
-//! Authored Solaris palette catalogue. Ordering and IDs are persistence/API
+//! Authored Krasnokamen palette catalogue. Ordering and IDs are persistence/API
 //! contracts; do not derive colors from an ID, random seed, or catalogue index.
 
 use crate::theme::{Palette, Theme, ThemeCategory, rgb};
@@ -58,8 +58,8 @@ const PRESETS: [Preset; 40] = [
     preset!("lavender-mist", "Lavender Mist", Light, 0xF3F0FA, 0xFCFAFF, 0xEAE4F3, 0xE5DEEF, 0x302B42, 0x625670, 0x74569A),
     preset!("glacier", "Glacier", Light, 0xECF4F7, 0xF8FDFF, 0xDFEEF3, 0xDBEAF0, 0x21343F, 0x4B626F, 0x2E687D),
     preset!("paper", "Paper", Light, 0xF5F2EC, 0xFFFCF6, 0xECE7DE, 0xE7E1D5, 0x302F2B, 0x625E55, 0x67633D),
-    // Solaris amber and fruit/mineral palettes, both light and dark.
-    preset!("solaris-original", "Solaris Original", Colorful, 0x0E0906, 0x120C08, 0x22170F, 0x0A0705, 0xFBE9CF, 0xC3A782, 0xFFA32E),
+    // Krasnokamen amber and fruit/mineral palettes, both light and dark.
+    preset!("krasnokamen-original", "Krasnokamen Original", Colorful, 0x0E0906, 0x120C08, 0x22170F, 0x0A0705, 0xFBE9CF, 0xC3A782, 0xFFA32E),
     preset!("sunset", "Sunset", Colorful, 0x281B2B, 0x382535, 0x493344, 0x1F1421, 0xFFF1ED, 0xDEC0CF, 0xF2AA88),
     preset!("matcha", "Matcha", Colorful, 0xEDF2E2, 0xF8FBEF, 0xE3EBD4, 0xDFE8CD, 0x2D3825, 0x536143, 0x53743B),
     preset!("arctic", "Arctic", Colorful, 0x102129, 0x17313C, 0x20414C, 0x0B1921, 0xEDFBFF, 0xAECFD9, 0x83D2DD),
@@ -149,7 +149,7 @@ mod tests {
             "Lavender Mist",
             "Glacier",
             "Paper",
-            "Solaris Original",
+            "Krasnokamen Original",
             "Sunset",
             "Matcha",
             "Arctic",

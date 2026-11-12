@@ -1626,9 +1626,9 @@ impl UiState {
                 self.pause_requested = paused;
                 effects.commands.push(UiCommand::Chat {
                     message: if paused {
-                        "solaris_pause on"
+                        "krasnokamen_pause on"
                     } else {
-                        "solaris_pause off"
+                        "krasnokamen_pause off"
                     }
                     .into(),
                     command: true,

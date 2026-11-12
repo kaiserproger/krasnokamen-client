@@ -20,7 +20,7 @@ fn fixture_file() -> PathBuf {
     write(5,configuration::clientbound::FINISH_CONFIGURATION,vec![]);
     let mut health=Writer::default();health.f32(13.5);health.var(17);health.f32(3.);
     write(30,play::clientbound::SET_HEALTH,health.0);
-    let marker=|tick:u64| {let mut body=Writer::default();body.string("solaris:tick");body.0.extend(tick.to_be_bytes());body.0.extend((tick*50_000_000).to_be_bytes());body.0};
+    let marker=|tick:u64| {let mut body=Writer::default();body.string("krasnokamen:tick");body.0.extend(tick.to_be_bytes());body.0.extend((tick*50_000_000).to_be_bytes());body.0};
     write(50,play::clientbound::CUSTOM_PAYLOAD,marker(9000));
     let mut health=Writer::default();health.f32(5.);health.var(10);health.f32(0.);
     write(90,play::clientbound::SET_HEALTH,health.0);

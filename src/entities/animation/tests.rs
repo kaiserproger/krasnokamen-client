@@ -7,7 +7,7 @@ use super::{
 use crate::{
     entities::{
         animation_tests::fixture, clip_pose, metadata::Metadata, presentation, resources::Rig,
-        solaris_models, Entity, Models,
+        krasnokamen_models, Entity, Models,
     },
     inventory::Stack,
     protocol::content::Content,
@@ -336,7 +336,7 @@ fn hurt_and_death_clips_only_play_on_armed_entities() {
 }
 
 fn zombie() -> &'static Rig {
-    solaris_models::authored("minecraft:zombie#main").expect("authored zombie rig")
+    krasnokamen_models::authored("minecraft:zombie#main").expect("authored zombie rig")
 }
 
 fn pose(e: &Entity, models: &Models, content: &Content, tick: u64, partial: f32) -> Vec<Mat4> {

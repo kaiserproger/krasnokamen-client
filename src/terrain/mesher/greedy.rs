@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 pub(super) fn enabled() -> bool {
     static ENABLED: LazyLock<bool> =
-        LazyLock::new(|| std::env::var_os("SOLARIS_CLIENT_GREEDY").is_none_or(|v| v != "0"));
+        LazyLock::new(|| std::env::var_os("KRASNOKAMEN_CLIENT_GREEDY").is_none_or(|v| v != "0"));
     *ENABLED
 }
 

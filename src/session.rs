@@ -99,7 +99,7 @@ pub struct Session {
     loader: crate::loader::Loader,
     environment: Environment,
     terrain: Option<Terrain>,
-    /// Far terrain beyond the loaded chunks (Solaris `[lod]` servers).
+    /// Far terrain beyond the loaded chunks (Krasnokamen `[lod]` servers).
     pub(crate) far: crate::far::Far,
     scene: Scene,
     presentation_partial: f32,
@@ -1656,7 +1656,7 @@ mod cpu_hotpath_tests {
             command: Command::Minecraft {
                 name: "minecraft_click_screen_button".into(),
                 arguments: json!({"expected_screen_class":"net.minecraft.client.gui.screens.TitleScreen",
-                    "expected_title":"Solaris","button_label":"Quit Game"}),
+                    "expected_title":"Krasnokamen","button_label":"Quit Game"}),
             },
             reply,
             expected_connection_epoch: None,

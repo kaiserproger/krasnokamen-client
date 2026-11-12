@@ -9,7 +9,7 @@ fn fixture() -> (Session, std::net::TcpListener) {
     session.network = Some(Network::connect(listener.local_addr().unwrap().to_string(), "BoatTest".into(), 8, true, Arc::new(|| {}), None).unwrap());
     let mut content = Content::test_cube();
     // Use the pinned 26.3 registry/schema, not a guessed boat entity class.
-    let facts: Value = serde_json::from_str(include_str!("../../assets/solaris/entities/entity-facts.json")).unwrap();
+    let facts: Value = serde_json::from_str(include_str!("../../assets/krasnokamen/entities/entity-facts.json")).unwrap();
     for (name, schema) in facts["entities"].as_object().unwrap() {
         content.entity_names.insert(schema["protocol_id"].as_u64().unwrap() as u32, name.clone());
     }

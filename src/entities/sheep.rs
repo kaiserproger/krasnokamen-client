@@ -1,5 +1,5 @@
 //! Sheep coat layer: dyed wool over the base body, or the dyed undercoat once sheared.
-//! The coat is Solaris-authored geometry (`sheep_wool`, `sheep_wool_baby`); the textures are the
+//! The coat is Krasnokamen-authored geometry (`sheep_wool`, `sheep_wool_baby`); the textures are the
 //! player's vanilla assets. Wool colour and shear state come from synchronized `DATA_WOOL_ID`.
 use super::{Entity, Models, presentation as p, resources::Rig};
 use crate::{

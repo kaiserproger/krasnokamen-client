@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/handheld",
+  "textures": {
+    "layer0": "krasnokamen_battle:item/iron_longsword"
+  }
+}

@@ -1170,7 +1170,7 @@ mod tests {
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let holder = TempRoot(std::env::temp_dir().join(format!(
-            "solaris-models-test-{}-{}",
+            "krasnokamen-models-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )));
@@ -1378,7 +1378,7 @@ mod tests {
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let holder = TempRoot(std::env::temp_dir().join(format!(
-            "solaris-shade-override-test-{}-{}",
+            "krasnokamen-shade-override-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )));

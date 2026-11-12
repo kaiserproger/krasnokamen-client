@@ -118,8 +118,8 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
     let capture = args.capture_window.map(|path| Rc::new(RefCell::new(WindowCapture::new(path))));
     app.capture = capture.clone();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Solaris Launcher")
-        .with_app_id("solaris-launcher")
+        .with_title("Krasnokamen Launcher")
+        .with_app_id("krasnokamen-launcher")
         .with_inner_size([app.config.window.width, app.config.window.height])
         .with_min_inner_size([640.0, 460.0])
         .with_resizable(true);
@@ -127,7 +127,7 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
         viewport = viewport.with_icon(Arc::new(icon));
     }
     eframe::run_native(
-        "Solaris Launcher",
+        "Krasnokamen Launcher",
         eframe::NativeOptions {
             viewport,
             ..Default::default()
@@ -471,7 +471,7 @@ impl App {
                         && let Some(icon) = load_icon()
                     {
                         self.logo = Some(ctx.load_texture(
-                            "solaris-brand",
+                            "krasnokamen-brand",
                             egui::ColorImage::from_rgba_unmultiplied(
                                 [icon.width as usize, icon.height as usize],
                                 &icon.rgba,
@@ -486,7 +486,7 @@ impl App {
                                 .corner_radius(6),
                         );
                     }
-                    ui.label(RichText::new("Solaris").size(20.0).strong());
+                    ui.label(RichText::new("Krasnokamen").size(20.0).strong());
                     ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
                         for (tab, name) in [
                             (Tab::Logs, "Logs"),
@@ -729,7 +729,7 @@ impl App {
                 egui::ScrollArea::vertical().show(ui, |ui| match self.settings_tab {
                 SettingsTab::General => {
                     section(ui, "Make yourself at home", "Your launcher settings stay on this device.");
-                    ui.label(format!("Solaris Launcher {}", env!("CARGO_PKG_VERSION")));
+                    ui.label(format!("Krasnokamen Launcher {}", env!("CARGO_PKG_VERSION")));
                     ui.weak("Independent native Minecraft client · offline/test-identity preview");
                     ui.add_space(14.0);
                     ui.label("Data folder");
@@ -759,7 +759,7 @@ impl App {
                     section(ui, "Game content", "Downloads are verified against their original hashes.");
                     if ui.add_enabled(!self.busy(), egui::Button::new("Verify / repair game files")).clicked() { self.start_install(ctx, false, true); self.tab = Tab::Play; }
                     ui.add_space(14.0);
-                    if text_field(ui, "Solaris content manifest", &mut self.manifest, 2048).changed() {
+                    if text_field(ui, "Krasnokamen content manifest", &mut self.manifest, 2048).changed() {
                         self.config.manifest_url = self.manifest.trim().to_owned(); self.save_config();
                     }
                     ui.weak("Advanced: change only if you know the source. Bundle trust is still pinned by this launcher.");
@@ -792,7 +792,7 @@ impl App {
         ui.add_space(8.0);
         if text_field(
             ui,
-            "Local PNG path · leave empty for the Solaris illustration",
+            "Local PNG path · leave empty for the Krasnokamen illustration",
             &mut self.config.appearance.background_path,
             4096,
         )
@@ -858,7 +858,7 @@ impl App {
     }
     fn theme_gallery(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Solaris Themes").size(21.0).strong());
+            ui.label(RichText::new("Krasnokamen Themes").size(21.0).strong());
             ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
                 if ui.button("Create theme").clicked() {
                     self.open_custom(None);
@@ -1104,7 +1104,7 @@ impl App {
                 else {
                     edited |= text_field(ui, "Local skin PNG · optional path", &mut self.draft_skin, 4096).changed();
                     ui.weak(media::LOCAL_SKIN_NOTICE);
-                    ui.weak("No skin selected: installed Steve texture, or the original Solaris avatar.");
+                    ui.weak("No skin selected: installed Steve texture, or the original Krasnokamen avatar.");
                 }
                 if edited { self.dialog_error = None; }
                 if let Some(error) = &self.dialog_error { note(ui, error.clone(), self.palette.error); }

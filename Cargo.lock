@@ -1696,6 +1696,67 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "krasnokamen-client"
+version = "1.0.0-rc.5"
+dependencies = [
+ "anyhow",
+ "arabic_reshaper",
+ "arboard",
+ "base64",
+ "bytemuck",
+ "crc32c",
+ "flate2",
+ "freetype-rs",
+ "getrandom 0.3.4",
+ "glam",
+ "krasnokamen-paths",
+ "libc",
+ "libm",
+ "md5",
+ "naga",
+ "parking_lot",
+ "png",
+ "pollster",
+ "reqwest",
+ "rodio",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "symphonia",
+ "unicode-bidi",
+ "uuid",
+ "wgpu",
+ "winit",
+ "zip",
+]
+
+[[package]]
+name = "krasnokamen-launcher"
+version = "1.0.0-rc.5"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "flate2",
+ "krasnokamen-paths",
+ "png",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "tar",
+ "wgpu",
+ "zip",
+ "zstd",
+]
+
+[[package]]
+name = "krasnokamen-paths"
+version = "0.1.0"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3322,67 +3383,6 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "solaris-client"
-version = "1.0.0-rc.5"
-dependencies = [
- "anyhow",
- "arabic_reshaper",
- "arboard",
- "base64",
- "bytemuck",
- "crc32c",
- "flate2",
- "freetype-rs",
- "getrandom 0.3.4",
- "glam",
- "libc",
- "libm",
- "md5",
- "naga",
- "parking_lot",
- "png",
- "pollster",
- "reqwest",
- "rodio",
- "rsa",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "solaris-paths",
- "symphonia",
- "unicode-bidi",
- "uuid",
- "wgpu",
- "winit",
- "zip",
-]
-
-[[package]]
-name = "solaris-launcher"
-version = "1.0.0-rc.5"
-dependencies = [
- "anyhow",
- "eframe",
- "flate2",
- "png",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "solaris-paths",
- "tar",
- "wgpu",
- "zip",
- "zstd",
-]
-
-[[package]]
-name = "solaris-paths"
-version = "0.1.0"
 
 [[package]]
 name = "spin"

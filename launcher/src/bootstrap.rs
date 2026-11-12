@@ -74,7 +74,7 @@ const FACTS: Pin = Pin {
 };
 
 /// Singleplayer only: the complete server content cache that
-/// `solaris-v2 content import` derives, the local server's `vanilla_data_dir`.
+/// `krasnokamen content import` derives, the local server's `vanilla_data_dir`.
 const CONTENT: Pin = Pin {
     kind: "content",
     name: pins::CONTENT_NAME,
@@ -89,7 +89,7 @@ struct Bundle {
 
 fn fetch_bundle(client: &Client, manifest_url: &str, pin: &Pin) -> Result<Bundle> {
     let bytes = net::fetch_bytes(client, manifest_url, None)
-        .with_context(|| format!("cannot reach the Solaris content manifest at {manifest_url}"))?;
+        .with_context(|| format!("cannot reach the Krasnokamen content manifest at {manifest_url}"))?;
     parse_bundle(&bytes, pin)
 }
 
@@ -250,7 +250,7 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     rep.stage(1, STAGES, "Checking Mojang version metadata");
     let release = mojang::resolve(&client, layout, rep)?;
 
-    rep.stage(2, STAGES, "Downloading Solaris game data");
+    rep.stage(2, STAGES, "Downloading Krasnokamen game data");
     let present = is_installed(&installed, &FACTS)
         && layout.join("facts").is_dir()
         && layout.join("data/vanilla/reports").is_dir();
@@ -304,7 +304,7 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     Ok(())
 }
 
-/// Singleplayer only (`solaris-launcher --singleplayer-runtime`, started by the client before
+/// Singleplayer only (`krasnokamen-launcher --singleplayer-runtime`, started by the client before
 /// a local world): the local server's content cache, installed from the pinned content bundle
 /// as its `vanilla_data_dir`. Multiplayer never needs it. Returns without touching the
 /// network when the pinned bundle is already installed, so the client can call this on

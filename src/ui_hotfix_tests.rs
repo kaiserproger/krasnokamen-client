@@ -439,7 +439,7 @@ fn singleplayer_pause_menu_emits_pause_and_resume_only_in_singleplayer() {
         assert_eq!(
             messages,
             if singleplayer {
-                vec!["solaris_pause on"]
+                vec!["krasnokamen_pause on"]
             } else {
                 vec![]
             }
@@ -459,7 +459,7 @@ fn singleplayer_pause_menu_emits_pause_and_resume_only_in_singleplayer() {
         assert_eq!(
             messages,
             if singleplayer {
-                vec!["solaris_pause off"]
+                vec!["krasnokamen_pause off"]
             } else {
                 vec![]
             }

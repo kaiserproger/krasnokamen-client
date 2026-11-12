@@ -488,7 +488,7 @@ fn detail_levels_drop_thin_item_quads_then_trims() {
         let x = x as f32 / 4.;
         model.quads.push(quad([[x, 0., 0.], [x, 0., 0.0625], [x, 1., 0.0625], [x, 1., 0.]]));
     }
-    let main = super::super::solaris_models::authored("minecraft:zombie#main").unwrap();
+    let main = super::super::krasnokamen_models::authored("minecraft:zombie#main").unwrap();
     let held = Held { slot: 0, hand: 0, bone: 3, context: "thirdperson_righthand", state: ItemContext::default(), shape: 1 };
     let texture = crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 16, height: 16 };
     let parts = [

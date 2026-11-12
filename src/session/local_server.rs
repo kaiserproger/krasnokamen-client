@@ -1,4 +1,4 @@
-//! Singleplayer session glue: start the local Solaris server for a world, join
+//! Singleplayer session glue: start the local Krasnokamen server for a world, join
 //! it, apply first-join world settings, report a crashed server, and stop the
 //! server (which checkpoints the world) whenever the connection ends.
 use super::*;
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("solaris-sp-session-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("krasnokamen-sp-session-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -324,7 +324,7 @@ mod tests {
         let server = singleplayer::spawn_fake_server(
             &root,
             "trap 'sleep 0.3; echo done > \"$PWD/checkpoint\"; exit 0' TERM\n\
-             echo 'Solaris is listening addr=127.0.0.1:41240'\n\
+             echo 'Krasnokamen is listening addr=127.0.0.1:41240'\n\
              while :; do sleep 1 & wait $!; done",
         )
         .unwrap();
@@ -345,7 +345,7 @@ mod tests {
         let root = temp_root("crash");
         let server = singleplayer::spawn_fake_server(
             &root,
-            "echo 'Solaris is listening addr=127.0.0.1:41241'\necho 'panic: tick failed' >&2\nexit 7",
+            "echo 'Krasnokamen is listening addr=127.0.0.1:41241'\necho 'panic: tick failed' >&2\nexit 7",
         )
         .unwrap();
         let mut session = Session::new_mode("local-crash".into(), false);
@@ -371,7 +371,7 @@ mod tests {
         let root = temp_root("badsave");
         let server = singleplayer::spawn_fake_server(
             &root,
-            "echo 'Solaris is listening addr=127.0.0.1:41242'\n\
+            "echo 'Krasnokamen is listening addr=127.0.0.1:41242'\n\
              trap 'echo disk full >&2; exit 5' TERM\n\
              while :; do sleep 1 & wait $!; done",
         )

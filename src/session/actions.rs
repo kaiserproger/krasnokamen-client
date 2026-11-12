@@ -883,7 +883,7 @@ impl Session {
         }
         // Far terrain distance in blocks (`far_terrain`, 0 = off); the Low
         // graphics preset (also when it is the unset default) has a shorter
-        // reach for weak GPUs. SOLARIS_CLIENT_FAR_TERRAIN overrides both for
+        // reach for weak GPUs. KRASNOKAMEN_CLIENT_FAR_TERRAIN overrides both for
         // scripted runs.
         let low = self
             .presentation_settings
@@ -891,7 +891,7 @@ impl Session {
             .and_then(crate::render::GraphicsPreset::from_setting)
             .unwrap_or_default()
             == crate::render::GraphicsPreset::Low;
-        let distance = std::env::var("SOLARIS_CLIENT_FAR_TERRAIN")
+        let distance = std::env::var("KRASNOKAMEN_CLIENT_FAR_TERRAIN")
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
             .or_else(|| {

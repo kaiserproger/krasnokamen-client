@@ -380,7 +380,7 @@ fn cursor_decoration_is_rendered_in_inventory_and_creative() {
 fn slot_and_cursor_counts_are_appended_over_the_bar() {
     for cursor in [false, true] {
         let (mut content, mut inventory, mut ui) = ui_fixture();
-        // Empty, Solaris-authored font definition exercises ordinary missing-glyph
+        // Empty, Krasnokamen-authored font definition exercises ordinary missing-glyph
         // geometry without loading any game assets.
         content.insert_test_font("minecraft:default", &json!({"providers":[]}));
         content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");

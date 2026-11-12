@@ -340,7 +340,7 @@ impl State {
     }
     /// Updates the wing beat of mobs that fold their wings while standing.
     /// minecraft.wiki: chickens flap their wings while in midair. The beat eases in
-    /// and out by a quarter per tick (a Solaris choice), so landing settles in four ticks.
+    /// and out by a quarter per tick (a Krasnokamen choice), so landing settles in four ticks.
     pub fn tick_wings(&mut self, supported: bool) {
         const EASE: f32 = 0.25;
         self.wings_old = self.wings;

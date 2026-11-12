@@ -1,7 +1,7 @@
-//! Platform data-root discovery shared by the Solaris client and launcher.
+//! Platform data-root discovery shared by the Krasnokamen client and launcher.
 use std::{ffi::OsString, path::PathBuf};
 
-const APP_NAME: &str = "solaris-client";
+const APP_NAME: &str = "krasnokamen-client";
 
 fn default_root_for(
     platform: &str,
@@ -53,7 +53,7 @@ mod tests {
     fn macos_uses_application_support() {
         assert_eq!(
             default_root_for("macos", Some("/Users/player".into()), None, None).unwrap(),
-            PathBuf::from("/Users/player/Library/Application Support/solaris-client"),
+            PathBuf::from("/Users/player/Library/Application Support/krasnokamen-client"),
         );
     }
 }

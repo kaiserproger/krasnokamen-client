@@ -1,7 +1,7 @@
 //! Creeper fuse warning and charged aura. minecraft.wiki: a creeper about to explode
 //! "hisses, flashes and expands" for 30 ticks; a charged creeper has a blue aura that
 //! stays visible while the creeper is invisible. Every size, rate and colour here is a
-//! Solaris-authored approximation, not a game constant.
+//! Krasnokamen-authored approximation, not a game constant.
 use super::{Entity, Models, presentation as p};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
@@ -55,7 +55,7 @@ pub(super) fn append_charge(
         return Ok(());
     }
     let (tick, partial, matrix) = pose;
-    let aura = super::solaris_models::authored("minecraft:creeper_charge#main")
+    let aura = super::krasnokamen_models::authored("minecraft:creeper_charge#main")
         .ok_or("missing authored creeper charge rig")?;
     let texture = p::texture(content, "minecraft:entity/creeper/creeper_armor")?;
     p::evaluate_rig(aura, entity, models, content, tick, partial, matrix, transforms);

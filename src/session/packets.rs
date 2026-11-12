@@ -115,23 +115,23 @@ impl Session {
     }
     fn custom_payload(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let channel = r.string(32767)?;
-        if channel.starts_with("solaris:loader") {
+        if channel.starts_with("krasnokamen:loader") {
             let payload = r.take(r.bytes.len() - r.offset)?;
             match channel.as_str() {
-                "solaris:loader/probe" if self.phase == "configuration" => {
+                "krasnokamen:loader/probe" if self.phase == "configuration" => {
                     if !payload.is_empty() {
                         return Err("Loader probe carries no payload".into());
                     }
                     // The network state machine already wrote the hello in packet order.
                 }
-                "solaris:loader/manifest" if self.phase == "configuration" => {
+                "krasnokamen:loader/manifest" if self.phase == "configuration" => {
                     let grants = crate::loader::Loader::local_permissions()?;
                     let outgoing = self.loader.begin(payload, &grants)?;
                     self.send_loader(outgoing)?;
                 }
-                "solaris:loader/artifact" if self.phase == "configuration" => {
+                "krasnokamen:loader/artifact" if self.phase == "configuration" => {
                     if let Some(outgoing) = self.loader.artifact(payload)? {
-                        let activated = outgoing.channel == "solaris:loader/ack";
+                        let activated = outgoing.channel == "krasnokamen:loader/ack";
                         if activated {
                             self.activate_loader_content()?;
                             self.event(json!({"type":"loader_activated","platform":"native","origin":"hash_verified_received_bundle"}));
@@ -139,7 +139,7 @@ impl Session {
                         self.send_loader(outgoing)?;
                     }
                 }
-                "solaris:loader/view" if self.phase == "play" => {
+                "krasnokamen:loader/view" if self.phase == "play" => {
                     let ui = self
                         .ui
                         .as_mut()
@@ -152,7 +152,7 @@ impl Session {
                         Err(error) => self.event(json!({"type":"loader_view_rejected","error":error,"origin":"received_optional_payload"})),
                     }
                 }
-                "solaris:loader/sound" => {
+                "krasnokamen:loader/sound" => {
                     match self.loader.sound(
                         payload,
                         self.phase == "play" && self.network.is_some(),
@@ -194,12 +194,12 @@ impl Session {
                 }
                 _ => return Err(format!("unsupported Loader channel or phase: {channel}")),
             }
-        } else if channel.starts_with("solaris:lod/") && self.phase == "play" {
+        } else if channel.starts_with("krasnokamen:lod/") && self.phase == "play" {
             let payload = r.take(r.bytes.len() - r.offset)?;
             let outcome = match channel.as_str() {
-                "solaris:lod/hello" => self.far.hello(payload),
-                "solaris:lod/program" => self.far.program(payload),
-                "solaris:lod/tile" => match self.content.as_ref() {
+                "krasnokamen:lod/hello" => self.far.hello(payload),
+                "krasnokamen:lod/program" => self.far.program(payload),
+                "krasnokamen:lod/tile" => match self.content.as_ref() {
                     Some(content) => self.far.tile(payload, content),
                     None => Ok(()),
                 },
@@ -1051,7 +1051,7 @@ mod tests {
     #[ignore = "requires an optional-pack loopback server and pinned local client content"]
     fn resource_pack_live_optional_join() {
         use std::{thread, time::Instant};
-        let address = std::env::var("SOLARIS_PACK_SMOKE_SERVER").unwrap();
+        let address = std::env::var("KRASNOKAMEN_PACK_SMOKE_SERVER").unwrap();
         assert!(address.parse::<std::net::SocketAddr>().unwrap().ip().is_loopback());
         let mut session = Session::new_mode("pack-live".into(), false);
         let owner = thread::current();

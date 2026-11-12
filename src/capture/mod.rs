@@ -106,7 +106,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
             // 180 degree shutter: sample only the first half of this frame.
             let time=base+frame_time(u64::from(sample),120*samples);
             replay.advance_to(time)?;
-            if replay.last_tick.is_none() { return Err("replay has no solaris:tick marker at shot start; configure recorder account".into()); }
+            if replay.last_tick.is_none() { return Err("replay has no krasnokamen:tick marker at shot start; configure recorder account".into()); }
             let partial=replay.partial();
             replay.session.replay_camera(&path,time.as_secs_f64(),partial)?;
             replay.session.prepare_frame(partial)?;

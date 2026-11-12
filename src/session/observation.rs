@@ -621,7 +621,7 @@ impl Session {
             &|column| covered.binary_search(&column).is_ok(),
         );
         for payload in requests {
-            if let Err(error) = self.send_custom("solaris:lod/request", &payload) {
+            if let Err(error) = self.send_custom("krasnokamen:lod/request", &payload) {
                 self.event(json!({"type":"far_terrain_request_failed","error":error}));
                 break;
             }

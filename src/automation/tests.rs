@@ -742,7 +742,7 @@ fn owner_exit_returns_unknown_result_and_signals_cancellation() {
 fn screenshot_sandbox_and_idle_writer_are_preserved() {
     let (mut core, receiver) = client();
     let directory = std::env::temp_dir().join(format!(
-        "solaris-capture-{}", super::control::nonce().unwrap(),
+        "krasnokamen-capture-{}", super::control::nonce().unwrap(),
     ));
     std::fs::create_dir(&directory).unwrap();
     Arc::get_mut(&mut core).unwrap().artifact_dir = directory.clone();
@@ -911,7 +911,7 @@ fn capture_after_authorized_respawn_preserves_idle_writer() {
 fn capture_owner_errors_never_revoke_or_renew_writer() {
     let (mut core, receiver) = client();
     let directory = std::env::temp_dir().join(format!(
-        "solaris-capture-owner-error-{}", super::control::nonce().unwrap()));
+        "krasnokamen-capture-owner-error-{}", super::control::nonce().unwrap()));
     std::fs::create_dir(&directory).unwrap();
     Arc::get_mut(&mut core).unwrap().artifact_dir = directory.clone();
     core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});

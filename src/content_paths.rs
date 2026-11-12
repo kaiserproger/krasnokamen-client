@@ -30,7 +30,7 @@ const INPUTS: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn default_root() -> Result<PathBuf, String> {
-    solaris_paths::data_root(None)
+    krasnokamen_paths::data_root(None)
 }
 
 /// The launch-selected data root, or the platform default outside a launch.
@@ -43,16 +43,16 @@ pub(crate) fn selected_root() -> Result<PathBuf, String> {
 pub(crate) fn apply_defaults(root: &Path) {
     let _ = SELECTED_ROOT.set(root.to_owned());
     for (suffix, relative) in INPUTS {
-        let var = format!("SOLARIS_CLIENT_{suffix}");
+        let var = format!("KRASNOKAMEN_CLIENT_{suffix}");
         if std::env::var_os(&var).is_none() {
             // SAFETY: startup is single-threaded; no environment readers exist yet.
             unsafe { std::env::set_var(var, root.join(relative)) };
         }
     }
     // Singleplayer keeps worlds and the managed server beside the content.
-    if std::env::var_os("SOLARIS_CLIENT_ROOT").is_none() {
+    if std::env::var_os("KRASNOKAMEN_CLIENT_ROOT").is_none() {
         // SAFETY: same single-threaded startup window as above.
-        unsafe { std::env::set_var("SOLARIS_CLIENT_ROOT", root) };
+        unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_ROOT", root) };
     }
 }
 
@@ -66,7 +66,7 @@ fn require(path: &Path, directory: bool) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "missing content {}: {} (run solaris-launcher once to download it, or solaris-client setup --from-dist DIR --assets DIR)",
+            "missing content {}: {} (run krasnokamen-launcher once to download it, or krasnokamen-client setup --from-dist DIR --assets DIR)",
             if directory { "directory" } else { "file" },
             path.display()
         ))
@@ -79,14 +79,14 @@ pub(crate) fn validate(presentation: bool) -> Result<(), String> {
         if !presentation && matches!(*suffix, "ASSET_ROOT" | "ASSET_INDEX" | "RESOURCE_ROOT") {
             continue;
         }
-        let var = format!("SOLARIS_CLIENT_{suffix}");
+        let var = format!("KRASNOKAMEN_CLIENT_{suffix}");
         let path = std::env::var_os(&var).ok_or_else(|| format!("missing content path: {var}"))?;
         require(
             Path::new(&path),
             matches!(*suffix, "ASSET_ROOT" | "DATA_DIR" | "RESOURCE_ROOT"),
         )?;
     }
-    let data = PathBuf::from(std::env::var_os("SOLARIS_CLIENT_DATA_DIR").unwrap());
+    let data = PathBuf::from(std::env::var_os("KRASNOKAMEN_CLIENT_DATA_DIR").unwrap());
     for file in [
         "blocks.json",
         "block_mining.json",
@@ -96,7 +96,7 @@ pub(crate) fn validate(presentation: bool) -> Result<(), String> {
         require(&data.join("reports").join(file), false)?;
     }
     if presentation {
-        let assets = PathBuf::from(std::env::var_os("SOLARIS_CLIENT_ASSET_ROOT").unwrap());
+        let assets = PathBuf::from(std::env::var_os("KRASNOKAMEN_CLIENT_ASSET_ROOT").unwrap());
         require(&assets.join("objects"), true)?;
     }
     Ok(())

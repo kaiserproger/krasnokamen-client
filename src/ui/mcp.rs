@@ -31,7 +31,7 @@ impl UiState {
                 Screen::Loader => {
                     let view = self.loader.as_ref().ok_or("loader screen state missing")?;
                     return Ok(Some((
-                        "dev.solaris.loader.minecraft.LoaderViewScreen",
+                        "dev.krasnokamen.loader.minecraft.LoaderViewScreen",
                         view.title.clone(),
                     )));
                 }
@@ -165,7 +165,7 @@ impl UiState {
                 ),
                 Screen::Title => (
                     "net.minecraft.client.gui.screens.TitleScreen",
-                    json!({"text":"Solaris"}),
+                    json!({"text":"Krasnokamen"}),
                 ),
                 Screen::Multiplayer => (
                     "net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen",
@@ -425,7 +425,7 @@ mod tests {
             deny_reason: None,
             focused: false,
             clip: None,
-            owner: "solaris_loader",
+            owner: "krasnokamen_loader",
             action: NodeAction::Focus(id.into()),
             paint: Paint::Field(id.into()),
         }

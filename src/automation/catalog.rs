@@ -84,7 +84,7 @@ pub(super) fn resources() -> Vec<Value> {
     .into_iter()
     .map(|name| {
         serde_json::json!({
-            "uri":format!("solaris-client://{name}"),"name":name,"mimeType":"application/json"
+            "uri":format!("krasnokamen-client://{name}"),"name":name,"mimeType":"application/json"
         })
     })
     .collect()

@@ -107,8 +107,8 @@ struct Options {
 }
 
 /// Resolves an artifact/runtime directory: absolute paths as given, relative ones
-/// under the client's data root (`--data-dir`, `$XDG_DATA_HOME/solaris-client`,
-/// `~/.local/share/solaris-client`). Never a compile-time path: release builds run
+/// under the client's data root (`--data-dir`, `$XDG_DATA_HOME/krasnokamen-client`,
+/// `~/.local/share/krasnokamen-client`). Never a compile-time path: release builds run
 /// on machines without the build checkout.
 fn artifact_root(path: &Path, data_root: &Path) -> Result<PathBuf, String> {
     if path
@@ -136,15 +136,15 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
         Some("record") => replay::record::cli(args),
         Some("mcp-schema") => {
             if args.next().is_some() {
-                return Err("usage: solaris-client mcp-schema".into());
+                return Err("usage: krasnokamen-client mcp-schema".into());
             }
             println!("{}", automation::schema());
             Ok(())
         }
         Some("profile-summary") => {
-            let path = args.next().ok_or("usage: solaris-client profile-summary <file>")?;
+            let path = args.next().ok_or("usage: krasnokamen-client profile-summary <file>")?;
             if args.next().is_some() {
-                return Err("usage: solaris-client profile-summary <file>".into());
+                return Err("usage: krasnokamen-client profile-summary <file>".into());
             }
             let summary = frame_trace::summarize(Path::new(&path))?;
             println!("{}", serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?);
@@ -154,7 +154,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
             let json_output = match args.next().as_deref() {
                 Some("--json") => true,
                 None => false,
-                _ => return Err("usage: solaris-client doctor [--json]".into()),
+                _ => return Err("usage: krasnokamen-client doctor [--json]".into()),
             };
             if args.next().is_some() {
                 return Err("unexpected_doctor_argument".into());
@@ -167,7 +167,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
                 );
             } else {
                 println!(
-                    "Solaris GPU doctor\n{}",
+                    "Krasnokamen GPU doctor\n{}",
                     serde_json::to_string_pretty(&evidence).map_err(|e| e.to_string())?
                 );
             }
@@ -176,7 +176,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
         Some("mcp") => {
             if args.next().as_deref() != Some("attach") {
                 return Err(
-                    "usage: solaris-client mcp attach --instance ID --stdio [--descriptor FILE]"
+                    "usage: krasnokamen-client mcp attach --instance ID --stdio [--descriptor FILE]"
                         .into(),
                 );
             }
@@ -1086,9 +1086,9 @@ impl ApplicationHandler for App {
             return;
         }
         let title = if self.options.automation {
-            "Solaris Native Client — AUTOMATION ENABLED"
+            "Krasnokamen Native Client — AUTOMATION ENABLED"
         } else {
-            "Solaris Native Client"
+            "Krasnokamen Native Client"
         };
         let window = match event_loop.create_window(
             Window::default_attributes()
@@ -1549,8 +1549,8 @@ impl ApplicationHandler for App {
             let revision = server.controller_revision();
             if revision != self.controller_revision {
                 let title = match server.controller_label() {
-                    Some(label) => format!("Solaris Native Client — Controller: {label}"),
-                    None => "Solaris Native Client — AUTOMATION ENABLED (no controller)".into(),
+                    Some(label) => format!("Krasnokamen Native Client — Controller: {label}"),
+                    None => "Krasnokamen Native Client — AUTOMATION ENABLED (no controller)".into(),
                 };
                 window.set_title(&title);
                 self.controller_revision = revision;
@@ -1612,7 +1612,7 @@ mod window_input_pacing_tests {
         assert!(!toggle_fullscreen_key(&mut session, KeyCode::F11, false));
         assert!(!toggle_fullscreen_key(&mut session, KeyCode::F10, true));
         assert!(toggle_fullscreen_key(&mut session, KeyCode::F11, true));
-        let path = std::env::temp_dir().join(format!("solaris-f11-settings-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("krasnokamen-f11-settings-{}.json", std::process::id()));
         local_config::save_client_settings_to(&session.client_settings_snapshot(), &path);
         let saved = local_config::load_client_settings_from(&path);
         assert_eq!(saved.get("fullscreen"), Some(&json!(true)));

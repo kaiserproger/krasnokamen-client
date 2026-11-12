@@ -1,5 +1,5 @@
 use super::render_living::MotionFacts;
-use super::solaris_models;
+use super::krasnokamen_models;
 use crate::protocol::{content::Content, Result};
 use glam::{Mat4, Vec3};
 use serde::Deserialize;
@@ -7,9 +7,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-/// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
+/// Krasnokamen-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
-const ENTITY_FACTS: &str = include_str!("../../assets/solaris/entities/entity-facts.json");
+const ENTITY_FACTS: &str = include_str!("../../assets/krasnokamen/entities/entity-facts.json");
 const FACTS_SCHEMA: u32 = 1;
 
 #[derive(Deserialize)]
@@ -151,12 +151,12 @@ pub(crate) struct ArmorModels {
 impl Models {
     fn parse() -> Result<Document> {
         let doc: Document = serde_json::from_str(ENTITY_FACTS)
-            .map_err(|e| format!("solaris entity facts schema: {e}"))?;
+            .map_err(|e| format!("krasnokamen entity facts schema: {e}"))?;
         if doc.schema != FACTS_SCHEMA || doc.game_version != "26.3" {
-            return Err("solaris entity facts source/target mismatch".into());
+            return Err("krasnokamen entity facts source/target mismatch".into());
         }
         if doc.entities.len() > 1024 || doc.poses.len() != 18 {
-            return Err("solaris entity facts catalog mismatch".into());
+            return Err("krasnokamen entity facts catalog mismatch".into());
         }
         for (name, schema) in &doc.entities {
             if !schema.width.is_finite()
@@ -190,7 +190,7 @@ impl Models {
     fn digest() -> String {
         let mut digest = Sha256::new();
         digest.update(ENTITY_FACTS.as_bytes());
-        digest.update(solaris_models::embedded_digest());
+        digest.update(krasnokamen_models::embedded_digest());
         format!("{:x}", digest.finalize())
     }
     fn attribute_ids(attributes: &BTreeMap<String, AttributeBounds>) -> BTreeMap<u32, String> {
@@ -224,7 +224,7 @@ impl Models {
             return Err("source skin catalog mismatch".into());
         }
         Self::check_registry(&doc, content)?;
-        // Geometry is Solaris-authored (`solaris_models`); the facts carry no meshes. A family
+        // Geometry is Krasnokamen-authored (`krasnokamen_models`); the facts carry no meshes. A family
         // whose rig has no authored model gets a visible entity-sized placeholder box.
         let mut rigs = BTreeMap::new();
         for (kind, family) in &doc.families {
@@ -233,9 +233,9 @@ impl Models {
                 .get(kind)
                 .map_or((0.6, 1.8), |schema| (schema.width, schema.height));
             for key in std::iter::once(&family.rig).chain(family.baby_rig.as_ref()) {
-                if solaris_models::authored(key).is_none() {
+                if krasnokamen_models::authored(key).is_none() {
                     rigs.entry(key.clone())
-                        .or_insert_with(|| solaris_models::placeholder(width, height));
+                        .or_insert_with(|| krasnokamen_models::placeholder(width, height));
                 }
             }
         }
@@ -260,20 +260,20 @@ impl Models {
         let set = if baby { &armor.baby } else { &armor.adult };
         set.get(part).map(String::as_str)
     }
-    /// Geometry for a renderer rig key: explicit entry, else Solaris-authored model, else a
+    /// Geometry for a renderer rig key: explicit entry, else Krasnokamen-authored model, else a
     /// placeholder box. Never fails; a missing model must not stop the frame.
     pub(crate) fn rig(&self, key: &str) -> &Rig {
         static FALLBACK: std::sync::LazyLock<Rig> =
-            std::sync::LazyLock::new(|| solaris_models::placeholder(0.75, 0.75));
+            std::sync::LazyLock::new(|| krasnokamen_models::placeholder(0.75, 0.75));
         self.rigs
             .get(key)
-            .or_else(|| solaris_models::authored(key))
+            .or_else(|| krasnokamen_models::authored(key))
             .unwrap_or(&FALLBACK)
     }
     /// Whether a real (non-placeholder) model exists for the key.
     pub(crate) fn has_authored_rig(&self, key: &str) -> bool {
         self.rigs.get(key).is_some_and(|rig| !rig.is_placeholder())
-            || (!self.rigs.contains_key(key) && solaris_models::authored(key).is_some())
+            || (!self.rigs.contains_key(key) && krasnokamen_models::authored(key).is_some())
     }
     pub fn accessor(&self, kind: &str, name: &str) -> Option<u8> {
         self.schemas

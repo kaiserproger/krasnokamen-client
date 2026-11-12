@@ -1175,23 +1175,23 @@ mod tests {
     #[test]
     fn battle_shield_item_models_bake_from_received_item_model_id() {
         let mut content = Content::test_cube();
-        content.insert_test_texture("solaris_battle:item/iron_tower_shield",
+        content.insert_test_texture("krasnokamen_battle:item/iron_tower_shield",
             crate::protocol::content::TextureRegion { layer: 10, uv: [0., 0., 1., 1.], width: 64, height: 64 });
         for (name, graph, geometry) in [
             ("iron_kite_shield",
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_kite_shield.json")[..],
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_kite_shield.json")[..]),
+                &include_bytes!("../../assets/battle_video/assets/krasnokamen_battle/items/iron_kite_shield.json")[..],
+                &include_bytes!("../../assets/battle_video/assets/krasnokamen_battle/models/item/iron_kite_shield.json")[..]),
             ("iron_tower_shield",
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_tower_shield.json")[..],
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_tower_shield.json")[..]),
+                &include_bytes!("../../assets/battle_video/assets/krasnokamen_battle/items/iron_tower_shield.json")[..],
+                &include_bytes!("../../assets/battle_video/assets/krasnokamen_battle/models/item/iron_tower_shield.json")[..]),
         ] {
-            content.insert_test_resource(&format!("assets/solaris_battle/items/{name}.json"), graph);
-            content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}.json"), geometry);
+            content.insert_test_resource(&format!("assets/krasnokamen_battle/items/{name}.json"), graph);
+            content.insert_test_resource(&format!("assets/krasnokamen_battle/models/item/{name}.json"), geometry);
             let mut stack = Stack::default();
             stack.id = 1;
             stack.count = 1;
             stack.components = Arc::new(BTreeMap::from([(
-                "minecraft:item_model".into(), json!(format!("solaris_battle:{name}")),
+                "minecraft:item_model".into(), json!(format!("krasnokamen_battle:{name}")),
             )]));
             let mut models = ItemModels::new();
             let baked = models.model(&content, &stack, "thirdperson_righthand").unwrap();
@@ -1252,10 +1252,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires SOLARIS_CLIENT_RESOURCE_ROOT with runtime game resources"]
+    #[ignore = "requires KRASNOKAMEN_CLIENT_RESOURCE_ROOT with runtime game resources"]
     fn resolved_shield_hand_frame_with_runtime_display_resources() {
-        let root = std::path::PathBuf::from(std::env::var_os("SOLARIS_CLIENT_RESOURCE_ROOT")
-            .expect("set SOLARIS_CLIENT_RESOURCE_ROOT to the activated resource root"));
+        let root = std::path::PathBuf::from(std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT")
+            .expect("set KRASNOKAMEN_CLIENT_RESOURCE_ROOT to the activated resource root"));
         let read = |path: &str| std::fs::read(root.join(path)).expect("runtime shield resource");
         let mut content = Content::test_cube();
         content.insert_test_texture("minecraft:entity/shield/shield_base_nopattern",

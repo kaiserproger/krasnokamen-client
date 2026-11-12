@@ -9,7 +9,7 @@ fn offscreen_padded_rows_and_mp4_pipe_round_trip() {
     const HEIGHT: u32=180;
     let _gpu = crate::render::gpu_test_lock();
     let clock = crate::replay::clock::VirtualClock::new();
-    let directory = std::env::var_os("SOLARIS_CAPTURE_TEST_ARTIFACTS")
+    let directory = std::env::var_os("KRASNOKAMEN_CAPTURE_TEST_ARTIFACTS")
         .map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
         .join(format!("capture-smoke-{}-{}", std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));

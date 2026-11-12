@@ -543,9 +543,9 @@ fn run(
                     )?,
                     // A Loader probe is answered here, in packet order, so the hello
                     // is written before the KnownPacks reply the server waits behind.
-                    configuration::clientbound::CUSTOM_PAYLOAD if matches!(Reader::new(&body).string(32767), Ok(ref channel) if channel == "solaris:loader/probe") => {
+                    configuration::clientbound::CUSTOM_PAYLOAD if matches!(Reader::new(&body).string(32767), Ok(ref channel) if channel == "krasnokamen:loader/probe") => {
                         let mut w = Writer::default();
-                        w.string("solaris:loader/hello");
+                        w.string("krasnokamen:loader/hello");
                         write(&mut socket, configuration::serverbound::CUSTOM_PAYLOAD, &w.0, compression)?
                     }
                     configuration::clientbound::COOKIE_REQUEST => {

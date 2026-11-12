@@ -72,22 +72,22 @@ pub(crate) struct Family {
 }
 
 pub(crate) const SWORD_COMBO: [&str; 3] = [
-    "animation.solaris.humanoid.sword_slash",
-    "animation.solaris.humanoid.sword_backhand",
-    "animation.solaris.humanoid.sword_overhead",
+    "animation.krasnokamen.humanoid.sword_slash",
+    "animation.krasnokamen.humanoid.sword_backhand",
+    "animation.krasnokamen.humanoid.sword_overhead",
 ];
-pub(crate) const SPEAR: &str = "animation.solaris.humanoid.spear_thrust";
-pub(crate) const MACE: &str = "animation.solaris.humanoid.mace_overhead";
-pub(crate) const SHIELD: &str = "animation.solaris.humanoid.shield_block";
-pub(crate) const STAGGER: &str = "animation.solaris.humanoid.stagger";
-pub(crate) const BOW: &str = "animation.solaris.humanoid.bow_shot";
-pub(crate) const CROSSBOW: &str = "animation.solaris.humanoid.crossbow_shot";
-pub(crate) const LANCE: &str = "animation.solaris.humanoid.lance_strike";
-pub(crate) const MOUNTED_SWORD: &str = "animation.solaris.humanoid.mounted_sword";
-pub(crate) const HURT: &str = "animation.solaris.humanoid.hurt";
-pub(crate) const DEATH: &str = "animation.solaris.humanoid.death";
-pub(crate) const HORSE_HURT: &str = "animation.solaris.horse.hurt";
-pub(crate) const HORSE_DEATH: &str = "animation.solaris.horse.death";
+pub(crate) const SPEAR: &str = "animation.krasnokamen.humanoid.spear_thrust";
+pub(crate) const MACE: &str = "animation.krasnokamen.humanoid.mace_overhead";
+pub(crate) const SHIELD: &str = "animation.krasnokamen.humanoid.shield_block";
+pub(crate) const STAGGER: &str = "animation.krasnokamen.humanoid.stagger";
+pub(crate) const BOW: &str = "animation.krasnokamen.humanoid.bow_shot";
+pub(crate) const CROSSBOW: &str = "animation.krasnokamen.humanoid.crossbow_shot";
+pub(crate) const LANCE: &str = "animation.krasnokamen.humanoid.lance_strike";
+pub(crate) const MOUNTED_SWORD: &str = "animation.krasnokamen.humanoid.mounted_sword";
+pub(crate) const HURT: &str = "animation.krasnokamen.humanoid.hurt";
+pub(crate) const DEATH: &str = "animation.krasnokamen.humanoid.death";
+pub(crate) const HORSE_HURT: &str = "animation.krasnokamen.horse.hurt";
+pub(crate) const HORSE_DEATH: &str = "animation.krasnokamen.horse.death";
 
 /// Every clip name the selection can start; the shipped files must provide each.
 #[cfg(test)]

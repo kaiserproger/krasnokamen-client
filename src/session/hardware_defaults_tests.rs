@@ -61,7 +61,7 @@ fn invalid_saved_values_do_not_disable_capacity_defaults() {
 
 #[test]
 fn saving_a_choice_does_not_persist_automatic_defaults() {
-    const CHILD: &str = "SOLARIS_HARDWARE_DEFAULTS_TEST_CHILD";
+    const CHILD: &str = "KRASNOKAMEN_HARDWARE_DEFAULTS_TEST_CHILD";
     if std::env::var_os(CHILD).is_some() {
         let path = crate::local_config::client_settings_path().unwrap();
         let mut session = session_with_far_offer("explicit-setting-save");
@@ -102,7 +102,7 @@ fn saving_a_choice_does_not_persist_automatic_defaults() {
         return;
     }
     let root = std::env::temp_dir().join(format!(
-        "solaris-hardware-defaults-{}-{}",
+        "krasnokamen-hardware-defaults-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -113,8 +113,8 @@ fn saving_a_choice_does_not_persist_automatic_defaults() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "session::actions::hardware_defaults_tests::saving_a_choice_does_not_persist_automatic_defaults", "--nocapture"])
         .env(CHILD, "1")
-        .env("SOLARIS_CLIENT_SETTINGS", root.join("settings.json"))
-        .env_remove("SOLARIS_CLIENT_FAR_TERRAIN")
+        .env("KRASNOKAMEN_CLIENT_SETTINGS", root.join("settings.json"))
+        .env_remove("KRASNOKAMEN_CLIENT_FAR_TERRAIN")
         .output().unwrap();
     std::fs::remove_dir_all(root).unwrap();
     assert!(

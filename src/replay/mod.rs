@@ -102,7 +102,7 @@ impl Player {
         // a local counter: skipped edge-pump ticks remain visible as gaps.
         if let Some((tick,wall)) = format::tick_marker(self.phase,id,body)? {
             if self.last_tick.is_some_and(|previous| tick <= previous) {
-                return Err("replay solaris:tick markers are not strictly increasing".into());
+                return Err("replay krasnokamen:tick markers are not strictly increasing".into());
             }
             self.last_tick = Some(tick);
             self.last_wall_ns = Some(wall);

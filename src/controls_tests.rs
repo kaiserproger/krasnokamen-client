@@ -18,7 +18,7 @@ fn controls_rebind_conflict_and_resets() {
 fn controls_settings_round_trip() {
     let mut bindings = Bindings::default();
     bindings.set("jump", Binding::Mouse(MouseButton::Middle));
-    let path = std::env::temp_dir().join(format!("solaris-controls-{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!("krasnokamen-controls-{}.json", std::process::id()));
     let mut settings = std::collections::BTreeMap::new();
     settings.insert("key_bindings".into(), bindings.value());
     crate::local_config::save_client_settings_to(&settings, &path);

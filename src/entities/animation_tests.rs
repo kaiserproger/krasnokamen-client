@@ -189,7 +189,7 @@ fn animation_received_motion_swings_limbs_without_velocity_packets() {
 #[test]
 fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
     let (models, mut entity) = fixture();
-    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:spider#main").unwrap();
     entity.type_name = "minecraft:spider".into();
     let pose = |entity: &Entity| {
         let mut matrices = vec![];
@@ -219,7 +219,7 @@ fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
 #[test]
 fn animation_zombie_authored_legs_follow_received_motion() {
     let (models, mut entity) = fixture();
-    let rig = solaris_models::authored("minecraft:zombie#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:zombie#main").unwrap();
     entity.type_name = "minecraft:zombie".into();
     let mut idle = vec![];
     presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut idle);
@@ -268,7 +268,7 @@ fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
             surface_heightmap_received: false,
         })
         .unwrap();
-    let rig = solaris_models::authored("minecraft:chicken#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:chicken#main").unwrap();
     let wing = rig.bones.iter().position(|bone| bone.role == BoneRole::WingNegativeX).unwrap();
     let wing_at = |entity: &mut Entity, tick: u64| {
         entity.source.as_mut().unwrap().age = tick as i32;
@@ -1175,7 +1175,7 @@ fn crossed_arms_rigs_emit_the_held_item_at_the_source_anchor() {
         ("minecraft:witch", 1, "arms"),
         ("minecraft:witch", 2, "nose"),
     ] {
-        let rig = solaris_models::authored(kind).unwrap();
+        let rig = krasnokamen_models::authored(kind).unwrap();
         let mut items = crate::ui::items::ItemModels::new();
         items.insert_test_model("test:held", cube.clone());
         let mut stack = Stack::default();
@@ -1565,7 +1565,7 @@ fn animation_roleless_named_parts_move_without_erasing_authored_orientation() {
         let (models, mut e, content) = action_fixture(&format!("minecraft:{kind}"));
         e.velocity = [0.1, 0., 0.];
         e.source.as_mut().unwrap().living.as_mut().unwrap().in_water = true;
-        let rig = solaris_models::authored(&format!("minecraft:{kind}#main")).unwrap();
+        let rig = krasnokamen_models::authored(&format!("minecraft:{kind}#main")).unwrap();
         let bone = rig.part_by_name[part];
         e.source.as_mut().unwrap().age = 1;
         let first = action_pose(&models, &e, &content, rig);
@@ -1586,7 +1586,7 @@ fn animation_modern_action_timers_change_parts_and_return_to_rest() {
     use render_living::Modern;
     for kind in ["frog", "warden", "rabbit", "breeze", "copper_golem", "creaking", "sniffer"] {
         let (models, mut e, content) = action_fixture(&format!("minecraft:{kind}"));
-        let rig = solaris_models::authored(&format!("minecraft:{kind}#main")).unwrap();
+        let rig = krasnokamen_models::authored(&format!("minecraft:{kind}#main")).unwrap();
         e.source.as_mut().unwrap().age = 5;
         let idle = action_pose(&models, &e, &content, rig);
         match &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
@@ -1687,7 +1687,7 @@ fn animation_modern_baby_adult_and_identity_changes_do_not_reuse_action_timers()
     for baby in [false, true] {
         let (models, mut e, content) = action_fixture("minecraft:camel");
         e.metadata.insert(16, Metadata::Bool(baby));
-        let rig = solaris_models::authored(if baby { "minecraft:camel_baby#main" } else { "minecraft:camel#main" }).unwrap();
+        let rig = krasnokamen_models::authored(if baby { "minecraft:camel_baby#main" } else { "minecraft:camel#main" }).unwrap();
         let standing = action_pose(&models, &e, &content, rig);
         if let Modern::Camel { sit_pose, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
             sit_pose.start(0);
@@ -1723,7 +1723,7 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
     ];
     let mut feet = Vec::new();
     for (base, _) in pairs {
-        let rig = solaris_models::authored(base).unwrap();
+        let rig = krasnokamen_models::authored(base).unwrap();
         let standing = action_pose(&models, &e, &content, rig);
         // Model space is Y-down: the standing feet are the lowest leg point.
         feet.push(extent(rig, &standing, "right_hind_leg", 1).1);
@@ -1739,12 +1739,12 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
             }
         }
         for ((base, saddle), feet) in pairs.into_iter().zip(&feet) {
-            let rig = solaris_models::authored(base).unwrap();
+            let rig = krasnokamen_models::authored(base).unwrap();
             let (back, belly) = extent(rig, &action_pose(&models, &e, &content, rig), "body", 1);
             assert!((feet - back - seat).abs() <= 1. / 16.,
                 "{base} sitting={sitting}: back {} blocks above feet, seat {seat}", feet - back);
             assert!(belly <= feet + 1e-4, "{base} sitting={sitting}: body sinks below its feet");
-            let saddle_rig = solaris_models::authored(saddle).unwrap();
+            let saddle_rig = krasnokamen_models::authored(saddle).unwrap();
             let (pad, _) = extent(saddle_rig, &action_pose(&models, &e, &content, saddle_rig), "body", 1);
             assert!((feet - pad - seat).abs() <= 1. / 16.,
                 "{saddle} sitting={sitting}: saddle {} blocks above feet, seat {seat}", feet - pad);
@@ -1838,7 +1838,7 @@ fn modern_visibility_reaches_submitted_geometry_for_tongue_croak_and_shell() {
                 "name":name,"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}]
             })).collect::<Vec<_>>()
         });
-        let rig = solaris_models::ModelFile::parse(&model.to_string()).unwrap().bake().unwrap();
+        let rig = krasnokamen_models::ModelFile::parse(&model.to_string()).unwrap().bake().unwrap();
         models.rigs.insert("test:pose#main".into(), rig);
         e.binding = Some(Ok(presentation::Binding {
             rig:"test:pose#main".into(),
@@ -1935,7 +1935,7 @@ fn animation_drowned_trident_pose_takes_precedence_on_the_actual_main_arm() {
 fn animation_bat_rest_and_axolotl_play_dead_are_reversible_for_babies_and_adults() {
     use render_living::Modern;
     let (models, mut bat, content) = action_fixture("minecraft:bat");
-    let bat_rig = solaris_models::authored("minecraft:bat#main").unwrap();
+    let bat_rig = krasnokamen_models::authored("minecraft:bat#main").unwrap();
     let flight = action_pose(&models, &bat, &content, bat_rig);
     if let Modern::Bat { rest, .. } = &mut bat.source.as_mut().unwrap().living.as_mut().unwrap().modern {
         rest.start(0);
@@ -1952,7 +1952,7 @@ fn animation_bat_rest_and_axolotl_play_dead_are_reversible_for_babies_and_adults
     for baby in [false, true] {
         let (models, mut e, content) = action_fixture("minecraft:axolotl");
         e.metadata.insert(16, Metadata::Bool(baby));
-        let rig = solaris_models::authored(if baby { "minecraft:axolotl_baby#main" } else { "minecraft:axolotl#main" }).unwrap();
+        let rig = krasnokamen_models::authored(if baby { "minecraft:axolotl_baby#main" } else { "minecraft:axolotl#main" }).unwrap();
         let idle = action_pose(&models, &e, &content, rig);
         if let Modern::Axolotl(state) = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
             for age in 0..10 { state.tick(age, baby, true, true, false, false); }

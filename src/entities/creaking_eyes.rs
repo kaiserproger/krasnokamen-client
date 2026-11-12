@@ -130,7 +130,7 @@ mod tests {
         assert!(err.contains("entity/creaking/creaking_eyes"));
         models.rigs.remove("minecraft:creaking_eyes#main");
         // A compiled-in authored rig is valid as well; a placeholder is not.
-        models.rigs.insert("minecraft:creaking_eyes#main".into(), super::super::solaris_models::placeholder(1., 1.));
+        models.rigs.insert("minecraft:creaking_eyes#main".into(), super::super::krasnokamen_models::placeholder(1., 1.));
         let err = render(&models, &entity, &content, Mat4::IDENTITY).unwrap_err();
         assert!(err.contains("minecraft:creaking_eyes#main"));
     }

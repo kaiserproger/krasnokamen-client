@@ -910,7 +910,7 @@ mod observation_tests {
         let mut session = Session::new_mode("entity-census".into(), false);
         let mut content = Content::test_cube();
         let facts: Value = serde_json::from_str(include_str!(
-            "../../assets/solaris/entities/entity-facts.json"
+            "../../assets/krasnokamen/entities/entity-facts.json"
         )).unwrap();
         content.entity_names = facts["entities"].as_object().unwrap().iter()
             .map(|(name, schema)| (u32::try_from(schema["protocol_id"].as_u64().unwrap()).unwrap(), name.clone()))

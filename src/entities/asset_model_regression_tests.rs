@@ -7,13 +7,13 @@
 //! were inspected in the locally supplied 26.3 atlas; no oracle pixels are embedded.
 //! Native/Java frame comparisons and isolated negative controls belong to Main.
 
-use super::{resources::{self, Rig}, solaris_models};
+use super::{resources::{self, Rig}, krasnokamen_models};
 use glam::{Mat4, Vec3};
 
 type Quad = [[f32; 5]; 4];
 
 fn rig(id: &str) -> &'static Rig {
-    solaris_models::authored(&format!("minecraft:{id}#main"))
+    krasnokamen_models::authored(&format!("minecraft:{id}#main"))
         .unwrap_or_else(|| panic!("missing embedded asset {id}"))
 }
 

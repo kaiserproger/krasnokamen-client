@@ -1,4 +1,4 @@
-//! Far-terrain generation program (`solaris:lod/program`), sent only when the
+//! Far-terrain generation program (`krasnokamen:lod/program`), sent only when the
 //! server operator opted in (`[lod] share_terrain_keys`): decoding and the
 //! CPU evaluator. The format and the reference semantics are documented in
 //! the server's `mc_worldgen::vanilla_density::program`; this evaluator gives

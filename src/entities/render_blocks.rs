@@ -1150,7 +1150,7 @@ mod tests {
                 let initial_body_indices =
                     geometry.indices[EntityMaterial::EntityCutout as usize].len();
                 let messages = if both_sides {
-                    ["FRONT", "Solaris", "Line 3", "Line 4"]
+                    ["FRONT", "Krasnokamen", "Line 3", "Line 4"]
                 } else {
                     ["P1 PARITY", "", "", ""]
                 }
@@ -1182,7 +1182,7 @@ mod tests {
                         "back_text",
                         Tag::record([
                             ("messages", Tag::List(
-                                ["BACK", "Solaris", "Line 3", "Line 4"]
+                                ["BACK", "Krasnokamen", "Line 3", "Line 4"]
                                     .into_iter()
                                     .map(Tag::string)
                                     .collect(),

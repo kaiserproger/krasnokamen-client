@@ -1,6 +1,6 @@
 //! Keyframe combat clips: files, baking and selection from received packets.
 //!
-//! * `assets/solaris/animations/*.animation.json` hold Solaris-authored clips in a
+//! * `assets/krasnokamen/animations/*.animation.json` hold Krasnokamen-authored clips in a
 //!   Bedrock-style keyframe format ([`format`]); they are embedded at build time, baked to
 //!   the renderer's fixed-rate tables ([`bake`]) and installed once into
 //!   [`clip_pose`](super::clip_pose), which both entity render paths sample with one rule.
@@ -35,11 +35,11 @@ const FLINCH: usize = 1;
 const SOURCES: [(&str, &str); 2] = [
     (
         "humanoid.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/solaris/animations/humanoid.animation.json")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/krasnokamen/animations/humanoid.animation.json")),
     ),
     (
         "horse.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/solaris/animations/horse.animation.json")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/krasnokamen/animations/horse.animation.json")),
     ),
 ];
 
@@ -67,13 +67,13 @@ impl Catalog {
             let clips = match format::parse(source) {
                 Ok(clips) => clips,
                 Err(error) => {
-                    eprintln!("solaris animation {file} rejected: {error}");
+                    eprintln!("krasnokamen animation {file} rejected: {error}");
                     continue;
                 }
             };
             for clip in clips {
                 if lengths.contains_key(&clip.name) {
-                    eprintln!("solaris animation {file}: duplicate clip {}", clip.name);
+                    eprintln!("krasnokamen animation {file}: duplicate clip {}", clip.name);
                     continue;
                 }
                 match bake::bake(&clip) {
@@ -81,12 +81,12 @@ impl Catalog {
                         lengths.insert(clip.name, clip.length);
                         baked.push(table);
                     }
-                    Err(error) => eprintln!("solaris animation {file} clip rejected: {error}"),
+                    Err(error) => eprintln!("krasnokamen animation {file} clip rejected: {error}"),
                 }
             }
         }
         if let Err(error) = clip_pose::ClipLibrary::new(baked).and_then(clip_pose::install) {
-            eprintln!("solaris animation library not installed: {error}");
+            eprintln!("krasnokamen animation library not installed: {error}");
         }
         let library = clip_pose::library();
         let clips = lengths

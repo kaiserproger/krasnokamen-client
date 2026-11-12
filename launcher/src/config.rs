@@ -108,7 +108,7 @@ impl Default for Config {
             }],
             selected_profile: 0,
             servers: vec![Server {
-                name: "Solaris test".into(),
+                name: "Krasnokamen test".into(),
                 address: "135.106.208.217:25565".into(),
             }],
             selected_server: 0,

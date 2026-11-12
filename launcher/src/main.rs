@@ -1,4 +1,4 @@
-//! Solaris launcher: downloads the game content, then starts `solaris-client`.
+//! Krasnokamen launcher: downloads the game content, then starts `krasnokamen-client`.
 mod bootstrap;
 mod capture;
 mod config;
@@ -19,19 +19,19 @@ use paths::Layout;
 use progress::Reporter;
 use std::path::PathBuf;
 
-const HELP: &str = "Solaris launcher
+const HELP: &str = "Krasnokamen launcher
 Usage:
-  solaris-launcher                      Open the launcher window
-  solaris-launcher --headless-bootstrap [--force] [--play]
+  krasnokamen-launcher                      Open the launcher window
+  krasnokamen-launcher --headless-bootstrap [--force] [--play]
                                         Download game content without a window
                                         (--play then starts the client and waits)
-  solaris-launcher --singleplayer-runtime
+  krasnokamen-launcher --singleplayer-runtime
                                         Install the server data singleplayer needs
                                         (the client starts this before a local world;
                                         it downloads only on first use or a new pin)
 Options:
-  --data-dir DIR     Data root (default: $XDG_DATA_HOME/solaris-client, %APPDATA%\\solaris-client)
-  --manifest URL     Solaris content manifest (default: built in, or launcher.json)
+  --data-dir DIR     Data root (default: $XDG_DATA_HOME/krasnokamen-client, %APPDATA%\\krasnokamen-client)
+  --manifest URL     Krasnokamen content manifest (default: built in, or launcher.json)
   --server HOST[:PORT]   Server for --play / --autoplay (default: selected server)
   --username NAME        Offline username for --play / --autoplay
   --autoplay         Window mode: start the install/Play flow immediately
@@ -132,7 +132,7 @@ fn headless(args: &Args, layout: &Layout) -> Result<()> {
         let mut child = launch::spawn(&spec, &rep)?;
         let status = child.wait()?;
         if !status.success() {
-            bail!("solaris-client exited with {status}");
+            bail!("krasnokamen-client exited with {status}");
         }
     }
     Ok(())
@@ -146,14 +146,14 @@ fn main() {
             return;
         }
         Err(error) => {
-            eprintln!("solaris-launcher: {error:#}");
+            eprintln!("krasnokamen-launcher: {error:#}");
             std::process::exit(2);
         }
     };
     let root = match paths::data_root(args.data_dir.clone()) {
         Ok(root) => root,
         Err(error) => {
-            eprintln!("solaris-launcher: {error}");
+            eprintln!("krasnokamen-launcher: {error}");
             std::process::exit(1);
         }
     };
@@ -170,7 +170,7 @@ fn main() {
         ui::run(args, layout)
     };
     if let Err(error) = result {
-        eprintln!("solaris-launcher: {error:#}");
+        eprintln!("krasnokamen-launcher: {error:#}");
         std::process::exit(1);
     }
 }
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn capture_requires_absolute_path_and_window_mode() {
         assert!(parse(args(&["--capture-window", "relative.png"])).is_err());
-        let image = std::env::temp_dir().join("solaris-launcher-capture.png");
+        let image = std::env::temp_dir().join("krasnokamen-launcher-capture.png");
         let image = image.to_str().unwrap();
         assert!(parse(args(&["--capture-window", image, "--headless-bootstrap"])).is_err());
         assert!(parse(args(&["--capture-window", image, "--singleplayer-runtime"])).is_err());

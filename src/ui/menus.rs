@@ -162,7 +162,7 @@ impl UiState {
         self.panel();
         let cx = self.width / 2.;
         let mark_y = (self.height * 0.13).floor();
-        self.label("title/name", "Solaris".into(), [cx - 150., mark_y, 300., 36.])?;
+        self.label("title/name", "Krasnokamen".into(), [cx - 150., mark_y, 300., 36.])?;
         self.label(
             "title/subtitle",
             format!("Minecraft {} · Native client", crate::singleplayer::GAME_VERSION),
@@ -473,13 +473,13 @@ mod tests {
     }
     #[test]
     fn rc1_saved_server_edit_delete_rewrites_file_with_confirmation() {
-        if std::env::var_os("SOLARIS_SERVER_REWRITE_TEST").is_none() {
-            let dir = std::env::temp_dir().join(format!("solaris-servers-{}", uuid::Uuid::new_v4()));
+        if std::env::var_os("KRASNOKAMEN_SERVER_REWRITE_TEST").is_none() {
+            let dir = std::env::temp_dir().join(format!("krasnokamen-servers-{}", uuid::Uuid::new_v4()));
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "ui::menus::tests::rc1_saved_server_edit_delete_rewrites_file_with_confirmation", "--nocapture"])
-                .env("SOLARIS_SERVER_REWRITE_TEST", "1")
-                .env("SOLARIS_CLIENT_ROOT", &dir)
-                .env("SOLARIS_CLIENT_SETTINGS", dir.join("client-settings.json"))
+                .env("KRASNOKAMEN_SERVER_REWRITE_TEST", "1")
+                .env("KRASNOKAMEN_CLIENT_ROOT", &dir)
+                .env("KRASNOKAMEN_CLIENT_SETTINGS", dir.join("client-settings.json"))
                 .env("XDG_DATA_HOME", &dir)
                 .status().unwrap();
             let _ = std::fs::remove_dir_all(dir);
@@ -541,7 +541,7 @@ mod tests {
     }
     #[test]
     fn server_list_write_errors_name_target_and_preserve_old_file() {
-        let dir = std::env::temp_dir().join(format!("solaris-server-write-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("krasnokamen-server-write-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("servers.json");
         let original = vec![SavedServer { name: "Keep".into(), address: "keep.example".into() }];

@@ -1,10 +1,10 @@
 //! Never-generated far columns computed on this machine, only on servers
-//! whose operator shares the generation program (`solaris:lod/program`,
+//! whose operator shares the generation program (`krasnokamen:lod/program`,
 //! `[lod] share_terrain_keys`). Such a client asks the server for stored
 //! columns only and meanwhile generates every tile still missing columns
 //! whole, in the renderer's compute pass (`TILES_PER_DISPATCH` per frame), or
 //! on a CPU worker thread when the GPU path is unavailable (headless, no
-//! compute, `SOLARIS_CLIENT_FAR_GPU=0`). Generated samples rank lowest: any
+//! compute, `KRASNOKAMEN_CLIENT_FAR_GPU=0`). Generated samples rank lowest: any
 //! server or chunk sample replaces them.
 use super::program::{Column, Program};
 use super::{write, Far, Source, TileKey, EDGE, SAMPLES};
@@ -42,7 +42,7 @@ pub(super) struct Generation {
 }
 
 impl Far {
-    /// `solaris:lod/program`: the server's zlib-compressed generation program.
+    /// `krasnokamen:lod/program`: the server's zlib-compressed generation program.
     pub(crate) fn program(&mut self, payload: &[u8]) -> Result<()> {
         let Some((&protocol, compressed)) = payload.split_first() else {
             return Err("empty far terrain program".into());

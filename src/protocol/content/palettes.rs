@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn generated_item_uses_palette_for_geometry_and_atlas_with_pack_overrides() {
         let root = Root(std::env::temp_dir().join(format!(
-            "solaris-palette-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+            "krasnokamen-palette-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
         )));
         let base = root.0.join("base");
         let pack = root.0.join("pack");
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn vanilla_26_3_trim_palettes_resolve_under_textures_palettes() {
         let root = Root(std::env::temp_dir().join(format!(
-            "solaris-palette-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+            "krasnokamen-palette-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
         )));
         let base = root.0.join("base");
         write(&base, "assets/minecraft/atlases/items.json", br#"{"sources":[

@@ -283,7 +283,7 @@ impl Post {
         });
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solaris HDR postprocess"),
+            label: Some("Krasnokamen HDR postprocess"),
             source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").into()),
         });
         let fullscreen = |fragment: &str, format: wgpu::TextureFormat| {

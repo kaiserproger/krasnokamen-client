@@ -84,8 +84,8 @@ impl Clouds {
         }
         let cells = &self.cells.as_ref().expect("cloud cells loaded").1;
         let white = content
-            .texture("solaris:white")
-            .ok_or("missing mandatory texture solaris:white")?;
+            .texture("krasnokamen:white")
+            .ok_or("missing mandatory texture krasnokamen:white")?;
         let uv = [(white.uv[0] + white.uv[2]) / 2., (white.uv[1] + white.uv[3]) / 2.];
         let tint = tint(env.sun_angle, env.rain);
         let scroll = ticks * DRIFT;
@@ -202,7 +202,7 @@ mod tests {
             uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1,
         };
         content.insert_test_texture(TEXTURE, region);
-        content.insert_test_texture("solaris:white", region);
+        content.insert_test_texture("krasnokamen:white", region);
         let mut clouds = Clouds {
             cells: Some((1, Cells { size: 1, solid: vec![true] })),
         };

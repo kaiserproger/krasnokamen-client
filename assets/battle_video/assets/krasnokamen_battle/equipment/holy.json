@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "krasnokamen_battle:holy"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "krasnokamen_battle:holy"
+      }
+    ]
+  }
+}

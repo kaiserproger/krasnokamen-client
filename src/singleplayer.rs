@@ -1,11 +1,11 @@
-//! Singleplayer: local worlds under `<data>/worlds/<name>` and the Solaris
+//! Singleplayer: local worlds under `<data>/worlds/<name>` and the Krasnokamen
 //! server subprocess that serves one of them to the native client.
 //!
 //! Layout of one world directory:
 //!
 //! ```text
 //! worlds/<name>/
-//!   solaris-world.json   client-owned metadata (name, seed, mode, last played)
+//!   krasnokamen-world.json   client-owned metadata (name, seed, mode, last played)
 //!   server.toml          regenerated before every start
 //!   ops.json             the local player as operator, regenerated before every start
 //!   world/               native server world storage
@@ -27,9 +27,9 @@ use std::{
 };
 
 pub(crate) const GAME_VERSION: &str = "26.3";
-const AUTH_PLUGIN: &str = "solaris-auth";
+const AUTH_PLUGIN: &str = "krasnokamen-auth";
 const READY_MARKER: &str = "is listening";
-const WORLD_FILE: &str = "solaris-world.json";
+const WORLD_FILE: &str = "krasnokamen-world.json";
 const TAIL_LINES: usize = 40;
 const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -133,7 +133,7 @@ fn now_ms() -> u64 {
 
 /// The single local data root shared with the launcher.
 pub(crate) fn data_root() -> Result<PathBuf, String> {
-    if let Some(root) = std::env::var_os("SOLARIS_CLIENT_ROOT").filter(|s| !s.is_empty()) {
+    if let Some(root) = std::env::var_os("KRASNOKAMEN_CLIENT_ROOT").filter(|s| !s.is_empty()) {
         return Ok(PathBuf::from(root));
     }
     crate::content_paths::default_root()
@@ -286,7 +286,7 @@ pub(crate) fn delete_world(root: &Path, dir_name: &str) -> Result<(), String> {
     }
     let dir = worlds_dir(root).join(dir_name);
     if read_meta(&dir).is_none() {
-        return Err(format!("{} is not a Solaris world", dir.display()));
+        return Err(format!("{} is not a Krasnokamen world", dir.display()));
     }
     fs::remove_dir_all(&dir).map_err(|e| format!("cannot delete {}: {e}", dir.display()))
 }
@@ -359,9 +359,9 @@ fn exe_name(name: &str) -> String {
     }
 }
 
-/// `solaris-v2` next to the client binary, else `<data>/servers/solaris-v2`.
+/// `krasnokamen` next to the client binary, else `<data>/servers/krasnokamen`.
 pub(crate) fn server_binary(root: &Path) -> Result<PathBuf, String> {
-    let name = exe_name("solaris-v2");
+    let name = exe_name("krasnokamen");
     let candidates = [
         exe_dir().map(|d| d.join(&name)),
         Some(root.join("servers").join(&name)),
@@ -373,7 +373,7 @@ pub(crate) fn server_binary(root: &Path) -> Result<PathBuf, String> {
         .cloned()
         .ok_or_else(|| {
             format!(
-                "Solaris server ({name}) not found. Place it next to the game or in {}",
+                "Krasnokamen server ({name}) not found. Place it next to the game or in {}",
                 root.join("servers").display()
             )
         })
@@ -391,7 +391,7 @@ fn plugin_pack(root: &Path) -> Option<PathBuf> {
 }
 
 /// The local server's content cache (`vanilla_data_dir`), installed by the launcher
-/// from the pinned Solaris content bundle.
+/// from the pinned Krasnokamen content bundle.
 fn content_cache(root: &Path) -> PathBuf {
     root.join("servers/content").join(GAME_VERSION)
 }
@@ -470,7 +470,7 @@ pub(crate) struct ConfigSpec<'a> {
 pub(crate) fn server_config(spec: &ConfigSpec) -> String {
     let view = spec.view_distance.clamp(2, 32);
     let mut out = format!(
-        "[server]\nname = {}\nmotd = \"Solaris singleplayer\"\nmax_players = 8\n\
+        "[server]\nname = {}\nmotd = \"Krasnokamen singleplayer\"\nmax_players = 8\n\
          view_distance = {view}\nsimulation_distance = {}\n\n\
          [network]\nbind_address = \"127.0.0.1\"\nport = 0\n\n\
          [auth]\nonline_mode = false\n\n\
@@ -631,7 +631,7 @@ fn pump(
     });
 }
 
-/// Port from the server's ready line, e.g. `... Solaris is listening (edge v2) addr=127.0.0.1:41567 ...`.
+/// Port from the server's ready line, e.g. `... Krasnokamen is listening (edge v2) addr=127.0.0.1:41567 ...`.
 /// The server binds port 0 and reports the address it actually got.
 fn listening_port(line: &str) -> Option<u16> {
     let line = strip_ansi(line);
@@ -884,19 +884,19 @@ pub(crate) struct Launch<'a> {
     pub view_distance: u8,
 }
 
-/// `solaris-launcher` next to this executable, else `$SOLARIS_LAUNCHER_BIN`.
+/// `krasnokamen-launcher` next to this executable, else `$KRASNOKAMEN_LAUNCHER_BIN`.
 fn launcher_binary() -> Option<PathBuf> {
-    if let Some(custom) = std::env::var_os("SOLARIS_LAUNCHER_BIN").map(PathBuf::from)
+    if let Some(custom) = std::env::var_os("KRASNOKAMEN_LAUNCHER_BIN").map(PathBuf::from)
         && custom.is_file()
     {
         return Some(custom);
     }
-    let beside = exe_dir()?.join(exe_name("solaris-launcher"));
+    let beside = exe_dir()?.join(exe_name("krasnokamen-launcher"));
     beside.is_file().then_some(beside)
 }
 
-/// Run `solaris-launcher --singleplayer-runtime`, which installs the local server's
-/// content cache from the pinned Solaris content bundle (first singleplayer Play only;
+/// Run `krasnokamen-launcher --singleplayer-runtime`, which installs the local server's
+/// content cache from the pinned Krasnokamen content bundle (first singleplayer Play only;
 /// afterwards it returns at once without network) and relay its progress lines.
 fn install_content(
     launcher: &Path,
@@ -953,9 +953,9 @@ fn ensure_content(
         None if content_ready(&cache) => {}
         None => {
             return Err(
-                "Singleplayer needs the server data that solaris-launcher downloads (first run \
+                "Singleplayer needs the server data that krasnokamen-launcher downloads (first run \
                  only). It was not found next to the client: run \
-                 `solaris-launcher --singleplayer-runtime` once, or set SOLARIS_LAUNCHER_BIN."
+                 `krasnokamen-launcher --singleplayer-runtime` once, or set KRASNOKAMEN_LAUNCHER_BIN."
                     .to_owned(),
             );
         }
@@ -976,7 +976,7 @@ pub(crate) fn prepare_world(
     plugins: Option<&Path>,
 ) -> Result<(PathBuf, WorldMeta), String> {
     let dir = worlds_dir(launch.root).join(launch.world_dir);
-    let mut meta = read_meta(&dir).ok_or_else(|| format!("{} is not a Solaris world", dir.display()))?;
+    let mut meta = read_meta(&dir).ok_or_else(|| format!("{} is not a Krasnokamen world", dir.display()))?;
     let world_storage = dir.join("world");
     let config = server_config(&ConfigSpec {
         name: &meta.name,
@@ -1028,7 +1028,7 @@ mod tests {
     use super::*;
 
     fn temp_root(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("solaris-sp-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("krasnokamen-sp-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -1156,13 +1156,13 @@ mod tests {
     fn plugin_sync_drops_the_login_plugin() {
         let root = temp_root("plugins");
         let pack = root.join("servers/plugins");
-        for name in ["solaris-auth", "solaris-essentials"] {
+        for name in ["krasnokamen-auth", "krasnokamen-essentials"] {
             fs::create_dir_all(pack.join(name)).unwrap();
             fs::write(pack.join(name).join("plugin.toml"), name).unwrap();
         }
         let dest = sync_plugins(&root).unwrap().unwrap();
-        assert!(dest.join("solaris-essentials/plugin.toml").is_file());
-        assert!(!dest.join("solaris-auth").exists());
+        assert!(dest.join("krasnokamen-essentials/plugin.toml").is_file());
+        assert!(!dest.join("krasnokamen-auth").exists());
         // A previously synced login plugin is removed again.
         fs::create_dir_all(dest.join("old")).unwrap();
         sync_plugins(&root).unwrap();
@@ -1172,12 +1172,12 @@ mod tests {
 
     #[test]
     fn listening_port_is_read_from_the_servers_ready_line() {
-        let line = "2026-10-19T02:00:00Z  INFO solaris_v2: Solaris is listening (edge v2) \
+        let line = "2026-10-19T02:00:00Z  INFO krasnokamen: Krasnokamen is listening (edge v2) \
                     addr=127.0.0.1:41567 name=My World";
         assert_eq!(listening_port(line), Some(41567));
-        assert_eq!(listening_port("Solaris is listening (edge v2) addr=[::1]:7 name=w"), Some(7));
-        assert_eq!(listening_port("Solaris is listening (edge v2)"), None);
-        assert_eq!(listening_port("Solaris is listening addr=nonsense"), None);
+        assert_eq!(listening_port("Krasnokamen is listening (edge v2) addr=[::1]:7 name=w"), Some(7));
+        assert_eq!(listening_port("Krasnokamen is listening (edge v2)"), None);
+        assert_eq!(listening_port("Krasnokamen is listening addr=nonsense"), None);
     }
 
     #[test]
@@ -1238,7 +1238,7 @@ mod tests {
             "mkfifo ready-gate\n\
              echo 'Preparing spawn: 1/9 chunks'\n\
              read token < ready-gate\n\
-             echo 'Solaris is listening addr=127.0.0.1:41239'",
+             echo 'Krasnokamen is listening addr=127.0.0.1:41239'",
         );
         let (cancel, events) = start_channel();
         let seen = Mutex::new(Vec::new());
@@ -1272,7 +1272,7 @@ mod tests {
         let binary = fake_server(
             &root,
             "trap 'echo checkpoint written > \"$PWD/checkpoint\"; exit 0' TERM\n\
-             echo 'Solaris is listening (edge v2) addr=127.0.0.1:41234 name=w'\n\
+             echo 'Krasnokamen is listening (edge v2) addr=127.0.0.1:41234 name=w'\n\
              while :; do sleep 1 & wait $!; done",
         );
         let mut server = launch_fake(&root, &binary).unwrap();

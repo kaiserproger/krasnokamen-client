@@ -60,7 +60,7 @@
     "baseline_order": [
       "isolated_renderer_replay",
       "live_server",
-      "co_located_client_and_Solaris_separate_run"
+      "co_located_client_and_Krasnokamen_separate_run"
     ],
     "comparators": [
       "unmodified_vanilla_26.1.2",

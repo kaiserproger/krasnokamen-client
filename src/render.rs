@@ -147,7 +147,7 @@ pub fn doctor() -> Result<Value, String> {
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .map_err(|e| format!("gpu_adapter_unavailable: {e}"))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("Solaris doctor device"),
+        label: Some("Krasnokamen doctor device"),
         ..Default::default()
     }))
     .map_err(|e| format!("gpu_device_unavailable: {e}"))?;
@@ -562,7 +562,7 @@ impl Renderer {
                 .flags
                 .contains(wgpu::DownlevelFlags::NONBLOCKING_QUERY_RESOLVE);
         let mdi_enabled = mdi::supported(adapter.features(),
-            std::env::var_os("SOLARIS_CLIENT_MDI").is_none_or(|value| value != "0"))
+            std::env::var_os("KRASNOKAMEN_CLIENT_MDI").is_none_or(|value| value != "0"))
             && downlevel.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS | wgpu::DownlevelFlags::INDIRECT_EXECUTION);
         let mut features = if timestamps {
             wgpu::Features::TIMESTAMP_QUERY
@@ -578,7 +578,7 @@ impl Renderer {
                     .allowed_usages
                     .contains(wgpu::TextureUsages::STORAGE_BINDING),
                 adapter.limits().max_storage_textures_per_shader_stage,
-                std::env::var_os("SOLARIS_CLIENT_HIZ").is_none_or(|value| value != "0"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_HIZ").is_none_or(|value| value != "0"),
             );
         capabilities["hiz_occlusion_enabled"] = json!(hiz_enabled);
         capabilities["enabled_features"] = json!(format!("{features:?}"));
@@ -605,7 +605,7 @@ impl Renderer {
         limits.max_buffer_size = adapter.limits().max_buffer_size.min(mesh::VERTEX_BUDGET);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("Solaris window GPU"),
+                label: Some("Krasnokamen window GPU"),
                 required_features: features,
                 required_limits: limits,
                 ..Default::default()
@@ -779,7 +779,7 @@ impl Renderer {
         });
         if let Some(mdi) = &mut mdi {
             mdi.set_cold_history(
-                std::env::var_os("SOLARIS_CLIENT_HIZ").is_some_and(|value| value == "cold"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_HIZ").is_some_and(|value| value == "cold"),
             );
         }
         let timing = timing::Timing::new(&device, &queue, timestamps);
@@ -794,7 +794,7 @@ impl Renderer {
         }
         let progress =
             progress::Progress::new(device.clone(), progress_errors, gpu_failed.clone())?;
-        // GPU far-terrain generation needs compute; SOLARIS_CLIENT_FAR_GPU=0
+        // GPU far-terrain generation needs compute; KRASNOKAMEN_CLIENT_FAR_GPU=0
         // forces the session's CPU generator instead.
         let far = far::FarTerrain::new(
             &device,
@@ -803,7 +803,7 @@ impl Renderer {
                 downlevel
                     .flags
                     .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS),
-                std::env::var_os("SOLARIS_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
             ),
         );
         Ok(Self {
@@ -1724,7 +1724,7 @@ impl Renderer {
                             _ => unreachable!(),
                         };
                         metadata["artifact_uri"] =
-                            json!(format!("solaris-client://artifacts/{artifact_name}.png"));
+                            json!(format!("krasnokamen-client://artifacts/{artifact_name}.png"));
                         metadata["file_name"] =
                             json!(capture.path.file_name().unwrap().to_string_lossy());
                         metadata["path"] = json!(capture.path);
@@ -1756,7 +1756,7 @@ mod presentation_error_tests {
     fn automation_capture_cancellation_without_writer_stops_before_and_after_gpu_submission() {
         let _gpu_guard = gpu_test_lock();
         let directory = std::env::temp_dir().join(format!(
-            "solaris-capture-cancel-{}-{}", std::process::id(),
+            "krasnokamen-capture-cancel-{}-{}", std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
                 .unwrap().as_nanos(),
         ));

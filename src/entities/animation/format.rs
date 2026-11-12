@@ -1,4 +1,4 @@
-//! Keyframe clip files (`assets/solaris/animations/*.animation.json`).
+//! Keyframe clip files (`assets/krasnokamen/animations/*.animation.json`).
 //!
 //! The file layout is the Bedrock entity-animation subset documented at
 //! <https://bedrock.dev/docs/stable/Animations> and the schema
@@ -17,8 +17,8 @@
 //! holds its value, otherwise linear. Before the first key the first `pre` applies, after
 //! the last key the last `post`.
 //!
-//! Solaris rules on top of the subset, all fail-closed at load:
-//! * values are numbers in the Solaris rig convention (`solaris_models.rs`): rotation in
+//! Krasnokamen rules on top of the subset, all fail-closed at load:
+//! * values are numbers in the Krasnokamen rig convention (`krasnokamen_models.rs`): rotation in
 //!   degrees applied Z, then Y, then X; position in pixels with +Y down and -Z the front.
 //!   This is not Bedrock's axis convention (Bedrock negates X/Y rotation and X position).
 //! * bones are the canonical parts in [`Part`]; MoLang strings and unknown bones are

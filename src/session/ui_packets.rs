@@ -256,17 +256,17 @@ mod dialog_tests {
             ("radius".into(), Nbt::Float(12.)),
             ("walls".into(), Nbt::Byte(1)),
         ]);
-        let packet = custom_click("solaris:dialog_probe/submit", Some(&payload)).unwrap();
+        let packet = custom_click("krasnokamen:dialog_probe/submit", Some(&payload)).unwrap();
         // Local 26.3 packets.json: play serverbound custom_click_action = 68.
         assert_eq!(packet.id, 0x44);
         let mut reader = Reader::new(&packet.payload.0);
-        assert_eq!(reader.string(32767).unwrap(), "solaris:dialog_probe/submit");
+        assert_eq!(reader.string(32767).unwrap(), "krasnokamen:dialog_probe/submit");
         let len = reader.var().unwrap() as usize;
         let body = reader.take(len).unwrap();
         reader.done().unwrap();
         assert_eq!(Reader::new(body).nbt_typed().unwrap(), payload);
         // No payload: length 1, TAG_End.
-        let none = custom_click("solaris:x", None).unwrap();
+        let none = custom_click("krasnokamen:x", None).unwrap();
         assert_eq!(&none.payload.0[none.payload.0.len() - 2..], &[1, 0]);
     }
 }

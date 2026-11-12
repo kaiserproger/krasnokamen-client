@@ -31,7 +31,7 @@ pub(super) struct Pipelines {
 impl Pipelines {
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solaris authored material/sky shader"),
+            label: Some("Krasnokamen authored material/sky shader"),
             source: wgpu::ShaderSource::Wgsl(super::graphics::main_shader_source().into()),
         });
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

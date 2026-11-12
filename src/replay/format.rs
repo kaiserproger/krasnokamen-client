@@ -47,7 +47,7 @@ pub(crate) fn phase_after(phase: Phase, id: i32) -> Phase {
 pub(crate) fn tick_marker(phase: Phase, id: i32, body: &[u8]) -> Result<Option<(u64,u64)>> {
     if phase != Phase::Play || id != play::clientbound::CUSTOM_PAYLOAD { return Ok(None); }
     let mut reader = Reader::new(body);
-    if reader.string(32767)? != "solaris:tick" { return Ok(None); }
+    if reader.string(32767)? != "krasnokamen:tick" { return Ok(None); }
     let tick = reader.i64()? as u64;
     let wall = reader.i64()? as u64;
     reader.done()?;
@@ -206,7 +206,7 @@ impl Recorder {
                 summary.packet_bytes+=packet.bytes.len() as u64;
                 summary.last_packet_ms=packet.ms;
             }
-            if summary.first_tick.is_none() { return Err("recording has no solaris:tick marker; configure server recorder account".into()); }
+            if summary.first_tick.is_none() { return Err("recording has no krasnokamen:tick marker; configure server recorder account".into()); }
             let file = writer.finish()?.into_inner().map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| format!("sync recording: {e}"))?;
             Ok(summary)

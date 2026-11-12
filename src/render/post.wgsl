@@ -1,4 +1,4 @@
-// Solaris HDR postprocess: Off passthrough copy; Fancy adds TAA resolve (High),
+// Krasnokamen HDR postprocess: Off passthrough copy; Fancy adds TAA resolve (High),
 // half-resolution screen-space god rays, light bloom, ACES and sRGB encode.
 //
 // The world target is always Rgba16Float. Off mode writes display-encoded

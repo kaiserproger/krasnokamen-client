@@ -41,14 +41,14 @@ struct Params {
     tables: [u32; 4],
 }
 
-/// Whether an adapter can run the crowd renderer (and `SOLARIS_CLIENT_CROWD` is not 0).
+/// Whether an adapter can run the crowd renderer (and `KRASNOKAMEN_CLIENT_CROWD` is not 0).
 pub(super) fn supported(downlevel: wgpu::DownlevelFlags, limits: &wgpu::Limits) -> bool {
     downlevel.contains(
         wgpu::DownlevelFlags::COMPUTE_SHADERS
             | wgpu::DownlevelFlags::INDIRECT_EXECUTION
             | wgpu::DownlevelFlags::VERTEX_STORAGE,
     ) && limits.max_storage_buffers_per_shader_stage >= 8
-        && std::env::var_os("SOLARIS_CLIENT_CROWD").is_none_or(|value| value != "0")
+        && std::env::var_os("KRASNOKAMEN_CLIENT_CROWD").is_none_or(|value| value != "0")
 }
 
 /// Six normalized planes `(n, d)` with `n·p + d >= 0` inside the clip volume of `m`
@@ -184,7 +184,7 @@ impl Crowd {
         atlas_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solaris material shader with crowd vertex stages"),
+            label: Some("Krasnokamen material shader with crowd vertex stages"),
             source: wgpu::ShaderSource::Wgsl(super::graphics::main_shader_source().into()),
         });
         let vertex = wgpu::ShaderStages::VERTEX;
