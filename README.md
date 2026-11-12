@@ -1,6 +1,24 @@
-# Solaris native client
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kaiserproger/krasnokamen/main/docs/brand/krasnokamen-logo-on-dark.svg">
+    <img src="https://raw.githubusercontent.com/kaiserproger/krasnokamen/main/docs/brand/krasnokamen-logo-on-light.svg" alt="Krasnokamen" width="420">
+  </picture>
+</p>
 
-A Rust/wgpu client for Minecraft Java Edition **26.3**, with a small launcher that sets everything up for you. This is an **offline/test-identity preview**: there is no Microsoft login yet and it is not full vanilla parity. It is built to play on Solaris servers.
+<h1 align="center">Krasnokamen native client</h1>
+
+<p align="center">
+  <b>An engine for large Minecraft-compatible simulations.</b><br>
+  Native Rust client and launcher for Krasnokamen servers and singleplayer
+</p>
+
+<p align="center">
+  <sub><b>Krasnokamen 1.0.0-rc.5 «Pauline»</b> · formerly Solaris (<a href="https://github.com/kaiserproger/krasnokamen/blob/main/docs/brand/README.md#formerly-solaris">why the name changed</a>)</sub>
+</p>
+
+A Rust/wgpu client for Minecraft Java Edition **26.3**, with a small launcher that sets everything up for you. This is an **offline/test-identity preview**: there is no Microsoft login yet and it is not full vanilla parity. It is built to play on Krasnokamen servers.
+
+> **Names.** The code still uses the Solaris names until the rename lands in the source tree: the archives, binaries (`solaris-client`, `solaris-launcher`, `solaris-v2`), `Solaris.app`, `SOLARIS_*` variables and data folder below are the current ones.
 
 ## Install and play
 
@@ -21,8 +39,8 @@ The download is not bundled with the launcher: no Mojang files are ever shipped 
 |---|---|---|
 | Minecraft 26.3 client jar (textures, models, fonts, lang) | Mojang (`piston-meta.mojang.com`, SHA-1 verified) | ~40 MB |
 | Game assets (sounds, languages) | Mojang (`resources.download.minecraft.net`, SHA-1 verified) | ~440 MB |
-| Solaris data tables (block/item facts, collision shapes) | Solaris static server (SHA-256 **pinned inside the launcher**) | ~1 MB |
-| Singleplayer server data (registries, tags, loot tables, worldgen, reports): first singleplayer Play only | Solaris static server (SHA-256 **pinned inside the launcher**) | ~3 MB |
+| Krasnokamen data tables (block/item facts, collision shapes) | Krasnokamen static server (SHA-256 **pinned inside the launcher**) | ~1 MB |
+| Singleplayer server data (registries, tags, loot tables, worldgen, reports): first singleplayer Play only | Krasnokamen static server (SHA-256 **pinned inside the launcher**) | ~3 MB |
 
 Downloads are parallel, resumable (an interrupted run continues from the partial files) and every file is hash-checked. If anything is damaged use **Settings → Advanced → Verify / repair game files**.
 
@@ -32,9 +50,9 @@ The native launcher opens at 820×530 logical pixels, resizes down to 640×460, 
 
 **Settings → Appearance → Themes** contains 40 coordinated palettes with real interface miniatures, search, Dark/Light/Colorful filters and favorites. Click a preview or its name to apply it immediately; the choice is saved in `launcher.json`. Graphite is the default warm-accent dark theme. Custom themes support validated colors, editing, reset, deletion and JSON import/export (export never overwrites an existing file).
 
-**Appearance → Background & motion** enables an optional landscape banner, accepts a local PNG, and offers reduced motion. The bundled default is an original Solaris illustration, not a Minecraft screenshot. Images and settings stay local; no image service or sign-in is required.
+**Appearance → Background & motion** enables an optional landscape banner, accepts a local PNG, and offers reduced motion. The bundled default is an original Krasnokamen illustration, not a Minecraft screenshot. Images and settings stay local; no image service or sign-in is required.
 
-**Profiles → Local skin PNG** previews a 64×64/64×32 skin (or an integer HD multiple) with its hat layer. Without a selected file, the launcher uses the installed Steve texture when present, otherwise a clearly labeled original Solaris avatar. This is a launcher preview only: it does not change the skin used by an offline server. See [launcher verification and remaining acceptance gates](docs/LAUNCHER_REDESIGN.md).
+**Profiles → Local skin PNG** previews a 64×64/64×32 skin (or an integer HD multiple) with its hat layer. Without a selected file, the launcher uses the installed Steve texture when present, otherwise a clearly labeled original Krasnokamen avatar. This is a launcher preview only: it does not change the skin used by an offline server. See [launcher verification and remaining acceptance gates](docs/LAUNCHER_REDESIGN.md).
 
 ### Connect to the Solaris test server
 
@@ -44,9 +62,9 @@ Without the launcher: `solaris-client --server 135.106.208.217:25565 --username 
 
 ### Singleplayer
 
-**Singleplayer** on the title screen lists your worlds (`worlds/<name>` in the data folder) with last-played time and size; **Create New World** takes a name, an optional seed (blank = random, text is hashed like vanilla), game mode (survival/creative) and difficulty. **Play Selected World** starts the bundled Solaris server (`solaris-v2`, next to the client or in `servers/`) on a free loopback port, joins it as the title screen's username and makes that player the operator. **Delete** asks for confirmation, **Open Folder** opens `worlds/`. In game, the pause menu's **Save & Quit to Title** stops the server gracefully so the world is saved.
+**Singleplayer** on the title screen lists your worlds (`worlds/<name>` in the data folder) with last-played time and size; **Create New World** takes a name, an optional seed (blank = random, text is hashed like vanilla), game mode (survival/creative) and difficulty. **Play Selected World** starts the bundled Krasnokamen server (`solaris-v2`, next to the client or in `servers/`) on a free loopback port, joins it as the title screen's username and makes that player the operator. **Delete** asks for confirmation, **Open Folder** opens `worlds/`. In game, the pause menu's **Save & Quit to Title** stops the server gracefully so the world is saved.
 
-The first Play installs the server's content cache (Minecraft 26.3 registries, tags, loot tables, worldgen data and reports, ~3 MB). The client asks `solaris-launcher --singleplayer-runtime` (next to the client) to download it once from the Solaris static server, SHA-256 pinned inside the launcher like the data tables. No Java runtime or Minecraft server jar is involved, and a server-only player never downloads it. The server binds an OS-assigned loopback port and the client reads the real port from its `is listening` line. If stopping the server fails or has to be killed, the error screen shows the end of its log ("world may not be fully saved"). Each world's server log is `worlds/<name>/logs/server.log`; if the server dies, the error screen shows the end of that log. Mode and difficulty are applied once with ordinary operator commands on the first join; later changes are yours via `/gamemode` and `/difficulty`. The bundled plugin pack is loaded without `solaris-auth` (offline, local operator).
+The first Play installs the server's content cache (Minecraft 26.3 registries, tags, loot tables, worldgen data and reports, ~3 MB). The client asks `solaris-launcher --singleplayer-runtime` (next to the client) to download it once from the Krasnokamen static server, SHA-256 pinned inside the launcher like the data tables. No Java runtime or Minecraft server jar is involved, and a server-only player never downloads it. The server binds an OS-assigned loopback port and the client reads the real port from its `is listening` line. If stopping the server fails or has to be killed, the error screen shows the end of its log ("world may not be fully saved"). Each world's server log is `worlds/<name>/logs/server.log`; if the server dies, the error screen shows the end of that log. Mode and difficulty are applied once with ordinary operator commands on the first join; later changes are yours via `/gamemode` and `/difficulty`. The bundled plugin pack is loaded without `solaris-auth` (offline, local operator).
 
 World startup follows the server's pushed log/progress and listening signal,
 not a three-minute deadline. A slow first start remains cancellable; a server
@@ -54,7 +72,7 @@ that exits reports its log tail instead of asking you to press Play again.
 
 ### Server dialogs
 
-The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). Plain-message text is centered line by line like vanilla; hovering a styled run shows its `hover_event` tooltip, and clicking a run with a `click_event` runs it like a button action (`custom` with its typed payload, `run_command`; other kinds are reported, not executed) followed by the dialog's `after_action`. `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button and title tooltips and vanilla's "custom screen" warning button. The server side is documented in the Solaris repo (`docs/DIALOGS.md`).
+The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). Plain-message text is centered line by line like vanilla; hovering a styled run shows its `hover_event` tooltip, and clicking a run with a `click_event` runs it like a button action (`custom` with its typed payload, `run_command`; other kinds are reported, not executed) followed by the dialog's `after_action`. `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button and title tooltips and vanilla's "custom screen" warning button. The server side is documented in the Krasnokamen repo (`docs/DIALOGS.md`).
 
 ### Far terrain
 The render-distance setting ranges from 2 to 32 chunks in both the launcher
@@ -72,7 +90,7 @@ finished fading in, avoiding gaps during loading. Far colours are block
 texture averages seen over black (translucent water and cutout leaves read
 darker from afar) times the biome's grass, foliage or water tint.
 
-On Solaris servers with `[lod]` enabled the client draws a coarse heightfield of the overworld beyond the render distance, fading into the sky. `far_terrain` in `client-settings.json` sets its reach in blocks (2048 by default, 1024 with the Low graphics preset, 0 turns it off; the server caps it). It is built from received chunks, stored server chunks and the server's terrain generator. Each column shows its top surface block, one with collision or holding a fluid; flowers, grass and thin snow are not ground (a snowy block reads as snow, kelp and seagrass as water). With `share_terrain_keys` the server sends its generation program for local generation; singleplayer always enables this. Hardware adapters can generate on the GPU; software adapters use the background CPU generator instead of putting expensive compute on the frame queue. An unconfigured software adapter starts at 4 near chunks and 256 far blocks. Valid saved choices take precedence; automatic defaults are not saved as user choices, even when another option is changed. Tiles are cached under `far-terrain/`. `SOLARIS_CLIENT_FAR_TERRAIN=<blocks>` overrides the setting; `SOLARIS_CLIENT_FAR_GPU=0` forces CPU generation.
+On Krasnokamen servers with `[lod]` enabled the client draws a coarse heightfield of the overworld beyond the render distance, fading into the sky. `far_terrain` in `client-settings.json` sets its reach in blocks (2048 by default, 1024 with the Low graphics preset, 0 turns it off; the server caps it). It is built from received chunks, stored server chunks and the server's terrain generator. Each column shows its top surface block, one with collision or holding a fluid; flowers, grass and thin snow are not ground (a snowy block reads as snow, kelp and seagrass as water). With `share_terrain_keys` the server sends its generation program for local generation; singleplayer always enables this. Hardware adapters can generate on the GPU; software adapters use the background CPU generator instead of putting expensive compute on the frame queue. An unconfigured software adapter starts at 4 near chunks and 256 far blocks. Valid saved choices take precedence; automatic defaults are not saved as user choices, even when another option is changed. Tiles are cached under `far-terrain/`. `SOLARIS_CLIENT_FAR_TERRAIN=<blocks>` overrides the setting; `SOLARIS_CLIENT_FAR_GPU=0` forces CPU generation.
 
 ## System requirements
 
@@ -110,7 +128,7 @@ integrated GPU, a physical-machine RAM minimum, or content-download time.
 The data folder is `$XDG_DATA_HOME/solaris-client` (default `~/.local/share/solaris-client`) on Linux, `%APPDATA%\solaris-client` on Windows, and `~/Library/Application Support/solaris-client` on macOS; **Settings → General → Open data folder** shows it. Override with `solaris-launcher --data-dir DIR` or `solaris-client --data-dir DIR`. Direct launches keep in-game Options and the saved multiplayer list in that root, not beside the installed executable. The explicit `SOLARIS_CLIENT_SETTINGS` environment override still selects a different settings file.
 
 ```
-facts/ data/vanilla/                  Solaris data tables (entity metadata and models ship inside the client)
+facts/ data/vanilla/                  Krasnokamen data tables (entity metadata and models ship inside the client)
 resources/assets/                     textures/models/fonts unpacked from your client.jar
 assets/asset-index.json, objects/     Mojang asset index and sound/language objects
 mojang/versions/26.3/               official version json and client.jar
@@ -145,8 +163,8 @@ backwards. Completions are cleared when disconnecting from a server.
 - **Launcher window does not open or is garbled.** It needs OpenGL 3.3 on Linux/Windows (`LIBGL_ALWAYS_SOFTWARE=1 ./solaris-launcher` forces Mesa software rendering). Check `glxinfo -B`.
 - **Wayland vs X11 (Linux).** Both work. If a window is missing, scaled wrongly or has no input under Wayland, force X11 with `WAYLAND_DISPLAY= WINIT_UNIX_BACKEND=x11 ./solaris-launcher`; to force Wayland unset `DISPLAY`. The game inherits the launcher's environment.
 - **macOS says Solaris.app cannot be opened.** The app is ad-hoc signed but not notarized. Control-click it, choose **Open**, and confirm; or run `xattr -dr com.apple.quarantine /path/to/Solaris.app` after verifying the download.
-- **Download fails / stalls.** Press PLAY again: it resumes. Behind a proxy set `HTTPS_PROXY`/`HTTP_PROXY` (also used for the Solaris data download over plain HTTP). **Verify / repair** re-checks every file. The full log is in the Logs tab and `logs/launcher.log`.
-- **"refusing content bundle … does not match the hash pinned in this launcher".** The Solaris data on the server changed after this launcher was built. Download the newest launcher release. The launcher never installs a bundle it was not built to trust.
+- **Download fails / stalls.** Press PLAY again: it resumes. Behind a proxy set `HTTPS_PROXY`/`HTTP_PROXY` (also used for the Krasnokamen data download over plain HTTP). **Verify / repair** re-checks every file. The full log is in the Logs tab and `logs/launcher.log`.
+- **"refusing content bundle … does not match the hash pinned in this launcher".** The Krasnokamen data on the server changed after this launcher was built. Download the newest launcher release. The launcher never installs a bundle it was not built to trust.
 - **Singleplayer's first Play fails while downloading the server data.** Only singleplayer needs it (multiplayer never does): the client runs `solaris-launcher --singleplayer-runtime` from beside itself, which downloads from the content manifest in **Settings → Advanced** (`launcher.json`) and logs to `logs/launcher.log`. Set `SOLARIS_LAUNCHER_BIN` if the launcher is not next to the client.
 - **Singleplayer starts slowly.** The loading screen shows the local server's startup progress. Startup waits for its actual readiness or failure, not a fixed 180-second deadline; Cancel still stops it. “Preparing terrain and light” closes only after nearby terrain/light and a completed GPU frame are ready.
 - **Windows SmartScreen warns about an unsigned app.** The preview is unsigned: "More info → Run anyway".
@@ -185,7 +203,9 @@ CONTENT=<cache> SOLARIS_V2=<solaris-v2> tools/publish_content.sh <rev>
                                   # target/publish/solaris-content-26.3-r<rev>.tar.zst
 ```
 
-Upload the archive(s) and `solaris-content.json` to `http://135.106.208.217:8080/static/`, then set `FACTS_*`/`CONTENT_*` in `launcher/src/pins.rs` to the printed values and release a new launcher. The facts bundle holds only pure data tables (block/item/interaction facts, collision shapes, registry and item-default reports). The content bundle is the complete cache `solaris-v2 content import` derives (`version.json`, `data/`, `reports/`, e.g. the Solaris checkout's `data/vanilla`); the script runs `solaris-v2 content verify` on it before packing. Textures, models, fonts and sounds are never published (they come from Mojang's own servers to the user's machine), and entity models/metadata are Solaris-authored data inside the client binary.
+The code still uses the Solaris names until the rename lands in the source tree, so the binaries, archives, environment variables and bundle names in this README are the `solaris-*` / `SOLARIS_*` ones; released launchers pin and look the bundles up by these names.
+
+Upload the archive(s) and `solaris-content.json` to `http://135.106.208.217:8080/static/`, then set `FACTS_*`/`CONTENT_*` in `launcher/src/pins.rs` to the printed values and release a new launcher. The facts bundle holds only pure data tables (block/item/interaction facts, collision shapes, registry and item-default reports). The content bundle is the complete cache `solaris-v2 content import` derives (`version.json`, `data/`, `reports/`, e.g. the Krasnokamen checkout's `data/vanilla`); the script runs `solaris-v2 content verify` on it before packing. Textures, models, fonts and sounds are never published (they come from Mojang's own servers to the user's machine), and entity models/metadata are Krasnokamen-authored data inside the client binary.
 
 ### Developer content setup (no launcher)
 
@@ -200,4 +220,4 @@ No arguments opens the Title screen; `--server HOST[:PORT]` joins directly (defa
 
 ## Legal
 
-Solaris is an independent client. It contains no Mojang code or assets; everything from Mojang is downloaded by the user's own machine from Mojang's official endpoints, as any third-party launcher does. Minecraft is a trademark of Mojang AB / Microsoft; this project is not affiliated with them. Licensed MIT OR Apache-2.0.
+The Krasnokamen client is independent and unofficial. It contains no Mojang code or assets; everything from Mojang is downloaded by the user's own machine from Mojang's official endpoints, as any third-party launcher does. Minecraft is a trademark of Mojang AB / Microsoft; this project is not affiliated with them. Licensed MIT OR Apache-2.0.
