@@ -50,6 +50,29 @@ fn rc2_authored_village_models_have_coherent_body_parts() {
 }
 
 #[test]
+fn villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe() {
+    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "villager.json").unwrap();
+    let model = ModelFile::parse(source).unwrap();
+    let right = model.bones.iter().find(|bone| bone.name == "right_leg").unwrap();
+    let left = model.bones.iter().find(|bone| bone.name == "left_leg").unwrap();
+    let body = model.bones.iter().find(|bone| bone.name == "body").unwrap();
+    let robe = body.bones.iter().find(|bone| bone.name == "jacket").unwrap();
+    assert_eq!(right.cubes.len(), 1);
+    assert_eq!(left.cubes.len(), 1);
+    let (a, b) = (&right.cubes[0], &left.cubes[0]);
+    assert_eq!(a.size, b.size);
+    assert_eq!(a.uv, b.uv);
+    assert!(!a.mirror && b.mirror);
+    assert!(a.faces.is_empty() && b.faces.is_empty(), "legs use the box unwrap, not custom texture faces");
+    assert_eq!(right.pivot[2], body.pivot[2]);
+    assert_eq!(left.pivot[2], body.pivot[2]);
+    let hem = body.pivot[1] + robe.pivot[1] + robe.cubes[0].origin[1] + robe.cubes[0].size[1];
+    let hip = right.pivot[1] + a.origin[1];
+    let feet = hip + a.size[1];
+    assert!(hip < hem && hem < feet, "the robe covers the upper legs but leaves the feet visible");
+}
+
+#[test]
 fn goat_horn_spacing_tracks_observed_front_silhouette() {
     let rig = authored("minecraft:goat#main").unwrap();
     let right = rig.bones[rig.part_by_name["right_horn"]].pivot.x;

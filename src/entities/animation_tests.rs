@@ -2076,3 +2076,83 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
         assert!(presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5), "{name}");
     }
 }
+
+#[test]
+fn spider_leg_swing_follows_the_26_3_spider_model_pairs() {
+    // Right and left legs of a pair mirror each other; the four pairs run a quarter cycle apart.
+    let (right_yaw, right_roll) = presentation::spider_leg_swing("leg0", 0.3, 1.).unwrap();
+    let (left_yaw, left_roll) = presentation::spider_leg_swing("leg1", 0.3, 1.).unwrap();
+    assert_eq!((right_yaw, right_roll), (-left_yaw, -left_roll));
+    assert!(right_roll >= 0.);
+    // Source numbers at phase 0.3 (walk position 0.3 / 0.6662), speed 1: yaw -0.4 cos(0.6), roll 0.4 |sin(0.3)|.
+    assert!((right_yaw + 0.4 * 0.6_f32.cos()).abs() < 1e-6, "{right_yaw}");
+    assert!((right_roll - 0.4 * 0.3_f32.sin().abs()).abs() < 1e-6, "{right_roll}");
+    let (next_yaw, _) = presentation::spider_leg_swing("leg2", 0.3, 1.).unwrap();
+    assert_ne!(right_yaw, next_yaw);
+    assert_eq!(presentation::spider_leg_swing("leg0", 0.3, 0.), Some((0., 0.)));
+    assert_eq!(presentation::spider_leg_swing("head", 0.3, 1.), None);
+    assert_eq!(presentation::spider_leg_swing("leg8", 0.3, 1.), None);
+}
+
+#[test]
+fn zombie_arm_rotation_matches_the_26_3_animate_zombie_arms_formula() {
+    use std::f32::consts::PI;
+    let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+    let right = presentation::zombie_arm_rotation(1., (true, false), 0., None);
+    close(right.x, -PI / 2.25);
+    close(right.y, -0.1);
+    close(right.z, 0.1);
+    let left = presentation::zombie_arm_rotation(-1., (true, false), 0., None);
+    close(left.y, 0.1);
+    close(left.z, -0.1);
+    close(presentation::zombie_arm_rotation(1., (true, true), 0., None).x, -PI / 1.5);
+    // Mid swing: +1.2 sin(a pi) - 0.4 sin((1 - (1 - a)^2) pi), the same for both arms.
+    let recover = (0.75 * PI).sin();
+    close(
+        presentation::zombie_arm_rotation(1., (true, false), 0., Some(0.5)).x,
+        -PI / 2.25 + 1.2 - 0.4 * recover,
+    );
+    close(
+        presentation::zombie_arm_rotation(1., (true, false), 0., Some(0.5)).y,
+        -(0.1 - 0.6),
+    );
+    // A baby holding an item: arms hang and the swing terms flip sign.
+    close(presentation::zombie_arm_rotation(1., (false, false), 0., None).x, 0.);
+    close(
+        presentation::zombie_arm_rotation(1., (false, false), 0., Some(0.5)).x,
+        -1.2 - 0.4 * recover,
+    );
+    // Bob: both arms sway, in opposite directions, with age.
+    let age = 40.;
+    let bob_r = presentation::zombie_arm_rotation(1., (true, false), age, None);
+    let bob_l = presentation::zombie_arm_rotation(-1., (true, false), age, None);
+    close(bob_r.x + bob_l.x, -2. * PI / 2.25);
+    close(bob_r.z + bob_l.z, 0.);
+}
+
+/// ISSUE-1-19: the rig's legs carry exactly the source `SpiderModel.setupAnim` offsets on top
+/// of their rest rotation (red against the Solaris-authored alternating swing).
+#[test]
+fn spider_rig_legs_carry_the_26_3_walk_offsets() {
+    let (models, mut entity) = fixture();
+    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    entity.type_name = "minecraft:spider".into();
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let living = entity.source.as_ref().unwrap().living.as_ref().unwrap();
+    let (phase, speed) = (living.walk.position(1.) * 0.6662, living.walk.speed(1.));
+    assert!(speed > 0.05, "fixture must walk, speed {speed}");
+    let mut out = vec![];
+    let content = crate::protocol::content::Content::test_cube();
+    presentation::evaluate_rig(rig, &entity, &models, &content, 2, 1., Mat4::IDENTITY, &mut out);
+    for index in 0..8 {
+        let name = format!("leg{index}");
+        let at = rig.part_by_name[&name];
+        let bone = &rig.bones[at];
+        let (yaw, roll) = presentation::spider_leg_swing(&name, phase, speed).unwrap();
+        let parent = bone.parent.map_or(Mat4::IDENTITY, |p| out[p]);
+        let expected = parent
+            * resources::transform(bone.pivot, bone.rotation + Vec3::new(0., yaw, roll), bone.scale);
+        assert!(expected.abs_diff_eq(out[at], 1e-5), "{name}: {expected:?} vs {:?}", out[at]);
+    }
+}

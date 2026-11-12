@@ -776,6 +776,76 @@ mod tests {
     }
 
     #[test]
+    fn first_person_held_item_rest_anchor_matches_vanilla_exactly() {
+        // Vanilla 26.3 FirstPersonHandsAndItemsRenderer.submitArmWithItem at rest:
+        // applyItemArmTransform -> translate(side*0.56, -0.52 + equip*-0.6, -0.72) with
+        // equip=0 and no swing/bob, then the item's own display transform. There is no
+        // idle hand sway in the source, so the rest baseline must be exactly the anchor
+        // with identity rotation.
+        let mut content = Content::test_cube();
+        content.item_names.insert(7, "test:held".into());
+        let mut stack = Stack::default();
+        stack.id = 7;
+        stack.count = 1;
+        let mut inventory = InventoryStore::default();
+        inventory.player.slots[36] = Some(stack.clone());
+        let mut player = Player::new();
+        player.pose_known = true;
+        player.visual.shown = Some(stack);
+        player.visual.items.insert_test_model("test:held", content.models[0].clone());
+        let mut scene = crate::api::Scene {
+            yaw: 0.,
+            pitch: 0.,
+            origin: [4096., 0., -4096.],
+            camera_position: [4096.5, 65.62, -4095.5],
+            ..Default::default()
+        };
+        player
+            .append_first_person(
+                &content,
+                &inventory,
+                &mut EntityStore::new(),
+                &mut scene,
+                crate::player::FirstPersonFrame {
+                    partial: 1.,
+                    light: [15., 0.],
+                    item_context: &ItemContext::default(),
+                    ui: None,
+                },
+            )
+            .unwrap();
+        // The rest hand pose must be exactly still: no idle offset or roll.
+        let hand = player.visual.sample(&player, 1.).hand;
+        assert_eq!(hand.offset, [0., 0., 0.], "rest hand offset must be zero, got {hand:?}");
+        assert_eq!(hand.roll_deg, 0., "rest hand roll must be zero, got {hand:?}");
+        // Recover the camera-space placement: the render pass adds
+        // presentation_origin = origin - camera_position and applies
+        // camera_view(ZERO, yaw, pitch), so the item lands in pure camera space.
+        let view = crate::render::camera_view(Vec3::ZERO, scene.yaw, scene.pitch);
+        let pres = Vec3::from_array([
+            (scene.origin[0] - scene.camera_position[0]) as f32,
+            (scene.origin[1] - scene.camera_position[1]) as f32,
+            (scene.origin[2] - scene.camera_position[2]) as f32,
+        ]);
+        // Vanilla rest anchor for the right hand; the test cube is the unit cube and
+        // its (missing) display transform recentres by -0.5, so camera-space vertices
+        // must be exactly anchor + corner - 0.5 with identity rotation.
+        let anchor = Vec3::new(0.56, -0.52, -0.72);
+        assert!(!scene.first_person.vertices.is_empty());
+        for v in &scene.first_person.vertices {
+            let cam = view.transform_point3(Vec3::from_array(v.position) + pres);
+            let corner = cam - anchor + Vec3::splat(0.5);
+            for axis in 0..3 {
+                let c = corner[axis];
+                assert!(
+                    (c.abs() < 1e-5) || ((c - 1.).abs() < 1e-5),
+                    "rest placement deviates from the vanilla anchor: corner {corner:?} (cam {cam:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn first_person_tools_in_both_hands_stay_out_of_world_geometry_during_swing_and_use() {
         let mut content = Content::test_cube();
         content.item_names.insert(7, "test:held".into());
