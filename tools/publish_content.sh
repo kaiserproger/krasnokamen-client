@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build the Solaris singleplayer content bundle and merge its entry into the
+# Build the Krasnokamen singleplayer content bundle and merge its entry into the
 # content manifest for the static file server.
 #
 # The bundle is the complete vanilla content cache that
-# `solaris-v2 content import` derives (version.json, assets/, data/, reports/). The
+# `krasnokamen content import` derives (version.json, assets/, data/, reports/). The
 # launcher's `--singleplayer-runtime` installs it as the local server's
 # `vanilla_data_dir`, so players need no JDK, no Mojang server jar and no
 # Java extractors. Owner decision 2026-10-28: this derived data is published
-# from the Solaris CDN. Mojang textures/models/fonts/sounds are NOT part of it:
+# from the Krasnokamen CDN. Mojang textures/models/fonts/sounds are NOT part of it:
 # they still come from Mojang's own CDN (client jar + asset index).
 #
 # Tar top-level layout:
@@ -15,7 +15,7 @@
 #   content/version.json, content/assets/, content/data/, content/reports/, and any supported
 #   root sidecar (currently gameplay_version.json)
 # Before packing, the staged tree is validated by the real server with
-# `solaris-v2 content verify`, so a cache the server would refuse at startup is
+# `krasnokamen content verify`, so a cache the server would refuse at startup is
 # never published. The release is the launcher's GAME_VERSION
 # (launcher/src/paths.rs); the cache's version.json must match it.
 #
@@ -23,10 +23,10 @@
 # $OUT_DIR/solaris-content.json, replacing only an entry with the same name, so
 # the facts bundle and older pinned revisions stay listed.
 #
-# Usage: CONTENT=<cache> SOLARIS_V2=<server binary> tools/publish_content.sh [REV]
+# Usage: CONTENT=<cache> KRASNOKAMEN_V2=<server binary> tools/publish_content.sh [REV]
 #   REV         bundle revision (default 1)
 #   CONTENT     content cache to pack (e.g. <solaris>/data/vanilla)
-#   SOLARIS_V2  solaris-v2 built for the same release, used for `content verify`
+#   KRASNOKAMEN_V2  krasnokamen built for the same release, used for `content verify`
 #   OUT_DIR     output dir (default <repo>/target/publish)
 set -euo pipefail
 
@@ -34,7 +34,7 @@ REV="${1:-1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$SCRIPT_DIR")"
 CONTENT="${CONTENT:?set CONTENT to the content cache to pack}"
-SOLARIS_V2="${SOLARIS_V2:?set SOLARIS_V2 to the solaris-v2 binary for this release}"
+KRASNOKAMEN_V2="${KRASNOKAMEN_V2:?set KRASNOKAMEN_V2 to the krasnokamen binary for this release}"
 OUT_DIR="${OUT_DIR:-$REPO/target/publish}"
 GAME_VERSION="$(awk -F'"' '/pub const GAME_VERSION: &str/ { print $2; exit }' "$REPO/launcher/src/paths.rs")"
 if [[ ! "$GAME_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
@@ -74,7 +74,7 @@ for entry in "${OPTIONAL_ROOT_FILES[@]}"; do
 done
 
 # 2. The server must accept the staged tree as its startup cache.
-(cd "$STAGE" && "$SOLARIS_V2" content verify --cache "$STAGE/content")
+(cd "$STAGE" && "$KRASNOKAMEN_V2" content verify --cache "$STAGE/content")
 
 printf '{"name":"%s","kind":"content","game_version":"%s","rev":%s}\n' \
   "$NAME" "$GAME_VERSION" "$REV" > "$STAGE/bundle.json"

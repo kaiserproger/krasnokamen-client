@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author-side tooling for Solaris entity models (assets/solaris/models/entity/*.json).
+"""Author-side tooling for Krasnokamen entity models (assets/krasnokamen/models/entity/*.json).
 
   entity_models.py fmt     [model.json ...]   canonical compact formatting (run after every edit)
   entity_models.py check   [model.json ...]   schema/UV/texture validation (all models if none given)
@@ -10,16 +10,16 @@
 map panel: each cube face rectangle is outlined, opaque texels no cube samples are tinted red.
 Use it to confirm every textured region of the vanilla layout is used and lands where it should.
 
-Vanilla textures: $SOLARIS_TEXTURES, default dist/resources/assets/minecraft/textures.
-Format reference: src/entities/solaris_models.rs (module docs).
+Vanilla textures: $KRASNOKAMEN_TEXTURES, default dist/resources/assets/minecraft/textures.
+Format reference: src/entities/krasnokamen_models.rs (module docs).
 """
 import glob, json, math, os, sys
 import numpy as np
 from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS = os.path.join(ROOT, "assets/solaris/models/entity")
-TEXTURES = os.environ.get("SOLARIS_TEXTURES") or os.path.join(ROOT, "dist/resources/assets/minecraft/textures")
+MODELS = os.path.join(ROOT, "assets/krasnokamen/models/entity")
+TEXTURES = os.environ.get("KRASNOKAMEN_TEXTURES") or os.path.join(ROOT, "dist/resources/assets/minecraft/textures")
 FACES = ["up", "down", "right", "front", "left", "back"]
 
 
@@ -39,7 +39,7 @@ def face_rects(c):
 
 
 def cube_quads(c, tw, th):
-    """Mirror of cube_quads() in solaris_models.rs. Returns [(corners[4][5], normal)] in pixels/uv-px."""
+    """Mirror of cube_quads() in krasnokamen_models.rs. Returns [(corners[4][5], normal)] in pixels/uv-px."""
     ox, oy, oz = c["origin"]
     w, h, d = c["size"]
     i = c.get("inflate", 0.0)

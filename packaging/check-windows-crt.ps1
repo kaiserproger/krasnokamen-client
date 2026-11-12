@@ -30,7 +30,7 @@ $dumpbin = Get-ChildItem -Path (Join-Path $vs 'VC\Tools\MSVC\*\bin\Hostx64\x64\d
     Sort-Object FullName -Descending | Select-Object -First 1
 if (!$dumpbin) { throw "dumpbin.exe not found in $vs" }
 
-foreach ($name in @('solaris-launcher.exe', 'solaris-client.exe', 'solaris-v2.exe')) {
+foreach ($name in @('krasnokamen-launcher.exe', 'krasnokamen-client.exe', 'krasnokamen.exe')) {
     $exe = Join-Path $Stage $name
     if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing staged executable: $exe" }
     $dump = & $dumpbin.FullName /dependents $exe 2>&1

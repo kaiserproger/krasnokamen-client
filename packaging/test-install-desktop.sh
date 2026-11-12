@@ -6,12 +6,12 @@ trap 'rm -rf "$work"' EXIT
 source_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 release="$work/release space \"quote\" \$dollar \`tick\` \\backslash %f | &"
 mkdir -p "$release" "$work/data"
-cp "$source_dir/install-desktop.sh" "$source_dir/solaris-launcher.desktop" "$release/"
-printf '#!/bin/sh\n' > "$release/solaris-launcher"
-chmod +x "$release/solaris-launcher"
-printf 'icon' > "$release/solaris-launcher.png"
+cp "$source_dir/install-desktop.sh" "$source_dir/krasnokamen-launcher.desktop" "$release/"
+printf '#!/bin/sh\n' > "$release/krasnokamen-launcher"
+chmod +x "$release/krasnokamen-launcher"
+printf 'icon' > "$release/krasnokamen-launcher.png"
 XDG_DATA_HOME="$work/data" bash "$release/install-desktop.sh"
-python3 - "$work/data/applications/solaris-launcher.desktop" "$release/solaris-launcher" <<'PY'
+python3 - "$work/data/applications/krasnokamen-launcher.desktop" "$release/krasnokamen-launcher" <<'PY'
 import pathlib
 import sys
 
@@ -28,13 +28,13 @@ PY
 # an existing valid installation rather than emitting a broken shortcut.
 unsupported="$work/release=rc1"
 mkdir -p "$unsupported"
-cp "$release/install-desktop.sh" "$release/solaris-launcher.desktop" "$release/solaris-launcher" "$release/solaris-launcher.png" "$unsupported/"
-cp "$work/data/applications/solaris-launcher.desktop" "$work/before.desktop"
+cp "$release/install-desktop.sh" "$release/krasnokamen-launcher.desktop" "$release/krasnokamen-launcher" "$release/krasnokamen-launcher.png" "$unsupported/"
+cp "$work/data/applications/krasnokamen-launcher.desktop" "$work/before.desktop"
 if XDG_DATA_HOME="$work/data" bash "$unsupported/install-desktop.sh" >"$work/error.log" 2>&1; then
   echo "expected unrepresentable Exec path to be rejected" >&2
   exit 1
 fi
-cmp "$work/before.desktop" "$work/data/applications/solaris-launcher.desktop"
+cmp "$work/before.desktop" "$work/data/applications/krasnokamen-launcher.desktop"
 python3 - "$work/error.log" <<'PY'
 import pathlib
 import sys

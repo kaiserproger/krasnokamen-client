@@ -3,8 +3,8 @@
 
 Invocation (after release.yml has created the signed app archive):
   python3 packaging/macos-runtime-gate.py --package ABS_ZIP \
-    --work-dir "$RUNNER_TEMP/solaris-macos-runtime" \
-    --evidence-dir "$RUNNER_TEMP/solaris-macos-evidence"
+    --work-dir "$RUNNER_TEMP/krasnokamen-macos-runtime" \
+    --evidence-dir "$RUNNER_TEMP/krasnokamen-macos-evidence"
 
 Requires a macOS arm64 window session/Metal device, ditto, matching packaged
 launcher/client, source tools/mcp_client.py, and the approved public manifest.
@@ -108,7 +108,7 @@ class Process:
                         b"gpu_missing_required_portable_target_formats",
                         b"render_target_dimensions_or_memory_budget_exceeded",
                         b"surface_out_of_memory", b"surface_failure_device_failed",
-                        b"checksum mismatch", b"cannot reach the Solaris content manifest",
+                        b"checksum mismatch", b"cannot reach the Krasnokamen content manifest",
                         b"does not match the hash pinned in this launcher",
                     ):
                         if phrase in line:
@@ -199,8 +199,8 @@ class Gate:
                                   ("ImageOS", "ImageVersion", "RUNNER_OS", "RUNNER_ARCH", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")}
         revisions = {}
         for name, root, expected in (("native", SOURCE, os.environ.get("GITHUB_SHA")),
-                                     ("core", SOURCE / "solaris-server", os.environ.get("SOLARIS_REVISION")),
-                                     ("plugins", SOURCE / "solaris-default-plugins", os.environ.get("SOLARIS_PLUGINS_REVISION"))):
+                                     ("core", SOURCE / "krasnokamen-server", os.environ.get("KRASNOKAMEN_REVISION")),
+                                     ("plugins", SOURCE / "krasnokamen-default-plugins", os.environ.get("KRASNOKAMEN_PLUGINS_REVISION"))):
             actual = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
                                              stderr=subprocess.DEVNULL, timeout=10).decode().strip()
             require(re.fullmatch(r"[0-9a-f]{40}", actual) and actual == expected,
@@ -215,8 +215,8 @@ class Gate:
         extract.mkdir()
         process = self.start("extract", ["ditto", "-x", "-k", self.package, extract])
         self.complete("extract", process, 60)
-        bins = extract / "Solaris.app/Contents/MacOS"
-        launcher, native = bins / "solaris-launcher", bins / "solaris-client"
+        bins = extract / "Krasnokamen.app/Contents/MacOS"
+        launcher, native = bins / "krasnokamen-launcher", bins / "krasnokamen-client"
         for binary in (launcher, native):
             require(binary.is_file() and not binary.is_symlink() and os.access(binary, os.X_OK),
                     "extracted executable missing, symlinked or not executable")
@@ -316,7 +316,7 @@ class Gate:
                         and all(schema["properties"][field].get("type") == "string" for field in fields),
                         "required MCP tool schema changed: " + name)
             self.save("discovery.json", {"protocol": "2025-11-25", "required_tools": [tools[name] for name in expected]})
-            capabilities_reply = client.request("resources/read", {"uri": "solaris-client://capabilities"})
+            capabilities_reply = client.request("resources/read", {"uri": "krasnokamen-client://capabilities"})
             require(capabilities_reply and "result" in capabilities_reply, "MCP capabilities discovery failed")
             capabilities = json.loads(capabilities_reply["result"]["contents"][0]["text"])
             instance = capabilities.get("instance_id")

@@ -58,7 +58,7 @@ class KeyboardSeat:
         libc.free(text)
         xkb.xkb_keymap_unref(keymap)
         xkb.xkb_context_unref(context)
-        fd = os.memfd_create('solaris-private-keymap', os.MFD_CLOEXEC)
+        fd = os.memfd_create('krasnokamen-private-keymap', os.MFD_CLOEXEC)
         try:
             os.write(fd, keymap_bytes)
             payload = struct.pack('IIII', 6, (16 << 16), 1, len(keymap_bytes))

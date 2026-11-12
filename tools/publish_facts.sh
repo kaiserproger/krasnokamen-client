@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the data-only Solaris facts bundle from <repo>/dist and merge its entry
+# Build the data-only Krasnokamen facts bundle from <repo>/dist and merge its entry
 # into the content manifest for the static file server (replacing only an entry
 # with the same name, so the content bundle and older revisions stay listed).
 #

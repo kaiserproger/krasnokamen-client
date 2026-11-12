@@ -8,12 +8,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Singleplayer ships the Solaris server and the default plugin pack. Both are
+  # Singleplayer ships the Krasnokamen server and the default plugin pack. Both are
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
   # `local_addr` listening-line change the singleplayer port discovery relies on.
-  SOLARIS_REVISION: 7edb728fd368fa94ed5a4ec178a7f35d5fdb49cb
-  SOLARIS_PLUGINS_REVISION: d2f3022f03ebdb20228797bd22e9b17affb6338c
+  KRASNOKAMEN_REVISION: 7edb728fd368fa94ed5a4ec178a7f35d5fdb49cb
+  KRASNOKAMEN_PLUGINS_REVISION: d2f3022f03ebdb20228797bd22e9b17affb6338c
 
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
           sudo apt-get install -y pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libvulkan-dev cmake
       - run: cargo check --workspace --locked
       # naga parse/validate/translate of every runtime WGSL shader (no GPU needed).
-      - run: cargo test --locked -p solaris-client --lib wgsl_validation
+      - run: cargo test --locked -p krasnokamen-client --lib wgsl_validation
 
   release:
     name: Release (${{ matrix.name }})
@@ -96,37 +96,37 @@ jobs:
           echo "CFLAGS_x86_64_pc_windows_msvc=/I$(cygpath -w "$zlib")" >> "$GITHUB_ENV"
       - name: Build release binaries
         run: cargo build --release --locked
-      - name: Check out Solaris server (pinned)
+      - name: Check out Krasnokamen server (pinned)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/solaris
-          ref: ${{ env.SOLARIS_REVISION }}
-          path: solaris-server
+          repository: ${{ github.repository_owner }}/krasnokamen
+          ref: ${{ env.KRASNOKAMEN_REVISION }}
+          path: krasnokamen-server
       - name: Check out default plugins (pinned)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/solaris-default-plugins
-          ref: ${{ env.SOLARIS_PLUGINS_REVISION }}
-          path: solaris-default-plugins
+          repository: ${{ github.repository_owner }}/krasnokamen-default-plugins
+          ref: ${{ env.KRASNOKAMEN_PLUGINS_REVISION }}
+          path: krasnokamen-default-plugins
       # The pinned core declares Rust 1.99 in Cargo.toml and rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@1.99
         with:
           targets: ${{ matrix.rust_target }}
-      - name: Build Solaris server
-        working-directory: solaris-server
-        run: cargo build --release --locked -p mc-edge --bin solaris-v2
+      - name: Build Krasnokamen server
+        working-directory: krasnokamen-server
+        run: cargo build --release --locked -p mc-edge --bin krasnokamen
       - name: Stage Linux package
         if: matrix.name == 'linux-x86_64'
         env:
           TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
-          dir="solaris-client-${TAG}-linux-x86_64"
+          dir="krasnokamen-client-${TAG}-linux-x86_64"
           rm -rf stage && mkdir -p "stage/$dir"
-          install -m 0755 target/release/solaris-client "stage/$dir/solaris-client"
-          install -m 0755 target/release/solaris-launcher "stage/$dir/solaris-launcher"
-          install -m 0644 launcher/assets/icon.png "stage/$dir/solaris-launcher.png"
-          install -m 0644 packaging/solaris-launcher.desktop "stage/$dir/solaris-launcher.desktop"
+          install -m 0755 target/release/krasnokamen-client "stage/$dir/krasnokamen-client"
+          install -m 0755 target/release/krasnokamen-launcher "stage/$dir/krasnokamen-launcher"
+          install -m 0644 launcher/assets/icon.png "stage/$dir/krasnokamen-launcher.png"
+          install -m 0644 packaging/krasnokamen-launcher.desktop "stage/$dir/krasnokamen-launcher.desktop"
           install -m 0755 packaging/install-desktop.sh "stage/$dir/install-desktop.sh"
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "stage/$dir/"
           packaging/stage-singleplayer.sh "stage/$dir"
@@ -136,8 +136,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf stage && mkdir stage
-          install -m 0755 target/release/solaris-client.exe stage/solaris-client.exe
-          install -m 0755 target/release/solaris-launcher.exe stage/solaris-launcher.exe
+          install -m 0755 target/release/krasnokamen-client.exe stage/krasnokamen-client.exe
+          install -m 0755 target/release/krasnokamen-launcher.exe stage/krasnokamen-launcher.exe
           install -m 0644 launcher/assets/icon.png stage/icon.png
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE stage/
           packaging/stage-singleplayer.sh stage .exe
@@ -149,22 +149,22 @@ jobs:
         if: matrix.name == 'macos-aarch64'
         run: |
           set -euo pipefail
-          app="stage/Solaris.app"
+          app="stage/Krasnokamen.app"
           macos="$app/Contents/MacOS"
           resources="$app/Contents/Resources"
-          mkdir -p "$macos" "$resources/Solaris.iconset"
-          install -m 0755 target/release/solaris-launcher "$macos/solaris-launcher"
-          install -m 0755 target/release/solaris-client "$macos/solaris-client"
+          mkdir -p "$macos" "$resources/Krasnokamen.iconset"
+          install -m 0755 target/release/krasnokamen-launcher "$macos/krasnokamen-launcher"
+          install -m 0755 target/release/krasnokamen-client "$macos/krasnokamen-client"
           packaging/stage-singleplayer.sh "$macos"
           install -m 0644 packaging/Info.plist "$app/Contents/Info.plist"
           install -m 0644 LICENSE-MIT LICENSE-APACHE "$resources/"
           for size in 16 32 128 256 512; do
-            sips -z "$size" "$size" launcher/assets/icon.png --out "$resources/Solaris.iconset/icon_${size}x${size}.png"
+            sips -z "$size" "$size" launcher/assets/icon.png --out "$resources/Krasnokamen.iconset/icon_${size}x${size}.png"
             doubled=$((size * 2))
-            sips -z "$doubled" "$doubled" launcher/assets/icon.png --out "$resources/Solaris.iconset/icon_${size}x${size}@2x.png"
+            sips -z "$doubled" "$doubled" launcher/assets/icon.png --out "$resources/Krasnokamen.iconset/icon_${size}x${size}@2x.png"
           done
-          iconutil -c icns "$resources/Solaris.iconset" -o "$resources/Solaris.icns"
-          rm -rf "$resources/Solaris.iconset"
+          iconutil -c icns "$resources/Krasnokamen.iconset" -o "$resources/Krasnokamen.icns"
+          rm -rf "$resources/Krasnokamen.iconset"
           codesign --force --deep -s - "$app"
       - name: Assert no Mojang bytes in staging
         shell: bash
@@ -184,8 +184,8 @@ jobs:
           TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
-          tar -C stage -czf "solaris-client-${TAG}-linux-x86_64.tar.gz" \
-            "solaris-client-${TAG}-linux-x86_64"
+          tar -C stage -czf "krasnokamen-client-${TAG}-linux-x86_64.tar.gz" \
+            "krasnokamen-client-${TAG}-linux-x86_64"
       # The packaged binary must start without the build checkout: extract it
       # outside the workspace and make the workspace unwritable while it runs.
       - name: Smoke packaged Linux client
@@ -194,23 +194,23 @@ jobs:
           TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
-          tar -C "$RUNNER_TEMP" -xzf "solaris-client-${TAG}-linux-x86_64.tar.gz"
+          tar -C "$RUNNER_TEMP" -xzf "krasnokamen-client-${TAG}-linux-x86_64.tar.gz"
           chmod a-w "$GITHUB_WORKSPACE"
           trap 'chmod u+w "$GITHUB_WORKSPACE"' EXIT
-          packaging/smoke-release.sh "$RUNNER_TEMP/solaris-client-${TAG}-linux-x86_64/solaris-client"
+          packaging/smoke-release.sh "$RUNNER_TEMP/krasnokamen-client-${TAG}-linux-x86_64/krasnokamen-client"
       - name: Package Windows zip
         if: matrix.name == 'windows-x86_64'
         env:
           TAG: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         shell: pwsh
-        run: Compress-Archive -Path stage/* -DestinationPath "solaris-client-${env:TAG}-windows-x86_64.zip"
+        run: Compress-Archive -Path stage/* -DestinationPath "krasnokamen-client-${env:TAG}-windows-x86_64.zip"
       - name: Package macOS app
         if: matrix.name == 'macos-aarch64'
         env:
           PACKAGE_VERSION: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref_name }}
         run: |
           set -euo pipefail
-          ditto -c -k --sequesterRsrc --keepParent stage/Solaris.app "solaris-client-${PACKAGE_VERSION}-macos-aarch64.zip"
+          ditto -c -k --sequesterRsrc --keepParent stage/Krasnokamen.app "krasnokamen-client-${PACKAGE_VERSION}-macos-aarch64.zip"
       - name: Gate packaged macOS startup and normal UI
         if: matrix.name == 'macos-aarch64'
         timeout-minutes: 35
@@ -219,9 +219,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 packaging/macos-runtime-gate.py \
-            --package "$GITHUB_WORKSPACE/solaris-client-${PACKAGE_VERSION}-macos-aarch64.zip" \
-            --work-dir "$RUNNER_TEMP/solaris-macos-runtime" \
-            --evidence-dir "$RUNNER_TEMP/solaris-macos-evidence"
+            --package "$GITHUB_WORKSPACE/krasnokamen-client-${PACKAGE_VERSION}-macos-aarch64.zip" \
+            --work-dir "$RUNNER_TEMP/krasnokamen-macos-runtime" \
+            --evidence-dir "$RUNNER_TEMP/krasnokamen-macos-evidence"
       - name: Retain curated macOS startup UI evidence
         if: always() && matrix.name == 'macos-aarch64'
         uses: actions/upload-artifact@v4
@@ -230,21 +230,21 @@ jobs:
           retention-days: 2
           if-no-files-found: warn
           path: |
-            ${{ runner.temp }}/solaris-macos-evidence/report.json
-            ${{ runner.temp }}/solaris-macos-evidence/gate.log
-            ${{ runner.temp }}/solaris-macos-evidence/discovery.json
-            ${{ runner.temp }}/solaris-macos-evidence/launcher-home.png
-            ${{ runner.temp }}/solaris-macos-evidence/launcher-settings.png
-            ${{ runner.temp }}/solaris-macos-evidence/native-title.png
-            ${{ runner.temp }}/solaris-macos-evidence/native-title.json
-            ${{ runner.temp }}/solaris-macos-evidence/native-options.png
-            ${{ runner.temp }}/solaris-macos-evidence/native-options.json
+            ${{ runner.temp }}/krasnokamen-macos-evidence/report.json
+            ${{ runner.temp }}/krasnokamen-macos-evidence/gate.log
+            ${{ runner.temp }}/krasnokamen-macos-evidence/discovery.json
+            ${{ runner.temp }}/krasnokamen-macos-evidence/launcher-home.png
+            ${{ runner.temp }}/krasnokamen-macos-evidence/launcher-settings.png
+            ${{ runner.temp }}/krasnokamen-macos-evidence/native-title.png
+            ${{ runner.temp }}/krasnokamen-macos-evidence/native-title.json
+            ${{ runner.temp }}/krasnokamen-macos-evidence/native-options.png
+            ${{ runner.temp }}/krasnokamen-macos-evidence/native-options.json
       - name: Checksum
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           shopt -s nullglob
-          for f in solaris-client-*.tar.gz solaris-client-*.zip; do
+          for f in krasnokamen-client-*.tar.gz krasnokamen-client-*.zip; do
             if command -v sha256sum >/dev/null; then
               sha256sum "$f" > "$f.sha256"
             else
@@ -260,9 +260,9 @@ jobs:
           retention-days: 2
           if-no-files-found: error
           path: |
-            solaris-client-*.tar.gz
-            solaris-client-*.zip
-            solaris-client-*.sha256
+            krasnokamen-client-*.tar.gz
+            krasnokamen-client-*.zip
+            krasnokamen-client-*.sha256
 
   publish:
     name: Publish gated release
@@ -281,6 +281,6 @@ jobs:
           # Hyphenated tags (v1.0.0-rc.1) stay prereleases; final tags become `latest`.
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            solaris-client-*.tar.gz
-            solaris-client-*.zip
-            solaris-client-*.sha256
+            krasnokamen-client-*.tar.gz
+            krasnokamen-client-*.zip
+            krasnokamen-client-*.sha256

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Solaris launcher icon (stdlib only, no Pillow).
+"""Generate the Krasnokamen launcher icon (stdlib only, no Pillow).
 
 Pixel-art sun over a night horizon: chunky 16px cells on a 256x256 RGBA
 canvas, blocky sun disc with warm glow, dark terrain silhouette, a few

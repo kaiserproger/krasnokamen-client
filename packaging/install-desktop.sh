@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Install (or remove via --uninstall) the Solaris Launcher freedesktop entry.
-# Expects to run from the unpacked release dir next to solaris-launcher,
-# solaris-launcher.desktop and solaris-launcher.png.
+# Install (or remove via --uninstall) the Krasnokamen Launcher freedesktop entry.
+# Expects to run from the unpacked release dir next to krasnokamen-launcher,
+# krasnokamen-launcher.desktop and krasnokamen-launcher.png.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_NAME="solaris-launcher"
-DESKTOP_SRC="$APP_DIR/solaris-launcher.desktop"
-ICON_SRC="$APP_DIR/solaris-launcher.png"
-BIN="$APP_DIR/solaris-launcher"
+APP_NAME="krasnokamen-launcher"
+DESKTOP_SRC="$APP_DIR/krasnokamen-launcher.desktop"
+ICON_SRC="$APP_DIR/krasnokamen-launcher.png"
+BIN="$APP_DIR/krasnokamen-launcher"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APPS_DIR="$DATA_HOME/applications"
 ICONS_DIR="$DATA_HOME/icons/hicolor/256x256/apps"

@@ -63,7 +63,7 @@ def main():
     p.add_argument('--binary', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--world', type=Path, default=ROOT / '.analysis/server/world')
-    p.add_argument('--server', type=Path, default=WORK / 'targets/rc1/release/solaris-v2')
+    p.add_argument('--server', type=Path, default=WORK / 'targets/rc1/release/krasnokamen')
     p.add_argument('--server-data', type=Path, default=Path('/home/kaiserroman/solaris/data/vanilla'))
     p.add_argument('--client-data', type=Path, default=Path('/home/kaiserroman/solaris/data/vanilla'))
     p.add_argument('--client-root', type=Path, help='private extracted launcher distribution root')
@@ -77,19 +77,19 @@ def main():
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     compositor = server = client = mcp = seat = None
-    runtime_dir = tempfile.TemporaryDirectory(prefix='solaris-pacing-')
+    runtime_dir = tempfile.TemporaryDirectory(prefix='krasnokamen-pacing-')
     report = {'binary': str(a.binary), 'sha256': hashlib.sha256(a.binary.read_bytes()).hexdigest(),
               'server': str(a.server), 'server_sha256': hashlib.sha256(a.server.read_bytes()).hexdigest(),
               'native_wayland': True, 'display_scanout_verified': False,
               'gpu_requested': a.gpu,
               'client_data': str(a.client_data), 'server_data': str(a.server_data),
               'client_root': str(a.client_root or out / 'client-root'),
-              'collision_shapes': os.environ.get('SOLARIS_CLIENT_COLLISION_SHAPES'),
-              'legacy_content_cache': os.environ.get('SOLARIS_LEGACY_CONTENT_CACHE'),
+              'collision_shapes': os.environ.get('KRASNOKAMEN_CLIENT_COLLISION_SHAPES'),
+              'legacy_content_cache': os.environ.get('KRASNOKAMEN_LEGACY_CONTENT_CACHE'),
               'route': {'steps': a.steps, 'ticks_per_step': 10, 'yaw_start': 0, 'yaw_step': 24, 'pitch': 60,
                         'warm_ticks': a.warm_ticks, 'look_settle_ticks': 12}}
     report['clients_start'] = subprocess.run(
-        ['pgrep', '-a', 'solaris-client'], capture_output=True, text=True, check=False).stdout
+        ['pgrep', '-a', 'krasnokamen-client'], capture_output=True, text=True, check=False).stdout
     try:
         # Unix socket paths are limited to 108 bytes; artifact paths are longer.
         runtime = Path(runtime_dir.name)
@@ -132,16 +132,16 @@ def main():
                       f'vanilla_data_dir = {json.dumps(str(a.server_data))}', toml)
         (out / 'server.toml').write_text(toml)
         server, _ = launch([str(a.server), '--config', str(out / 'server.toml')], env,
-                           out / 'server.log', 'Solaris is listening')
+                           out / 'server.log', 'Krasnokamen is listening')
         settings = out / 'settings.json'
         settings.write_text(json.dumps({'vsync': True, 'max_fps': 120}))
         env.update(WAYLAND_DISPLAY=wayland, VK_ICD_FILENAMES=f'/usr/share/vulkan/icd.d/{a.gpu}_icd.json',
-                   SOLARIS_CLIENT_FRAME_TRACE=str(out / 'frames.tsv'), SOLARIS_CLIENT_SETTINGS=str(settings),
-                   SOLARIS_CLIENT_ROOT=str(a.client_root or out / 'client-root'),
-                   SOLARIS_CLIENT_DATA_DIR=str(a.client_data),
-                   SOLARIS_CLIENT_RESOURCE_ROOT=str(WORK / 'solaris-client/.analysis/resources'),
-                   SOLARIS_CLIENT_ASSET_ROOT='/home/kaiserroman/.local/share/PrismLauncher/assets',
-                   SOLARIS_CLIENT_ASSET_INDEX=str(WORK / 'solaris-client/.analysis/evidence/C00/asset-index-current.json'))
+                   KRASNOKAMEN_CLIENT_FRAME_TRACE=str(out / 'frames.tsv'), KRASNOKAMEN_CLIENT_SETTINGS=str(settings),
+                   KRASNOKAMEN_CLIENT_ROOT=str(a.client_root or out / 'client-root'),
+                   KRASNOKAMEN_CLIENT_DATA_DIR=str(a.client_data),
+                   KRASNOKAMEN_CLIENT_RESOURCE_ROOT=str(WORK / 'krasnokamen-client/.analysis/resources'),
+                   KRASNOKAMEN_CLIENT_ASSET_ROOT='/home/kaiserroman/.local/share/PrismLauncher/assets',
+                   KRASNOKAMEN_CLIENT_ASSET_INDEX=str(WORK / 'krasnokamen-client/.analysis/evidence/C00/asset-index-current.json'))
         client, descriptor = launch([str(a.binary), 'play', '--profile', 'offline-test', '--server', f'127.0.0.1:{port}',
                                     '--username', 'InputProbe', '--automation', '--mcp-http', '127.0.0.1:0',
                                     '--windowed', '--width', '1280', '--height', '720',
@@ -151,14 +151,14 @@ def main():
         report['initialize'] = mcp.initialize()
         report['schemas'] = mcp.request('tools/list')
         report['resources'] = mcp.request('resources/list')
-        report['capabilities'] = mcp.request('resources/read', {'uri': 'solaris-client://capabilities'})
+        report['capabilities'] = mcp.request('resources/read', {'uri': 'krasnokamen-client://capabilities'})
         mcp.tool('minecraft_wait_for_play', {'timeout_seconds': 120})
         mcp.tool('minecraft_wait_ticks', {'ticks': a.warm_ticks})
         mcp.tool('minecraft_look', {'yaw_deg': 0, 'pitch_deg': 60})
         mcp.tool('minecraft_wait_ticks', {'ticks': 12})
         report['start'] = mcp.tool('minecraft_observe')
         def frame():
-            caps = mcp.request('resources/read', {'uri': 'solaris-client://capabilities'})
+            caps = mcp.request('resources/read', {'uri': 'krasnokamen-client://capabilities'})
             return int(json.loads(caps['result']['contents'][0]['text'])['renderer']['submitted_frame_id'])
         report['first_frame'] = frame()
         report['poses'] = []
@@ -169,7 +169,7 @@ def main():
             report['poses'].append(mcp.tool('minecraft_observe')['player'])
         report['last_frame'] = frame()
         report['end'] = mcp.tool('minecraft_observe')
-        report['capabilities_end'] = mcp.request('resources/read', {'uri': 'solaris-client://capabilities'})
+        report['capabilities_end'] = mcp.request('resources/read', {'uri': 'krasnokamen-client://capabilities'})
         report['adapter'] = json.loads(
             report['capabilities_end']['result']['contents'][0]['text'])['renderer']['adapter']
         if a.legacy_synchronous_trace:
@@ -207,7 +207,7 @@ def main():
         report['mean_fps'] = 1000 / statistics.fmean(values)
         report['slow_frames'] = [r for r in rows if float(r['submitted_frame_interval_ms']) > 50]
         report['clients_end'] = subprocess.run(
-            ['pgrep', '-a', 'solaris-client'], capture_output=True, text=True, check=False).stdout
+            ['pgrep', '-a', 'krasnokamen-client'], capture_output=True, text=True, check=False).stdout
         other_clients = report['clients_start'].splitlines() + [
             line for line in report['clients_end'].splitlines()
             if line.split()[0] != str(client.pid)]
