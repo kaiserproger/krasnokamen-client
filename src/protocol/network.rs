@@ -62,6 +62,25 @@ struct ConnectionState {
     /// Latest setting; only the I/O owner chooses the phase-specific packet ID.
     view_distance: AtomicU8,
     main_arm_right: AtomicBool,
+    /// Options language (`en_us` style); the ClientInformation locale.
+    language: Mutex<Arc<str>>,
+}
+/// The Options the server learns through ClientInformation; the I/O owner resends
+/// ClientInformation whenever the published value differs from the last one sent.
+#[derive(Clone, PartialEq, Eq)]
+struct ClientSettings {
+    view_distance: u8,
+    main_arm_right: bool,
+    language: Arc<str>,
+}
+impl ConnectionState {
+    fn client_settings(&self) -> ClientSettings {
+        ClientSettings {
+            view_distance: self.view_distance.load(Ordering::Acquire),
+            main_arm_right: self.main_arm_right.load(Ordering::Acquire),
+            language: Arc::clone(&self.language.lock()),
+        }
+    }
 }
 impl ConnectionState {
     fn publish(&self, events: &Sender<Event>, event: Event) -> Result<bool> {
@@ -95,6 +114,7 @@ impl Network {
         username: String,
         view_distance: u8,
         main_arm_right: bool,
+        language: &str,
         wake: Arc<dyn Fn() + Send + Sync>,
         recording: Option<crate::replay::format::RecordingOptions>,
     ) -> Result<Self> {
@@ -110,6 +130,7 @@ impl Network {
             terminal_error: Mutex::new(None),
             view_distance: AtomicU8::new(view_distance),
             main_arm_right: AtomicBool::new(main_arm_right),
+            language: Mutex::new(Arc::from(language)),
         });
         let stop = state.clone();
         let endpoint = endpoint(&address)?;
@@ -222,6 +243,18 @@ impl Network {
 
     pub fn set_main_arm_right(&self, right: bool) {
         self.state.main_arm_right.store(right, Ordering::Release);
+        #[cfg(windows)]
+        self.worker_wake.unpark();
+    }
+
+    pub fn set_language(&self, language: &str) {
+        {
+            let mut current = self.state.language.lock();
+            if &**current == language {
+                return;
+            }
+            *current = Arc::from(language);
+        }
         #[cfg(windows)]
         self.worker_wake.unpark();
     }
@@ -452,20 +485,20 @@ fn run(
     let mut phase = Phase::Login;
     let mut compression = None;
     let mut buffer = Vec::with_capacity(65536);
-    let mut advertised_radius = None;
+    let mut advertised_settings = None;
     #[cfg(windows)]
     let reader = BlockingReader::start(&socket, thread::current()).map_err(|e| e.to_string())?;
     while !state.cancelled.load(Ordering::Acquire) {
         flush_outbound(&mut socket, commands, state, compression)?;
-        let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
-        if phase != Phase::Login && advertised_radius != Some(settings) {
+        let settings = state.client_settings();
+        if phase != Phase::Login && advertised_settings.as_ref() != Some(&settings) {
             let id = if phase == Phase::Configuration {
                 configuration::serverbound::CLIENT_INFORMATION
             } else {
                 play::serverbound::CLIENT_INFORMATION
             };
-            write(&mut socket, id, &client_information(settings.0, settings.1), compression)?;
-            advertised_radius = Some(settings);
+            write(&mut socket, id, &client_information(&settings), compression)?;
+            advertised_settings = Some(settings);
         }
         // Tap every decoded incoming packet once before the Login/Configuration
         // state machine and the terminal/ordinary Event::Packet handoff below.
@@ -475,7 +508,7 @@ fn run(
         })? {
             flush_outbound(&mut socket, commands, state, compression)?;
             let original = phase;
-            let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
+            let settings = state.client_settings();
             if phase == Phase::Login {
                 match id {
                     login::clientbound::HELLO => return Err("online-mode encryption requires official authentication; offline profile refused".into()),
@@ -488,8 +521,8 @@ fn run(
                     login::clientbound::LOGIN_FINISHED => {
                         write(&mut socket, login::serverbound::LOGIN_ACKNOWLEDGED, &[], compression)?;
                         phase = Phase::Configuration;
-                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(settings.0, settings.1), compression)?;
-                        advertised_radius = Some(settings);
+                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(&settings), compression)?;
+                        advertised_settings = Some(settings.clone());
                     }
                     login::clientbound::CUSTOM_QUERY => {
                         let mut r = Reader::new(&body);
@@ -571,8 +604,8 @@ fn run(
                     play::clientbound::START_CONFIGURATION => {
                         write(&mut socket, play::serverbound::CONFIGURATION_ACKNOWLEDGED, &[], compression)?;
                         phase = Phase::Configuration;
-                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(settings.0, settings.1), compression)?;
-                        advertised_radius = Some(settings);
+                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(&settings), compression)?;
+                        advertised_settings = Some(settings.clone());
                     }
                     _ => {}
                 }
@@ -622,14 +655,14 @@ fn run(
     Ok(())
 }
 
-fn client_information(view_distance: u8, main_arm_right: bool) -> Vec<u8> {
+fn client_information(settings: &ClientSettings) -> Vec<u8> {
     let mut w = Writer::default();
-    w.string("en_us");
-    w.byte(view_distance);
+    w.string(&settings.language);
+    w.byte(settings.view_distance);
     w.var(0);
     w.byte(1);
     w.byte(127);
-    w.var(i32::from(main_arm_right));
+    w.var(i32::from(settings.main_arm_right));
     w.byte(0);
     w.byte(1);
     w.var(0);
@@ -640,6 +673,16 @@ fn client_information(view_distance: u8, main_arm_right: bool) -> Vec<u8> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+    fn info(view_distance: u8, main_arm_right: bool) -> Vec<u8> {
+        info_in("en_us", view_distance, main_arm_right)
+    }
+    fn info_in(language: &str, view_distance: u8, main_arm_right: bool) -> Vec<u8> {
+        client_information(&ClientSettings {
+            view_distance,
+            main_arm_right,
+            language: Arc::from(language),
+        })
+    }
     #[test]
     fn blocking_reader_idle_shutdown_and_eof_are_terminal() {
         for shutdown in [false, true] {
@@ -709,7 +752,7 @@ mod tests {
     fn windows_play_socket_never_uses_a_read_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let network = Network::connect(
-            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, true, Arc::new(|| {}), None
+            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, true, "en_us", Arc::new(|| {}), None
         ).unwrap();
         assert_eq!(network.socket.as_ref().unwrap().read_timeout().unwrap(), None);
     }
@@ -740,7 +783,7 @@ mod tests {
     fn client_information_encodes_configured_radius() {
         // Regression: UI distance and the Configuration wire byte disagreed.
         for radius in [8u8, 12] {
-            let body = client_information(radius, true);
+            let body = info(radius, true);
             let mut expected = vec![5, b'e', b'n', b'_', b'u', b's'];
             expected.push(radius);
             expected.extend([0, 1, 127, 1, 0, 1, 0]);
@@ -752,9 +795,23 @@ mod tests {
     }
 
     #[test]
+    fn client_information_carries_the_chosen_locale() {
+        for language in ["en_us", "ru_ru", "zh_cn"] {
+            let body = info_in(language, 8, true);
+            assert_eq!(Reader::new(&body).string(16).unwrap(), language);
+            let mut expected = vec![language.len() as u8];
+            expected.extend(language.as_bytes());
+            expected.push(8);
+            expected.extend([0, 1, 127, 1, 0, 1, 0]);
+            assert_eq!(body, expected);
+        }
+        assert_ne!(info_in("ru_ru", 8, true), info_in("en_us", 8, true));
+    }
+
+    #[test]
     fn client_information_encodes_left_and_right_main_arm() {
-        let right = client_information(8, true);
-        let left = client_information(8, false);
+        let right = info(8, true);
+        let left = info(8, false);
         assert_eq!(right[10], 1);
         assert_eq!(left[10], 0);
     }
@@ -773,7 +830,7 @@ mod tests {
             write(&mut status, 0, &response.0, None).unwrap();
         });
         let mut network = Network::connect(
-            address.to_string(), "VersionTest".into(), 8, true, Arc::new(|| {}), None,
+            address.to_string(), "VersionTest".into(), 8, true, "en_us", Arc::new(|| {}), None,
         ).unwrap();
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
@@ -834,6 +891,7 @@ mod tests {
                 "TerminalTest".into(),
                 8,
                 true,
+                "en_us",
                 Arc::new(|| {}),
                 None,
             )
@@ -917,26 +975,29 @@ mod tests {
             success.var(0);
             write(&mut login, 2, &success.0, None).unwrap();
             assert_eq!(read_packet(&mut login), (3, Vec::new()));
-            assert_eq!(read_packet(&mut login), (0, client_information(8, true)));
+            assert_eq!(read_packet(&mut login), (0, info(8, true)));
 
             ready.send(Phase::Configuration).unwrap();
-            assert_eq!(read_packet(&mut login), (0, client_information(12, true)));
+            assert_eq!(read_packet(&mut login), (0, info(12, true)));
             write(&mut login, 3, &[], None).unwrap();
             assert_eq!(read_packet(&mut login), (3, Vec::new()));
             ready.send(Phase::Play).unwrap();
-            assert_eq!(read_packet(&mut login), (0x0e, client_information(32, true)));
+            assert_eq!(read_packet(&mut login), (0x0e, info(32, true)));
             ready.send(Phase::Play).unwrap();
-            assert_eq!(read_packet(&mut login), (0x0e, client_information(32, false)));
+            assert_eq!(read_packet(&mut login), (0x0e, info(32, false)));
+            // Vanilla resends ClientInformation on an Options change: the language too.
+            ready.send(Phase::Play).unwrap();
+            assert_eq!(read_packet(&mut login), (0x0e, info_in("ru_ru", 32, false)));
 
             // A reconfiguration must use the latest published radius, not the
             // startup value and not the session owner's potentially stale phase.
             write(&mut login, 120, &[], None).unwrap();
             assert_eq!(read_packet(&mut login), (16, Vec::new()));
-            assert_eq!(read_packet(&mut login), (0, client_information(32, false)));
+            assert_eq!(read_packet(&mut login), (0, info_in("ru_ru", 32, false)));
             login.shutdown(Shutdown::Write).unwrap();
         });
         let mut network =
-            Network::connect(address.to_string(), "RadiusTest".into(), 8, true, Arc::new(|| {}), None).unwrap();
+            Network::connect(address.to_string(), "RadiusTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap();
         assert_eq!(
             stages.recv_timeout(Duration::from_secs(5)).unwrap(),
             Phase::Configuration
@@ -949,6 +1010,8 @@ mod tests {
         network.set_view_distance(32);
         assert_eq!(stages.recv_timeout(Duration::from_secs(5)).unwrap(), Phase::Play);
         network.set_main_arm_right(false);
+        assert_eq!(stages.recv_timeout(Duration::from_secs(5)).unwrap(), Phase::Play);
+        network.set_language("ru_ru");
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
     }
@@ -964,6 +1027,7 @@ mod tests {
             "Burst".into(),
             8,
             true,
+            "en_us",
             Arc::new(|| {}),
             None,
         )
@@ -990,6 +1054,7 @@ mod tests {
                 terminal_error: Mutex::new(None),
                 view_distance: AtomicU8::new(8),
                 main_arm_right: AtomicBool::new(true),
+                language: Mutex::new(Arc::from("en_us")),
             }),
             socket: None,
             #[cfg(windows)]
@@ -1046,7 +1111,7 @@ mod tests {
                 }
                 write(&mut login, id, &[1, 2, 3], None).unwrap();
             });
-            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, Arc::new(|| {}), None).unwrap();
+            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap();
             peer.join().unwrap();
             network.worker.take().unwrap().join().unwrap();
             assert!(matches!(network.try_recv(), Ok(Event::Packet(received, packet_id, body))

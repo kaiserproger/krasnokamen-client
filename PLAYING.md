@@ -211,9 +211,18 @@ integer scale retaining at least 320×240 logical pixels).
 Options also expose Fullscreen, VSync, Max FPS (30–260 or Unlimited), and
 Shaders (Fancy/Off). These values persist with the other managed settings.
 
+Language (Esc → Options → Language): lists the vanilla lang files of the installed
+content, `en_us` until you pick one, as a vanilla client's first start. The choice is
+saved as `language` in `client-settings.json`, translates the client's own text
+(server-sent translatable components such as dialogs, chat and signs; the Options
+labels themselves stay English) and is sent to the server in ClientInformation. Changing it
+in a running session resends ClientInformation, as vanilla does. Set
+`KRASNOKAMEN_CLIENT_LANGUAGE=ru_ru` (a lang ID, no `.json`) to override it for one
+run without saving it; an ID the content has no lang file for fails the start.
+
 UI theme: all menus use the warm translucent pixel theme (stepped-corner
 dark-amber panels over the live scene; the Title slowly pans its backdrop).
-Options are Sodium-style: category tabs (Video / Controls / Audio / Interface)
+Options are Sodium-style: category tabs (Video / Controls / Audio / Interface / Language)
 on the left, label + slider or switch rows on the right, and a one-line
 description of the hovered/focused row at the bottom. Sliders take mouse
 drag, wheel (one stop per notch) and ←/→ (Shift ×5, Home/End); Enter on a

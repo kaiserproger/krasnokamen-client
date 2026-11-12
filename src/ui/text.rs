@@ -40,16 +40,29 @@ pub struct TextRun {
     pub text: String,
     pub style: TextStyle,
 }
+/// The language a vanilla client starts in and falls back to.
+pub const DEFAULT_LANGUAGE: &str = "en_us";
 pub struct Language {
     pub entries: BTreeMap<String, String>,
 }
+/// Language ID as vanilla names lang files: lowercase ASCII letters and `_`.
+pub fn valid_language_id(language: &str) -> bool {
+    (1..=16).contains(&language.len())
+        && language.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+}
 impl Language {
+    /// `ClientLanguage.loadFrom` stacks the selected language over `en_us`, so a key the
+    /// selected file lacks reads English rather than its raw key.
     pub fn load(c: &Content, language: &str) -> Result<Self> {
-        if !language.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+        if !valid_language_id(language) {
             return Err("invalid language ID".into());
         }
-        let bytes = c.resource_bytes(&format!("assets/minecraft/lang/{language}.json"))?;
-        let entries = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        let read = |id: &str| -> Result<BTreeMap<String, String>> {
+            let bytes = c.resource_bytes(&format!("assets/minecraft/lang/{id}.json"))?;
+            serde_json::from_slice(&bytes).map_err(|e| format!("lang {id}: {e}"))
+        };
+        let mut entries = if language == DEFAULT_LANGUAGE { BTreeMap::new() } else { read(DEFAULT_LANGUAGE)? };
+        entries.extend(read(language)?);
         Ok(Self { entries })
     }
     pub fn translate<'a>(&'a self, key: &'a str) -> &'a str {
@@ -319,6 +332,30 @@ mod tests {
                 .unwrap(),
             "B / A"
         );
+    }
+    #[test]
+    fn selected_language_stacks_over_english_and_ids_come_from_the_lang_files() {
+        let mut content = Content::test_cube();
+        content.insert_test_resource(
+            "assets/minecraft/lang/en_us.json",
+            br#"{"hub":"Settlement","only_en":"English only"}"#,
+        );
+        content.insert_test_resource(
+            "assets/minecraft/lang/ru_ru.json",
+            "{\"hub\":\"Поселение\"}".as_bytes(),
+        );
+        assert_eq!(content.language_ids(), ["en_us", "ru_ru"]);
+        let ru = Language::load(&content, "ru_ru").unwrap();
+        assert_eq!(ru.translate("hub"), "Поселение");
+        // ClientLanguage.loadFrom: a key the selected file lacks reads English, not the raw key.
+        assert_eq!(ru.translate("only_en"), "English only");
+        let en = Language::load(&content, "en_us").unwrap();
+        assert_eq!(en.translate("hub"), "Settlement");
+        assert!(Language::load(&content, "de_de").is_err());
+        for bad in ["", "ru-ru", "RU_RU", "../x", "ru_ru.json", "abcdefghijklmnopq"] {
+            assert!(Language::load(&content, bad).is_err(), "{bad}");
+            assert!(!valid_language_id(bad), "{bad}");
+        }
     }
 }
 

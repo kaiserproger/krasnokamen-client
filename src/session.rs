@@ -161,6 +161,8 @@ pub struct Session {
     /// base look scale, volume is the Master gain. All defaults live on UiState.
     render_distance: u32,
     main_arm_right: bool,
+    /// Options language (`en_us` style): ClientInformation locale and client text translation.
+    language: String,
     /// Chunk radius the server last announced (login, set_chunk_cache_radius).
     server_view_distance: Option<u32>,
     fov_deg: f32,
@@ -273,6 +275,7 @@ impl Session {
             debug_overlay_pending: false,
             render_distance: UiState::DEFAULT_RENDER_DISTANCE,
             main_arm_right: true,
+            language: crate::ui::text::DEFAULT_LANGUAGE.into(),
             server_view_distance: None,
             fov_deg: UiState::DEFAULT_FOV_DEG,
             mouse_sensitivity: UiState::DEFAULT_MOUSE_SENSITIVITY,
@@ -560,6 +563,7 @@ impl Session {
             UiState::MAX_RENDER_DISTANCE,
         ) as u8;
         let main_arm_right = self.main_arm_right;
+        let language = self.language.clone();
         let wake = self.wake_callback();
         let presentation = self.presentation;
         let recording = self.recording.clone();
@@ -580,7 +584,7 @@ impl Session {
                         crate::entities::Models::load_state(&content)?
                     });
                     eprintln!("session startup: connecting network");
-                    let network = Network::connect(endpoint, username, view_distance, main_arm_right, wake.clone(), recording)?;
+                    let network = Network::connect(endpoint, username, view_distance, main_arm_right, &language, wake.clone(), recording)?;
                     Ok(Loaded {
                         content,
                         network: Some(network),
@@ -752,6 +756,7 @@ impl Session {
         self.content = Some(content);
         self.ui = Some(ui);
         self.apply_persisted_settings(crate::local_config::load_client_settings());
+        self.check_language_override()?;
         Ok(json!({"phase": "disconnected", "screen": "title"}))
     }
     /// App startup entry for title mode (`--server` absent): builds the real

@@ -310,6 +310,7 @@ impl App {
             .unwrap_or(options.profile == "offline-test" && options.automation);
         let mut session = Session::new_mode(instance, presentation);
         session.apply_persisted_settings(crate::local_config::load_client_settings());
+        crate::local_config::language_override()?;
         if options.fullscreen {
             session.apply_client_setting("fullscreen", &json!(true))?;
         }

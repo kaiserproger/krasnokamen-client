@@ -1280,6 +1280,13 @@ keep their own deadlines. This avoids a past `WaitUntil` spinning while a Waylan
 frame callback is pending. Raw-motion-only wakes apply the look immediately but
 do not repeat network/scene owner work before a real deadline or owner event.
 
+`KRASNOKAMEN_CLIENT_LANGUAGE=<lang id>` (for example `ru_ru`) sets the client language for one
+run without writing `client-settings.json`: the client sends it in ClientInformation (the
+server then picks its dialog and chat language from it) and translates received
+translatable components with that vanilla lang file over `en_us`. An invalid ID or one with no
+lang file in the content fails the start. The core harness sets it for
+`settlement-map-qa --client native -- --language ru_ru`.
+
 For a pacing regression, retain `KRASNOKAMEN_CLIENT_FRAME_TRACE=/absolute/path.tsv`,
 the exact executable hash, native display/backend and adapter, window size,
 settings, route and walking interval. Compare `submitted_frame_interval_ms`

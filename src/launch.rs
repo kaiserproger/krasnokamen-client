@@ -26,6 +26,7 @@ Default data: Linux `$XDG_DATA_HOME/krasnokamen-client` (or `~/.local/share/kras
 Windows `%APPDATA%\\krasnokamen-client`, macOS `~/Library/Application Support/krasnokamen-client`;
 relative --artifact-dir/--runtime-dir resolve there (defaults artifacts/, runtime/).
 KRASNOKAMEN_CLIENT_* environment variables optionally override individual content paths.
+KRASNOKAMEN_CLIENT_LANGUAGE=<lang id, e.g. ru_ru> sets the language for one run (Options > Language saves one).
 Default username: Player. Server port defaults to 25565. --help / -h prints this text.
 WASD move, Space jump, Shift sneak, Ctrl sprint, mouse look, left break/right use,
 1–9 hotbar, E inventory, Escape menu.";

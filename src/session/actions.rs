@@ -729,6 +729,17 @@ impl Session {
                 self.scene.render_distance = self.render_distance;
                 self.push_render_distance();
             }
+            "language" => {
+                let language = clean.as_str().ok_or("client setting language lost its string")?;
+                if let Err(error) = self.set_language(language) {
+                    // The Options row already shows the choice; put the applied one back.
+                    let applied = json!(self.language);
+                    if let Some(ui) = &mut self.ui {
+                        ui.apply_setting(key, applied)?;
+                    }
+                    return Err(format!("language {language} unavailable: {error}"));
+                }
+            }
             "main_arm_right" => {
                 let right = clean.as_bool().ok_or("client setting main_arm_right lost its boolean")?;
                 self.main_arm_right = right;
@@ -774,6 +785,32 @@ impl Session {
         Ok(())
     }
 
+    /// An explicit `KRASNOKAMEN_CLIENT_LANGUAGE` is a requirement of the run, so a language the
+    /// content cannot load fails loudly instead of falling back to `en_us` like a stale saved one.
+    pub(super) fn check_language_override(&self) -> Result<()> {
+        match crate::local_config::language_override()? {
+            Some(wanted) if wanted != self.language => Err(format!(
+                "KRASNOKAMEN_CLIENT_LANGUAGE={wanted} could not be loaded; the client language is {}",
+                self.language
+            )),
+            _ => Ok(()),
+        }
+    }
+    /// Switch the client language: translate client-side text through the UI's text renderer
+    /// (state-only clients render no text) and publish it for the next ClientInformation.
+    fn set_language(&mut self, language: &str) -> Result<()> {
+        if self.presentation
+            && let (Some(ui), Some(content)) = (&mut self.ui, &self.content)
+        {
+            ui.set_language(content, language, false, false)?;
+            self.entities.set_text_renderer(ui.text_renderer());
+        }
+        self.language = language.to_owned();
+        if let Some(network) = &self.network {
+            network.set_language(language);
+        }
+        Ok(())
+    }
     /// Publish the setting; the I/O owner alone chooses its wire-phase encoding.
     fn push_render_distance(&self) {
         let Some(network) = self.network.as_ref() else {
@@ -790,6 +827,7 @@ impl Session {
         let mut out = BTreeMap::new();
         out.insert("render_distance".into(), json!(self.render_distance));
         out.insert("main_arm_right".into(), json!(self.main_arm_right));
+        out.insert("language".into(), json!(self.language));
         out.insert("fov".into(), json!(self.fov_deg));
         out.insert("mouse_sensitivity".into(), json!(self.mouse_sensitivity));
         out.insert(
@@ -824,11 +862,28 @@ impl Session {
                         .then(|| json!(4))
                 })
                 .or_else(|| UiState::default_setting_value(key));
-            let Some(clean) = raw else { continue };
+            let Some(mut clean) = raw else { continue };
+            if *key == "language"
+                && let Ok(Some(id)) = crate::local_config::language_override()
+            {
+                clean = json!(id);
+            }
             if let Some(ui) = &mut self.ui {
                 let _ = ui.apply_setting(key, clean.clone());
             }
             match *key {
+                "language" => {
+                    if let Some(language) = clean.as_str()
+                        && let Err(error) = self.set_language(language)
+                    {
+                        // A saved language this content lacks must not stop the client starting.
+                        eprintln!("client language {language} unavailable ({error}); using {}", crate::ui::text::DEFAULT_LANGUAGE);
+                        let _ = self.set_language(crate::ui::text::DEFAULT_LANGUAGE);
+                        if let Some(ui) = &mut self.ui {
+                            let _ = ui.apply_setting(key, json!(self.language));
+                        }
+                    }
+                }
                 "key_bindings" => {
                     if let Some(bindings) = crate::controls::Bindings::from_value(&clean) {
                         self.bindings = bindings;
@@ -1214,6 +1269,49 @@ mod client_settings_tests {
         assert!(!restored.player.main_arm_right());
         restored.apply_persisted_settings(BTreeMap::new());
         assert!(restored.player.main_arm_right());
+    }
+    #[test]
+    fn language_translates_client_text_reaches_the_network_and_persists() {
+        let mut session = Session::new_mode("language-setting".into(), true);
+        let mut content = Content::test_cube();
+        content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
+        content.insert_test_font("minecraft:default", &json!({"providers":[]}));
+        content.insert_test_resource(
+            "assets/minecraft/lang/en_us.json",
+            br#"{"hub":"Settlement","language.name":"English"}"#,
+        );
+        content.insert_test_resource(
+            "assets/minecraft/lang/ru_ru.json",
+            "{\"hub\":\"Поселение\",\"language.name\":\"Русский\"}".as_bytes(),
+        );
+        session.ui = Some(UiState::new(&content).unwrap());
+        session.content = Some(content);
+        let translate = |session: &Session| {
+            session.ui.as_ref().unwrap().text_renderer().language.translate("hub").to_owned()
+        };
+        assert_eq!(session.client_settings_snapshot().get("language"), Some(&json!("en_us")));
+        assert_eq!(translate(&session), "Settlement");
+        session.set_language("ru_ru").unwrap();
+        assert_eq!(translate(&session), "Поселение");
+        assert_eq!(session.ui.as_ref().unwrap().language(), "ru_ru");
+        let saved = session.client_settings_snapshot();
+        assert_eq!(saved.get("language"), Some(&json!("ru_ru")));
+        // A lang file the content lacks is refused without losing the applied language.
+        assert!(session.apply_client_setting("language", &json!("de_de")).is_err());
+        assert_eq!(session.client_settings_snapshot().get("language"), Some(&json!("ru_ru")));
+        assert_eq!(translate(&session), "Поселение");
+        assert_eq!(session.ui.as_ref().unwrap().language(), "ru_ru");
+        // The saved value survives a restart through the same managed-settings path.
+        let path = std::env::temp_dir().join(format!("krasnokamen-language-settings-{}.json", std::process::id()));
+        crate::local_config::save_client_settings_to(&saved, &path);
+        let loaded = crate::local_config::load_client_settings_from(&path);
+        let _ = std::fs::remove_file(path);
+        assert_eq!(loaded.get("language"), Some(&json!("ru_ru")));
+        let mut restored = Session::new_mode("language-restored".into(), false);
+        restored.apply_persisted_settings(loaded);
+        assert_eq!(restored.client_settings_snapshot().get("language"), Some(&json!("ru_ru")));
+        restored.apply_persisted_settings(BTreeMap::new());
+        assert_eq!(restored.client_settings_snapshot().get("language"), Some(&json!("en_us")));
     }
     #[test]
     fn stores_fov_and_render_distance() {
