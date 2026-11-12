@@ -12,7 +12,7 @@ pub(super) fn paddle(time: f32, right: bool) -> [f32; 2] {
     let y = super::source_sin(-time + 1.) * 0.5 + 0.5;
     let yaw = -std::f32::consts::FRAC_PI_4 + y * std::f32::consts::FRAC_PI_2;
     [
-        -1.0471976 + x * (-0.2617994 + 1.0471976),
+        -std::f32::consts::FRAC_PI_3 + x * (-0.2617994 + std::f32::consts::FRAC_PI_3),
         if right {
             std::f32::consts::PI - yaw
         } else {

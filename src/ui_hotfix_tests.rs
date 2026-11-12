@@ -1087,7 +1087,6 @@ fn pause_and_options_seams() {
     assert!(fov["label"]
         .as_str()
         .is_some_and(|l| l.starts_with("Field of view:")));
-    assert!(ui.observed_settings().get("fov").is_some() || true);
     // Escape on Pause goes back (Close path), not stuck.
     ui.execute(
         UiIntent::Key {

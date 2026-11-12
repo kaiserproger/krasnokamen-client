@@ -167,7 +167,7 @@ impl State {
                 {
                     self.rowing[side] =
                         if has_controlling_passenger && p::boolean(models, entity, name) {
-                            self.rowing[side] + 0.3926991
+                            self.rowing[side] + std::f32::consts::FRAC_PI_8
                         } else {
                             0.
                         };
@@ -236,7 +236,8 @@ impl State {
     }
     pub fn rowing_time(&self, side: usize, enabled: bool, partial: f32) -> f32 {
         if enabled {
-            self.rowing[side] - 0.3926991 + 0.3926991 * partial.clamp(0., 1.)
+            self.rowing[side] - std::f32::consts::FRAC_PI_8
+                + std::f32::consts::FRAC_PI_8 * partial.clamp(0., 1.)
         } else {
             0.
         }
