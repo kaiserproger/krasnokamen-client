@@ -513,7 +513,10 @@ pub(crate) fn source_no_factory(name: &str) -> bool {
     // Reflected against the pinned original PROVIDERS map and complete registry.
     matches!(
         name,
-        "minecraft:furnace"
+        // 26.3 draws beds from their normal block models; the 26.1.2 bed renderer is gone
+        // (f4bd26d4), so the bed block entity is a no-factory constructor like the furnace.
+        "minecraft:bed"
+            | "minecraft:furnace"
             | "minecraft:jukebox"
             | "minecraft:dispenser"
             | "minecraft:dropper"
