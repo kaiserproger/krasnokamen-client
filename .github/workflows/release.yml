@@ -12,8 +12,8 @@ env:
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
   # `local_addr` listening-line change the singleplayer port discovery relies on.
-  KRASNOKAMEN_REVISION: 7edb728fd368fa94ed5a4ec178a7f35d5fdb49cb
-  KRASNOKAMEN_PLUGINS_REVISION: d2f3022f03ebdb20228797bd22e9b17affb6338c
+  KRASNOKAMEN_REVISION: 576398988405d3c0db16f670a7473e2bbf887c7c
+  KRASNOKAMEN_PLUGINS_REVISION: 0162e03f052f2238bb70f1904d9d01d71f882aa3
 
 permissions:
   contents: read
