@@ -192,8 +192,10 @@ These are software-rendered Xvfb agent checks, not human play or hardware FPS ev
 
 Motion polish (render-only; `src/motion.rs`, `src/session/block_motion.rs`):
 frame-time springs/easing drive landing dip (scaled by fall), strafe lean (±1.2°),
-first-person hand idle sway, turn inertia, use/place bump, eased equip and
-eat/drink pose, and a quick-strike attack swing; remote mobs get landing squash,
+turn inertia, use/place bump, eased equip and
+eat/drink pose, and a quick-strike attack swing; the first-person hand is still
+at idle like the source (no idle sway, so the held-item baseline stays exactly on
+the vanilla anchor); remote mobs get landing squash,
 idle breathing, a short hit lean, and an idle head glance at a player within six
 blocks; a mid-tick position packet now continues from the pose on screen instead
 of snapping; block-break fragments glide and shrink out; placed blocks pop in

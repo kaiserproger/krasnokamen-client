@@ -704,25 +704,20 @@ impl ViewMotion {
         self.lag[1] = damp(self.lag[1], input.pitch, LAG_RATE, dt);
         self.consume = damp(self.consume, input.consume, 12., dt);
     }
-    /// Hand offsets for the current spring state; `walking` is the 0..1
-    /// bob amplitude that suppresses idle sway while the walk bob dominates.
-    pub fn hand(&self, walking: f32, yaw: f32, pitch: f32) -> HandPose {
-        let idle = 1. - smoothstep(walking * 3.);
-        let t = (self.time % 600.) as f32;
+    /// Hand offsets for the current spring state. The source first-person hand is
+    /// perfectly still at idle (only the camera bob moves it), so the rest pose
+    /// carries no time-based sway: the held-item baseline stays exactly on the
+    /// vanilla anchor `(side*0.56, -0.52, -0.72)`.
+    pub fn hand(&self, _walking: f32, yaw: f32, pitch: f32) -> HandPose {
         let turn = angle_delta(self.lag[0], yaw);
         let tilt = pitch - self.lag[1];
         HandPose {
             offset: [
-                (t * 0.9).sin() * 0.004 * idle
-                    - (turn * 0.0035).clamp(-0.06, 0.06)
-                    - self.roll.x * 0.004,
-                (t * 1.3 + 1.).sin() * 0.005 * idle
-                    + (tilt * 0.003).clamp(-0.05, 0.05)
-                    + self.dip.x * 0.5
-                    - self.bump.x * 0.5,
+                -(turn * 0.0035).clamp(-0.06, 0.06) - self.roll.x * 0.004,
+                (tilt * 0.003).clamp(-0.05, 0.05) + self.dip.x * 0.5 - self.bump.x * 0.5,
                 -self.bump.x,
             ],
-            roll_deg: (t * 0.7).sin() * 0.5 * idle - (turn * 0.25).clamp(-5., 5.),
+            roll_deg: -(turn * 0.25).clamp(-5., 5.),
         }
     }
 }
