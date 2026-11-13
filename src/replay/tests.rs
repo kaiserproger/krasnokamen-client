@@ -206,7 +206,7 @@ fn crowd_mesh_fingerprint_uses_content_not_process_global_revision() {
     let fingerprint=crowd_mesh_hash(&meshes);
     meshes.revision=999;
     assert_eq!(crowd_mesh_hash(&meshes),fingerprint);
-    meshes.vertices.push(crate::entities::CrowdVertex::default());
+    meshes.chunks.push(std::sync::Arc::new(crate::entities::CrowdChunk { vertices: vec![crate::entities::CrowdVertex::default()], ..Default::default() }));
     assert_ne!(crowd_mesh_hash(&meshes),fingerprint);
 }
 

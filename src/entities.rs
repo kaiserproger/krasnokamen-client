@@ -47,7 +47,7 @@ pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
 pub use presentation::{special_item, PresentationStats};
-pub use crowd::{CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
+pub use crowd::{CrowdChunk, CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,

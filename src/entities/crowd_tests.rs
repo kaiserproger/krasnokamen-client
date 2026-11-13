@@ -213,14 +213,15 @@ pub(crate) fn parity_grid(side: usize, spacing: f32) -> (DynamicGeometry, CrowdS
 fn crowd_quads(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibrary) -> [Vec<[Vertex; 4]>; MATERIALS.len()] {
     let bones = evaluate(meshes, instance, clips);
     let group = &meshes.groups[instance.words[0] as usize];
+    let chunk = &meshes.chunks[instance.words[0] as usize];
     std::array::from_fn(|material| {
-        let first = group.first_index[material] as usize;
-        let indices = &meshes.indices[first..first + group.counts[material][0] as usize];
+        let first = (group.first_index[material] - chunk.first[1]) as usize;
+        let indices = &chunk.indices[first..first + group.counts[material][0] as usize];
         indices
             .chunks(6)
             .map(|quad| {
                 [quad[0], quad[1], quad[2], quad[4]].map(|index| {
-                    let v = meshes.vertices[(group.base_vertex + index as i32) as usize];
+                    let v = chunk.vertices[index as usize];
                     let m = bones[(v.bone_flags & 0xffff) as usize];
                     let (c0, c1, c2) = (m.x_axis.truncate(), m.y_axis.truncate(), m.z_axis.truncate());
                     let cofactor = glam::Mat3::from_cols(c1.cross(c2), c2.cross(c0), c0.cross(c1));
@@ -518,14 +519,14 @@ fn detail_levels_drop_thin_item_quads_then_trims() {
     assert_eq!(at(EntityMaterial::ItemCutout), [36, 12, 12], "extrusion edges leave at level 1");
     // The kept quads come first: a level draws a prefix of its range.
     let items = MATERIALS.iter().position(|m| *m == EntityMaterial::ItemCutout).unwrap();
-    let first = group.first_index[items] as usize;
+    let first = (group.first_index[items] - meshes.chunks[0].first[1]) as usize;
     let attachment = p::held_item_attachment(Mat4::IDENTITY, 0) * p::item_matrix(&model, "thirdperson_righthand");
     let faces: Vec<Vec3> = model.quads[..2]
         .iter()
         .flat_map(|quad| quad.positions.map(|v| attachment.transform_point3(Vec3::from_array(v))))
         .collect();
-    for &index in &meshes.indices[first..first + 12] {
-        let position = Vec3::from_array(meshes.vertices[(group.base_vertex + index as i32) as usize].position);
+    for &index in &meshes.chunks[0].indices[first..first + 12] {
+        let position = Vec3::from_array(meshes.chunks[0].vertices[index as usize].position);
         assert!(faces.iter().any(|face| face.abs_diff_eq(position, 1e-5)), "a face quad vertex");
     }
     // The bound covers every vertex under any pose.

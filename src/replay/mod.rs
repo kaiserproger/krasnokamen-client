@@ -225,13 +225,19 @@ impl Player {
 
 fn crowd_mesh_hash(meshes:&crate::entities::CrowdMeshes) -> [u8;32] {
     let mut hash=Sha256::new();
-    for bytes in [
-        bytemuck::cast_slice(meshes.vertices.as_slice()),
-        bytemuck::cast_slice(meshes.indices.as_slice()),
-        bytemuck::cast_slice(meshes.bones.as_slice()),
-    ] {
-        hash.update((bytes.len() as u64).to_be_bytes());
-        hash.update(bytes);
+    type Bytes = for<'a> fn(&'a crate::entities::CrowdChunk) -> &'a [u8];
+    let parts: [Bytes; 3] = [
+        |chunk| bytemuck::cast_slice(chunk.vertices.as_slice()),
+        |chunk| bytemuck::cast_slice(chunk.indices.as_slice()),
+        |chunk| bytemuck::cast_slice(chunk.bones.as_slice()),
+    ];
+    // The bytes of every chunk in order: the same stream as one contiguous buffer.
+    for bytes in parts {
+        let len: usize = meshes.chunks.iter().map(|chunk| bytes(chunk).len()).sum();
+        hash.update((len as u64).to_be_bytes());
+        for chunk in &meshes.chunks {
+            hash.update(bytes(chunk));
+        }
     }
     hash.update((meshes.groups.len() as u64).to_be_bytes());
     for group in &meshes.groups {

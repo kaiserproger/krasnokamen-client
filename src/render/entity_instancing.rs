@@ -124,6 +124,8 @@ pub(super) struct Crowd {
     view: wgpu::Buffer,
     params: wgpu::Buffer,
     mesh_revision: Option<u64>,
+    /// Pool and chunk count the mesh buffers hold.
+    mesh_chunks: Option<(u64, usize)>,
     vertices: Grow,
     indices: Grow,
     bones: Grow,
@@ -326,6 +328,7 @@ impl Crowd {
                 mapped_at_creation: false,
             }),
             mesh_revision: None,
+            mesh_chunks: None,
             vertices: Grow::new(device, "crowd composite vertices", wgpu::BufferUsages::VERTEX),
             indices: Grow::new(device, "crowd composite indices", wgpu::BufferUsages::INDEX),
             bones: Grow::new(device, "crowd composite bones", storage),
@@ -364,21 +367,33 @@ impl Crowd {
             return 0;
         }
         let mut uploaded = 0;
-        let mut write = |queue: &wgpu::Queue, buffer: &wgpu::Buffer, bytes: &[u8]| {
-            queue.write_buffer(buffer, 0, bytes);
-            uploaded += bytes.len() as u64;
+        let mut write = |queue: &wgpu::Queue, buffer: &wgpu::Buffer, offset: u64, bytes: &[u8]| {
+            if !bytes.is_empty() {
+                queue.write_buffer(buffer, offset, bytes);
+                uploaded += bytes.len() as u64;
+            }
         };
         let mut rebind = false;
         if self.mesh_revision != Some(meshes.revision) {
-            let vertices: &[u8] = bytemuck::cast_slice(&meshes.vertices);
-            let indices: &[u8] = bytemuck::cast_slice(&meshes.indices);
-            let bones: &[u8] = bytemuck::cast_slice(&meshes.bones);
-            self.vertices.ensure(device, vertices.len() as u64);
-            self.indices.ensure(device, indices.len() as u64);
-            rebind |= self.bones.ensure(device, bones.len() as u64);
-            write(queue, &self.vertices.buffer, vertices);
-            write(queue, &self.indices.buffer, indices);
-            write(queue, &self.bones.buffer, bones);
+            const VERTEX: u64 = std::mem::size_of::<model::CrowdVertex>() as u64;
+            const BONE: u64 = std::mem::size_of::<model::CrowdBone>() as u64;
+            let [vertices, indices, bones] = meshes.lens.map(u64::from);
+            let grown = self.vertices.ensure(device, vertices * VERTEX) | self.indices.ensure(device, indices * 4);
+            let bones_grown = self.bones.ensure(device, bones * BONE);
+            rebind |= bones_grown;
+            // A pool only grows: write the composites the buffers lack, or every one for a
+            // new pool or recreated (empty) buffers.
+            let from = match self.mesh_chunks {
+                Some((pool, chunks)) if pool == meshes.pool && !grown && !bones_grown && chunks <= meshes.chunks.len() => chunks,
+                _ => 0,
+            };
+            for chunk in &meshes.chunks[from..] {
+                let [vertex, index, bone] = chunk.first.map(u64::from);
+                write(queue, &self.vertices.buffer, vertex * VERTEX, bytemuck::cast_slice(&chunk.vertices));
+                write(queue, &self.indices.buffer, index * 4, bytemuck::cast_slice(&chunk.indices));
+                write(queue, &self.bones.buffer, bone * BONE, bytemuck::cast_slice(&chunk.bones));
+            }
+            self.mesh_chunks = Some((meshes.pool, meshes.chunks.len()));
             self.mesh_revision = Some(meshes.revision);
         }
         if self.clip_revision != Some(scene.clips.revision()) {
@@ -394,7 +409,7 @@ impl Crowd {
             }
             let bytes: &[u8] = bytemuck::cast_slice(&table);
             rebind |= self.clips.ensure(device, bytes.len() as u64);
-            write(queue, &self.clips.buffer, bytes);
+            write(queue, &self.clips.buffer, 0, bytes);
             self.clip_revision = Some(scene.clips.revision());
         }
         let instances = scene.instances.len() as u32;
@@ -450,11 +465,11 @@ impl Crowd {
         rebind |= self.visible.ensure(device, u64::from(views_count * 3 * instances) * 4);
         rebind |= self.counts.ensure(device, u64::from(views_count * group_count as u32 * 3) * 4);
         rebind |= self.args.ensure(device, u64::from(entries) * ARGS_BYTES);
-        write(queue, &self.instances.buffer, bytemuck::cast_slice(&scene.instances));
-        write(queue, &self.groups.buffer, bytemuck::cast_slice(&groups));
-        write(queue, &self.args.buffer, bytemuck::cast_slice(&args));
-        write(queue, &self.params, bytemuck::bytes_of(&params));
-        write(queue, &self.view, bytemuck::bytes_of(&origin.extend(0.).to_array()));
+        write(queue, &self.instances.buffer, 0, bytemuck::cast_slice(&scene.instances));
+        write(queue, &self.groups.buffer, 0, bytemuck::cast_slice(&groups));
+        write(queue, &self.args.buffer, 0, bytemuck::cast_slice(&args));
+        write(queue, &self.params, 0, bytemuck::bytes_of(&params));
+        write(queue, &self.view, 0, bytemuck::bytes_of(&origin.extend(0.).to_array()));
         if rebind || self.binds.is_none() {
             self.binds = Some(self.bind(device));
         }

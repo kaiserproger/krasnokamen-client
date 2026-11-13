@@ -156,14 +156,28 @@ pub struct CrowdGroup {
     pub radius: f32,
 }
 
-/// Every composite, shared across frames; `revision` changes with the contents.
-#[derive(Clone, Debug, Default)]
-pub struct CrowdMeshes {
-    pub revision: u64,
+/// One composite's mesh: its vertices, its indices (vertex numbers from its group's
+/// `base_vertex`) and its bones, at the pool offsets `first` (vertices, indices, bones).
+#[derive(Debug, Default)]
+pub struct CrowdChunk {
+    pub first: [u32; 3],
     pub vertices: Vec<CrowdVertex>,
     pub indices: Vec<u32>,
     pub bones: Vec<CrowdBone>,
+}
+
+/// Every composite, shared across frames; `revision` changes with the contents. A pool only
+/// grows until `Registry::clear_composites` starts another (`pool`), and each composite's
+/// mesh is its own shared chunk (`chunks[i]` belongs to `groups[i]`): appending to a pool
+/// that a frame or the renderer still holds copies the composite table, never every mesh.
+#[derive(Clone, Debug, Default)]
+pub struct CrowdMeshes {
+    pub revision: u64,
+    pub pool: u64,
+    pub chunks: Vec<Arc<CrowdChunk>>,
     pub groups: Vec<CrowdGroup>,
+    /// Vertices, indices and bones of every chunk.
+    pub lens: [u32; 3],
 }
 
 /// This frame's crowd: meshes, instances and the clip table they sample.
@@ -288,7 +302,8 @@ impl Registry {
     pub(crate) fn clear_composites(&mut self) {
         self.generation += 1;
         self.keys.clear();
-        self.meshes = Arc::new(CrowdMeshes { revision: REVISIONS.fetch_add(1, Ordering::Relaxed), ..Default::default() });
+        let revision = REVISIONS.fetch_add(1, Ordering::Relaxed);
+        self.meshes = Arc::new(CrowdMeshes { revision, pool: revision, ..Default::default() });
         self.instances.clear();
         self.counts.clear();
         self.bones = 0;
@@ -682,25 +697,32 @@ pub(crate) struct Built {
 
 impl CrowdMeshes {
     fn append(&mut self, built: Built) {
+        let [vertex, index, bone] = self.lens;
         let mut group = CrowdGroup {
-            base_vertex: self.vertices.len() as i32,
-            bone_first: self.bones.len() as u32,
+            base_vertex: vertex as i32,
+            bone_first: bone,
             bone_count: built.bones.len() as u32,
             hip: built.hip.to_array(),
             radius: built.radius,
             ..Default::default()
         };
-        self.vertices.extend(built.vertices);
-        self.bones.extend(built.bones);
+        let mut indices = Vec::new();
         for (material, mut quads) in built.quads.into_iter().enumerate() {
-            group.first_index[material] = self.indices.len() as u32;
+            group.first_index[material] = index + indices.len() as u32;
             // Each LOD draws a prefix: parts kept at coarser levels come first.
             quads.sort_by_key(|(lod, _)| std::cmp::Reverse(*lod));
             for lod in 0..LODS {
                 group.counts[material][lod] = 6 * quads.iter().filter(|(max, _)| *max >= lod).count() as u32;
             }
-            self.indices.extend(quads.iter().flat_map(|(_, indices)| *indices));
+            indices.extend(quads.iter().flat_map(|(_, indices)| *indices));
         }
+        let chunk = CrowdChunk { first: self.lens, vertices: built.vertices, indices, bones: built.bones };
+        self.lens = [
+            vertex + chunk.vertices.len() as u32,
+            index + chunk.indices.len() as u32,
+            bone + chunk.bones.len() as u32,
+        ];
+        self.chunks.push(Arc::new(chunk));
         self.groups.push(group);
     }
 }
@@ -845,7 +867,7 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
 #[cfg(test)]
 pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibrary) -> Vec<Mat4> {
     let group = &meshes.groups[instance.words[0] as usize];
-    let bones = &meshes.bones[group.bone_first as usize..(group.bone_first + group.bone_count) as usize];
+    let bones = &meshes.chunks[instance.words[0] as usize].bones;
     let r = instance.root;
     let root = Mat4::from_cols(
         glam::Vec4::new(r[0][0], r[1][0], r[2][0], 0.),
