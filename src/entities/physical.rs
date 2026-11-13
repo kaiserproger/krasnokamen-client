@@ -470,6 +470,55 @@ impl Store {
         }
         Ok(())
     }
+    /// Horizontal velocity the local player receives this tick from overlapping living
+    /// entities. Vanilla: every living entity's client `aiStep` runs
+    /// `LivingEntity.pushEntities`, whose client branch collects only the local player
+    /// (`EntitySelector.pushableBy`) among boxes intersecting its own, and `doPush` calls
+    /// `player.push(entity)` (`Entity.push(Entity)`), which moves the player away from it.
+    /// The caller applies it only while the player itself is pushable.
+    pub(crate) fn local_player_push(&self, player: Bounds, player_id: i32, tick: u64) -> Result<[f64; 2]> {
+        let models = self.models_ref().ok_or("entity models not activated")?;
+        let root = self.root_vehicle(player_id)?;
+        let x = (player.min[0] + player.max[0]) / 2.;
+        let z = (player.min[2] + player.max[2]) / 2.;
+        let mut push = [0.; 2];
+        for e in self.candidates(player) {
+            if e.handle.network_id == player_id
+                || !hierarchy(models, e, "net.minecraft.world.entity.LivingEntity")
+                // No push on a player: ArmorStand.pushEntities pushes minecarts only, Bat's
+                // is empty, Parrot.doPush skips players, and EnderDragon.aiStep never
+                // reaches LivingEntity.aiStep. A spectator has noPhysics.
+                || [
+                    "net.minecraft.world.entity.decoration.ArmorStand",
+                    "net.minecraft.world.entity.ambient.Bat",
+                    "net.minecraft.world.entity.animal.parrot.Parrot",
+                    "net.minecraft.world.entity.boss.enderdragon.EnderDragon",
+                ]
+                .iter()
+                .any(|class| hierarchy(models, e, class))
+                || spectator(self, e)
+                || self.root_vehicle(e.handle.network_id)? == root
+            {
+                continue;
+            }
+            let b = self.bounds(e.handle, tick, 0.)?;
+            if !b.intersects(player) {
+                continue;
+            }
+            let mut dx = (b.min[0] + b.max[0]) / 2. - x;
+            let mut dz = (b.min[2] + b.max[2]) / 2. - z;
+            let mut distance = dx.abs().max(dz.abs());
+            if distance >= f64::from(0.01f32) {
+                distance = distance.sqrt();
+                dx /= distance;
+                dz /= distance;
+                let scale = (1. / distance).min(1.);
+                push[0] -= dx * scale * f64::from(0.05f32);
+                push[1] -= dz * scale * f64::from(0.05f32);
+            }
+        }
+        Ok(push)
+    }
     pub(crate) fn placement_unobstructed(
         &self,
         area: Bounds,

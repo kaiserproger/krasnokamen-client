@@ -87,6 +87,14 @@ impl Player {
         self.vehicle_prediction = None;
         let env = self.environment(world, content)?;
         let underwater = self.update_eye_environment(world, content)?;
+        // Overlapping living entities push the local player away (vanilla client
+        // `LivingEntity.pushEntities` -> `Entity.push`), while he is pushable: alive, not a
+        // spectator, not on a climbable (`env.climbable` is `Player.onClimbable`).
+        if self.game_mode != 3 && !env.climbable && self.health.is_none_or(|health| health > 0.) {
+            let push = entities.local_player_push(self.bounds(), self.entity_id, world_tick)?;
+            self.velocity[0] += push[0];
+            self.velocity[2] += push[1];
+        }
         if !self.abilities.flying {
             apply_flow(
                 &mut self.velocity,
@@ -1394,5 +1402,112 @@ mod tests {
             &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
         )
         .is_err());
+    }
+
+    fn push_models(hierarchy: &[&str]) -> crate::entities::Models {
+        let schema = serde_json::from_value(serde_json::json!({
+            "protocol_id": 1, "width": 0.6, "height": 1.95, "eye_height": 1.74,
+            "fire_immune": false, "class": hierarchy.last().unwrap(),
+            "dimension_constants": {}, "enum_ids": {}, "enum_numbers": {},
+            "hierarchy": hierarchy,
+            "method_owners": {"canBeCollidedWith": "net.minecraft.world.entity.Entity"},
+            "dimensions": {"width": 0.6, "height": 1.95, "eye_height": 1.74,
+                "fixed": false, "attachments": {}},
+            "default_attributes": {"minecraft:scale": {"id": 30, "value": 1.0}}, "accessors": {}
+        }))
+        .unwrap();
+        crate::entities::Models {
+            rigs: BTreeMap::new(),
+            schemas: BTreeMap::from([("test:entity".into(), schema)]),
+            families: BTreeMap::new(),
+            builtin_variants: BTreeMap::new(),
+            simple_particles: Vec::new(),
+            default_skins: Vec::new(),
+            poses: BTreeMap::from([(0, "STANDING".into())]),
+            attributes: BTreeMap::new(),
+            attribute_ids: BTreeMap::new(),
+            digest: String::new(),
+            armor_models: BTreeMap::new(),
+            motion: BTreeMap::new(),
+        }
+    }
+
+    /// An air chunk, the player at (12, 4, 12) and one `test:entity` of `hierarchy` per position.
+    fn push_fixture(hierarchy: &[&str], mobs: &[[f64; 3]]) -> (Player, World, Content, InventoryStore, EntityStore) {
+        use crate::protocol::world::{Chunk, Palette, Section, SurfaceHeightmap};
+        let mut content = Content::test_cube();
+        content.entity_names.insert(1, "test:entity".into());
+        content.set_registries(BTreeMap::from([(
+            "minecraft:block".into(),
+            vec![("minecraft:air".into(), serde_json::Value::Null), ("test:cube".into(), serde_json::Value::Null)],
+        )]));
+        let mut world = World::new(0, 16);
+        let palette = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
+        world
+            .insert([0, 0], Chunk {
+                sections: vec![Arc::new(Section { blocks: palette(4096), biomes: palette(64), non_empty_block_count: 0 })],
+                sky: BTreeMap::new(),
+                block: BTreeMap::new(),
+                block_entities: Arc::new(Vec::new()),
+                surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+                surface_heightmap_received: false,
+            })
+            .unwrap();
+        let mut player = Player::new();
+        player.position = [12., 4., 12.];
+        let mut entities = EntityStore::new();
+        for (index, position) in mobs.iter().enumerate() {
+            let mut packet = crate::protocol::Writer::default();
+            packet.var(42 + index as i32);
+            packet.0.extend([index as u8 + 1; 16]);
+            packet.var(1);
+            for coordinate in position {
+                packet.f64(*coordinate);
+            }
+            packet.0.extend([0u8; 5]); // velocity, pitch, yaw, head yaw, data
+            entities.apply(1, &mut crate::protocol::Reader::new(&packet.0), &content, 1).unwrap();
+        }
+        entities.models = Some(Arc::new(push_models(hierarchy)));
+        (player, world, content, InventoryStore::default(), entities)
+    }
+
+    const LIVING: [&str; 2] = ["net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity"];
+
+    #[test]
+    fn overlapping_mob_pushes_the_local_player_out_like_vanilla() {
+        // Mob 0.3 east of the player: vanilla Entity.push gives -0.05 * 0.3 / sqrt(0.3) * min(1, 1 / sqrt(0.3))
+        // = -0.05 * sqrt(0.3) on x; in air the player then moves by that velocity this tick.
+        let (mut player, world, content, inventory, entities) = push_fixture(&LIVING, &[[12.3, 4., 12.]]);
+        let mut out = Vec::new();
+        player.predict(&world, &content, &inventory, &entities, HeldInput::default(), 1, 1, &mut out).unwrap();
+        let push = 0.3 / 0.3f64.sqrt() * f64::from(0.05f32);
+        assert!((player.position[0] - (12. - push)).abs() < 1e-9, "x {}", player.position[0]);
+        assert_eq!(player.position[2], 12.);
+    }
+
+    #[test]
+    fn local_player_push_follows_vanilla_owners_and_distance_rules() {
+        let at = |hierarchy: &[&str], mobs: &[[f64; 3]]| {
+            let (player, _, _, _, entities) = push_fixture(hierarchy, mobs);
+            entities.local_player_push(player.bounds(), player.entity_id, 1).unwrap()
+        };
+        // Two mobs on opposite sides cancel; one mob 1.2 north: no overlap, no push.
+        let both = at(&LIVING, &[[12.2, 4., 12.], [11.8, 4., 12.]]);
+        assert!(both[0].abs() < 1e-12 && both[1] == 0., "{both:?}");
+        assert_eq!(at(&LIVING, &[[12., 4., 13.2]]), [0., 0.]);
+        // Exactly on top (absMax below 0.01): vanilla pushes nothing.
+        assert_eq!(at(&LIVING, &[[12.005, 4., 12.]]), [0., 0.]);
+        // A plain entity, an armor stand, a bat or a parrot never pushes a player.
+        assert_eq!(at(&["net.minecraft.world.entity.Entity"], &[[12.3, 4., 12.]]), [0., 0.]);
+        for class in [
+            "net.minecraft.world.entity.decoration.ArmorStand",
+            "net.minecraft.world.entity.ambient.Bat",
+            "net.minecraft.world.entity.animal.parrot.Parrot",
+        ] {
+            assert_eq!(at(&[LIVING[0], LIVING[1], class], &[[12.3, 4., 12.]]), [0., 0.], "{class}");
+        }
+        // Within a block the 1/sqrt factor is capped at 1: push 0.05 * d / sqrt(d) away.
+        let near = at(&LIVING, &[[12., 4., 12.5]]);
+        assert!((near[1] + 0.5f64.sqrt() * f64::from(0.05f32)).abs() < 1e-12, "{near:?}");
     }
 }
