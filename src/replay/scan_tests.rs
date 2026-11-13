@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::Writer;
 
 fn components(entries: &[(&str, Value)]) -> BTreeMap<String, Value> {
     entries.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
@@ -148,7 +149,7 @@ fn arrow_velocity_is_rederived_from_sparse_server_positions() {
     let (launch, velocity) = ([0., 70., 0.], [0., 1.5, 2.5]);
     let (at_sync, _) = fly(launch, velocity, 20, |_, _| None);
     let mut arrow = Tracked { role: Role::Arrow, position: launch, spawn: launch, sampled: launch, side: None, weapon: None,
-        vehicle: None, dead: false, stopped: false, velocity, base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None };
+        vehicle: None, dead: false, stopped: false, velocity, base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None, combat: Combat::default() };
     arrow.moved(at_sync, 120);
     let mut truth = velocity;
     for _ in 0..20 { truth = [truth[0] * 0.99, truth[1] * 0.99 - 0.05, truth[2] * 0.99]; }
@@ -162,7 +163,7 @@ fn arrow_velocity_is_rederived_from_sparse_server_positions() {
 
 fn fighter(position: [f64; 3], side: Side, weapon: &str) -> Tracked {
     Tracked { role: Role::Fighter, position, spawn: position, sampled: position, side: Some(side), weapon: Some(weapon.into()),
-        vehicle: None, dead: false, stopped: false, velocity: [0.; 3], base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None }
+        vehicle: None, dead: false, stopped: false, velocity: [0.; 3], base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None, combat: Combat::default() }
 }
 
 #[test]
@@ -196,4 +197,67 @@ fn melee_attackers_count_distinct_main_hand_swingers_in_a_sliding_two_second_win
     assert_eq!(events(&scan.sample(120, 1.)), [1, 2], "1 counted once; 6 still inside 40 ticks");
     assert_eq!(events(&scan.sample(139, 1.95))[1], 2, "tick 100 is the 40th tick back from 139");
     assert_eq!(events(&scan.sample(140, 2.)), [0, 1], "only the swing of tick 120 is left");
+}
+
+fn bare_models() -> crate::entities::Models {
+    crate::entities::Models {
+        rigs: BTreeMap::new(), schemas: BTreeMap::new(), families: BTreeMap::new(), builtin_variants: BTreeMap::new(),
+        simple_particles: vec![], default_skins: vec![], poses: BTreeMap::new(), attributes: BTreeMap::new(),
+        attribute_ids: BTreeMap::new(), digest: String::new(), armor_models: BTreeMap::new(), motion: BTreeMap::new(),
+    }
+}
+
+#[test]
+fn reach_is_the_main_hand_attack_range_with_the_codec_default_otherwise() {
+    assert_eq!(attack_reach(&components(&[("minecraft:attack_range", json!({"max_reach":4.5,"mob_factor":0.5}))])), 4.5);
+    assert_eq!(attack_reach(&components(&[("minecraft:weapon", json!({}))])), DEFAULT_REACH);
+}
+
+#[test]
+fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shield() {
+    let mut content = Content::test_cube();
+    content.sound_names.insert(5, "minecraft:item.shield.block".into());
+    content.sound_names.insert(6, "minecraft:entity.generic.hurt".into());
+    let mut scan = Scan::new(-64, 384);
+    scan.models = Some(bare_models());
+    scan.living_flags = Some(8);
+    let mut shielded = fighter([2.8, 64., 0.], Side::Blue, "minecraft:iron_sword");
+    shielded.combat.offhand = Some("minecraft:shield".into());
+    let mut spear = fighter([100., 64., 0.], Side::Red, "minecraft:iron_spear");
+    spear.combat.reach = 4.5;
+    for (id, e) in [
+        (1, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword")), // enemy 2.8 away: in its 3.0 reach, outside the legacy 2.5
+        (2, shielded),
+        (3, spear), // blue 4 away: in the spear's reach only
+        (4, fighter([104., 64., 0.], Side::Blue, "minecraft:iron_sword")),
+        (5, fighter([200., 64., 0.], Side::Red, "minecraft:iron_sword")), // nobody near
+    ] { scan.entities.insert(id, e); }
+    let mut apply = |scan: &mut Scan, id: i32, body: &[u8]| scan.apply(id, body, &content).unwrap();
+    let row = |scan: &mut Scan, tick: u64| { let v = scan.sample(tick, 0.); (
+        ["fighting_2s", "shields_raised", "shield_blocks"].map(|k| v["events"][k].as_u64().unwrap()),
+        [v["contact_fighters"].as_u64().unwrap(), v["contact_fighters_legacy"].as_u64().unwrap()]) };
+    scan.tick = Some(100);
+    apply(&mut scan, cb::SWING_ANIMATION, &[1, 0, 1, 21]); // 1 attacks
+    apply(&mut scan, cb::SWING_ANIMATION, &[5, 0, 1, 21]); // 5 swings at nobody
+    apply(&mut scan, cb::SET_ENTITY_DATA, &[2, 8, 0, 3, 255]); // 2: using item (1) with the off hand (2)
+    apply(&mut scan, cb::SET_ENTITY_DATA, &[4, 8, 0, 1, 255]); // 4: using the main hand, which holds a sword: not a shield
+    let mut sound = Writer::default();
+    sound.var(0); sound.string("minecraft:item.shield.block"); sound.0.push(0); sound.var(7); sound.var(2); sound.f32(1.); sound.f32(1.); sound.i64(0);
+    apply(&mut scan, cb::SOUND_ENTITY, &sound.0); // inline holder
+    let mut registry = Writer::default();
+    registry.var(6); registry.var(7); registry.var(2); registry.f32(1.); registry.f32(1.); registry.i64(0);
+    apply(&mut scan, cb::SOUND_ENTITY, &registry.0); // registry id 5 + 1
+    let mut other = Writer::default();
+    other.var(7); other.var(7); other.var(2); other.f32(1.); other.f32(1.); other.i64(0);
+    apply(&mut scan, cb::SOUND_ENTITY, &other.0); // a different sound
+    let mut stranger = Writer::default();
+    stranger.var(6); stranger.var(7); stranger.var(99); stranger.f32(1.); stranger.f32(1.); stranger.i64(0);
+    apply(&mut scan, cb::SOUND_ENTITY, &stranger.0); // untracked entity
+    assert_eq!(row(&mut scan, 100), ([2, 1, 2], [3, 0]), "1 (swing) and 2 (shield) fight; 3 reaches 4 but not back; 5 touches nobody");
+    // The shield goes down at tick 125: it still counts until tick 164, the swing of tick 100 until 139.
+    scan.tick = Some(125);
+    apply(&mut scan, cb::SET_ENTITY_DATA, &[2, 8, 0, 0, 255]);
+    assert_eq!(row(&mut scan, 130), ([2, 0, 0], [3, 0]));
+    assert_eq!(row(&mut scan, 140), ([1, 0, 0], [3, 0]), "only the lowered shield is left");
+    assert_eq!(row(&mut scan, 165), ([0, 0, 0], [3, 0]));
 }

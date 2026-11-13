@@ -21,10 +21,22 @@ const IDS_PER_SIDE: usize = 6;
 /// Attackers window: a fighter is an attacker while his last main-hand melee
 /// swing is within the last 40 ticks (2 s) ending at the sample's tick.
 const ATTACK_WINDOW: u64 = 40;
+/// `max_reach` default of the `minecraft:attack_range` component codec (this client's
+/// `src/inventory/components.rs` "attack_range" decoder, i.e. vanilla's `AttackRange` default), used
+/// when the main-hand item has no such component (swords, axes, bare hands).
+const DEFAULT_REACH: f64 = 3.;
+/// Entity types the scan treats as fighters.
+const FIGHTER_KINDS: [&str; 5] = ["minecraft:husk", "minecraft:zombie", "minecraft:skeleton", "minecraft:pillager", "minecraft:vindicator"];
 /// Field definitions, repeated in the header row so receipts are self-describing.
 const SWING_DEFINITIONS: &str = "events.melee_attack_swings: main-hand melee swings in this interval by fighters not holding a bow or crossbow \
     (SWING_ANIMATION hand 0 with swing type whack/stab; ANIMATE is never an attack on 26.3, where its action 0 is wake-up; off-hand swings, i.e. shield parries, and type none, i.e. staggers, are not attacks). \
     events.melee_attackers_2s: distinct such fighters with an attack swing in the 40 ticks ending at the sample tick.";
+const COMBAT_DEFINITIONS: &str = "reach: per fighter, max_reach of the minecraft:attack_range component of the main-hand item (stack components, item defaults merged), \
+    else 3.0 (codec default); mob_factor and hitbox margin are ignored. contact_fighters: fighters with an enemy-side fighter within their OWN reach \
+    (horizontal distance between positions, |dy| <= 2); contact_fighters_legacy: the old symmetric 2.5-block count (contact_reach); `contacts` clusters still use contact_reach. \
+    events.fighting_2s: contact_fighters that made a main-hand attack swing or had a raised shield in the last 40 ticks. \
+    events.shields_raised: fighters at the sample tick using an item (DATA_LIVING_ENTITY_FLAGS bit 1) whose hand (bit 2: off hand) holds minecraft:shield. \
+    events.shield_blocks: SOUND_ENTITY minecraft:item.shield.block on a fighter in this interval (the server announces a block with that sound, not with an entity event).";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Side { Red, Blue }
@@ -204,6 +216,42 @@ struct Tracked {
     spawn_tick: u64,
     first_contact: Option<u64>,
     death_tick: Option<u64>,
+    combat: Combat,
+}
+
+/// Per fighter: weapon reach and shield state (see `COMBAT_DEFINITIONS`).
+#[derive(Debug)]
+struct Combat {
+    /// `max_reach` of the `minecraft:attack_range` component of the item in the main hand.
+    reach: f64,
+    /// Item in the off hand (SET_EQUIPMENT slot 1).
+    offhand: Option<String>,
+    /// DATA_LIVING_ENTITY_FLAGS: bit 1 using an item, bit 2 the hand is the off hand.
+    flags: i32,
+    shield_was_up: bool,
+    /// Last tick the shield was seen raised or being lowered.
+    shield_tick: Option<u64>,
+}
+impl Default for Combat {
+    fn default() -> Self { Self { reach: DEFAULT_REACH, offhand: None, flags: 0, shield_was_up: false, shield_tick: None } }
+}
+
+/// `max_reach` of the stack's `minecraft:attack_range` (item defaults are merged into `components`).
+fn attack_reach(components: &BTreeMap<String, Value>) -> f64 {
+    components.get("minecraft:attack_range").and_then(|v| v.get("max_reach")).and_then(Value::as_f64).unwrap_or(DEFAULT_REACH)
+}
+
+impl Tracked {
+    /// Using the item in the hand named by the flags, and that item is a shield.
+    fn shield_up(&self) -> bool {
+        let item = if self.combat.flags & 2 != 0 { self.combat.offhand.as_deref() } else { self.weapon.as_deref() };
+        self.combat.flags & 1 != 0 && item == Some("minecraft:shield")
+    }
+    fn note_shield(&mut self, tick: u64) {
+        let up = self.shield_up();
+        if up || self.combat.shield_was_up { self.combat.shield_tick = Some(tick); }
+        self.combat.shield_was_up = up;
+    }
 }
 
 /// Vanilla arrow flight per tick (move, 0.99 drag, 0.05 gravity) for `ticks`
@@ -248,14 +296,12 @@ fn surface_top(chunks: &HashMap<(i32, i32), Box<[[i16; 256]; 2]>>, x: f64, z: f6
 struct Interval {
     swings: Vec<i32>,
     attack_swings: u32,
+    shield_blocks: u32,
     hurts: u32,
     deaths: u32,
     launches: Vec<([f64; 3], Option<Side>)>,
     impacts: Vec<([f64; 3], Option<Side>)>,
 }
-
-/// A main-hand melee swing of a fighter (see `SWING_DEFINITIONS`).
-struct AttackSwing { tick: u64, id: i32 }
 
 #[derive(Default)]
 pub(crate) struct Scan {
@@ -268,8 +314,11 @@ pub(crate) struct Scan {
     pub(crate) first_tick: Option<u64>,
     pub(crate) tick: Option<u64>,
     component_sides: u64,
-    /// Attack swings of the last `ATTACK_WINDOW` ticks (tick ascending).
-    attacks: VecDeque<AttackSwing>,
+    /// Tick of each fighter's last main-hand melee swing (entries older than `ATTACK_WINDOW` are dropped at samples).
+    last_attack: HashMap<i32, u64>,
+    /// Entity metadata schema, and the DATA_LIVING_ENTITY_FLAGS index every fighter type shares.
+    models: Option<crate::entities::Models>,
+    living_flags: Option<u8>,
     samples: u64,
     last_sample_t: f64,
     /// Dimension layout (overworld default); chunk sections decode against it.
@@ -350,7 +399,7 @@ impl Scan {
     fn attack(&mut self, target: i32) {
         let Some(e) = self.entities.get(&target) else { return };
         if e.role != Role::Fighter || matches!(e.weapon.as_deref(), Some("minecraft:bow" | "minecraft:crossbow")) { return; }
-        self.attacks.push_back(AttackSwing { tick: self.tick(), id: target });
+        self.last_attack.insert(target, self.tick());
         self.interval.attack_swings += 1;
     }
     fn t(&self, tick: u64) -> f64 { round((tick.saturating_sub(self.first_tick.unwrap_or(tick))) as f64 * 0.05) }
@@ -396,7 +445,7 @@ impl Scan {
                 let role = match name.as_str() {
                     "minecraft:arrow" | "minecraft:spectral_arrow" => Role::Arrow,
                     "minecraft:horse" => Role::Horse,
-                    "minecraft:husk" | "minecraft:zombie" | "minecraft:skeleton" | "minecraft:pillager" | "minecraft:vindicator" => Role::Fighter,
+                    n if FIGHTER_KINDS.contains(&n) => Role::Fighter,
                     _ => Role::Other,
                 };
                 if role == Role::Other { self.remove(entity); return Ok(()); }
@@ -410,7 +459,7 @@ impl Scan {
                 self.remove(entity);
                 self.entities.insert(entity, Tracked { role, position, spawn: position, sampled: position, side,
                     weapon: None, vehicle: None, dead: false, stopped: false, velocity, base_tick: tick, spawn_tick: tick,
-                    first_contact: None, death_tick: None });
+                    first_contact: None, death_tick: None, combat: Combat::default() });
             }
             cb::MOVE_ENTITY_POS | cb::MOVE_ENTITY_POS_ROT => {
                 let target = r.var()?;
@@ -458,7 +507,8 @@ impl Scan {
             cb::SET_EQUIPMENT => {
                 let target = r.var()?;
                 let mut seen = 0u16;
-                let (mut side, mut weapon) = (None, None);
+                let (mut side, mut weapon, mut reach) = (None, None, None);
+                let mut offhand: Option<Option<String>> = None;
                 loop {
                     let b = r.u8()?;
                     let slot = b & 127;
@@ -467,8 +517,12 @@ impl Scan {
                     let stack = crate::inventory::read_stack(&mut r, content)?;
                     if !stack.empty() {
                         side = side.or_else(|| side_of_components(&stack.components));
-                        if slot == 0 { weapon = content.item_names.get(&stack.id).cloned(); }
+                        if slot == 0 {
+                            weapon = content.item_names.get(&stack.id).cloned();
+                            reach = Some(attack_reach(&stack.components));
+                        }
                     }
+                    if slot == 1 { offhand = Some(if stack.empty() { None } else { content.item_names.get(&stack.id).cloned() }); }
                     if b & 128 == 0 { break; }
                 }
                 r.done()?;
@@ -476,6 +530,9 @@ impl Scan {
                     if side.is_some() && e.side.is_none() { self.component_sides += 1; }
                     e.side = side.or(e.side);
                     e.weapon = weapon.or(e.weapon.take());
+                    if let Some(reach) = reach { e.combat.reach = reach; }
+                    if let Some(offhand) = offhand { e.combat.offhand = offhand; }
+                    e.note_shield(tick);
                 }
             }
             cb::SET_PASSENGERS => {
@@ -516,6 +573,37 @@ impl Scan {
             cb::DAMAGE_EVENT | cb::HURT_ANIMATION => {
                 let target = r.var()?;
                 if self.entities.get(&target).is_some_and(|e| e.role == Role::Fighter) { self.interval.hurts += 1; }
+            }
+            // SET_ENTITY_DATA: VarInt entity id, then the metadata list (entities::metadata::decode).
+            cb::SET_ENTITY_DATA => {
+                let target = r.var()?;
+                let (Some(models), Some(index)) = (&self.models, self.living_flags) else { return Ok(()) };
+                if !self.entities.get(&target).is_some_and(|e| e.role == Role::Fighter) { return Ok(()); }
+                let data = crate::entities::metadata::decode(&mut r, content, models)?;
+                r.done()?;
+                if let Some(flags) = data.get(&index).and_then(crate::entities::Metadata::int) && let Some(e) = self.entities.get_mut(&target) {
+                    e.combat.flags = flags;
+                    e.note_shield(tick);
+                }
+            }
+            // SOUND_ENTITY (client session/packets.rs): sound holder (0 + identifier + optional fixed range, else
+            // registry id + 1), VarInt source, VarInt entity id, f32 volume, f32 pitch, i64 seed.
+            cb::SOUND_ENTITY => {
+                let holder = r.var()?;
+                let sound = if holder == 0 {
+                    let name = r.string(32767)?;
+                    if r.bool()? { r.f32()?; }
+                    name
+                } else {
+                    content.sound_names.get(&((holder - 1) as u32)).cloned().ok_or_else(|| format!("unknown sound registry ID {holder}"))?
+                };
+                r.count(16)?;
+                let target = r.var()?;
+                r.f32()?; r.f32()?; r.i64()?;
+                r.done()?;
+                if sound == "minecraft:item.shield.block" && self.entities.get(&target).is_some_and(|e| e.role == Role::Fighter) {
+                    self.interval.shield_blocks += 1;
+                }
             }
             cb::ENTITY_EVENT => {
                 let target = r.i32()?;
@@ -567,11 +655,21 @@ impl Scan {
     /// Distinct attackers of the `ATTACK_WINDOW` ticks ending at `tick` (see
     /// `SWING_DEFINITIONS`); drops the swings no later window can use.
     fn attackers_in_window(&mut self, tick: u64) -> usize {
-        let live = |t: u64| t + ATTACK_WINDOW > tick;
-        let attackers: HashSet<i32> = self.attacks.iter().filter(|a| live(a.tick)).map(|a| a.id).collect();
-        // The next window ends later, so entries outside this one never count again.
-        while self.attacks.front().is_some_and(|a| !live(a.tick)) { self.attacks.pop_front(); }
-        attackers.len()
+        self.last_attack.retain(|_, t| *t + ATTACK_WINDOW > tick);
+        self.last_attack.len()
+    }
+
+    /// Loads the entity metadata schema: SET_ENTITY_DATA of fighters is decoded with it, for the
+    /// shield state. Every fighter kind must put DATA_LIVING_ENTITY_FLAGS at the same index.
+    pub(crate) fn activate(&mut self, models: crate::entities::Models) -> Result<()> {
+        let mut index = None;
+        for kind in FIGHTER_KINDS {
+            let i = models.accessor(kind, "DATA_LIVING_ENTITY_FLAGS").ok_or_else(|| format!("no DATA_LIVING_ENTITY_FLAGS accessor for {kind}"))?;
+            if *index.get_or_insert(i) != i { return Err("fighter kinds disagree on the DATA_LIVING_ENTITY_FLAGS index".into()); }
+        }
+        self.living_flags = index;
+        self.models = Some(models);
+        Ok(())
     }
 
     /// One timeline row for the state after every packet of `tick`.
@@ -598,6 +696,23 @@ impl Scan {
         }
         fighters.sort_by_key(|f| f.id);
         let clusters = contact_clusters(&fighters, CONTACT_REACH, CONTACT_LINK);
+        // Contact by weapon: an enemy-side fighter within the fighter's own reach.
+        let reaches: Vec<f64> = fighters.iter().map(|f| self.entities[&f.id].combat.reach).collect();
+        let max_reach = reaches.iter().copied().fold(DEFAULT_REACH, f64::max);
+        let cells = grid(fighters.iter().map(|f| f.position), max_reach);
+        let (mut contact_by_weapon, mut fighting, mut shields_raised) = (0usize, 0usize, 0usize);
+        let recent = |t: Option<u64>| t.is_some_and(|t| t + ATTACK_WINDOW > tick);
+        for (i, f) in fighters.iter().enumerate() {
+            let in_reach = near(&cells, f.position, max_reach)
+                .any(|j| fighters[j].side != f.side && close(f.position, fighters[j].position, reaches[i]));
+            let e = self.entities.get_mut(&f.id).unwrap();
+            e.note_shield(tick);
+            shields_raised += usize::from(e.shield_up());
+            if in_reach {
+                contact_by_weapon += 1;
+                if recent(self.last_attack.get(&f.id).copied()) || recent(e.combat.shield_tick) { fighting += 1; }
+            }
+        }
         let swings: std::collections::HashSet<i32> = self.interval.swings.iter().copied().collect();
         let mut contacts = Vec::new();
         for cluster in &clusters {
@@ -691,15 +806,17 @@ impl Scan {
         self.last_sample_t = seconds;
         json!({"kind":"sample","t":seconds,"tick":tick,"live":live,
             "events":{"swings":interval.swings.len(),"melee_swings":melee_swings,"bow_swings":bow_swings,"hurts":interval.hurts,"deaths":interval.deaths,
-                "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s},
-            "contact_fighters":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
+                "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s,
+                "fighting_2s":fighting,"shields_raised":shields_raised,"shield_blocks":interval.shield_blocks},
+            "contact_fighters":contact_by_weapon,
+            "contact_fighters_legacy":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
             "contacts":contacts,"arrows":arrows,"cavalry":cavalry,"armies":armies})
     }
 
     fn entity_rows(&self) -> Vec<Value> {
         let row = |id: i32, e: &Tracked, removed: Option<u64>| json!({"kind":"entity","id":id,
             "role":if e.role == Role::Horse { "horse" } else { "fighter" },
-            "side":self.side(e).map(Side::name),"weapon":e.weapon,"vehicle":e.vehicle,
+            "side":self.side(e).map(Side::name),"weapon":e.weapon,"reach":e.combat.reach,"vehicle":e.vehicle,
             "spawn_t":self.t(e.spawn_tick),"first_contact_t":e.first_contact.map(|t| self.t(t)),
             "death_t":e.death_tick.map(|t| self.t(t)),"removed_t":removed.map(|t| self.t(t))});
         let mut rows: Vec<(i32, Value)> = self.finished.iter().map(|(id, e, removed)| (*id, row(*id, e, Some(*removed)))).collect();
@@ -743,8 +860,10 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<()> {
     let mut write = |value: &Value| writeln!(out, "{value}").map_err(|e| format!("write timeline: {e}"));
     write(&json!({"kind":"header","recording":recording,"server_build":input.header.server_build,
         "interval_ticks":every,"contact_reach":CONTACT_REACH,"contact_link":CONTACT_LINK,"min_y":min_y,"height":height,
-        "attack_window_ticks":ATTACK_WINDOW,"swing_definitions":SWING_DEFINITIONS}))?;
+        "attack_window_ticks":ATTACK_WINDOW,"default_reach":DEFAULT_REACH,"contact_reach_note":"legacy: only `contacts` and contact_fighters_legacy use it",
+        "swing_definitions":SWING_DEFINITIONS,"combat_definitions":COMBAT_DEFINITIONS}))?;
     let (mut scan, mut phase, mut packets) = (Scan::new(min_y, height), Phase::Login, 0u64);
+    scan.activate(crate::entities::Models::load_state(&content)?)?;
     while let Some(packet) = input.next_packet()? {
         packets += 1;
         let (id, body) = packet.split()?;

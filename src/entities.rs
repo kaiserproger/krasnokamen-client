@@ -17,7 +17,7 @@ mod local;
 mod animation_tests;
 #[cfg(test)]
 mod asset_model_regression_tests;
-mod metadata;
+pub(crate) mod metadata;
 mod nameplates;
 mod physical;
 mod prediction;
