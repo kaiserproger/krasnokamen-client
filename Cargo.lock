@@ -1814,6 +1814,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "mc-melee-range"
+version = "1.0.0-rc.5"
+source = "git+file:///run/media/kaiserroman/games/solaris-work/solaris?rev=45296bf5ed48d7ad1510474e487a5665010d9a3e#45296bf5ed48d7ad1510474e487a5665010d9a3e"
+
+[[package]]
 name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3339,6 +3344,7 @@ dependencies = [
  "glam",
  "libc",
  "libm",
+ "mc-melee-range",
  "md5",
  "naga",
  "parking_lot",

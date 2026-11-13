@@ -209,39 +209,13 @@ fn bare_models() -> crate::entities::Models {
 }
 
 #[test]
-fn strike_range_follows_the_vanilla_mob_attack_range_rule() {
+fn strike_range_comes_from_the_attack_range_component() {
     // iron spear data: min 2, max 4.5, mob_factor 0.5 -> [1.0, 2.25]; no hitbox margin for a mob.
     let spear = json!({"min_reach":2.0,"max_reach":4.5,"min_creative_reach":2.0,"max_creative_reach":6.5,"hitbox_margin":0.125,"mob_factor":0.5});
-    assert_eq!(attack_range(&components(&[("minecraft:attack_range", spear)])), [1., 2.25]);
-    // Codec defaults for omitted fields; no component: Mob.DEFAULT_ATTACK_REACH.
-    assert_eq!(attack_range(&components(&[("minecraft:attack_range", json!({}))])), [0., 3.]);
-    assert_eq!(attack_range(&components(&[("minecraft:weapon", json!({}))])), DEFAULT_RANGE);
-    assert!((DEFAULT_MELEE_REACH - (2.04f32 as f64).sqrt() + f64::from(0.6f32)).abs() < 1e-12, "{DEFAULT_MELEE_REACH}");
-}
-
-#[test]
-fn melee_range_is_a_box_test_with_height_overlap_a_minimum_and_the_mount() {
-    let body = |x: f64, y: f64| body_box([x, y, 0.], [0.6, 1.95]);
-    let sword = DEFAULT_RANGE;
-    let me = body(0., 0.);
-    // Gap between the boxes along x: centre distance minus the 0.6 width.
-    assert!(in_melee_range(sword, &me, &body(1.4, 0.)), "gap 0.8 <= 0.828");
-    assert!(!in_melee_range(sword, &me, &body(1.5, 0.)), "gap 0.9");
-    // Height: the boxes must overlap vertically (no 3D growth), whatever the centre distance says.
-    assert!(in_melee_range(sword, &me, &body(1.4, 1.9)), "overlap 0.05");
-    assert!(!in_melee_range(sword, &me, &body(1.4, 2.0)), "target starts above the head");
-    assert!(!in_melee_range(sword, &me, &body(1.4, -1.95)), "target ends at the feet");
-    // Spear [1.0, 2.25]: strikes at a gap of 2.0, not inside its minimum of 1.0.
-    let spear = [1., 2.25];
-    assert!(in_melee_range(spear, &me, &body(2.6, 0.)), "gap 2.0");
-    assert!(!in_melee_range(spear, &me, &body(3.0, 0.)), "gap 2.4");
-    assert!(!in_melee_range(spear, &me, &body(1.1, 0.)), "gap 0.5 is inside the minimum");
-    // A rider's box is joined sideways with his horse's (1.4 x 1.6): the strike reaches 0.4 farther.
-    let horse = body_box([0., 0., 0.], [1.4, 1.6]);
-    assert!(!in_melee_range(sword, &me, &body(1.8, 0.)), "gap 1.2 on foot");
-    assert!(in_melee_range(sword, &join_horizontal(me, horse), &body(1.8, 0.)), "gap 0.8 from the mount's flank");
-    // The target is never grown by the mount: a mounted target's own box is used.
-    assert!(!in_melee_range(sword, &body(1.8, 0.), &me));
+    assert_eq!(attack_range(&components(&[("minecraft:attack_range", spear)])), MeleeReach { min: 1., max: 2.25 });
+    // Codec defaults for omitted fields; no component: the default mob reach.
+    assert_eq!(attack_range(&components(&[("minecraft:attack_range", json!({}))])), MeleeReach { min: 0., max: 3. });
+    assert_eq!(attack_range(&components(&[("minecraft:weapon", json!({}))])), MeleeReach::mob(None));
 }
 
 #[test]
@@ -255,9 +229,9 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     let mut shielded = fighter([1.4, 64., 0.], Side::Blue, "minecraft:iron_sword");
     shielded.combat.offhand = Some("minecraft:shield".into());
     let mut spear = fighter([100., 64., 0.], Side::Red, "minecraft:iron_spear");
-    spear.combat.range = [1., 2.25];
+    spear.combat.range = MeleeReach { min: 1., max: 2.25 };
     let mut close_spear = fighter([300., 64., 0.], Side::Red, "minecraft:iron_spear");
-    close_spear.combat.range = [1., 2.25];
+    close_spear.combat.range = MeleeReach { min: 1., max: 2.25 };
     for (id, e) in [
         (1, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword")), // enemy 1.4 away (box gap 0.8): in reach both ways
         (2, shielded),
@@ -301,12 +275,12 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
 fn a_rider_sits_three_quarters_up_the_horse_and_dismounting_frees_him() {
     // Horse 1.4 x 1.6: the rider sits 1.2 up; the striking box joins sideways and keeps that y.
     let (own, strike) = mounted_boxes([0., 0., 0.], [1.4, 1.6], [0.6, 1.95]);
-    assert!((own.0[1] - 1.2).abs() < 1e-12 && (strike.0[1] - 1.2).abs() < 1e-12, "{own:?} {strike:?}");
-    assert_eq!((strike.0[0], strike.1[0]), (-0.7, 0.7));
+    assert!((own.min[1] - 1.2).abs() < 1e-12 && (strike.min[1] - 1.2).abs() < 1e-12, "{own:?} {strike:?}");
+    assert_eq!((strike.min[0], strike.max[0]), (-0.7, 0.7));
     // A target on ground 0.8 lower (top 1.15) is under the mounted rider's feet but beside a rider on foot.
-    let low = body_box([1.4, -0.8, 0.], [0.6, 1.95]);
-    assert!(in_melee_range(DEFAULT_RANGE, &body_box([0., 0., 0.], [0.6, 1.95]), &low), "on foot");
-    assert!(!in_melee_range(DEFAULT_RANGE, &strike, &low), "mounted: no vertical overlap");
+    let low = Aabb::at([1.4, -0.8, 0.], 0.6, 1.95);
+    assert!(in_melee_range(Aabb::at([0., 0., 0.], 0.6, 1.95), low, MeleeReach::mob(None)), "on foot");
+    assert!(!in_melee_range(strike, low, MeleeReach::mob(None)), "mounted: no vertical overlap");
 
     let content = Content::test_cube();
     let mut scan = Scan::new(-64, 384);
