@@ -1193,30 +1193,68 @@ mod tests {
     }
 
     #[test]
-    fn battle_shield_item_models_bake_from_received_item_model_id() {
+    fn battle_item_models_bake_from_received_item_model_id() {
+        macro_rules! pack {
+            ($($name:literal),* $(,)?) => {[$((
+                $name,
+                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/items/", $name, ".json"))[..],
+                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/models/item/", $name, ".json"))[..],
+            )),*]};
+        }
+        macro_rules! blocking {
+            ($($name:literal),* $(,)?) => {[$((
+                $name,
+                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/models/item/", $name, "_blocking.json"))[..],
+            )),*]};
+        }
+        let weapons = pack!["iron_longsword", "iron_spear", "iron_lance", "iron_halberd", "iron_flanged_mace",
+            "iron_longbow_standby", "iron_heavy_crossbow_standby"];
+        let shields = pack!["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
+        let blocking_models = blocking!["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
         let mut content = Content::test_cube();
-        content.insert_test_texture("solaris_battle:item/iron_tower_shield",
-            crate::protocol::content::TextureRegion { layer: 10, uv: [0., 0., 1., 1.], width: 64, height: 64 });
-        for (name, graph, geometry) in [
-            ("iron_kite_shield",
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_kite_shield.json")[..],
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_kite_shield.json")[..]),
-            ("iron_tower_shield",
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/items/iron_tower_shield.json")[..],
-                &include_bytes!("../../assets/battle_video/assets/solaris_battle/models/item/iron_tower_shield.json")[..]),
-        ] {
+        let region = |layer| crate::protocol::content::TextureRegion { layer, uv: [0., 0., 1., 1.], width: 64, height: 64 };
+        content.insert_test_texture("solaris_battle:item/battle_parts", region(10));
+        for (n, (name, ..)) in shields.iter().enumerate() {
+            content.insert_test_texture(&format!("solaris_battle:item/{name}"), region(11 + n as u32));
+        }
+        for (name, graph, geometry) in weapons.iter().chain(shields.iter()) {
             content.insert_test_resource(&format!("assets/solaris_battle/items/{name}.json"), graph);
             content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}.json"), geometry);
+        }
+        for (name, geometry) in &blocking_models {
+            content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}_blocking.json"), geometry);
+        }
+        let stack_for = |name: &str| {
             let mut stack = Stack::default();
             stack.id = 1;
             stack.count = 1;
             stack.components = Arc::new(BTreeMap::from([(
                 "minecraft:item_model".into(), json!(format!("solaris_battle:{name}")),
             )]));
+            stack
+        };
+        for (name, ..) in &weapons {
             let mut models = ItemModels::new();
-            let baked = models.model(&content, &stack, "thirdperson_righthand").unwrap();
-            assert!(!baked.quads.is_empty(), "{name}");
-            assert!(baked.quads.iter().all(|quad| quad.texture_layer == 10), "{name}");
+            let baked = models.model(&content, &stack_for(name), "thirdperson_righthand").unwrap();
+            // Real 3D: far more than the two faces of a flat sprite, with display transforms.
+            assert!(baked.quads.len() > 12, "{name}: {} quads", baked.quads.len());
+            assert!(baked.display.contains_key("thirdperson_righthand"), "{name}");
+            assert!(baked.display.contains_key("thirdperson_lefthand"), "{name}");
+        }
+        for (name, ..) in &shields {
+            let mut models = ItemModels::new();
+            let stack = stack_for(name);
+            let idle = models.model(&content, &stack, "thirdperson_lefthand").unwrap().clone();
+            assert!(idle.quads.len() >= 18, "{name}: plate, boss and handle boxes");
+            let state = ItemContext { display: "thirdperson_lefthand".into(), using_item: true, ..ItemContext::default() };
+            let blocking = models.model_with(&content, &stack, &state).unwrap().clone();
+            assert_eq!(blocking.quads.len(), idle.quads.len(), "{name}");
+            assert_ne!(blocking.display["thirdperson_lefthand"].rotation, idle.display["thirdperson_lefthand"].rotation,
+                "{name}: using_item must select the blocking display");
+            // Thickness: plate, boss and handle span well over one pixel in depth.
+            let (lo, hi) = idle.quads.iter().flat_map(|q| q.positions.iter().map(|p| p[2]))
+                .fold((f32::MAX, f32::MIN), |(lo, hi), z| (lo.min(z), hi.max(z)));
+            assert!(hi - lo > 6. / 16., "{name}: shield depth {}", hi - lo);
         }
     }
 

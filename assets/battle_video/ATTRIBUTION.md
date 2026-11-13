@@ -1,19 +1,15 @@
 # Battle resource attribution
 
-The seven `iron_*` weapon sprites in `assets/solaris_battle/textures/item/`
-are unmodified copies from [Spartan Weaponry](https://github.com/ObliviousSpartan/SpartanWeaponry),
-commit `e45342c53c`, by ObliviousSpartan and contributors, distributed under
-Apache License 2.0; see `licenses/SpartanWeaponry-APACHE-2.0.txt`. The accompanying
-item model and item definition JSON files were created for Solaris and are not
-copies of the upstream model files.
-
-The Iron kite and tower shield item models are converted and transformed from
-[Spartan Shields](https://github.com/ObliviousSpartan/SpartanShields), commit
-`89e376d70b`, by ObliviousSpartan and contributors, Apache License 2.0; see
-`licenses/SpartanShields-APACHE-2.0.txt`. Their unmodified shared texture is
-`assets/solaris_battle/textures/item/iron_tower_shield.png`. Coordinates,
-model format, item definitions and item display transforms were changed for
-Solaris. Rendering and UV orientation are not yet visually verified.
+The shield and weapon item models (red/blue heater, iron kite and tower shields;
+longsword, spear, lance, halberd, flanged mace, longbow, heavy crossbow) and their
+textures (`battle_parts.png`, four shield paintings) were created for Solaris by
+`tools/battle_items_gen.py` and contain no third-party bytes. The shield board and
+handle dimensions (plate 12x22x1, handle 2x6x6) and the idle/blocking display
+transforms are numbers read from the local vanilla `ShieldModel` class and
+`shield.json` / `shield_blocking.json`; no Mojang texture, model or sound is copied.
+The earlier flat sprites and Spartan Shields element models (Apache-2.0, Spartan
+Weaponry / Spartan Shields by ObliviousSpartan) are no longer shipped, so their
+licence files were removed.
 
 The `battle_holy_*` and `battle_iron_plate_*` entity models are Solaris-schema
 conversions of the normal-width armor models from
@@ -27,7 +23,7 @@ to retain a source cuboid with a negative V coordinate. Its red plume pixels wer
 moved into a greyscale dyeable layer, `iron_plate_plume.png`, and replaced by grey
 in the base texture. Upstream animated decorations are represented at their rest pose.
 
-The red and blue surcoats, caparisons, heater shield sprites, and crested helm
+The red and blue surcoats, caparisons and crested helm
 geometry and textures were created for Solaris. These resources have not yet
 been validated in the native client; copying them into this directory does not
 itself register them with Loader or activate them in the texture atlas.
