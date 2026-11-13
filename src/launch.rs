@@ -5,7 +5,7 @@ use winit::event_loop::EventLoop;
 const HELP: &str = "Usage:
   solaris-client                         Open the title screen
   solaris-client --server HOST[:PORT] [--username NAME]
-                 [--width W --height H] [--fullscreen] [--data-dir DIR]
+                 [--width W --height H] [--fullscreen] [--hidden-hud-keeps-hand] [--data-dir DIR]
   solaris-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
   solaris-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
@@ -48,6 +48,8 @@ struct Parsed {
     data_dir: Option<PathBuf>,
     explicit_profile: bool,
     help: bool,
+    /// Filming: F1 hides the HUD but keeps the first-person hand and held items.
+    hidden_hud_keeps_hand: bool,
 }
 
 fn dimension(value: Option<String>, name: &str) -> Result<u32, String> {
@@ -78,6 +80,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         data_dir: None,
         explicit_profile: false,
         help: false,
+        hidden_hud_keeps_hand: false,
     };
     let options = &mut parsed.options;
     while let Some(arg) = args.next() {
@@ -121,6 +124,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
             "--width" => options.width = dimension(args.next(), "width")?,
             "--height" => options.height = dimension(args.next(), "height")?,
             "--fullscreen" => options.fullscreen = true,
+            "--hidden-hud-keeps-hand" => parsed.hidden_hud_keeps_hand = true,
             _ => return Err(format!("unknown_play_argument: {arg}")),
         }
     }
@@ -141,6 +145,7 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
         mut options,
         data_dir,
         explicit_profile,
+        hidden_hud_keeps_hand,
         ..
     } = parsed;
     let root = data_dir
@@ -189,6 +194,7 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
             let _ = proxy.send_event(());
         }),
     )?;
+    app.session.hidden_hud_keeps_hand = hidden_hud_keeps_hand;
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     app.error.map_or(Ok(()), Err)
 }

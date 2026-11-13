@@ -918,8 +918,8 @@ impl Session {
                         self.presentation_partial,
                         &crate::entities::NameplateView {
                             crosshair,
-                            // Session::camera currently follows the local player.
-                            camera_entity: Some(self.player.entity_id),
+                            // The Set Camera entity's own name is hidden, as vanilla.
+                            camera_entity: Some(self.player.camera_entity.unwrap_or(self.player.entity_id)),
                             viewer_name: self.username.as_deref(),
                             viewer_spectator: self.player.game_mode == 3,
                             render_names: !ui
@@ -941,7 +941,8 @@ impl Session {
                 }
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
-                    && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
+                    && (self.hidden_hud_keeps_hand
+                        || !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false))
                     && let Some(light) = sample_light(self.player.eye_position())?
                 {
                     let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.local_partial, light, item_context: &item_context, ui: self.ui.as_ref() });

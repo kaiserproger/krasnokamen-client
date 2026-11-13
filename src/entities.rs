@@ -532,6 +532,16 @@ impl Store {
     ) -> Result<Transform> {
         self.attached_transform(entity, tick, partial, 0)
     }
+    /// Interpolated eye point, head yaw and pitch of a received entity: the view a
+    /// server Set Camera target lends the client camera (vanilla `Minecraft.cameraEntity`).
+    pub(crate) fn eye_view(&self, entity: &Entity, tick: u64, partial: f32) -> Result<([f64; 3], f32, f32)> {
+        let transform = self.presented_transform(entity, tick, partial)?;
+        let models = self.models_ref().ok_or("entity models not activated")?;
+        let (dimensions, scale) = models.dimensions(entity)?;
+        let mut eye = transform.position;
+        eye[1] += f64::from(dimensions.eye_height * scale);
+        Ok((eye, transform.head_yaw, transform.pitch))
+    }
     fn attached_transform(
         &self, entity: &Entity, tick: u64, partial: f32, depth: usize,
     ) -> Result<Transform> {
