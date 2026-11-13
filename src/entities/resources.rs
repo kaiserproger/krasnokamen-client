@@ -1083,9 +1083,10 @@ mod tests {
         out
     }
 
-    /// Spatial queries pad by the widest received kind, not by every kind of the registry:
-    /// with only soldiers present a query near the camera visits no distant entity, and a
-    /// dragon widens the padding once it arrives.
+    /// Spatial queries pad by the widest received entity at its actual size, not by every kind
+    /// of the registry at the largest scale: with only soldiers present a query near the camera
+    /// visits no distant entity, a scale attribute that grows an entity widens the padding so
+    /// a query its grown body reaches finds it, and a dragon widens it once it arrives.
     #[test]
     fn spatial_padding_follows_present_kinds() {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
@@ -1096,7 +1097,7 @@ mod tests {
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
-        assert_eq!(store.query_padding(), 32.);
+        assert_eq!(store.query_padding(), 4.);
         let spawn = |store: &mut super::super::Store, id: i32, kind: &str, x: f64| {
             let mut spawn = Writer::default();
             spawn.var(id);
@@ -1111,14 +1112,32 @@ mod tests {
         };
         spawn(&mut store, 1, "minecraft:zombie", 0.);
         spawn(&mut store, 2, "minecraft:zombie", 1000.);
-        assert_eq!(store.query_padding(), 32.);
+        assert_eq!(store.query_padding(), 4.);
         let near = crate::player::Bounds { min: [-1., 60., -1.], max: [1., 70., 1.] };
         let ids: Vec<_> = store.candidates(near).map(|e| e.handle.network_id).collect();
         assert_eq!(ids, [1]);
-        spawn(&mut store, 3, "minecraft:ender_dragon", 2000.);
+        // A horse in the next spatial cell, scaled 16 times: its body reaches `beside`.
+        spawn(&mut store, 3, "minecraft:horse", 16.5);
+        let beside = crate::player::Bounds { min: [8., 60., -1.], max: [10., 70., 1.] };
+        let found = |store: &super::super::Store| store.candidates(beside).any(|e| e.handle.network_id == 3);
+        assert!(!found(&store));
+        let scale = *models.attribute_ids.iter().find(|(_, name)| name.as_str() == "minecraft:scale").unwrap().0;
+        let mut attributes = Writer::default();
+        attributes.var(3);
+        attributes.var(1);
+        attributes.var(scale as i32);
+        attributes.0.extend_from_slice(&16f64.to_be_bytes());
+        attributes.var(0);
+        store.apply(cb::UPDATE_ATTRIBUTES, &mut Reader::new(&attributes.0), &content, 1).unwrap();
+        let horse = store.get(3).unwrap().handle;
+        assert!(store.bounds(horse, 1, 0.).unwrap().intersects(beside), "the grown horse reaches it");
+        assert!(found(&store), "padding {}", store.query_padding());
+        store.activate_models(std::sync::Arc::clone(&models));
+        assert!(found(&store), "activation keeps the grown horse's padding");
+        spawn(&mut store, 4, "minecraft:ender_dragon", 2000.);
         let dragon = f64::from(doc.entities["minecraft:ender_dragon"].width) * 16.;
         assert!(dragon > 32. && store.query_padding() == dragon);
-        // Models activated again keep the padding of the kinds present.
+        // Models activated again keep the padding of the entities present.
         store.activate_models(models);
         assert_eq!(store.query_padding(), dragon);
     }

@@ -343,14 +343,17 @@ impl Store {
             entity.binding = None;
         }
         self.revision += 1;
-        // Spatial queries pad by the widest present kind at the largest scale, not by every
-        // kind the registry knows (the ender dragon's 256 blocks made every query, raycasts
-        // and the frame's candidates included, visit every received entity).
+        // Spatial queries pad by the widest present entity at its actual size, not by every
+        // kind the registry knows at the largest scale (the ender dragon's 256 blocks made every
+        // query, raycasts and the frame's candidates included, visit every received entity).
         let models = self.models.clone().unwrap();
         self.spatial_padding = self
             .slots
             .iter()
-            .map(|entity| kind_padding(&models, &entity.type_name))
+            .map(|entity| {
+                let size = physical::bounds(&models, entity, 0, 0.).map_or(0., extent);
+                kind_padding(&models, &entity.type_name).max(size)
+            })
             .fold(MIN_SPATIAL_PADDING, f64::max);
     }
     pub fn models(&self) -> Option<Arc<Models>> {
@@ -597,6 +600,18 @@ impl Store {
             self.models_ref().ok_or("entity models not activated")?, entity,
             self.presented_transform(entity, tick, partial)?.position,
         )
+    }
+    /// Widens `spatial_padding` to entity `id`'s horizontal extent (received data resized it).
+    /// Without models it waits for `activate_models`, which pads by every present entity.
+    fn widen_padding(&mut self, id: i32, tick: u64) -> Result<()> {
+        if self.models.is_none() {
+            return Ok(());
+        }
+        if let Some(e) = self.get(id) {
+            let extent = extent(self.bounds(e.handle, tick, 0.)?);
+            self.spatial_padding = self.spatial_padding.max(extent);
+        }
+        Ok(())
     }
     fn get_mut(&mut self, id: i32) -> Option<&mut Entity> {
         self.ids.get(&id).copied().map(|i| &mut self.slots[i])
@@ -1146,11 +1161,7 @@ impl Store {
                 }) {
                     self.physical_active.insert(target);
                 }
-                if let Some(e) = self.get(target) {
-                    let b = self.bounds(e.handle, tick, 0.)?;
-                    let extent = (b.max[0] - b.min[0]).max(b.max[2] - b.min[2]);
-                    self.spatial_padding = self.spatial_padding.max(extent);
-                }
+                self.widen_padding(target, tick)?;
             }
             cb::SET_ENTITY_LINK => {
                 let target = r.i32()?;
@@ -1362,6 +1373,8 @@ impl Store {
                 if let Some(e) = self.get_mut(target) {
                     e.attributes.extend(attrs);
                 }
+                // `minecraft:scale` resizes the entity.
+                self.widen_padding(target, tick)?;
             }
             cb::DAMAGE_EVENT => {
                 let target = r.var()?;
@@ -1674,13 +1687,21 @@ impl Store {
 fn cell(p: [f64; 3]) -> [i32; 2] {
     [(p[0] / 16.).floor() as i32, (p[2] / 16.).floor() as i32]
 }
-/// Floor of `Store::spatial_padding`: two spatial cells.
-const MIN_SPATIAL_PADDING: f64 = 32.;
-/// Spatial query padding a received entity of `type_name` needs: its source width at the
-/// largest `minecraft:scale` (16). Metadata that resizes an entity widens the padding again
-/// from its actual bounds (SET_ENTITY_DATA).
+/// Floor of `Store::spatial_padding`: the farthest a default-size box reaches past its schema
+/// width (a shulker peeking a block, a four-block painting).
+const MIN_SPATIAL_PADDING: f64 = 4.;
+/// Spatial query padding a received entity of `type_name` needs at its default size: its
+/// source width; the ender dragon's at the largest `minecraft:scale` (16), since a ray reaches
+/// its parts through it. Metadata and attributes that resize an entity widen the padding from
+/// its actual bounds (`Store::widen_padding`).
 fn kind_padding(models: &Models, type_name: &str) -> f64 {
-    models.schemas.get(type_name).map_or(0., |schema| f64::from(schema.width) * 16.)
+    models.schemas.get(type_name).map_or(0., |schema| {
+        f64::from(schema.width) * if type_name == "minecraft:ender_dragon" { 16. } else { 1. }
+    })
+}
+/// Horizontal extent of `bounds`.
+fn extent(bounds: crate::player::Bounds) -> f64 {
+    (bounds.max[0] - bounds.min[0]).max(bounds.max[2] - bounds.min[2])
 }
 fn degrees(v: u8) -> f32 {
     f32::from(v) * 360. / 256.
