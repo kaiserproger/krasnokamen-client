@@ -6,7 +6,7 @@ const HELP: &str = "Usage:
   solaris-client                         Open the title screen
   solaris-client --server HOST[:PORT] [--username NAME]
                  [--width W --height H] [--fullscreen] [--data-dir DIR]
-                 [--hide-hud-keep-hand] [--third-person]
+                 [--hide-hud-keep-hand] [--third-person] [--follow-player NAME]
   solaris-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
   solaris-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
@@ -53,6 +53,8 @@ struct Parsed {
     hidden_hud_keeps_hand: bool,
     /// Filming: start in the F5 third-person (behind) camera.
     third_person: bool,
+    /// Filming: spectator camera over this player's shoulder.
+    follow_player: Option<String>,
 }
 
 fn dimension(value: Option<String>, name: &str) -> Result<u32, String> {
@@ -85,6 +87,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         help: false,
         hidden_hud_keeps_hand: false,
         third_person: false,
+        follow_player: None,
     };
     let options = &mut parsed.options;
     while let Some(arg) = args.next() {
@@ -130,6 +133,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
             "--fullscreen" => options.fullscreen = true,
             "--hide-hud-keep-hand" => parsed.hidden_hud_keeps_hand = true,
             "--third-person" => parsed.third_person = true,
+            "--follow-player" => parsed.follow_player = Some(args.next().ok_or("missing_follow_player")?),
             _ => return Err(format!("unknown_play_argument: {arg}")),
         }
     }
@@ -152,6 +156,7 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
         explicit_profile,
         hidden_hud_keeps_hand,
         third_person,
+        follow_player,
         ..
     } = parsed;
     let root = data_dir
@@ -204,6 +209,7 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
     if third_person {
         app.session.cycle_camera();
     }
+    app.session.set_follow_player(follow_player);
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     app.error.map_or(Ok(()), Err)
 }

@@ -7,6 +7,7 @@ mod clouds;
 mod torch_particles;
 mod block_motion;
 mod local_server;
+mod follow;
 #[cfg(test)]
 mod entity_aim_tests;
 #[cfg(test)]
@@ -84,6 +85,8 @@ pub struct Session {
     /// Filming (`--hide-hud-keep-hand`): the HUD stays hidden in play, as after F1,
     /// but the first-person hand and held items are still drawn.
     pub(crate) hidden_hud_keeps_hand: bool,
+    /// Filming (`--follow-player NAME`): over-the-shoulder spectator camera.
+    follow: Option<follow::Follow>,
     loading: Option<mpsc::Receiver<Result<Loaded>>>,
     wake: Arc<RwLock<Wake>>,
     pub(crate) phase: String,
@@ -209,6 +212,7 @@ impl Session {
             recording_tick: None,
             cinematic_camera: None,
             hidden_hud_keeps_hand: false,
+            follow: None,
             loading: None,
             wake: Arc::new(RwLock::new(Arc::new(|| {}))),
             phase: "fixture".into(),
@@ -1011,6 +1015,9 @@ impl Session {
                 self.world_tick,
                 &mut self.commands,
             )?;
+            if self.follow.is_some() {
+                self.follow_tick();
+            }
             self.environment
                 .tick_vignette(&self.world, self.player.eye_position())?;
             self.tick_detail_ms[5] += start.elapsed().as_secs_f64() * 1000.;
@@ -1084,6 +1091,15 @@ impl Session {
             self.scene.yaw = pose.yaw;
             self.scene.pitch = pose.pitch;
             self.scene.fov_deg = pose.fov;
+            self.scene.roll_deg = 0.;
+            self.scene.hurt_tilt_deg = 0.;
+            return;
+        }
+        if let Some((position, yaw, pitch)) = self.follow_camera() {
+            self.scene.camera_position = position;
+            self.scene.yaw = yaw;
+            self.scene.pitch = pitch;
+            self.scene.fov_deg = self.fov_deg;
             self.scene.roll_deg = 0.;
             self.scene.hurt_tilt_deg = 0.;
             return;

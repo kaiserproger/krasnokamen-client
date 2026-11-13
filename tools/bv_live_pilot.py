@@ -150,8 +150,22 @@ def rank(args, client: Client):
         me = pilot.player()
         here = position(me)
         if me.get("health") is not None and float(me["health"]) <= 0:
-            pilot.keys(set())
-            client.tool("minecraft_wait_ticks", {"ticks": 10})
+            # Death screen: the ordinary Respawn action. The server then re-equips and
+            # re-slots PovRed; the teleport below re-takes the offset to new neighbours.
+            pilot.held.clear()
+            log("dead at", [round(v, 1) for v in here], "; pressing Respawn")
+            try:
+                client.tool("minecraft_respawn", {"timeout_seconds": 30})
+            except RuntimeError as error:
+                log("respawn not accepted yet:", str(error)[:200])
+                client.tool("minecraft_wait_ticks", {"ticks": 10})
+                continue
+            me = pilot.player()
+            yaw = rest_yaw = float(me.get("yaw", yaw))
+            pitch = float(me.get("pitch", pitch))
+            offset, target, last = None, None, position(me)
+            pilot.sent_look = None
+            log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             continue
         if last is not None and math.dist(here, last) > 6.0:
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
