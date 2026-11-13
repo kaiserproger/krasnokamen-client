@@ -84,7 +84,7 @@ def hand_display(f, rot_tp, tr_tp, sc_tp, rot_fp, tr_fp, sc_fp, gui_scale, gui_r
     k = 1.0 / f
     d = {
         "thirdperson_righthand": {"rotation": rot_tp, "translation": tr_tp, "scale": [round(sc_tp * k, 4)] * 3},
-        "firstperson_righthand": {"rotation": rot_fp, "translation": tr_fp, "scale": [round(sc_fp * k, 4)] * 3},
+        "firstperson_righthand": {"rotation": rot_fp, "translation": tr_fp, "scale": [sc_fp] * 3},
         "gui": {"rotation": list(gui_rot), "translation": list(gui_tr), "scale": [round(gui_scale * k, 4)] * 3},
         "ground": {"rotation": [0, 0, 0], "translation": [0, 3, 0], "scale": [round(0.5 * k, 4)] * 3},
         "fixed": {"rotation": [0, 0, 0], "translation": [0, 0, 0], "scale": [round(0.7 * k, 4)] * 3},
@@ -120,7 +120,7 @@ def longsword():
     w.box((-0.35, -2.2, -0.62), (0.35, 15, 0.62), "steel_lo", "steel_lo")   # fuller
     w.box((-1.2, 17, -0.45), (1.2, 19.5, 0.45), "steel", "steel_hi")        # taper
     w.box((-0.6, 19.5, -0.35), (0.6, 21, 0.35), "steel_hi", "steel_hi")     # tip
-    disp = hand_display(0.75, [0, 0, 0], [0, 0, 0], 0.85, [0, -90, -20], [1.13, 3.2, 1.13], 0.68, 0.62, (30, 45, -40))
+    disp = hand_display(0.75, [0, 0, 0], [0, 0, 0], 0.85, [-30, 0, 12], [-1, 4, 0], 0.75, 0.62, (30, 45, -40))
     return w.model(disp)
 
 
@@ -134,7 +134,7 @@ def mace():
     for ang in (0, 60, 120):                                                # flanges: 6 plates round the core
         w.box((-3.4, 6.4, -0.55), (3.4, 10.6, 0.55), "steel_lo", "steel_hi", rot=("y", ang, (0, 8, 0)))
     w.box((-1.0, 11, -1.0), (1.0, 12.6, 1.0), "steel_hi", "steel_hi")       # top spike
-    disp = hand_display(1.0, [0, 0, 0], [0, 0, 0], 0.85, [0, -90, -20], [1.13, 3.2, 1.13], 0.68, 0.8, (30, 45, -40))
+    disp = hand_display(1.0, [0, 0, 0], [0, 0, 0], 0.85, [-30, 0, 12], [-1, 4, 0], 0.75, 0.8, (30, 45, -40))
     return w.model(disp)
 
 
@@ -148,7 +148,7 @@ def spear():
     w.box((-0.7, 36, -0.5), (0.7, 39, 0.5), "steel_hi", "steel_hi")         # tip
     w.box((-0.3, 27, -0.7), (0.3, 37, 0.7), "steel_lo", "steel_lo")         # midrib
     w.box((-1.0, 8, -1.2), (1.0, 11, 1.2), "cloth_red", "cloth_red")        # tassel
-    disp = hand_display(0.5, [-15, 0, 0], [0, 0, 0], 0.8, [0, -90, -20], [1.13, 3.2, 1.13], 0.6, 0.62, (30, 45, -40))
+    disp = hand_display(0.5, [-15, 0, 0], [0, 0, 0], 0.8, [-50, 0, 10], [-3, 3, 0], 0.8, 0.62, (30, 45, -40))
     return w.model(disp)
 
 
@@ -163,7 +163,7 @@ def lance():
     w.box((-1.3, 46, -1.3), (1.3, 50, 1.3), "steel", "steel_hi")
     w.box((-0.7, 50, -0.7), (0.7, 54, 0.7), "steel_hi", "steel_hi")         # point
     w.box((0, 31, -0.2), (7, 38, 0.2), "cloth_red", "cloth_red")            # pennon
-    disp = hand_display(0.5, [-65, 0, 0], [0, 0, 0], 0.8, [0, -90, -20], [1.13, 3.2, 1.13], 0.6, 0.5, (30, 45, -40))
+    disp = hand_display(0.5, [-65, 0, 0], [0, 0, 0], 0.8, [-60, 0, 8], [-3, 2, 0], 0.65, 0.5, (30, 45, -40))
     return w.model(disp)
 
 
@@ -182,7 +182,7 @@ def halberd():
     w.box((-8.0, 29, -0.5), (-9.2, 33, 0.5), "steel_hi", "steel_hi")
     w.box((-1.1, 4, -1.1), (1.1, 6, 1.1), "leather_dk", "leather_dk")       # grip wraps
     w.box((-1.1, 8, -1.1), (1.1, 10, 1.1), "leather_dk", "leather_dk")
-    disp = hand_display(0.5, [-10, 0, 0], [0, 0, 0], 0.8, [0, -90, -20], [1.13, 3.2, 1.13], 0.6, 0.5, (30, 45, -40))
+    disp = hand_display(0.5, [-10, 0, 0], [0, 0, 0], 0.8, [-50, 0, 10], [-3, 3, 0], 0.75, 0.5, (30, 45, -40))
     return w.model(disp)
 
 
@@ -205,7 +205,7 @@ def longbow():
     w.box((-0.5, 21.0, -0.8), (0.8, 22.5, 0.8), "bone", "bone")                   # nocks
     w.box((-0.5, -22.5, -0.8), (0.8, -21.0, 0.8), "bone", "bone")
     w.box((-0.1, -21.8, -0.15), (0.2, 21.8, 0.15), "string", "string")           # string
-    disp = hand_display(0.75, [0, -90, -25], [0, 0, 0], 0.9, [0, -90, -25], [1.13, 3.2, 1.13], 0.68, 0.6, (30, 45, -40))
+    disp = hand_display(0.75, [0, -90, -25], [0, 0, 0], 0.9, [-15, -70, 0], [0, 0, 0], 0.8, 0.6, (30, 45, -40))
     return w.model(disp)
 
 
@@ -230,7 +230,7 @@ def crossbow():
     w.box((-0.5, 8, -3.0), (0.5, 10, -1.9), "steel_hi", "steel_hi")
     w.box((-0.5, -6, -2.5), (0.5, -4, -1.5), "fletch", "fletch")
     w.box((-0.7, -3, -2.2), (0.7, 0, -1.7), "leather", "leather_dk")        # trigger guard stub
-    disp = hand_display(0.75, [-80, 180, 0], [0, 0, 0], 0.85, [0, -90, -20], [1.13, 3.2, 1.13], 0.68, 0.5, (30, 45, -40))
+    disp = hand_display(0.75, [-80, 180, 0], [0, 0, 0], 0.85, [-75, 180, 0], [-1, 4, 0], 0.7, 0.5, (30, 45, -40))
     return w.model(disp)
 
 
@@ -334,8 +334,11 @@ def make_shield(name, rows, crest, field, trim, boss, w_half=None, tex_size=(64,
     elements.append({"from": [7, ycen - 3, 3], "to": [9, ycen + 3, 9], "faces": hf})
     # vanilla display for the shield item (read from the local shield.json / shield_blocking.json)
     disp = {
-        "thirdperson_righthand": {"rotation": [0, 90, 0], "translation": [10, 6, -4], "scale": [1, 1, 1]},
-        "thirdperson_lefthand": {"rotation": [0, 90, 0], "translation": [10, 6, 12], "scale": [1, 1, 1]},
+        # Husk arms are raised 80 degrees forward, so vanilla's hanging-arm idle transform (board beside the
+        # forearm, edge-on from the front) is replaced by one that holds the face forward over the forearm.
+        # Left and right carry the same numbers: the client mirrors the left-hand context.
+        "thirdperson_righthand": {"rotation": [0, 180, 0], "translation": [0, -6, -4], "scale": [1, 1, 1]},
+        "thirdperson_lefthand": {"rotation": [0, 180, 0], "translation": [0, -6, -4], "scale": [1, 1, 1]},
         "firstperson_righthand": {"rotation": [0, 180, 5], "translation": [-10, 1.75, -10], "scale": [1.25, 1.25, 1.25]},
         "firstperson_lefthand": {"rotation": [0, 180, 5], "translation": [10, 0, -10], "scale": [1.25, 1.25, 1.25]},
         "gui": {"rotation": [15, -25, -5], "translation": [2, 3, 0], "scale": [0.65, 0.65, 0.65]},
@@ -347,8 +350,9 @@ def make_shield(name, rows, crest, field, trim, boss, w_half=None, tex_size=(64,
     # shield_blocking.json display (same local read): the board turns to the front
     blocking = json.loads(json.dumps(model))
     blocking["display"].update({
-        "thirdperson_righthand": {"rotation": [45, 155, 0], "translation": [-3.49, 11, -2], "scale": [1, 1, 1]},
-        "thirdperson_lefthand": {"rotation": [45, 155, 0], "translation": [11.51, 7, 2.5], "scale": [1, 1, 1]},
+        # BLOCK pose (arm 54 degrees up, turned 30 degrees inward): the board sits in front of the chest.
+        "thirdperson_righthand": {"rotation": [20, 170, 0], "translation": [2, -2, -4], "scale": [1, 1, 1]},
+        "thirdperson_lefthand": {"rotation": [20, 170, 0], "translation": [2, -2, -4], "scale": [1, 1, 1]},
         "firstperson_righthand": {"rotation": [0, 180, -5], "translation": [-15, 3.25, -11], "scale": [1.25, 1.25, 1.25]},
         "firstperson_lefthand": {"rotation": [0, 180, -5], "translation": [5, 5, -11], "scale": [1.25, 1.25, 1.25]},
     })

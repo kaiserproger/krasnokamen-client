@@ -825,12 +825,12 @@
   "thirdperson_righthand": {
    "rotation": [
     0,
-    90,
+    180,
     0
    ],
    "translation": [
-    10,
-    6,
+    0,
+    -6,
     -4
    ],
    "scale": [
@@ -842,13 +842,13 @@
   "thirdperson_lefthand": {
    "rotation": [
     0,
-    90,
+    180,
     0
    ],
    "translation": [
-    10,
-    6,
-    12
+    0,
+    -6,
+    -4
    ],
    "scale": [
     1,

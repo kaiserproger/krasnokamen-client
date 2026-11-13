@@ -7,6 +7,8 @@ condition/special item definitions are NOT evaluated: pass the model id).
   item_models.py hand  MODEL_ID... --pack DIR [--hand right|left] [--pose forward|hang|block] [-o out.png]
       each model held by an armoured husk soldier through the client's own chain
       (arm bone * ItemInHandLayer attachment * display transform), front / 3-4 / side.
+  item_models.py first RIGHT_MODEL|- LEFT_MODEL|- [--pose block] -o out.png
+      first-person frame (camera space, FOV 70) with the right/left hand items at the client's rest anchor.
   item_models.py compare --old DIR --pack DIR MODEL_ID... [--hand ...] -o out.png
       `hand` rows, old pack on top, new pack below.
 
@@ -444,6 +446,34 @@ def soldier_views(pack, held, cell=300, views=(("front", 0, 0), ("3/4", 145, -15
     return tiles
 
 
+def firstperson_view(pack, held, size=(640, 360), fov=70.0, blocking=False):
+    """Camera-space first-person frame: hand anchor translate(side*0.56, -0.52, -0.72) (player/visual.rs
+    append_first_person at rest) then the item's firstperson_* display transform. held {hand(0 right,1 left): id}."""
+    W, H = size
+    F = (H / 2) / math.tan(math.radians(fov / 2))
+    sc = Scene()
+    for hand, mid in held.items():
+        if blocking and _find(_roots(pack), split_id(mid + "_blocking")[0], "models", split_id(mid + "_blocking")[1], ".json"):
+            mid += "_blocking"
+        model = load_resolved(pack, mid)
+        quads = model_quads(model, pack)
+        side = 1.0 if hand == 0 else -1.0
+        T = np.eye(4)
+        T[:3, 3] = [side * 0.56, -0.52, -0.72]
+        Mi = T @ display_matrix(model, "firstperson_righthand" if hand == 0 else "firstperson_lefthand") @ np.diag([1 / 16, 1 / 16, 1 / 16, 1.0])
+        for pts, uvs, tex, n in quads:
+            c = (np.c_[pts, np.ones(4)] @ Mi.T)[:, :3]      # camera space: x right, y up, -z forward
+            depth = -c[:, 2]
+            if (depth < 0.05).any():
+                continue
+            nn = Mi[:3, :3] @ n
+            nn = nn / (np.linalg.norm(nn) + 1e-9)
+            sx = c[:, 0] / depth * F
+            sy = -c[:, 1] / depth * F
+            sc.add(np.c_[sx, sy, depth], uvs, tex, np.array([nn[0], -nn[1], -nn[2]]))
+    return raster(sc, 1.0, size, (W / 2, H / 2), bg=(120, 160, 200))
+
+
 def montage(rows, labels, out, cell):
     cols = max(len(r) for r in rows)
     canvas = Image.new("RGB", (cols * cell, len(rows) * cell + 0), (20, 20, 24))
@@ -457,7 +487,7 @@ def montage(rows, labels, out, cell):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["items", "hand", "compare"])
+    ap.add_argument("cmd", choices=["items", "hand", "compare", "first"])
     ap.add_argument("models", nargs="+")
     ap.add_argument("--pack", default=os.path.join(ROOT, "assets/battle_video"))
     ap.add_argument("--old")
@@ -470,6 +500,11 @@ def main():
     if a.cmd == "items":
         rows = [item_alone_views(a.pack, m) for m in a.models]
         montage(rows, a.models, a.output, 240)
+    elif a.cmd == "first":
+        # models: [right-hand model] [left-hand model]; "-" for an empty hand
+        held = {i: m for i, m in enumerate(a.models) if m != "-"}
+        firstperson_view(a.pack, held, blocking=a.pose == "block").save(a.output)
+        print("wrote", a.output)
     elif a.cmd == "hand":
         rows = [soldier_views(a.pack, {hand: m}, pose=a.pose, armour=not a.no_armour) for m in a.models]
         montage(rows, a.models, a.output, 300)
