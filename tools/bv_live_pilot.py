@@ -426,17 +426,13 @@ def crosshair(client: Client):
     return ("block" if target.get("type") == "block" else "none"), None, target
 
 
-DIAG_LIMIT = 400
-
-
-def clip(value) -> str:
-    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return text if len(text) <= DIAG_LIMIT else text[:DIAG_LIMIT - 3] + "..."
+def compact(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def diag_before(observed: dict, item) -> str:
     """The one diagnostic line before an attack: `using` whole, held inputs, game mode, the crosshair target, main hand."""
-    return clip("attack diag before: using=" + json.dumps(observed.get("using"), sort_keys=True, separators=(",", ":"))
+    return ("attack diag before: using=" + json.dumps(observed.get("using"), sort_keys=True, separators=(",", ":"))
                 + " held=" + json.dumps((observed.get("inputs") or {}).get("held"), sort_keys=True)
                 + " game_mode=" + json.dumps(next((found for found in ((observed.get("player") or {}).get("game_mode"), observed.get("game_mode"))
                                                    if found is not None), "absent"))
@@ -455,14 +451,14 @@ def main_hand(client: Client):
 
 def press_attack(client: Client):
     """The attack input for one tick with the diagnostic lines: the observation taken right before it, and the
-    tool's whole answer (clipped to DIAG_LIMIT characters) right after."""
+    tool's whole answer (never cut) right after."""
     log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
     try:
         answer = client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
     except RuntimeError as error:
-        log(clip("attack diag after: error " + str(error)))
+        log("attack diag after: error " + str(error))
         raise
-    log(clip("attack diag after: " + json.dumps(answer, sort_keys=True, separators=(",", ":"))))
+    log("attack diag after: " + compact(answer))
 
 
 def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
@@ -546,7 +542,7 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
         result = client.tool("minecraft_attack_entity_once", {**identity(fresh), "timeout_seconds": 1.0})
     except RuntimeError as error:
         text = str(error)
-        log(clip("attack diag after: error " + text))
+        log("attack diag after: error " + text)
         if any(code in text for code in RECOVERABLE):
             raise
         in_way = OCCLUDED.search(text)
@@ -575,7 +571,7 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
         else:
             log("attack failed", ident, text[:200])
         return False
-    log(clip("attack diag after: " + json.dumps(result, sort_keys=True, separators=(",", ":"))))
+    log("attack diag after: " + compact(result))
     log("attack dispatched", ident, "health before", before)
     return True
 

@@ -669,7 +669,7 @@ class Fighting(unittest.TestCase):
             self.assertEqual(after, 'attack diag after: {}')
         self.assertEqual(len(sim.attacks), len(sent))
 
-    def test_the_diagnostic_line_format_and_clipping(self):
+    def test_the_diagnostic_line_format_is_never_cut(self):
         line = pilot.diag_before({"using": {"hand": 1, "item_id": 7, "remaining": 40}, "inputs": {"held": ["use", "forward"]},
                                   "player": {"game_mode": 3}, "target": {"type": "none"}}, {"components": {"x": 1}})
         self.assertEqual(line, 'attack diag before: using={"hand":1,"item_id":7,"remaining":40} held=["use", "forward"] '
@@ -677,9 +677,46 @@ class Fighting(unittest.TestCase):
         absent = pilot.diag_before({"using": None, "inputs": {"held": []}, "target": {"type": "none"}}, "unreadable: x")
         self.assertIn(" game_mode=\"absent\" ", absent)
         self.assertIn(" game_mode=1 ", pilot.diag_before({"game_mode": 1}, {}))
-        long = pilot.clip({"k": "v" * 1000})
-        self.assertEqual(len(long), 400)
-        self.assertTrue(long.endswith("..."))
+        # nothing is cut: a 1000-character item description and a 1000-character answer stay whole
+        big = {"components": {"k": "v" * 1000}}
+        self.assertIn("v" * 1000, pilot.diag_before({"using": None}, big))
+        self.assertGreater(len(pilot.diag_before({"using": None}, big)), 400)
+
+    def test_a_long_answer_and_a_long_error_are_logged_whole_in_both_modes(self):
+        answer = {"dispatched": True, "detail": "x" * 1000}
+        error = "ordinary entity attack was not dispatched: " + "y" * 1000
+        for mode in ("input", "once"):
+            sim = MarchingRank(0.05, march=0.0, duration=60.0)
+            sim.soldiers = {1000: [0.0, 2.0]}
+            sim.mode = mode
+            real = sim.tool
+            def tool(name, arguments=None, real=real, mode=mode):
+                if name == "minecraft_attack_entity_once":
+                    real(name, arguments)
+                    return answer
+                if name == "minecraft_press_inputs" and arguments and "attack" in arguments.get("keys", []):
+                    real(name, arguments)
+                    return answer
+                return real(name, arguments)
+            sim.tool = tool
+            logs = []
+            saved = pilot.log
+            pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+            try:
+                target = next(e for e in real("minecraft_list_entities", {"radius": 9, "limit": 9})["entities"] if e["entity_id"] == 1000)
+                swing = pilot.attack_once if mode == "once" else pilot.attack_input
+                swing(sim, pilot.Pilot(sim), target, pilot.arguments(["runtime"]), {1000: "blue"}, {}, True)
+                self.assertIn("attack diag after: " + pilot.compact(answer), logs, mode)
+                if mode == "once":
+                    def refuse(name, arguments=None):
+                        if name == "minecraft_attack_entity_once":
+                            raise RuntimeError(error)
+                        return real(name, arguments)
+                    sim.tool = refuse
+                    swing(sim, pilot.Pilot(sim), target, pilot.arguments(["runtime"]), {1000: "blue"}, {}, True)
+                    self.assertIn("attack diag after: error " + error, logs)
+            finally:
+                pilot.log = saved
 
     def test_once_mode_strikes_with_the_tool_and_frames_every_call_with_the_diagnostic(self):
         sim, logs = duel({1000: (0.0, 2.0, 64.0)}, argv=("--attack-mode", "once"))
