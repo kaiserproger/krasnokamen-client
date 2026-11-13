@@ -59,7 +59,7 @@ def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> 
 
 
 RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen")
-MOVE_KEYS = ("forward", "back", "left", "right", "sprint", "jump")
+MOVE_KEYS = ("forward", "back", "left", "right", "sprint", "jump", "use")
 
 
 def interrupt(*_):
@@ -283,9 +283,14 @@ def rank(args, client: Client):
                 # Steps and pit walls: jump while walking into a block.
                 if me.get("horizontal_collision"):
                     wanted.add("jump")
-        pilot.keys(wanted)
         now = time.monotonic()
-        if enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval:
+        strike = enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval
+        # Shield up (the ordinary use input on the off-hand shield) while an enemy is
+        # close, lowered for each swing: vanilla cannot attack while blocking.
+        if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
+            wanted.add("use")
+        pilot.keys(wanted)
+        if strike:
             # The ordinary attack: aim at any visible part of the enemy's box, attack
             # input, then wait briefly for authoritative damage or removal.
             before = enemy.get("health")
@@ -310,6 +315,8 @@ def main():
     parser.add_argument("--k", type=int, default=8, help="same-side soldiers whose centroid anchors the rank slot")
     parser.add_argument("--radius", type=float, default=24.0)
     parser.add_argument("--reach", type=float, default=2.8, help="feet distance; the client's own limit is 3 blocks eye to box")
+    parser.add_argument("--guard", type=float, default=6.0,
+                        help="raise the off-hand shield while an enemy is this close (0 = never)")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
     parser.add_argument("--attack-interval", type=float, default=0.65)
