@@ -153,6 +153,27 @@ fn probe_without_apply_restores_the_look() {
 }
 
 #[test]
+fn set_camera_entity_lends_its_eye_and_f5_orbits_it() {
+    let (mut session, _) = session([10.5, 4., 7.5]);
+    session.camera();
+    let own = session.scene.camera_position;
+    session.player.camera_entity = Some(ENTITY_ID);
+    session.camera();
+    let eye = session.scene.camera_position;
+    assert!((eye[0] - 10.5).abs() < 1e-9 && (eye[2] - 7.5).abs() < 1e-9, "camera stayed on the local player: {eye:?}");
+    assert!((eye[1] - (4. + 1.62)).abs() < 1e-5, "camera is not at the target's eye height: {eye:?}");
+    // F5: the boom runs four blocks behind the target's received look (yaw 0 faces +Z).
+    session.cycle_camera();
+    let rear = session.scene.camera_position;
+    assert!((rear[0] - 10.5).abs() < 1e-6 && (rear[2] - 3.5).abs() < 1e-6, "F5 did not orbit the target: {rear:?}");
+    // Set Camera back to the local player restores its own first-person eye.
+    session.player.camera_entity = Some(session.player.entity_id);
+    session.cycle_camera();
+    session.cycle_camera();
+    assert_eq!(session.scene.camera_position, own);
+}
+
+#[test]
 fn fully_occluded_entity_reports_the_blocking_block() {
     let (mut session, handle) = session([4.5, 4., 7.5]);
     block(&mut session, [4, 4, 6]);

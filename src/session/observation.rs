@@ -636,6 +636,14 @@ impl Session {
 
     pub(super) fn refresh_scene_mode(&mut self, animation_only: bool) -> Result<bool> {
         self.camera();
+        // Filming mode keeps the HUD hidden in play (as F1 would), with no keyboard input.
+        if self.hidden_hud_keeps_hand
+            && self.phase == "play"
+            && let Some(ui) = &mut self.ui
+            && ui.setting("hide_hud").and_then(Value::as_bool) != Some(true)
+        {
+            ui.apply_setting("hide_hud", json!(true))?;
+        }
         let world_ready = self.play_world_presentation_ready();
         if !animation_only {
             self.sync_ui_state(world_ready)?;
@@ -918,8 +926,8 @@ impl Session {
                         self.presentation_partial,
                         &crate::entities::NameplateView {
                             crosshair,
-                            // Session::camera currently follows the local player.
-                            camera_entity: Some(self.player.entity_id),
+                            // The Set Camera entity's own name is hidden, as vanilla.
+                            camera_entity: Some(self.player.camera_entity.unwrap_or(self.player.entity_id)),
                             viewer_name: self.username.as_deref(),
                             viewer_spectator: self.player.game_mode == 3,
                             render_names: !ui
@@ -941,7 +949,8 @@ impl Session {
                 }
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
-                    && !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false)
+                    && (self.hidden_hud_keeps_hand
+                        || !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false))
                     && let Some(light) = sample_light(self.player.eye_position())?
                 {
                     let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.local_partial, light, item_context: &item_context, ui: self.ui.as_ref() });

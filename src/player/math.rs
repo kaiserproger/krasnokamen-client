@@ -56,7 +56,7 @@ pub(crate) fn atan2(mut y: f64, mut x: f64) -> f64 {
     }
     angle
 }
-pub(super) fn view(pitch: f32, yaw: f32) -> [f64; 3] {
+pub(crate) fn view(pitch: f32, yaw: f32) -> [f64; 3] {
     let p = f64::from(pitch * 0.017453292);
     let y = f64::from(-yaw * 0.017453292);
     let c = cos(p);

@@ -7,6 +7,7 @@ mod clouds;
 mod torch_particles;
 mod block_motion;
 mod local_server;
+mod follow;
 #[cfg(test)]
 mod entity_aim_tests;
 #[cfg(test)]
@@ -81,6 +82,11 @@ pub struct Session {
     recording: Option<crate::replay::format::RecordingOptions>,
     recording_tick: Option<u64>,
     cinematic_camera: Option<crate::capture::camera::Pose>,
+    /// Filming (`--hide-hud-keep-hand`): the HUD stays hidden in play, as after F1,
+    /// but the first-person hand and held items are still drawn.
+    pub(crate) hidden_hud_keeps_hand: bool,
+    /// Filming (`--follow-player NAME`): over-the-shoulder spectator camera.
+    follow: Option<follow::Follow>,
     loading: Option<mpsc::Receiver<Result<Loaded>>>,
     wake: Arc<RwLock<Wake>>,
     pub(crate) phase: String,
@@ -205,6 +211,8 @@ impl Session {
             recording: None,
             recording_tick: None,
             cinematic_camera: None,
+            hidden_hud_keeps_hand: false,
+            follow: None,
             loading: None,
             wake: Arc::new(RwLock::new(Arc::new(|| {}))),
             phase: "fixture".into(),
@@ -1007,6 +1015,9 @@ impl Session {
                 self.world_tick,
                 &mut self.commands,
             )?;
+            if let Some(follow) = &self.follow {
+                follow.trail(&self.entities, &mut self.player);
+            }
             self.environment
                 .tick_vignette(&self.world, self.player.eye_position())?;
             self.tick_detail_ms[5] += start.elapsed().as_secs_f64() * 1000.;
@@ -1084,24 +1095,38 @@ impl Session {
             self.scene.hurt_tilt_deg = 0.;
             return;
         }
+        if let Some((position, yaw, pitch)) = self.follow_camera() {
+            self.scene.camera_position = position;
+            self.scene.yaw = yaw;
+            self.scene.pitch = pitch;
+            self.scene.fov_deg = self.fov_deg;
+            self.scene.roll_deg = 0.;
+            self.scene.hurt_tilt_deg = 0.;
+            return;
+        }
         let view = self.player.visual_view(self.local_partial);
-        let yaw = self.player.yaw;
-        self.scene.camera_position = view.eye;
+        // Server Set Camera: another received entity lends its eye and head look
+        // (vanilla cameraEntity); F5 then orbits that entity, not the local body.
+        let spectated = self.spectated_view();
+        let (eye, yaw, pitch) = spectated.unwrap_or((view.eye, self.player.yaw, self.player.pitch));
+        self.scene.camera_position = eye;
         self.scene.yaw = yaw;
-        self.scene.pitch = self.player.pitch;
+        self.scene.pitch = pitch;
         if self.camera_mode == 0 {
-            self.scene.camera_position[0] += f64::from(yaw.to_radians().cos() * view.bob[0]);
-            self.scene.camera_position[2] += f64::from(yaw.to_radians().sin() * view.bob[0]);
-            self.scene.camera_position[1] += f64::from(view.bob[1]) - f64::from(view.dip);
-            self.scene.pitch += view.pitch_bob;
+            if spectated.is_none() {
+                self.scene.camera_position[0] += f64::from(yaw.to_radians().cos() * view.bob[0]);
+                self.scene.camera_position[2] += f64::from(yaw.to_radians().sin() * view.bob[0]);
+                self.scene.camera_position[1] += f64::from(view.bob[1]) - f64::from(view.dip);
+                self.scene.pitch += view.pitch_bob;
+            }
         } else {
             let sign = if self.camera_mode == 1 { -1. } else { 1. };
-            let direction = self.player.look_direction().map(|v| v * sign);
+            let direction = crate::player::math::view(pitch, yaw).map(|v| v * sign);
             let distance = self.content.as_ref().map_or(4., |content| {
-                crate::player::camera_distance(&self.world, content, view.eye, direction)
+                crate::player::camera_distance(&self.world, content, eye, direction)
             });
             self.scene.camera_position =
-                std::array::from_fn(|i| view.eye[i] + direction[i] * distance);
+                std::array::from_fn(|i| eye[i] + direction[i] * distance);
             if self.camera_mode == 2 {
                 self.scene.yaw += 180.;
                 self.scene.pitch = -self.scene.pitch;
@@ -1115,6 +1140,14 @@ impl Session {
             self.damage_tilt_strength,
         );
         self.scene.hurt_direction = self.player.hurt_direction;
+    }
+
+    /// The Set Camera entity's interpolated eye view, while it is another received
+    /// entity. Absent or not yet received: the local player's own view, as vanilla.
+    fn spectated_view(&self) -> Option<([f64; 3], f32, f32)> {
+        let id = self.player.camera_entity.filter(|id| *id != self.player.entity_id)?;
+        let entity = self.entities.get(id)?;
+        self.entities.eye_view(entity, self.world_tick, self.presentation_partial).ok()
     }
 
     pub(crate) fn cycle_camera(&mut self) {

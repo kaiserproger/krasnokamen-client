@@ -366,6 +366,40 @@ its kind or is rejected (`plan.json` `rejected_placements` counts them by check)
 `battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
 per preview time through the kit's `bv-render.sh` (`BV_SIZE`, default 640x360).
 
+## Live filming clients (no replay)
+
+Real clients can also film a live battle from inside it. They join with the
+ordinary direct-join launch (`--server HOST:PORT --username NAME`) plus:
+
+- `--hide-hud-keep-hand`: in play the HUD (hotbar, crosshair, chat, names) stays
+  hidden as after F1, but the first-person hand and held items are still drawn, so
+  a soldier's weapon and shield are in frame. No keyboard input is needed.
+- `--third-person`: start in the F5 behind-the-back camera.
+- `--follow-player NAME`: spectator camera over that player's right shoulder
+  (3.5 blocks behind, 1.8 up, 0.7 right of his eye, 14° down, yaw eased over
+  0.5 s, pulled in before terrain). It samples the player's received interpolated
+  pose every frame and re-resolves him by player-list name and UUID, so respawns
+  and new entity ids need nothing. In spectator mode the client also moves its own
+  body to that point every tick (ordinary movement), so the server keeps streaming
+  the chunks and entities around him.
+- A server **Set Camera** (`minecraft:set_camera`) entity now drives the view as in
+  vanilla: first person at its eye with its head look, F5 orbits it.
+
+`tools/bv_live_pilot.py RUNTIME_DIR` drives one such client (started with
+`--automation --mcp-http 127.0.0.1:0 --windowed --runtime-dir RUNTIME_DIR`) through
+its MCP endpoint as a rank soldier: it keeps the join-time offset to the centroid
+of the 8 nearest same-side soldiers (side from `solaris_battle:red_*`/`blue_*`
+shields and surcoats, else red/blue dye), walks with held movement keys, eases its
+look toward the nearest enemy (at most 6° per step), attacks enemies in reach with
+`minecraft_attack_entity_once` once per full weapon cooldown (from the held
+weapon's `attack_speed` modifier) and logs each confirmed health drop, raises the
+off-hand shield (use input) while an enemy is within 6 blocks and lowers it for
+each swing, presses Respawn on death and re-takes its offset after any teleport.
+It never sleeps: each step waits on the reply to its MCP calls and two client
+ticks. MCP input needs the window focused; on `window_not_focused` or a respawn
+the pilot waits for the next client state event and resumes, a writer lease held
+by another MCP session fails closed, and on exit it releases its keys and session.
+
 ## Focused checks and provenance
 
 `cargo test -p solaris-client --lib replay`,
