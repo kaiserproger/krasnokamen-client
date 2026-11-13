@@ -3,8 +3,8 @@
 
   bv_live_pilot.py RUNTIME_DIR [--side red] [--k 8]
 
-Keeps PovRed's join-time place relative to the centroid of the K nearest same-side
-soldiers (side read from their shield/surcoat ids or dyed kit), walks with held movement
+Keeps PovRed's join-time place relative to the centroid of the K same-side soldiers
+nearest him at join, respawn or re-slot (side read from their shield/surcoat ids or dyed kit), walks with held movement
 keys, turns smoothly toward the nearest enemy (else along the rank's motion), and
 presses attack when an enemy is in reach. RUNTIME_DIR is the client's --runtime-dir;
 the client runs with `--automation --mcp-http 127.0.0.1:0 --windowed` and
@@ -171,6 +171,11 @@ def identity(entity):
             "entity_type": entity["entity_type"]}
 
 
+def soldier(entity) -> bool:
+    """A living mob or other player near PovRed: not himself, not a horse."""
+    return not entity.get("local_player") and "horse" not in entity["entity_type"] and entity.get("health", 1) > 0
+
+
 def side_of(client: Client, entity) -> str | None:
     for slot in SIDE_SLOTS:
         try:
@@ -200,7 +205,8 @@ def rank(args, client: Client):
     yaw, pitch = float(me.get("yaw", 0.0)), float(me.get("pitch", 0.0))
     rest_yaw = yaw
     sides: dict[int, str | None] = {}
-    offset = None
+    offset = anchor = None
+    members: set[int] = set()
     target = None
     last = None
     last_step = time.monotonic()
@@ -227,7 +233,7 @@ def rank(args, client: Client):
             me = pilot.player()
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
-            offset, target, last, last_step = None, None, position(me), time.monotonic()
+            offset, anchor, target, last, last_step = None, None, None, position(me), time.monotonic()
             pilot.sent_look = None
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             continue
@@ -235,45 +241,71 @@ def rank(args, client: Client):
         stepped = time.monotonic()
         if last is not None and math.dist(here, last) > 4.0 + 8.0 * (stepped - last_step):
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
-            offset, target = None, None
+            offset, anchor, target = None, None, None
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
             interval = attack_interval(client, args.attack_interval)
             log("attack interval", round(interval, 2), "s")
         last, last_step = here, stepped
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
-        pending = eligible = 0
+        soldiers = sorted((e for e in listed if soldier(e)), key=lambda e: e["distance"])
         friends, enemies, unread = [], [], []
-        for entity in listed:
-            if entity.get("local_player") or "horse" in entity["entity_type"] or entity.get("health", 1) <= 0:
-                continue
-            eligible += 1
-            ident = entity["entity_id"]
-            if ident not in sides:
+        for entity in soldiers:
+            side = sides.get(entity["entity_id"], "unread")
+            if side == "unread":
                 # Read after this step's movement and attack, so combat is not delayed.
-                # Only the nearest 2K soldiers gate the offset: a marching army keeps
-                # bringing unread ids into the outer part of the page.
                 unread.append(entity)
-                pending += eligible <= 2 * args.k
-                continue
-            side = sides[ident]
-            if side == args.side:
+            elif side == args.side:
                 friends.append(entity)
             elif side is not None:
                 enemies.append(entity)
-        near = sorted(friends, key=lambda e: e["distance"])[: args.k]
-        if len(near) >= min(args.k, 3):
-            centroid = [sum(e[a] for e in near) / len(near) for a in ("x", "z")]
+        if offset is None and anchor is None:
+            # The rank place is measured from one instant, right after join, respawn or
+            # re-slot: PovRed and his nearest 2K neighbours as listed now, however long
+            # reading their sides takes while the rank marches on.
+            anchor = (here, soldiers[: 2 * args.k])
+        if offset is None:
+            placed, ready = [], True
+            for entity in anchor[1]:
+                side = sides.get(entity["entity_id"], "unread")
+                if side == "unread":
+                    ready = False
+                    break
+                if side == args.side:
+                    placed.append(entity)
+                    if len(placed) == args.k:
+                        break
+            if ready and len(placed) >= min(args.k, 3):
+                # PovRed then follows these same soldiers (by id), not whoever is nearest
+                # later: a nearest-K centroid shifts as he moves and walks him out of the
+                # rank. The cap keeps a late measurement (pilot started after the march
+                # began) inside the formation instead of behind it.
+                then = [sum(e[a] for e in placed) / len(placed) for a in ("x", "z")]
+                offset = [anchor[0][0] - then[0], anchor[0][2] - then[1]]
+                length = math.hypot(*offset)
+                if length > args.max_offset:
+                    offset = [v * args.max_offset / length for v in offset]
+                members = {e["entity_id"] for e in placed}
+                log("rank offset", [round(v, 2) for v in offset], "from", len(placed), "same-side soldiers",
+                    "(measured", round(length, 2), "blocks)")
+            elif ready:
+                anchor = None  # too few soldiers of his side near him: measure again next step
+            # Their sides are read first, nearest first.
+            first = [e for e in anchor[1] if e["entity_id"] not in sides] if anchor else []
+            unread = first + [e for e in unread if e["entity_id"] not in {f["entity_id"] for f in first}]
+        near = friends[: args.k]
+        if near:
             velocity = [sum(e["velocity"][a] for e in near) / len(near) for a in ("x", "z")]
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
-            # The join-time offset waits until the nearest 2K soldiers have a side, so
-            # late classification does not shift the centroid it is measured from.
-            if offset is None and pending == 0:
-                offset = [here[0] - centroid[0], here[2] - centroid[1]]
-                log("rank offset", [round(v, 2) for v in offset], "from", len(near), "same-side soldiers")
-            if offset is not None:
+        if offset is not None:
+            tracked = [e for e in friends if e["entity_id"] in members]
+            if len(tracked) >= min(args.k, 3):
+                centroid = [sum(e[a] for e in tracked) / len(tracked) for a in ("x", "z")]
                 goal = [centroid[0] + offset[0], centroid[1] + offset[1]]
                 target = goal if target is None else [0.7 * target[i] + 0.3 * goal[i] for i in range(2)]
+            else:
+                log("rank neighbours gone (", len(tracked), "left in view ); measuring the place again")
+                offset = anchor = None
         enemy = min(enemies, key=lambda e: e["distance"]) if enemies else None
         # Facing: the nearest enemy, else the rank's own motion, else the join-time facing.
         if enemy is not None and enemy["distance"] <= args.face_enemy:
@@ -328,8 +360,10 @@ def rank(args, client: Client):
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
             pilot.sent_look = (int(round(wrap(yaw))), int(round(pitch)))
-        # Classify a few unread neighbours (nearest first); fewer while an enemy is close.
-        budget = 2 if enemy is not None and enemy["distance"] <= args.guard else args.classify_per_step
+        # Classify unread neighbours, nearest first. While his place is unknown he stands
+        # still, so many per step; afterwards two, because movement keys stay held for a
+        # whole step and a long step overshoots his place (each read waits a client frame).
+        budget = args.classify_per_step if offset is None else 2
         for entity in unread[:budget]:
             sides[entity["entity_id"]] = side_of(client, entity)
         client.tool("minecraft_wait_ticks", {"ticks": 2})
@@ -349,6 +383,8 @@ def main():
     parser.add_argument("--transcript", action="store_true", help="keep the full MCP transcript (large)")
     parser.add_argument("--side", default="red", choices=("red", "blue"))
     parser.add_argument("--k", type=int, default=8, help="same-side soldiers whose centroid anchors the rank slot")
+    parser.add_argument("--max-offset", type=float, default=3.0,
+                        help="cap (blocks) on PovRed's place relative to that centroid")
     parser.add_argument("--radius", type=float, default=24.0)
     parser.add_argument("--reach", type=float, default=2.8, help="feet distance; the client's own limit is 3 blocks eye to box")
     parser.add_argument("--guard", type=float, default=6.0,
@@ -356,7 +392,8 @@ def main():
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
     parser.add_argument("--attack-interval", type=float, default=0.65)
-    parser.add_argument("--classify-per-step", type=int, default=8)
+    parser.add_argument("--classify-per-step", type=int, default=8,
+                        help="side reads per step until his place is measured (then 2)")
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     args = parser.parse_args()
