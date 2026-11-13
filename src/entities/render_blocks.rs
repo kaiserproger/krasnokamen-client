@@ -1119,7 +1119,7 @@ mod tests {
             store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
             store.activate_models(Arc::new(Models {
                 rigs: BTreeMap::new(),
-                schemas: BTreeMap::new(),
+                schemas: std::collections::HashMap::new(),
                 families: BTreeMap::new(),
                 builtin_variants: BTreeMap::new(),
                 simple_particles: Vec::new(),

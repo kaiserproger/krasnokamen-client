@@ -6,7 +6,7 @@ use resources::{Bone, BoneRole, Rig};
 pub(super) fn fixture() -> (Models, Entity) {
     let mut models = Models {
         rigs: BTreeMap::new(),
-        schemas: BTreeMap::new(),
+        schemas: std::collections::HashMap::new(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: vec![],
@@ -100,7 +100,7 @@ pub(super) fn fixture() -> (Models, Entity) {
                 resources::DefaultAttribute { id: 1, value: 1. },
             )]),
             height: 1.,
-            accessors: BTreeMap::new(),
+            accessors: std::collections::HashMap::new(),
         },
     );
     entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());

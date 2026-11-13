@@ -559,7 +559,7 @@ mod tests {
         store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
         store.activate_models(Arc::new(Models {
             rigs: BTreeMap::new(),
-            schemas: BTreeMap::from([
+            schemas: std::collections::HashMap::from([
                 ("minecraft:marker".into(), schema),
                 ("minecraft:text_display".into(), text_display_schema()),
             ]),

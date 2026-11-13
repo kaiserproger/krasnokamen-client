@@ -1418,7 +1418,7 @@ mod tests {
         .unwrap();
         crate::entities::Models {
             rigs: BTreeMap::new(),
-            schemas: BTreeMap::from([("test:entity".into(), schema)]),
+            schemas: std::collections::HashMap::from([("test:entity".into(), schema)]),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: Vec::new(),

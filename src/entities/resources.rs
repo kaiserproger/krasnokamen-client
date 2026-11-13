@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3};
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
@@ -16,7 +16,7 @@ const FACTS_SCHEMA: u32 = 1;
 struct Document {
     schema: u32,
     game_version: String,
-    entities: BTreeMap<String, EntitySchema>,
+    entities: HashMap<String, EntitySchema>,
     families: BTreeMap<String, Family>,
     armor_models: BTreeMap<String, ArmorModels>,
     simple_particles: Vec<String>,
@@ -88,7 +88,8 @@ pub struct EntitySchema {
     pub dimensions: Dimensions,
     pub default_attributes: BTreeMap<String, DefaultAttribute>,
     pub height: f32,
-    pub accessors: BTreeMap<String, [u32; 2]>,
+    /// Hashed, not ordered: looked up by name per entity many times a tick and frame.
+    pub accessors: HashMap<String, [u32; 2]>,
 }
 #[derive(Deserialize, Debug)]
 pub struct Family {
@@ -130,7 +131,8 @@ pub struct Rig {
 }
 pub struct Models {
     pub rigs: BTreeMap<String, Rig>,
-    pub schemas: BTreeMap<String, EntitySchema>,
+    /// Hashed, not ordered: looked up by kind per entity many times a tick and frame.
+    pub schemas: HashMap<String, EntitySchema>,
     pub families: BTreeMap<String, Family>,
     pub builtin_variants: BTreeMap<String, BTreeMap<String, Value>>,
     pub simple_particles: Vec<String>,
@@ -583,7 +585,9 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
         store.registries.insert(registry.clone(), entries.iter()
             .map(|(name, value)| (name.clone(), value.clone())).collect());
     }
-    for (kind, schema) in &models.schemas {
+    let mut kinds: Vec<_> = models.schemas.iter().collect();
+    kinds.sort_unstable_by_key(|(kind, _)| *kind);
+    for (kind, schema) in kinds {
         let entity = || {
             let mut fixture = Store::default();
             let mut spawn = Writer::default();

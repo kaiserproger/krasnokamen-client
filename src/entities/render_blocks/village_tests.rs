@@ -37,7 +37,7 @@ fn bone(name: &str, pivot: [f32; 3], quads: Vec<[[f32; 5]; 4]>) -> Bone {
 fn models_with(rigs: Vec<(String, Rig)>) -> Models {
     Models {
         rigs: rigs.into_iter().collect(),
-        schemas: BTreeMap::new(),
+        schemas: std::collections::HashMap::new(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),

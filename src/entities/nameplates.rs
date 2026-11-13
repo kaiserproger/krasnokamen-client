@@ -316,7 +316,7 @@ mod tests {
                 resources::DefaultAttribute { id: 7, value: 1. },
             )]),
             height: 2.,
-            accessors: BTreeMap::from([
+            accessors: std::collections::HashMap::from([
                 ("DATA_SHARED_FLAGS_ID".into(), [0, 0]),
                 ("DATA_CUSTOM_NAME".into(), [2, 6]),
                 ("DATA_CUSTOM_NAME_VISIBLE".into(), [3, 8]),
@@ -328,7 +328,7 @@ mod tests {
         };
         let models = Models {
             rigs: BTreeMap::new(),
-            schemas: BTreeMap::from([(kind.into(), schema)]),
+            schemas: std::collections::HashMap::from([(kind.into(), schema)]),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: Vec::new(),
