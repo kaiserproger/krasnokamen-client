@@ -185,6 +185,7 @@ def rank(args, client: Client):
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
+    last_status, steps = time.monotonic(), 0
     interval = attack_interval(client, args.attack_interval)
     log("attack interval", round(interval, 2), "s")
     while True:
@@ -304,6 +305,13 @@ def rank(args, client: Client):
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
             pilot.sent_look = (int(round(wrap(yaw))), int(round(pitch)))
         client.tool("minecraft_wait_ticks", {"ticks": 2})
+        steps += 1
+        if time.monotonic() - last_status >= 5.0:
+            elapsed = time.monotonic() - last_status
+            log("status at", [round(v, 1) for v in here], "friends", len(friends), "enemies", len(enemies),
+                "nearest enemy", None if enemy is None else round(enemy["distance"], 1),
+                "keys", sorted(pilot.held), "step", round(elapsed / steps, 2), "s")
+            last_status, steps = time.monotonic(), 0
 
 
 def main():
