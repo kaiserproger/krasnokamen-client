@@ -58,7 +58,8 @@ def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> 
     return client
 
 
-RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen")
+RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen",
+               "player died", "client player is not dead")
 MOVE_KEYS = ("forward", "back", "left", "right", "sprint", "jump", "use")
 
 
@@ -333,6 +334,7 @@ def main():
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGHUP, interrupt)
     client = connect(args.runtime, args.evidence, args.transcript)
     try:
         while True:
