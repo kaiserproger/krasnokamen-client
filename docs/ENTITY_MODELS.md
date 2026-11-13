@@ -393,6 +393,10 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
 * `python3 tools/entity_models.py fmt|check|preview` - canonical formatting, validation
   (schema, UV bounds, texture existence/size, unique bones, roles, texel coverage) and a textured
   four-view + UV-map preview using the vanilla PNG (`SOLARIS_TEXTURES` overrides the texture root).
+* `python3 tools/item_models.py items|hand|compare MODEL_ID... [--pack DIR] -o out.png` - previews
+  item element models (and flat sprites) alone and held by an armoured husk through the client's
+  own attachment chain (`--hand`, `--pose forward|hang|block`; `compare --old DIR` stacks old and
+  new packs). `tools/battle_items_gen.py` regenerates the battle shield/weapon models and textures.
 * `cargo test --lib solaris_models` - geometry winding/unwrap/mirror tests, key resolution, and a
   sanity test over every shipped model (UVs inside the declared texture, roles/bones valid, and -
   when vanilla textures are available under `SOLARIS_CLIENT_RESOURCE_ROOT` or `dist/resources` -
