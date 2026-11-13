@@ -11,6 +11,11 @@ pub(super) struct Breaking {
     pub ticks: u32,
     pub finished: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AttackEarlyExit {
+    Using,
+    Spectator,
+}
 pub(super) struct UsingItem {
     pub hand: u8,
     pub item_id: u32,
@@ -446,6 +451,81 @@ impl Player {
         }
         Ok(())
     }
+    /// The gates at the top of `attack` that make an ordinary Attack send no attack packet.
+    fn attack_early_exit(&self) -> Option<AttackEarlyExit> {
+        if self.using.is_some() {
+            Some(AttackEarlyExit::Using)
+        } else if self.game_mode == 3 {
+            Some(AttackEarlyExit::Spectator)
+        } else {
+            None
+        }
+    }
+    /// Why an ordinary entity Attack queued no attack packet: the early exit that fired and
+    /// the player state around it. Pure diagnostics; changes nothing.
+    pub fn attack_refusal(
+        &self,
+        keys: &BTreeSet<String>,
+        content: &Content,
+        inventory: &InventoryStore,
+        queued: &str,
+    ) -> String {
+        let item = |id: u32| {
+            content
+                .item_names
+                .get(&id)
+                .map_or_else(|| format!("item_id {id}"), |name| name.to_string())
+        };
+        let early_exit = match self.attack_early_exit() {
+            Some(AttackEarlyExit::Using) => "using_item (self.using is set)",
+            Some(AttackEarlyExit::Spectator) => "spectator_mode (game_mode 3)",
+            None => "none (no early exit fired; see queued_commands)",
+        };
+        let using = self.using.as_ref().map_or_else(
+            || "none".to_owned(),
+            |using| {
+                format!(
+                    "{} hand={} remaining_ticks={}",
+                    item(using.item_id),
+                    if using.hand == 1 { "off_hand" } else { "main_hand" },
+                    using.remaining
+                )
+            },
+        );
+        let main_hand = held(inventory, 0).map_or_else(|| "empty".to_owned(), |stack| item(stack.id));
+        let piercing = held(inventory, 0)
+            .is_some_and(|stack| stack.components.contains_key("minecraft:piercing_weapon"));
+        let game_mode = match self.game_mode {
+            0 => "survival",
+            1 => "creative",
+            2 => "adventure",
+            3 => "spectator",
+            _ => "unknown",
+        };
+        format!(
+            "attack not started; early_exit={early_exit}; using={using}; held_keys=[{}]; \
+             last_tick_input={}; main_hand={main_hand} (piercing_weapon={piercing}); \
+             game_mode={} ({game_mode}); queued_commands={queued} \
+             (`started` counts only attack or player_action 0|2|7; the list is the ground truth)",
+            keys.iter().map(String::as_str).collect::<Vec<_>>().join(","),
+            self.last_input.describe(),
+            self.game_mode
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn set_using_for_test(&mut self, hand: u8, item_id: u32) {
+        self.using = Some(UsingItem {
+            hand,
+            item_id,
+            slot_identity: 0,
+            duration: 32,
+            remaining: 4,
+            crossbow_charge_ticks: 0.,
+            crossbow_components: None,
+            movement_factor: 1.,
+            can_sprint: true,
+        });
+    }
     fn attack(
         &mut self,
         target: Option<Hit>,
@@ -456,16 +536,17 @@ impl Player {
         tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
-        if self.using.is_some() {
-            return Ok(());
-        }
-        if self.game_mode == 3 {
-            if let Some(Hit::Entity { handle, .. }) = target {
-                let mut w = Writer::default();
-                w.var(handle.network_id.checked_add(1).ok_or("spectator entity id overflow")?);
-                out.push(PacketCommand::new(sb::SPECTATOR_ACTION, w));
+        match self.attack_early_exit() {
+            Some(AttackEarlyExit::Using) => return Ok(()),
+            Some(AttackEarlyExit::Spectator) => {
+                if let Some(Hit::Entity { handle, .. }) = target {
+                    let mut w = Writer::default();
+                    w.var(handle.network_id.checked_add(1).ok_or("spectator entity id overflow")?);
+                    out.push(PacketCommand::new(sb::SPECTATOR_ACTION, w));
+                }
+                return Ok(());
             }
-            return Ok(());
+            None => {}
         }
         if held(inventory, 0)
             .is_some_and(|s| s.components.contains_key("minecraft:piercing_weapon"))
