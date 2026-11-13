@@ -641,9 +641,11 @@ class StairsEdge(unittest.TestCase):
             self.assertGreaterEqual(sim.me[0] - 188.0, self.EDGE + 1.5 - 1e-6, f"start {start}")
 
 
-def duel(enemies, friends=None, duration=10.0, call=0.05, always_using=False, argv=()):
+def duel(enemies, friends=None, duration=10.0, call=0.05, always_using=False, argv=(), bare=False, floor=None):
     """The rank standing still (march 0) with PovRed in his slot, enemies and extra friends at {id: (x, z, y)}: (sim, log lines)."""
-    sim = MarchingRank(call, march=0.0, duration=duration)
+    sim = MarchingRank(call, march=0.0, duration=duration, **({"floor": floor} if floor else {}))
+    if bare:
+        sim.soldiers = {}  # no rank around him: only the soldiers given
     for ident, (x, z, y) in {**enemies, **(friends or {})}.items():
         sim.soldiers[ident] = [x, z]
         sim.ys[ident] = y
@@ -680,8 +682,7 @@ class Fighting(unittest.TestCase):
     def test_a_friend_under_the_crosshair_is_never_struck(self):
         # a friend fills the whole line to the enemy: no aim point passes him
         sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=30.0)
-        self.assertEqual(sim.hits, [], "the friend is not struck, nor the enemy through him")
-        self.assertEqual(sim.attacks, [])
+        self.assertNotIn(500, sim.hits, "the friend is never struck")
         self.assertTrue(any(line.startswith("attack skipped (crosshair friend 500") for line in logs), logs[-4:])
         self.assertLessEqual(sum(1 for line in logs if line.startswith("attack skipped (crosshair friend")), 11,
                         "the target is left alone for a while after every point failed")
@@ -689,8 +690,7 @@ class Fighting(unittest.TestCase):
     def test_an_entity_of_unknown_side_under_the_crosshair_is_never_struck(self):
         with mock.patch.object(pilot, "side_of", lambda client, entity: None if entity["entity_id"] == 500 else ("blue" if entity["entity_id"] >= 1000 else "red")):
             sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=8.0)
-        self.assertEqual(sim.hits, [], "nothing is struck through or at an entity whose side is unknown")
-        self.assertEqual(sim.attacks, [])
+        self.assertNotIn(500, sim.hits, "an entity whose side is unknown is never struck")
         self.assertTrue(any(line.startswith("attack skipped (crosshair unknown-side 500") for line in logs), logs[-4:])
 
     def test_the_aim_moves_past_a_friends_shoulder(self):
@@ -786,7 +786,7 @@ class Fighting(unittest.TestCase):
         self.assertEqual(sim.once_calls, [], "no call while the client reports an item in use")
         self.assertTrue(any("attack not dispatched (item still in use" in line for line in logs))
         sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=6.0, argv=("--attack-mode", "once"))
-        self.assertEqual(sim.hits, [], "a friend in the way is not struck in once mode either")
+        self.assertNotIn(500, sim.hits, "a friend in the way is not struck in once mode either")
         self.assertTrue(any(line.startswith("attack diag after: error target entity is occluded by entity 500") for line in logs), logs[-6:])
         self.assertTrue(any(line.startswith("attack occluded by friend 500") for line in logs))
 
@@ -956,6 +956,34 @@ class Fight(unittest.TestCase):
         gaps = [b - a for a, b in zip(sim.press_times, sim.press_times[1:])]
         self.assertTrue(gaps)
         self.assertGreaterEqual(min(gaps), 1.1 - 0.05, "swings closer than 22 ticks")
+
+    def jammed(self, enemy, friend, argv=(), floor=None, duration=25.0):
+        return duel({1000: enemy}, friends={500: friend}, duration=duration, argv=argv, bare=True, floor=floor)
+
+    def test_a_friend_in_the_line_makes_him_step_aside_and_strike(self):
+        sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0))
+        self.assertIn(1000, sim.hits, logs[-6:])
+        self.assertNotIn(500, sim.hits, "the friend is never struck")
+        self.assertTrue(any("attack sent (crosshair enemy 1000" in line for line in logs))
+
+    def test_he_does_not_stand_without_input_behind_his_own_man(self):
+        sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), duration=12.0)
+        self.assertGreater(abs(sim.me[0]), 0.3, "he did not leave the line behind the friend")
+
+    def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
+        for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
+            sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), floor=void)
+            self.assertIn(1000, sim.hits, logs[-6:])
+
+    def test_a_spear_user_too_close_backs_off_and_then_steps_around_the_friend(self):
+        sim = MarchingRank(0.05, march=0.0, duration=30.0)
+        sim.soldiers = {500: [0.0, 0.9], 1000: [0.0, 1.6]}
+        sim.hotbar, sim.selected = {0: IRON_SPEAR}, 0
+        sim.hud, sim.charge_full, sim.reach_limit = True, 21, 4.5
+        logs = logged(sim, lambda: self.run_rank(sim))
+        self.assertIn(1000, sim.hits, logs[-6:])
+        self.assertEqual([d for d in sim.press_distances if d < 2.0], [], "a spear swing inside its minimum reach")
+        self.assertNotIn(500, sim.hits)
 
     def run_rank(self, sim):
         saved = pilot.time
