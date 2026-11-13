@@ -332,7 +332,7 @@ def position(record) -> list[float]:
 
 
 PIERCING = "minecraft:piercing_weapon"
-HOTBAR_FIRST = 36  # hotbar slot 0 in the player-inventory numbering of minecraft_read_item_components
+HOTBAR_FIRST = 0  # the MCP numbers the Inventory: 0-8 hotbar, 9-35 main, 36-39 feet/legs/chest/head, 40 offhand, 41 body, 42 saddle
 
 
 def components_of(stack) -> dict:

@@ -48,6 +48,7 @@ class MarchingRank:
         self.selected_free = True  # reads of the selected item (the weapon interval) also take no march time
         self.since_attack, self.charge_full, self.hud = 99, 13, True  # ticks since the last attack; ticks to full strength; HUD in observe
         self.press_strengths = []  # attack strength at each attack press
+        self.other = {}  # slot -> stack outside the hotbar (armour 36-39, offhand 40)
         self.hotbar, self.selected = {}, 0  # slot -> stack; selected slot
         self.mode, self.once_calls = "input", []  # the pilot's --attack-mode; targets of minecraft_attack_entity_once
         self.attacks, self.hits = [], []  # attack inputs pressed / entities they struck
@@ -161,9 +162,12 @@ class MarchingRank:
                     raise RuntimeError("no held item data")
                 return self.hotbar[self.selected]
             if arguments["source"] == "player":
-                if arguments["slot"] - 36 not in self.hotbar:
-                    raise RuntimeError("player inventory slot not received")
-                return self.hotbar[arguments["slot"] - 36]
+                # The client's Inventory numbering: 0-8 hotbar; 36-40 armour and offhand (self.other); size 43.
+                if arguments["slot"] < 9 and arguments["slot"] in self.hotbar:
+                    return self.hotbar[arguments["slot"]]
+                if arguments["slot"] in self.other:
+                    return self.other[arguments["slot"]]
+                raise RuntimeError("player inventory slot not received")
             self.entity_reads.append(arguments.get("entity_id"))
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
             return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
@@ -904,6 +908,17 @@ class Fight(unittest.TestCase):
         self.assertTrue(any(line.startswith("hotbar 0 ") and "piercing_weapon" in line for line in logs), logs)
         self.assertTrue(any(line.startswith("hotbar 1 ") for line in logs))
         self.assertIn("melee slot 1 selected (melee weapon without piercing_weapon)", logs)
+
+    def test_the_hotbar_is_inventory_slots_0_to_8_not_the_armour_slots(self):
+        sim = MarchingRank(0.05)
+        # 37 is the cosmetic-leggings carrier and looks like a sword here; hotbar slot 1 is a spear, slot 3 a sword.
+        sim.hotbar, sim.other, sim.selected = {0: SPEAR, 1: SPEAR, 3: SWORD}, {36: {"components": {}}, 37: SWORD, 40: SWORD}, 0
+        reads = []
+        real = sim.tool
+        sim.tool = lambda name, arguments=None: (reads.append(arguments["slot"]) if arguments and arguments.get("source") == "player" else None, real(name, arguments))[1]
+        logs = logged(sim, lambda: pilot.choose_melee(sim, "auto"))
+        self.assertEqual(reads, list(range(9)), "only inventory slots 0-8 are read")
+        self.assertEqual(sim.selected, 3, logs)
 
     def test_auto_keeps_a_selected_non_piercing_weapon(self):
         sim = MarchingRank(0.05)
