@@ -639,6 +639,18 @@ fn held_item_selections_follow_stack_and_item_use() {
     let (composite, selections) = frame(&mut store);
     assert_eq!(composite, late);
     assert_eq!(frame(&mut store), (late, selections));
+    // Unrelated metadata (health) as SET_ENTITY_DATA applies it: a new appearance revision
+    // and presentation binding. Only the facts are read again; nothing is resolved.
+    store.slots[0].metadata.insert(9, crate::entities::Metadata::Float(10.));
+    store.slots[0].appearance_revision += 1;
+    store.slots[0].binding = None;
+    let (_, stats) = render(&mut store, &content, true);
+    assert_eq!((store.crowd.instances()[0].words[0], stats.crowd_resolved, store.items.selections()), (late, 0, selections));
+    // A worn stack replaced without any appearance change is resolved again.
+    store.slots[0].equipment[2] = None;
+    let (_, stats) = render(&mut store, &content, true);
+    assert_eq!(stats.crowd_resolved, 1);
+    assert_ne!(store.crowd.instances()[0].words[0], late, "no boots: another composite");
 }
 
 /// G2 battle soldiers: zombies in the `assets/battle_video` armour holding its weapons and
@@ -821,7 +833,9 @@ fn battle_crowd_frame_time() {
         );
     };
     eprintln!("bench: first frame {:.2} ms", first.as_secs_f64() * 1e3);
-    report("steady", (1..=30).map(|index| frame(&mut store, index).0).collect());
+    // `SOLARIS_BENCH_STEADY` frames (default 30), e.g. many for a profile of steady frames.
+    let steady = std::env::var("SOLARIS_BENCH_STEADY").ok().and_then(|v| v.parse().ok()).unwrap_or(30_u64);
+    report("steady", (1..=steady).map(|index| frame(&mut store, index).0).collect());
     let mut churn = Vec::new();
     let mut composites = 0;
     for index in 31..=60_u64 {

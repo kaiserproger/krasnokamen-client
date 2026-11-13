@@ -196,36 +196,52 @@ fn texture_key(texture: TextureRegion) -> [u32; 5] {
 }
 
 /// An entity's last composite, valid while nothing it was resolved from changed: the crowd
-/// and item generations, the appearance revision (every metadata and equipment change bumps
-/// it), the rig and texture, and per held/head slot the stack and the frame-varying item
-/// state its selection read. Checking it costs no lookup by name and no allocation.
+/// and item generations, the texture, every slot's stack, the metadata it read ([`Facts`]),
+/// and per held/head slot the frame-varying item state its selection read. An unchanged
+/// appearance revision proves the facts unchanged, so a frame costs no lookup by name and no
+/// allocation; a changed revision (any metadata, health included) re-reads only the facts.
 #[derive(Debug)]
 pub(crate) struct Binding {
     generation: u64,
     items: u64,
     appearance: u64,
-    rig: usize,
     texture: [u32; 5],
-    left_main: bool,
+    rig: usize,
+    facts: Facts,
     /// Metadata index of the kind's living flags (item use), resolved once.
     flags: Option<u8>,
-    /// Slots 0, 1 and 5 ([`HELD_SLOTS`]).
-    held: [HeldMemo; 3],
+    /// Every slot's stack: its component handle (retained, so the address cannot be reused)
+    /// and item.
+    stacks: [Option<(Arc<BTreeMap<String, Value>>, u32)>; 8],
+    /// Slots 0, 1 and 5 ([`HELD_SLOTS`]): the held item's shape, the context inputs its
+    /// selection read and their values; `None` when the slot holds nothing drawn as an item.
+    held: [Option<(u64, Reads, ItemUse)>; 3],
     composite: u32,
 }
 
 /// Held (0, 1) and head (5) slots: their item model is selected per frame.
 const HELD_SLOTS: [usize; 3] = [0, 1, 5];
 
-/// One held/head slot as its binding resolved it.
-#[derive(Debug)]
-struct HeldMemo {
-    /// The slot's stack: its component handle (retained, so the address cannot be reused)
-    /// and item.
-    stack: Option<(Arc<BTreeMap<String, Value>>, u32)>,
-    /// The held item's shape, the context inputs its selection read and their values
-    /// (in use, use ticks, crossbow pull); `None` when the slot holds nothing drawn as an item.
-    item: Option<(u64, Reads, ItemUse)>,
+/// The metadata a composite and its crowd routing read: main arm (held item sides), baby
+/// (armour rigs), invisible/glowing flags and pose (routing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Facts {
+    left_main: bool,
+    baby: bool,
+    hidden: bool,
+    pose: i32,
+}
+
+impl Facts {
+    fn of(models: &Models, entity: &Entity) -> Self {
+        Self {
+            left_main: p::left_main_arm(models, entity),
+            baby: p::boolean(models, entity, "DATA_BABY_ID"),
+            // Invisible bodies still draw equipment; glowing adds an outline.
+            hidden: p::number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & (32 | 64) != 0,
+            pose: p::number(models, entity, "DATA_POSE").unwrap_or(0),
+        }
+    }
 }
 
 /// Frame-varying item state of a held slot (`presentation::held_item_use`).
@@ -245,13 +261,11 @@ impl ItemUse {
     }
 }
 
-impl HeldMemo {
-    fn same_stack(&self, stack: Option<&Stack>) -> bool {
-        match (&self.stack, stack) {
-            (None, None) => true,
-            (Some((components, id)), Some(stack)) => *id == stack.id && Arc::ptr_eq(components, &stack.components),
-            _ => false,
-        }
+fn same_stack(kept: &Option<(Arc<BTreeMap<String, Value>>, u32)>, stack: Option<&Stack>) -> bool {
+    match (kept, stack) {
+        (None, None) => true,
+        (Some((components, id)), Some(stack)) => *id == stack.id && Arc::ptr_eq(components, &stack.components),
+        _ => false,
     }
 }
 
@@ -326,14 +340,15 @@ pub(super) struct Inputs<'a> {
 pub(super) type Fallback = &'static str;
 
 /// Routes `entity` (of a crowd [`kind`]) to the crowd renderer and pushes its instance,
-/// or names why the CPU path must draw it (nothing pushed).
+/// or names why the CPU path must draw it (nothing pushed). `Ok(true)`: its appearance was
+/// resolved again this frame (`PresentationStats::crowd_resolved`).
 pub(super) fn try_instance(
     registry: &mut Registry,
     items: &mut ItemModels,
     equipment: &mut equipment::Cache,
     entity: &mut Entity,
     inputs: Inputs<'_>,
-) -> Result<(), Fallback> {
+) -> Result<bool, Fallback> {
     let Inputs { models, content, frame, .. } = inputs;
     if registry.instances.len() >= MAX_INSTANCES {
         return Err("instance budget");
@@ -342,19 +357,25 @@ pub(super) fn try_instance(
     if !matches!(bound.style, RootStyle::Living) || bound.layers.is_some() || bound.anger.is_some() {
         return Err("special layers");
     }
-    let rig = models.rig(&bound.rig);
-    // Invisible bodies still draw equipment; glowing adds an outline: both stay on the CPU path.
-    let flags = p::number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
-    if rig.is_placeholder() {
-        return Err("placeholder rig");
-    }
-    if flags & (32 | 64) != 0 {
-        return Err("invisible or glowing");
-    }
-    if p::number(models, entity, "DATA_POSE").unwrap_or(0) != 0 {
-        return Err("pose");
-    }
-    let composite = composite(registry, items, equipment, entity, rig, &inputs)?;
+    // A kept binding passed the checks below for the same rig and facts.
+    let (composite, resolved) = match kept(registry, items, entity, &inputs)? {
+        Some(composite) => (composite, false),
+        None => {
+            let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
+            let rig = models.rig(&bound.rig);
+            let facts = Facts::of(models, entity);
+            if rig.is_placeholder() {
+                return Err("placeholder rig");
+            }
+            if facts.hidden {
+                return Err("invisible or glowing");
+            }
+            if facts.pose != 0 {
+                return Err("pose");
+            }
+            (composite(registry, items, equipment, entity, rig, facts, &inputs)?, true)
+        }
+    };
     let bone_count = registry.meshes.groups[composite as usize].bone_count;
     if registry.bones + bone_count > MAX_BONES {
         return Err("bone budget");
@@ -369,7 +390,7 @@ pub(super) fn try_instance(
     }
     registry.counts[composite as usize] += 1;
     registry.instances.push(instance);
-    Ok(())
+    Ok(resolved)
 }
 
 /// The per-frame instance of a bound entity; `None` when its pose has no instance form.
@@ -450,14 +471,64 @@ impl Held {
     }
 }
 
-/// The composite of `entity`'s appearance (`rig` is its bound rig), resolving and building
-/// it when needed.
+/// The composite of `entity`'s kept [`Binding`] when nothing it was resolved from changed and
+/// every held item still selects the same shape (re-selecting those whose read inputs
+/// changed); `None` when the appearance must be resolved again.
+fn kept(
+    registry: &Registry,
+    items: &mut ItemModels,
+    entity: &mut Entity,
+    inputs: &Inputs<'_>,
+) -> Result<Option<u32>, Fallback> {
+    let Inputs { models, content, frame, item_context, .. } = *inputs;
+    let Some(mut binding) = entity.crowd.take() else { return Ok(None) };
+    let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
+    let texture = texture_key(bound.texture);
+    if binding.generation != registry.generation
+        || binding.items != items.generation()
+        || binding.texture != texture
+        || !binding.stacks.iter().enumerate().all(|(slot, kept)| same_stack(kept, entity.equipment_value(slot)))
+    {
+        return Ok(None);
+    }
+    if binding.appearance != entity.appearance_revision {
+        // New metadata (most often health): only the facts it could change are compared.
+        if std::ptr::from_ref(models.rig(&bound.rig)) as usize != binding.rig || Facts::of(models, entity) != binding.facts {
+            return Ok(None);
+        }
+        binding.appearance = entity.appearance_revision;
+    }
+    let mut flags = None;
+    for (memo, slot) in binding.held.iter_mut().zip(HELD_SLOTS) {
+        let (Some((shape, reads, used)), Some(stack)) = (*memo, entity.equipment_value(slot)) else { continue };
+        let flags = *flags.get_or_insert_with(|| {
+            binding.flags.and_then(|index| entity.metadata_value(index)).and_then(Metadata::int).unwrap_or(0)
+        });
+        let (using, ticks, pull) = p::held_item_use(entity, flags, slot, frame.partial);
+        if !reads.contains(Reads::VOLATILE) && used.same(ItemUse { using, ticks, pull }, reads) {
+            continue;
+        }
+        let rig = models.rig(&bound.rig);
+        let held = held_item(entity, models, content, items, rig, slot, stack, binding.facts.left_main, frame.partial, item_context)?;
+        if held.shape != shape {
+            return Ok(None);
+        }
+        *memo = Some((held.shape, held.reads, held.item_use()));
+    }
+    let composite = binding.composite;
+    entity.crowd = Some(binding);
+    Ok(Some(composite))
+}
+
+/// The composite of `entity`'s appearance (`rig` is its bound rig, `facts` its metadata),
+/// resolving and building it when needed, and its new [`Binding`].
 fn composite(
     registry: &mut Registry,
     items: &mut ItemModels,
     equipment: &mut equipment::Cache,
     entity: &mut Entity,
     rig: &Rig,
+    facts: Facts,
     inputs: &Inputs<'_>,
 ) -> Result<u32, Fallback> {
     let Inputs { models, content, frame, item_context, .. } = *inputs;
@@ -465,44 +536,7 @@ fn composite(
     let rig_key = std::ptr::from_ref(rig) as usize;
     let texture = texture_key(bound.texture);
     let bound_texture = bound.texture;
-    // Unchanged appearance: only the held items' frame-varying selection inputs can differ.
-    if let Some(mut binding) = entity.crowd.take()
-        && binding.generation == registry.generation
-        && binding.items == items.generation()
-        && binding.appearance == entity.appearance_revision
-        && binding.rig == rig_key
-        && binding.texture == texture
-    {
-        let mut current = true;
-        let mut flags = None;
-        for (memo, slot) in binding.held.iter_mut().zip(HELD_SLOTS) {
-            let stack = entity.equipment_value(slot);
-            if !memo.same_stack(stack) {
-                current = false;
-                break;
-            }
-            let (Some((shape, reads, used)), Some(stack)) = (memo.item, stack) else { continue };
-            let flags = *flags.get_or_insert_with(|| {
-                binding.flags.and_then(|index| entity.metadata_value(index)).and_then(Metadata::int).unwrap_or(0)
-            });
-            let (using, ticks, pull) = p::held_item_use(entity, flags, slot, frame.partial);
-            if !reads.contains(Reads::VOLATILE) && used.same(ItemUse { using, ticks, pull }, reads) {
-                continue;
-            }
-            let held = held_item(entity, models, content, items, rig, slot, stack, binding.left_main, frame.partial, item_context)?;
-            if held.shape != shape {
-                current = false;
-                break;
-            }
-            memo.item = Some((held.shape, held.reads, held.item_use()));
-        }
-        if current {
-            let composite = binding.composite;
-            entity.crowd = Some(binding);
-            return Ok(composite);
-        }
-    }
-    let left_main = p::left_main_arm(models, entity);
+    let left_main = facts.left_main;
     let mut held = Vec::new();
     for slot in HELD_SLOTS {
         let Some(stack) = entity.equipment_value(slot) else { continue };
@@ -570,18 +604,16 @@ fn composite(
             composite
         }
     };
-    let held = HELD_SLOTS.map(|slot| HeldMemo {
-        stack: entity.equipment_value(slot).map(|stack| (Arc::clone(&stack.components), stack.id)),
-        item: held.iter().find(|h| h.slot == slot).map(|h| (h.shape, h.reads, h.item_use())),
-    });
+    let held = HELD_SLOTS.map(|slot| held.iter().find(|h| h.slot == slot).map(|h| (h.shape, h.reads, h.item_use())));
     entity.crowd = Some(Binding {
         generation: registry.generation,
         items: items.generation(),
         appearance: entity.appearance_revision,
-        rig: rig_key,
         texture,
-        left_main,
+        rig: rig_key,
+        facts,
         flags: models.accessor(&entity.type_name, "DATA_LIVING_ENTITY_FLAGS"),
+        stacks: std::array::from_fn(|slot| entity.equipment_value(slot).map(|stack| (Arc::clone(&stack.components), stack.id))),
         held,
         composite,
     });

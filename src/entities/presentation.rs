@@ -49,6 +49,9 @@ pub struct PresentationStats {
     pub profile_textures_pending: usize,
     /// Entities drawn by the GPU crowd renderer instead of dynamic geometry.
     pub crowd: usize,
+    /// Crowd entities whose appearance was resolved again this frame (new stacks, changed
+    /// facts or held item shapes); the rest reused their kept composite.
+    pub crowd_resolved: usize,
     /// Entities of crowd kinds left on the CPU path, per kind and reason.
     pub crowd_fallback: BTreeMap<&'static str, BTreeMap<&'static str, usize>>,
     pub unrendered: BTreeMap<String, String>,
@@ -751,9 +754,10 @@ pub fn append(
                 bed_direction,
             });
             match routed {
-                Ok(()) => {
+                Ok(resolved) => {
                     append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], transform, out)?;
                     stats.crowd += 1;
+                    stats.crowd_resolved += usize::from(resolved);
                     stats.animated += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
                     continue;
