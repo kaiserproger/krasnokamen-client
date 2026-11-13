@@ -1590,11 +1590,22 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         pitch = crate::motion::lerp(pitch, look_pitch, weight);
     }
     let swing = 1.4 * amplitude * leg_swing;
+    let mut legs = [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing];
+    if super::animation::select::horse_like(&e.type_name) {
+        // 26.3 `AbstractEquineModel.setupAnim` (javap): with c = cos(walkPos * 0.6662 + PI) the
+        // right hind and left front legs swing +0.5c and +0.8c times the walk speed, the other
+        // diagonal pair the negatives, and the head parts turn at most 20 degrees. The role
+        // gait carries one amplitude per diagonal pair: their mean, 0.65 (not the humanoid 1.4,
+        // which threw the legs out nearly flat at a gallop).
+        let pair = (phase + std::f32::consts::PI).cos() * amplitude * 0.65;
+        legs = [pair, -pair];
+        yaw_rel = yaw_rel.clamp(-20., 20.);
+    }
     RolePose {
         head: [pitch.to_radians(), yaw_rel.to_radians()],
         arms,
         arm_pivot_z_zero: spell,
-        legs: [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing],
+        legs,
         riding: e.vehicle.is_some(),
         crouch: number(models, e, "DATA_POSE") == Some(5),
         phase,
@@ -3283,6 +3294,37 @@ mod tests {
         assert_eq!(renderer_scale(&entity, &models, 0.), 1.1);
         entity.type_name = "minecraft:pig".into();
         assert_eq!(renderer_scale(&entity, &models, 0.), 1.);
+    }
+
+    /// BV-HORSE ("splayed legs"): equines take the 26.3 `AbstractEquineModel` gait (diagonal
+    /// pairs, 0.65 x walk speed), not the humanoid 1.4 that threw a galloping horse's legs out
+    /// nearly flat; a zombie at the same walk keeps 1.4.
+    #[test]
+    fn walking_horse_legs_take_the_equine_gait() {
+        use super::super::{animation_tests, render_living};
+        let pose_of = |type_name: &str| {
+            let (models, mut entity) = animation_tests::fixture();
+            entity.type_name = type_name.into();
+            let mut source = entity.source.take().unwrap();
+            for x in [0.2, 0.5, 0.8] {
+                source.living.as_mut().unwrap().tick(&models, &entity, &render_living::TickInput {
+                    age: 1, position: [x, 0., 0.], yaw: 0., alive: true, passenger: false,
+                    baby: false, visually_swimming: false, in_water: false, uses_y_for_walk: false,
+                    rotation_changed_before_base_tick: false, is_mob: true,
+                    first_passenger_is_mob: false, max_head_yaw: 75., max_body_head_yaw: 75.,
+                    attack_active: false, camel_sitting: false, camel_visually_sitting: false,
+                    camel_sitting_down: false, camel_pose_transition: false, camel_pose_time: 0,
+                });
+            }
+            entity.source = Some(source);
+            role_pose(&entity, &models, &Content::test_cube(), 2, 0.5)
+        };
+        let horse = pose_of("minecraft:horse");
+        assert!(horse.amplitude > 0.1, "walking: {}", horse.amplitude);
+        let pair = (horse.phase + std::f32::consts::PI).cos() * horse.amplitude * 0.65;
+        assert!((horse.legs[0] - pair).abs() < 1e-6 && (horse.legs[1] + pair).abs() < 1e-6, "{:?}", horse.legs);
+        let zombie = pose_of("minecraft:zombie");
+        assert!((zombie.legs[0] - zombie.phase.cos() * 1.4 * zombie.amplitude).abs() < 1e-6);
     }
 
     #[test]
