@@ -181,6 +181,7 @@ def rank(args, client: Client):
     offset = None
     target = None
     last = None
+    last_step = time.monotonic()
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
@@ -203,18 +204,20 @@ def rank(args, client: Client):
             me = pilot.player()
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
-            offset, target, last = None, None, position(me)
+            offset, target, last, last_step = None, None, position(me), time.monotonic()
             pilot.sent_look = None
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             continue
-        if last is not None and math.dist(here, last) > 6.0:
+        # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
+        stepped = time.monotonic()
+        if last is not None and math.dist(here, last) > 4.0 + 8.0 * (stepped - last_step):
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
             offset, target = None, None
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
             interval = attack_interval(client, args.attack_interval)
             log("attack interval", round(interval, 2), "s")
-        last = here
+        last, last_step = here, stepped
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
         new = pending = 0
         friends, enemies = [], []
