@@ -262,7 +262,7 @@ class RouteGuard(unittest.TestCase):
         self.assertEqual(kept, set(), "any height: the box has no ceiling or floor")
 
     def test_the_box_edge_counts_the_players_width(self):
-        kept, _ = self.run_filter(FakeWorld(), {"forward"}, here=[-192.9, 73.0, 25.5], reach=0.5)
+        kept, _ = self.run_filter(FakeWorld(), {"forward"}, here=[-192.9, 73.0, 25.5], reach=0.7)
         self.assertEqual(kept, set(), "0.9 blocks from the box at x -192, the player's 0.3 radius and the 0.7 look step reach it")
 
     def test_from_inside_the_box_only_the_way_out_is_allowed(self):
@@ -429,6 +429,86 @@ class Probe(unittest.TestCase):
     def test_the_step_limit_ends_it(self):
         sim, logs = run_probe(["0", "500", "--probe-steps", "3"])
         self.assertRegex(logs[-1], r"^probe done: step limit 3")
+
+
+# The trial-7 stairs into the mine, walking -X from the valley at (-187.5, 73, 24.5) (sim x = world x + 188, start
+# sim 0.5). Columns: the top of the solid run from the bottom of the world at z 24, read from the native checkpoint
+# probe receipts/BvLiveBugs/probe-trial7.json (probe-native of world-trial7, blocks x -199..-184, z 21..35, y 0..100;
+# the live probe's own MCP transcripts probe-3000/probe-edge/mcp-transcript.jsonl are empty). It reproduces the
+# live log: from feet y 73 cell -190 (top 70) is a drop of 2; from feet y 72 the first refused cell is -191 (top 67,
+# a drop of 4), from feet y 71 it is -192 (top 64, a drop of 6).
+STAIRS = {-189: 72, -190: 70, -191: 67, -192: 64, -193: 19, -194: 13, -195: 10, -196: 7}
+DEEP = 7
+
+
+def stairs_floor(sim_x: float, sim_z: float):
+    """The sim's floor (feet y 64 stands for the world's 73: shifted by 9) under sim cell (x, z); world x = sim x - 188."""
+    cell = math.floor(sim_x - 188.0)
+    ground = 72 if cell >= -189 else STAIRS.get(cell, DEEP)  # (the valley floor beyond -189 is 72-74; 72 is enough)
+    return ground - 9
+
+
+class StairsEdge(unittest.TestCase):
+    """PovRed walking -X off the valley toward the stairs: he must stop short of the first refused cell (-191, a
+    drop of 5 from y 73; sim cell -3) with the margin, not walk down onto the 2-block step beside it (the live probe did: y 72.8
+    -> 71.0, stopped 0.1 blocks from the cell)."""
+
+    EDGE = -190.0  # east edge of the refused cell -191
+
+    def probe(self, *extra):
+        sim = MarchingRank(0.05, floor=lambda x, z: stairs_floor(x, z))
+        logs, ticks = [], []
+        real = sim.tool
+
+        def tool(name, arguments=None):
+            if name == "minecraft_press_inputs" and "hold" not in (arguments or {}):
+                ticks.append(arguments["ticks"])
+            return real(name, arguments)
+
+        sim.tool = tool
+        saved = pilot.time, pilot.log
+        pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
+        pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+        sim.me = [0.5, 0.5]
+        try:
+            # world goal x -197 is sim x -9: the probe takes its goal in the sim's own frame
+            pilot.probe(pilot.arguments(["runtime", "--probe", "-9", "0.5", *extra]), sim)
+        except Stop:
+            pass
+        finally:
+            pilot.time, pilot.log = saved
+        return sim, logs, ticks
+
+    def test_he_stops_a_margin_before_the_refused_cell_and_never_steps_down(self):
+        sim, logs, ticks = self.probe()
+        world_x = sim.me[0] - 188.0
+        self.assertGreaterEqual(world_x, self.EDGE + 1.5 - 1e-6, f"stopped at x {world_x:.2f}, closer than 1.5 to the refused cell")
+        self.assertTrue(any(line.startswith("edge refused forward at -3,64,0") and "drop=4+" in line for line in logs), logs)
+        self.assertRegex(logs[-1], r"^probe done: refused 3 steps in a row")
+        self.assertEqual(sim.held_during, [])
+
+    def test_no_pulse_is_longer_than_the_ground_read_beyond_it(self):
+        sim, logs, ticks = self.probe()
+        speed = 4.3
+        self.assertTrue(ticks)
+        for t in ticks:
+            self.assertLessEqual(t / 20 * speed, pilot.GUARD_REACH - pilot.GUARD_MARGIN + speed / 20 + 1e-6)
+
+    def test_a_pulse_never_ends_nearer_the_refused_cell_than_the_margin(self):
+        # Drive it from several starts: whatever the step lengths, the position after every step is >= 1.5 away.
+        for start in (12.5, 7.3, 3.1, 0.5):  # sim x; world = sim - 188: -175.5 .. -187.5
+            sim = MarchingRank(0.05, floor=lambda x, z: stairs_floor(x, z))
+            sim.me = [start, 0.5]
+            saved = pilot.time, pilot.log
+            pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
+            pilot.log = lambda *parts: None
+            try:
+                pilot.probe(pilot.arguments(["runtime", "--probe", "-9", "0.5"]), sim)
+            except Stop:
+                pass
+            finally:
+                pilot.time, pilot.log = saved
+            self.assertGreaterEqual(sim.me[0] - 188.0, self.EDGE + 1.5 - 1e-6, f"start {start}")
 
 
 if __name__ == "__main__":

@@ -130,8 +130,15 @@ MAX_DROP = 3
 KEEPOUT = (-192.0, -184.0, 21.0, 30.0)  # x0, x1, z0, z1: the mine's box, blocks (cells -192..-184 / 21..30), any height
 PLAYER_RADIUS = 0.3
 LOOK_STEP = 0.7  # blocks between checked points along a key's direction, from the feet
-GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key (a pulse walks at most this less 0.5)
+GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key
+GUARD_MARGIN = 1.8  # a pulse ends this many blocks (inertia of its last tick included) short of the farthest cell read
 LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
+
+
+def look_points(reach: float):
+    """Distances from the feet that are checked along a key's direction: every LOOK_STEP up to `reach`, and `reach` itself."""
+    points = [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP + 1e-9) + 1)]
+    return points + ([reach] if not points or reach - points[-1] > 1e-9 else [])
 
 
 def key_vector(key: str, yaw: float):
@@ -174,14 +181,13 @@ class Guard:
         self.logged: dict[tuple, float] = {}
 
     def cells(self, here, vector, reach):
-        """Distinct (x, z) cells along `vector` from the feet, 0.7 blocks apart up to `reach`, not the feet's own."""
+        """Distinct (x, z) cells along `vector` from the feet at `look_points(reach)`, not the feet's own."""
         own = (math.floor(here[0]), math.floor(here[2]))
-        out, k = [], LOOK_STEP
-        while k <= reach + 1e-9:
+        out = []
+        for k in look_points(reach):
             cell = (math.floor(here[0] + vector[0] * k), math.floor(here[2] + vector[1] * k))
             if cell != own and cell not in out:
                 out.append(cell)
-            k += LOOK_STEP
         return out
 
     def columns(self, cells, feet_y):
@@ -242,7 +248,7 @@ class Guard:
                 if vector[0] * (here[0] - centre[0]) + vector[1] * (here[2] - centre[1]) <= 0:
                     return (f"keepout refused {name} at {place} (inside the box, key leads deeper)", ("keepout", name))
             elif any(in_keepout(here[0] + vector[0] * k, here[2] + vector[1] * k, self.keepout)
-                     for k in [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP) + 2)]):
+                     for k in look_points(reach)):
                 return (f"keepout refused {name} at {place} (box x {x0:g}..{x1:g}, z {z0:g}..{z1:g})", ("keepout", name))
         bad = self.judge(self.cells(here, vector, reach), feet_y)
         if bad is not None:
@@ -576,10 +582,13 @@ def move(client: Client, pilot: Pilot, guard, wanted: set, here, yaw: float, dis
     wanted = set(wanted)
     checked = None  # blocks along each key that the guard has read ground for
     if guard is not None:
-        # Read as far as the walk goes; a drop, water or the box inside that range shortens the walk to the
-        # nearer reach that is clear (half, then 1.5 blocks), and only a refusal at 1.5 blocks is logged.
-        far = min(GUARD_REACH, max(1.5, distance + 1.0))
-        reaches = [far, max(1.5, far / 2), 1.5] if far > 1.5 else [1.5]
+        # The ground is read GUARD_MARGIN blocks beyond where the pulse ends, so the pulse never ends within the margin
+        # of a cell that is refused (drop of more than 3 blocks measured from the feet now, water, lava, unread, the
+        # box), however far the stepping-down of a permitted drop carries him. A refusal inside the range shortens the
+        # read (half, then the least that still allows a 0.5-block pulse); only a refusal at the least is logged.
+        least = GUARD_MARGIN + 0.5
+        far = min(GUARD_REACH, max(least, distance + GUARD_MARGIN))
+        reaches = [far, max(least, far / 2), least] if far > least else [least]
         for checked in reaches[:-1]:
             kept = guard.filter(wanted, here, yaw, checked, quiet=True)
             if kept & {"forward", "back", "left", "right"} or not wanted & {"forward", "back", "left", "right"}:
@@ -597,7 +606,7 @@ def move(client: Client, pilot: Pilot, guard, wanted: set, here, yaw: float, dis
         pulse = set()
     pilot.keys(wanted)
     if pulse:
-        walk = distance if checked is None else min(distance, checked - 0.5)
+        walk = distance if checked is None else min(distance, checked - GUARD_MARGIN)
         client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, math.ceil(walk / speed * 20)))})
     return pulse or (wanted & {"forward", "back", "left", "right"})
 
