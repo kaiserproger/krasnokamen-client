@@ -350,8 +350,9 @@ writes a JSONL timeline for camera planning:
 
 `tools/battle_shots.py plan timeline.jsonl --out DIR --name NAME` turns the
 timeline into kit cameras and a `bv-render.sh batch` shot list: dollies
-along contact lines, over-the-shoulder `attach_entity` shots on fighters
-reaching contact, volleys followed from behind the archers to the impact,
+along contact lines, flat flank dollies and down-the-line enfilades,
+over-the-shoulder `attach_entity` shots on fighters reaching contact (looking
+along the line, the lens lifted by the ground steps around the cluster), volleys followed from behind the archers to the impact,
 cavalry tracking, push-ins into the densest melee and at most one high oblique
 establishing shot. Cameras sit at a height above their own column's ground. Every
 pose of a shot (every 0.25 s on the client's Catmull-Rom/smoothstep path) must keep
@@ -386,8 +387,28 @@ and drop is a line in `DIR/plan.log` and in `plan.json` `order_decisions`.
 `battle_shots.py check SHOTS_FILE CAMERA_DIR` applies the same rule to a final
 `shots.txt` (CAMERA_DIR is the root its camera paths are relative to; a
 `plan.json` there supplies `where`). It prints every adjacent pair with its time
-delta and whether the cut is a sharp angle change, and exits 1 on a forbidden
-backtrack; run it on the shot list before the montage step.
+delta and whether the cut is a sharp angle change, then every shot's class and
+the variety rule below, and exits 1 on a forbidden backtrack or a variety
+violation; run it on the shot list before the montage step.
+
+Shot variety. Every shot has a class from the median pitch of its view
+(`shot_class`, from the camera file alone): `high` looks down at 22 degrees or
+more (`HIGH_PITCH`), it shows the army the lens stands in; `shoulder` is a flatter
+`attach_entity` camera in the line of contact; `low-side` is every other flat view,
+from beside or along the line, with the horizon in frame. A plan has at most two
+adjacent shots of one class (`MAX_RUN`) and at least 40 % low-side or shoulder
+shots (`MIN_VARIED`). Besides the dollies, push-ins and shoulders, the planner
+makes `flank` shots (a flat dolly 12-20 blocks off the line, looking 16 blocks
+along it) and `enfilade` shots (down the line from beyond its end, on its axis).
+Every contact shot must frame both colours: red and blue each hold at least 15 %
+of the contact-cluster fighters in its frames (`MIN_SIDE`, `frame_share`: a
+cluster is red on its -normal side and blue on its +normal side, split by its red
+and blue counts), and the more even the frame the higher the shot ranks. `plan`
+repairs its pick to the variety rule (swap a shot of the offending class for the
+best unused candidate of another class, else drop it; `plan.json`
+`variety_decisions`, and `plan.json` `shots` carry class, pitch, lens height and the
+in-frame counts), then fills a short cut with candidates that keep the order and
+the rule.
 
 ## Live filming clients (no replay)
 
@@ -442,7 +463,7 @@ easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain
 includes the replay settle beyond the CPU mesh budget (several upload rounds equal
 one round). `cargo test -p solaris-client --lib replay::scan` covers side
 classification, contact clustering, terrain columns and arrow flight;
-`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff, framing and shot-order rules;
+`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff, framing, shot-order and shot-variety rules;
 `python3 -m unittest tools.test_bv_live_pilot` the live pilot against a simulated marching rank
 with slow (0.4 s) and fast MCP calls. These
 do not replace the captured real-world smoke shot or a full 20k battle.

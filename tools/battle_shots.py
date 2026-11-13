@@ -8,7 +8,8 @@
   battle_shots.py check SHOTS.txt CAMERA_DIR
       lists every adjacent pair of a final shots.txt (camera paths resolved under CAMERA_DIR, plus
       CAMERA_DIR/plan.json for the world position of attach_entity shots) with its time delta and whether
-      the cut is a sharp angle change; exits 1 on a forbidden backtrack (see "Shot order").
+      the cut is a sharp angle change, then each shot's class and the variety rule; exits 1 on a forbidden
+      backtrack (see "Shot order") or a variety violation (see "Shot classes").
   battle_shots.py preview DIR --kit KIT --take TAKE.solrec [--size 640x360]
       renders one frame per preview time with KIT/bv-render.sh (BV_* env passes through)
       into KIT/shots and extracts DIR/previews/SHOT-N.png.
@@ -44,8 +45,27 @@ change is allowed; forward jumps in time are always allowed. Otherwise the plann
 shot's start forward to the previous END when at least MIN_SHOT (2.5) seconds remain, else drops it;
 every trim, drop and allowed sharp backtrack is a line in DIR/plan.log and in plan.json
 `order_decisions`.
+
+Shot classes (`shot_class`, from the camera file alone, so `check` rederives them): by the median pitch of
+the view over the shot,
+- high: pitch <= HIGH_PITCH (-22 deg), looking down on the mass; it shows the army the lens stands in;
+- shoulder: an attach_entity camera (over a fighter's shoulder, in the line of contact) that looks flatter;
+- low-side: every other camera: a flat view from beside or along the contact line, horizon in frame.
+Besides dolly, push-in, shoulder, volley, cavalry and establishing shots the planner makes `flank` shots (a
+flat dolly 12-20 blocks off the contact line looking 16 blocks along it) and `enfilade` shots (down the line
+from beyond its end, on its axis).
+
+Variety: no more than MAX_RUN (2) adjacent shots of one class, and at least MIN_VARIED (40 %) of the shots
+are low-side or shoulder. `plan` repairs its pick (swaps a shot of the offending class for the best unused
+candidate of another class, else drops it; then fills a short cut with candidates that keep the order and the
+rule; every swap, drop and addition is a line in plan.log and plan.json `variety_decisions`) and `check` exits
+1 on a violation. A contact shot (dolly, push-in, shoulder, flank, enfilade) must also frame both colours:
+each of red and blue holds at least MIN_SIDE (15 %) of the contact-cluster fighters inside its frames,
+summed over the shot's poses (`frame_share`: every contact cluster is red on its -normal side and blue on
+its +normal side, split by its red/blue counts; fighters beyond FRAME_REACH blocks do not count); the more
+even the frame, the higher the shot ranks.
 """
-import argparse, bisect, hashlib, json, math, os, subprocess, sys
+import argparse, bisect, copy, hashlib, json, math, os, subprocess, sys
 from collections import Counter
 from pathlib import Path
 
@@ -63,6 +83,11 @@ SHARP_LOOK = 40.0      # ... look targets farther apart than this (blocks)
 SHARP_YAW = 60.0       # ... view directions differing by more than this (degrees)
 MIN_SHOT = 2.5         # a shot trimmed by the no-backtrack rule must keep at least this many seconds
 TIME_EPS = 1e-6
+HIGH_PITCH = -22.0    # degrees; a median view pitch at or below this looks down on the mass ("high")
+MAX_RUN = 2           # at most this many consecutive shots of one class
+MIN_VARIED = 0.4      # at least this share of a plan's shots are low-side or shoulder
+MIN_SIDE = 0.15       # each colour's least share of the contact fighters in frame, summed over a contact shot's poses
+FRAME_REACH = 90.0    # fighters farther than this from the lens do not count as in frame
 
 
 def load(path):
@@ -304,15 +329,55 @@ def off_centre(eye, look, fov, point):
     return abs(p - pitch) > v / 4 or abs((hd - heading + math.pi) % (2 * math.pi) - math.pi) > h / 4
 
 
+def in_frame(eye, look, fov, point, reach=FRAME_REACH):
+    """True when `point` is inside the frame (vertical `fov`, 16:9) within `reach` blocks of the lens."""
+    pitch, heading, _ = angles(eye, look)
+    p, hd, dist = angles(eye, point)
+    v = math.radians(fov)
+    h = 2 * math.atan(math.tan(v / 2) * ASPECT)
+    return dist <= reach and abs(p - pitch) <= v / 2 and abs((hd - heading + math.pi) % (2 * math.pi) - math.pi) <= h / 2
+
+
+RED_ON_NORMAL = -1.0  # red stands on the -normal side of a contact cluster, blue on +normal (111 of 125 melee clusters of G2)
+
+
+def frame_share(sample, eye, look, fov, grid=7):
+    """(red, blue) contact fighters inside the frame at `sample`'s time. Each contact cluster is a
+    `grid` x `grid` lattice over its ground (line x normal, one block of margin): red fills the share of the
+    depth its count says on the red side, blue the rest, each lattice point carries its share of the count."""
+    red = blue = 0.0
+    for c in sample["contacts"]:
+        total = c["count"]
+        if not total:
+            continue
+        r, b = c.get("red", 0), c.get("blue", 0)
+        cut = r / (r + b) if r + b else 0.5  # fraction of the depth, from the red edge, that is red
+        sign = RED_ON_NORMAL
+        half_u, half_v = c["length"] / 2 + 1.0, c["depth"] / 2 + 1.0
+        for i in range(grid):
+            u = -half_u + 2 * half_u * (i + 0.5) / grid
+            for j in range(grid):
+                f = (j + 0.5) / grid  # 0 at the red edge, 1 at the blue edge
+                v = sign * half_v * (1.0 - 2.0 * f)  # -half_v (red's edge) at f = 0 with red on -normal
+                point = [c["centroid"][0] + u * c["line"][0] + v * c["normal"][0], c["centroid"][1] + 1.2,
+                         c["centroid"][2] + u * c["line"][1] + v * c["normal"][1]]
+                if in_frame(eye, look, fov, point):
+                    red_part = min(1.0, max(0.0, cut * grid - j))  # the share of this lattice row that is red
+                    red += total / grid ** 2 * red_part
+                    blue += total / grid ** 2 * (1.0 - red_part)
+    return red, blue
+
+
 class Vet:
     """The standoff, terrain and framing checks at every STEP of a shot; counts rejections by check."""
 
     def __init__(self, tl, terrain):
         self.tl, self.terrain, self.rejected = tl, terrain, Counter()
 
-    def why_not(self, keys, attach=None, subject=None, looks_up=False):
+    def why_not(self, keys, attach=None, subject=None, looks_up=False, sides=False):
         t0, t1 = keys[0][0], keys[-1][0]
         n = max(1, round((t1 - t0) / STEP))
+        seen = [0.0, 0.0]  # red, blue contact fighters in frame summed over the shot's poses
         for t in sorted({t0 + (t1 - t0) * i / n for i in range(n + 1)} | {k[0] for k in keys}):
             eye, look, fov = pose(keys, t)
             if attach is not None:
@@ -321,21 +386,64 @@ class Vet:
             reason = (crowding(self.terrain, eye, look, self.tl.at(t))
                       or terrain_view(self.terrain, eye, look, fov, looks_up)
                       or (subject is not None and off_centre(eye, look, fov, subject(t)) and "subject off the frame centre"))
+            if not reason and sides:
+                red, blue = frame_share(self.tl.at(t), eye, look, fov)
+                if red + blue < 1.0:
+                    reason = "no contact in frame"
+                seen[0] += red
+                seen[1] += blue
             if reason:
                 return reason
+        if sides and min(seen) < MIN_SIDE * sum(seen):
+            return "one colour fills the frame"
         return None
 
-    def __call__(self, keys, attach=None, subject=None, looks_up=False):
-        reason = self.why_not(keys, attach, subject, looks_up)
+    def __call__(self, keys, attach=None, subject=None, looks_up=False, sides=False):
+        reason = self.why_not(keys, attach, subject, looks_up, sides)
         if reason:
             self.rejected[reason] += 1
         return reason is None
+
+
+def median_pitch(keys):
+    """Median view pitch in degrees (negative looks down) over the shot's poses, every STEP."""
+    t0, t1 = keys[0][0], keys[-1][0]
+    n = max(1, round((t1 - t0) / STEP))
+    pitches = sorted(math.degrees(angles(*pose(keys, t0 + (t1 - t0) * i / n)[:2])[0]) for i in range(n + 1))
+    return pitches[len(pitches) // 2]
+
+
+def shot_class(keys, attach=None):
+    """high / shoulder / low-side, see the module doc."""
+    if median_pitch(keys) <= HIGH_PITCH:
+        return "high"
+    return "shoulder" if attach is not None else "low-side"
+
+
+def variety_problems(classes):
+    """Violations of the variety rule over the classes of a plan's shots in order, as (kind, first, last, text)
+    with 0-based shot indexes: `run` for a stretch longer than MAX_RUN, `share` (no indexes) when low-side plus
+    shoulder shots are under MIN_VARIED of the plan."""
+    out, i = [], 0
+    while i < len(classes):
+        j = i
+        while j + 1 < len(classes) and classes[j + 1] == classes[i]:
+            j += 1
+        if j - i + 1 > MAX_RUN:
+            out.append(("run", i, j, f"{j - i + 1} {classes[i]} shots in a row (shots {i + 1}-{j + 1}), at most {MAX_RUN}"))
+        i = j + 1
+    varied = sum(1 for c in classes if c != "high")
+    if classes and varied < MIN_VARIED * len(classes) - 1e-9:
+        out.append(("share", None, None, f"{varied} of {len(classes)} shots are low-side or shoulder, "
+                                         f"under {MIN_VARIED:.0%}"))
+    return out
 
 
 class Shot:
     def __init__(self, kind, start, end, keys, why, score, attach=None, where=None):
         self.kind, self.start, self.end, self.keys = kind, round(start, 2), round(end, 2), keys
         self.why, self.score, self.attach, self.where = why, score, attach, where
+        self.cls = shot_class(keys, attach)
 
     def camera(self):
         doc = {"keyframes": [{"time": round(t, 3), "position": [round(v, 3) for v in p],
@@ -408,7 +516,7 @@ def dolly_shots(tl, terrain, vet):
                     if not ok or len(times) < 2:
                         continue
                     keys = keyed(times, pos, look, [FOV] * len(times))
-                    if vet(keys):
+                    if vet(keys, sides=True):
                         swings = sum(g["swings"] for _, _, g in path if g)
                         out.append(Shot("dolly", times[0], times[-1], keys,
                                         f"contact line of {c['count']} fighters at t {s['t']}, camera {off:g} blocks behind {side}, {height:g} up, {swings} swings",
@@ -417,6 +525,114 @@ def dolly_shots(tl, terrain, vet):
                 else:
                     continue
                 break
+    return out
+
+
+# (height, blocks off the line); outside an army's box a lens can be low, inside only the HIGH ones keep the standoff.
+FLANK_PLACES = ((2.6, 12.0), (4.0, 14.0), (HIGH, 12.0), (HIGH, 16.0), (HIGH, 20.0))
+FLANK_AHEAD = 16.0  # the look target: this many blocks along the line from the lens's foot point
+
+
+def flank_shots(tl, terrain, vet):
+    """Low-side dolly: 12-20 blocks off the contact line, travelling along it and looking 16 blocks ahead
+    along the line from a flat pitch, so the line recedes across the frame with red on one side and blue on the other."""
+    out = []
+    for s in tl.samples:
+        if int(round(s["t"] * 2)) % 2:
+            continue  # whole seconds: neighbours half a second apart are the same shot
+        for c in s["contacts"][:3]:
+            if c["count"] < 20 or s["t"] < 4.5:
+                continue
+            t0, t1 = s["t"] - 1.0, min(tl.end - 0.1, s["t"] + 4.0)
+            if t1 - t0 < 3.0:
+                continue
+            path = smooth(tl.track(t0, t1, c["centroid"]))
+            if len(path) < 4:
+                continue
+            line, normal = c["line"], c["normal"]
+            travel = max(6.0, min(14.0, 0.6 * c["length"]))
+            done = False
+            for height, off in FLANK_PLACES:
+                for fwd in (1.0, -1.0):
+                    for sign in ((-1.0, 1.0) if int(s["t"]) % 2 == 0 else (1.0, -1.0)):
+                        times, pos, look, ok = [], [], [], True
+                        for t, centroid, _ in path[::2] + ([path[-1]] if len(path) % 2 == 0 else []):
+                            u = fwd * (-travel / 2 + travel * (t - path[0][0]) / (path[-1][0] - path[0][0]))
+                            base = add(centroid, flat(line), u)
+                            cam = place(terrain, add(base, flat(normal), sign * off), height)
+                            if cam is None:
+                                ok = False
+                                break
+                            times.append(t)
+                            pos.append(cam)
+                            look.append([base[0] + fwd * FLANK_AHEAD * line[0], chest(centroid, 1.0), base[2] + fwd * FLANK_AHEAD * line[1]])
+                        if not ok or len(times) < 2:
+                            continue
+                        keys = keyed(times, pos, look, [FOV] * len(times))
+                        if vet(keys, sides=True):
+                            swings = sum(g["swings"] for _, _, g in path if g)
+                            out.append(Shot("flank", times[0], times[-1], keys,
+                                            f"contact line of {c['count']} fighters at t {s['t']}, camera {off:g} blocks off the line on the "
+                                            f"{'red' if sign * RED_ON_NORMAL > 0 else 'blue'} side, {height:g} up, looking {FLANK_AHEAD:g} blocks along it, {swings} swings",
+                                            c["count"] + swings, where=c["centroid"]))
+                            done = True
+                            break
+                    if done:
+                        break
+                if done:
+                    break
+    return out
+
+
+# (height, blocks beyond the line's end)
+ENFILADE_PLACES = ((2.6, 10.0), (4.0, 12.0), (HIGH, 12.0), (HIGH, 16.0), (HIGH, 22.0))
+
+
+def enfilade_shots(tl, terrain, vet):
+    """Down the contact line from just beyond its end, 2-3 blocks off its axis, aimed at its centre: the line
+    recedes with red on one side of the frame and blue on the other."""
+    out = []
+    for s in tl.samples:
+        if int(round(s["t"] * 2)) % 2:
+            continue
+        for c in s["contacts"][:3]:
+            if c["count"] < 20 or s["t"] < 4.5:
+                continue
+            t0, t1 = s["t"] - 1.0, min(tl.end - 0.1, s["t"] + 4.0)
+            if t1 - t0 < 3.0:
+                continue
+            path = smooth(tl.track(t0, t1, c["centroid"]))
+            if len(path) < 4:
+                continue
+            line, normal = c["line"], c["normal"]
+            done = False
+            for height, back in ENFILADE_PLACES:
+                for fwd in (1.0, -1.0):
+                    for lat in (2.0, -2.0):
+                        times, pos, look, ok = [], [], [], True
+                        for t, centroid, g in path[::2] + ([path[-1]] if len(path) % 2 == 0 else []):
+                            reach = (g["length"] if g else c["length"]) / 2 + back
+                            cam = place(terrain, add(add(centroid, flat(line), -fwd * reach), flat(normal), lat), height)
+                            if cam is None:
+                                ok = False
+                                break
+                            times.append(t)
+                            pos.append(cam)
+                            look.append([centroid[0], chest(centroid, 1.0), centroid[2]])
+                        if not ok or len(times) < 2:
+                            continue
+                        keys = keyed(times, pos, look, [FOV] * len(times))
+                        if vet(keys, sides=True):
+                            swings = sum(g["swings"] for _, _, g in path if g)
+                            out.append(Shot("enfilade", times[0], times[-1], keys,
+                                            f"down the contact line of {c['count']} fighters at t {s['t']} from {back:g} blocks beyond its end, "
+                                            f"{height:g} up, {swings} swings", c["count"] + swings, where=c["centroid"]))
+                            done = True
+                            break
+                    if done:
+                        break
+                if done:
+                    break
     return out
 
 
@@ -452,7 +668,7 @@ def push_shots(tl, terrain, vet):
                     continue
                 keys = keyed([first[0], mid_t, last[0]], [far, mid, near],
                              [[p[0], chest(p, 0.3), p[2]] for p in (first[1], mid_c, last[1])], [FOV, 66.0, 60.0])
-                if vet(keys):
+                if vet(keys, sides=True):
                     out.append(Shot("push-in", first[0], last[0], keys,
                                     f"densest melee ({c['count']} in contact, {c['swings']} swings) at t {s['t']}, push to {stop:g} blocks, {2.6 + rise:g} up",
                                     c["count"] * 1.5 + c["swings"], where=c["centroid"]))
@@ -463,12 +679,28 @@ def push_shots(tl, terrain, vet):
     return out
 
 
-def shoulder_shots(tl, terrain, entities, vet):
-    """Over the shoulder of a front-line fighter walking into contact (attach_entity).
+SHOULDER_AHEAD = 16.0  # the look target of an over-the-shoulder camera: this far ahead of it along the fighter's advance
+SHOULDER_RELIEF = 5.0  # blocks around the contact cluster's centroid whose ground steps lift an over-the-shoulder lens
+SHOULDER_LIFT = 4.0    # at most this many blocks of lift
+SHOULDER_PITCH = 14.0  # degrees down the over-the-shoulder view keeps whatever its lens height
 
-    The timeline has no per-fighter positions, so the camera rides HIGH above the
-    fighter's feet: every neighbour's helmet stays STANDOFF below the lens. The checks
-    follow the fighter's contact cluster."""
+
+def ground_relief(terrain, centre, radius):
+    """Highest minus lowest ground among the recorded columns within `radius` blocks of `centre` (x, y, z)."""
+    r = int(radius)
+    grounds = [g for dx in range(-r, r + 1) for dz in range(-r, r + 1) if dx * dx + dz * dz <= radius * radius
+               for g in [terrain.ground(centre[0] + dx, centre[2] + dz)] if g is not None]
+    return max(grounds) - min(grounds) if grounds else 0.0
+
+
+def shoulder_shots(tl, terrain, entities, vet):
+    """Over the shoulder of a front-line fighter walking into contact (attach_entity), looking along the contact
+    line either way (red on one side of the frame, blue on the other) or, failing the both-colours frame
+    there, ahead along its advance.
+
+    The timeline has no per-fighter positions, so the camera rides HIGH (plus the ground relief around the
+    cluster, at most SHOULDER_LIFT) above the fighter's feet: every neighbour's helmet stays STANDOFF below the
+    lens. The checks follow the fighter's contact cluster."""
     out = []
     for s in tl.samples:
         tc = s["t"]
@@ -490,16 +722,25 @@ def shoulder_shots(tl, terrain, entities, vet):
                         continue
                     if path is None:
                         path = smooth(tl.track(tc - 2.5, end, c["centroid"])) or [(tc, c["centroid"], c)]
-                    d = [c["normal"][0] * sign, c["normal"][1] * sign]
-                    right = [-d[1], d[0]]
-                    back = lambda k: [-k * d[0] + 0.9 * right[0], HIGH, -k * d[1] + 0.9 * right[1]]
-                    look = [6.0 * d[0], 0.3, 6.0 * d[1]]  # about 30 degrees down: the clash, not the sky
-                    keys = keyed([tc - 2.5, tc, end], [back(3.0), back(2.4), back(2.0)], [look] * 3, [FOV, 68.0, 64.0])
-                    if not vet(keys, attach=following(path)):
+                    # The fighter's own spot in the cluster is unknown: its neighbours may stand on ground steps, so the
+                    # lens rises by the ground relief around the cluster (their helmets stay STANDOFF below it).
+                    lens = HIGH + min(SHOULDER_LIFT, ground_relief(terrain, c["centroid"], SHOULDER_RELIEF))
+                    ahead = max(SHOULDER_AHEAD, (lens - 1.5) / math.tan(math.radians(SHOULDER_PITCH)))
+                    aims = (("along the line", list(c["line"])), ("along the line", [-c["line"][0], -c["line"][1]]),
+                            ("ahead", [c["normal"][0] * sign, c["normal"][1] * sign]))
+                    for aim, d in aims:
+                        right = [-d[1], d[0]]
+                        back = lambda k: [-k * d[0] + 0.9 * right[0], lens, -k * d[1] + 0.9 * right[1]]
+                        look = [ahead * d[0], 1.5, ahead * d[1]]  # about 14 degrees down: the line of contact, not the helmets
+                        keys = keyed([tc - 2.5, tc, end], [back(3.0), back(2.4), back(2.0)], [look] * 3, [FOV, 68.0, 64.0])
+                        if vet(keys, attach=following(path), sides=True):
+                            out.append(Shot("shoulder", tc - 2.5, end, keys,
+                                            f"over the {side} fighter {fid}'s shoulder as it reaches contact at t {tc} (cluster of {c['count']}), looking {aim}",
+                                            (c["count"] + 10) * (2.0 if aim == "along the line" else 1.0),  # "in the line of contact" ranks first
+                                            attach=fid, where=c["centroid"]))
+                            break
+                    else:
                         continue
-                    out.append(Shot("shoulder", tc - 2.5, end, keys,
-                                    f"over the {side} fighter {fid}'s shoulder as it reaches contact at t {tc} (cluster of {c['count']})",
-                                    c["count"] + 10, attach=fid, where=c["centroid"]))
                     break
     return out
 
@@ -637,7 +878,13 @@ def establishing_shot(tl, terrain, vet):
     return out
 
 
-QUOTA = {"push-in": 4, "dolly": 5, "shoulder": 4, "volley": 2, "cavalry": 2, "establishing": 1}
+QUOTA = {"push-in": 3, "dolly": 3, "shoulder": 4, "flank": 4, "enfilade": 3, "volley": 2, "cavalry": 2, "establishing": 1}
+
+
+def apart(c, others):
+    """Same kind: 8 s apart within 30 blocks, 3 s within 60; farther ones are other places."""
+    return not any((abs(c.start - m.start) < 3.0 and dist2(c.where, m.where) < 3600)
+                   or (abs(c.start - m.start) < 8.0 and dist2(c.where, m.where) < 900) for m in others)
 
 
 def choose(candidates, seconds):
@@ -648,19 +895,86 @@ def choose(candidates, seconds):
         for c in pool:
             if len(mine) == quota:
                 break
-            # Same kind: 8 s apart within 30 blocks, 3 s within 60; farther ones are other places.
-            if any((abs(c.start - m.start) < 3.0 and dist2(c.where, m.where) < 3600)
-                   or (abs(c.start - m.start) < 8.0 and dist2(c.where, m.where) < 900) for m in mine):
-                continue
-            mine.append(c)
+            if apart(c, mine):
+                mine.append(c)
         picked.extend(mine)
     picked.sort(key=lambda c: c.start)
     total = sum(c.end - c.start for c in picked)
     while total > seconds + 3 and len(picked) > 6:
-        drop = min((c for c in picked if c.kind != "establishing"), key=lambda c: c.score)
+        # Every kind keeps its best shot: the weakest shot of a kind with a second one goes first.
+        extra = [c for c in picked if c.kind != "establishing" and sum(1 for m in picked if m.kind == c.kind) > 1]
+        if not extra:
+            break
+        drop = min(extra, key=lambda c: c.score)
         picked.remove(drop)
         total -= drop.end - drop.start
     return picked
+
+
+def ordered_copies(chosen):
+    """`order_shots` on copies of `chosen` (it trims starts); each kept copy's `.src` is its original."""
+    copies = []
+    for s in chosen:
+        c = copy.copy(s)
+        c.src = s
+        copies.append(c)
+    return order_shots(copies)[0]
+
+
+def diversify(picked, candidates, seconds=0.0):
+    """Repair `picked` until the variety rule holds for the shots in the order `order_shots` keeps them:
+    a shot of the offending class (of an over-long run; a high shot when low-side and shoulder shots are too
+    few) is swapped for the best unused candidate of another class, preferring one within 8 s of it, else
+    dropped. Of the shots that could go, the one whose removal leaves the fewest problems goes, then a swap
+    before a drop, then one that is not the only shot of its kind, then the weakest. Then, while the cut is
+    under `seconds`, the best unused candidates that `order_shots` keeps whole (no trim, no drop) and that
+    leave the variety rule intact are added.
+    Returns (shots by start, one decision line per swap, drop or addition)."""
+    chosen, decisions = list(picked), []
+    spare = [c for c in candidates if all(c is not p for p in chosen)]
+    while True:
+        kept = ordered_copies(chosen)
+        problems = variety_problems([s.cls for s in kept])
+        if not problems:
+            break
+        kind, first, last, text = problems[0]
+        if kind == "run":
+            victims = [s.src for s in kept[first:last + 1]]
+            fits = lambda c: c.cls != kept[first].cls
+        else:
+            victims = [s.src for s in kept if s.cls == "high"]
+            fits = lambda c: c.cls != "high"
+        options = []
+        for victim in victims:
+            rest = [s for s in chosen if s is not victim]
+            pool = sorted((c for c in spare if fits(c) and apart(c, [m for m in rest if m.kind == c.kind])),
+                          key=lambda c: (abs(c.start - victim.start) > 8.0, -c.score))
+            repl = pool[0] if pool else None
+            left = len(variety_problems([s.cls for s in ordered_copies(rest + ([repl] if repl else []))]))
+            lone = all(m.kind != victim.kind for m in rest)  # the only shot of its kind goes last
+            options.append((left, repl is None, lone, victim.score, len(options), victim, repl))
+        *_, victim, repl = min(options, key=lambda o: o[:5])
+        chosen.remove(victim)
+        label = f"{victim.cls} {victim.kind} {victim.start:.2f}-{victim.end:.2f}"
+        if repl:
+            spare.remove(repl)
+            chosen.append(repl)
+            decisions.append(f"swap {label} for {repl.cls} {repl.kind} {repl.start:.2f}-{repl.end:.2f}: {text}")
+        else:
+            decisions.append(f"drop {label}: {text}, no unused candidate of another class")
+    total = sum(s.end - s.start for s in ordered_copies(chosen))
+    for c in sorted(spare, key=lambda c: -c.score):
+        if total >= seconds:
+            break
+        if not apart(c, [m for m in chosen if m.kind == c.kind]):
+            continue
+        kept = ordered_copies(chosen + [c])
+        if len(kept) != len(chosen) + 1 or any(k.start != k.src.start for k in kept) or variety_problems([k.cls for k in kept]):
+            continue
+        chosen.append(c)
+        total += c.end - c.start
+        decisions.append(f"add {c.cls} {c.kind} {c.start:.2f}-{c.end:.2f}: the cut was under {seconds:g} s")
+    return sorted(chosen, key=lambda s: (s.start, s.end)), decisions
 
 
 def view_at(keys, t, attach, where):
@@ -735,13 +1049,14 @@ def read_shots(path):
 
 
 def check(args):
-    """Every adjacent pair of a final shots.txt: time delta, sharp angle change or not; 1 on a forbidden backtrack."""
+    """Every adjacent pair of a final shots.txt: time delta, sharp angle change or not; then the shot classes and the
+    variety rule. 1 on a forbidden backtrack or a variety violation."""
     root = Path(args.camera_dir)
     plan_json = root / "plan.json"
     wheres = {}
     if plan_json.exists():
         wheres = {s["name"]: s.get("where") for s in json.loads(plan_json.read_text()).get("shots", [])}
-    views = []
+    views, classes = [], []
     for name, camera, start, end in read_shots(args.shots):
         path = root / camera
         if not path.is_file():
@@ -751,6 +1066,7 @@ def check(args):
                      [k["look_target"] for k in doc["keyframes"]], [k["fov"] for k in doc["keyframes"]])
         attach, where = doc.get("attach_entity"), wheres.get(name)
         views.append((name, start, end, view_at(keys, start, attach, where), view_at(keys, end, attach, where)))
+        classes.append((name, shot_class(keys, attach), median_pitch(keys)))
     forbidden = 0
     for (a, a_start, a_end, _, a_last), (b, b_start, b_end, b_first, _) in zip(views, views[1:]):
         delta = b_start - a_end
@@ -761,9 +1077,32 @@ def check(args):
         kind = "sharp angle change" if change["sharp"] else "similar angle"
         verdict = "FORBIDDEN BACKTRACK" if bad else ("backtrack allowed" if backtrack else "ok")
         print(f"{a} -> {b}  delta {delta:+.2f} s  {kind} ({describe_change(change)})  {verdict}")
-    print(f"{len(views)} shots, {max(len(views) - 1, 0)} cuts, {forbidden} forbidden backtracks "
-          f"(sharp: camera > {SHARP_POSITION:g} or look > {SHARP_LOOK:g} blocks, heading > {SHARP_YAW:g} deg)")
-    return 1 if forbidden else 0
+    print("classes: " + ", ".join(f"{name} {cls} ({pitch:.0f} deg)" for name, cls, pitch in classes))
+    problems = variety_problems([cls for _, cls, _ in classes])
+    for _, _, _, text in problems:
+        print(f"VARIETY VIOLATION: {text}")
+    print(f"{len(views)} shots, {max(len(views) - 1, 0)} cuts, {forbidden} forbidden backtracks, {len(problems)} variety violations "
+          f"(sharp: camera > {SHARP_POSITION:g} or look > {SHARP_LOOK:g} blocks, heading > {SHARP_YAW:g} deg; "
+          f"variety: <= {MAX_RUN} adjacent of one class, >= {MIN_VARIED:.0%} low-side or shoulder)")
+    return 1 if forbidden or problems else 0
+
+
+BALANCE_FLOOR = 0.5  # a contact shot's score is scaled by this plus the minority colour's share of the contact fighters in frame (0-0.5)
+CONTACT_KINDS = ("dolly", "push-in", "shoulder", "flank", "enfilade")
+
+
+def mid_frame(tl, terrain, shot):
+    """(lens height above its ground, red, blue contact fighters in frame) at the middle of a shot. An
+    attach_entity camera stands on the shot's `where` (its fighter's cluster) and its height is the offset."""
+    mid = (shot.start + shot.end) / 2
+    eye, look, fov = pose(shot.keys, mid)
+    if shot.attach is None:
+        ground = terrain.ground(eye[0], eye[2])
+        height = None if ground is None else eye[1] - ground
+    else:
+        height = eye[1]
+        eye, look = add(shot.where, eye), add(shot.where, look)
+    return height, *frame_share(tl.at(mid), eye, look, fov)
 
 
 def plan(args):
@@ -780,8 +1119,16 @@ def plan(args):
         best = max(contact_samples, key=lambda s: s["contact_fighters"])
         front = best["contacts"][0]["centroid"]
     candidates = (dolly_shots(tl, terrain, vet) + push_shots(tl, terrain, vet) + shoulder_shots(tl, terrain, entities, vet)
+                  + flank_shots(tl, terrain, vet) + enfilade_shots(tl, terrain, vet)
                   + volley_shots(tl, terrain, vet) + cavalry_shots(tl, terrain, front, vet) + establishing_shot(tl, terrain, vet))
-    shots, decisions = order_shots(choose(candidates, args.seconds))
+    for c in candidates:
+        if c.kind in CONTACT_KINDS:  # the more evenly both colours fill the frame, the better
+            _, red, blue = mid_frame(tl, terrain, c)
+            c.score *= BALANCE_FLOOR + (min(red, blue) / (red + blue) if red + blue else 0.0)
+    picked, variety = diversify(choose(candidates, args.seconds), candidates, args.seconds)
+    shots, decisions = order_shots(picked)
+    if not shots:
+        raise SystemExit("no shot is left after the variety rule; the timeline has too few low-side or shoulder candidates")
     out = Path(args.out)
     cams = out / "cameras" / args.name
     cams.mkdir(parents=True, exist_ok=False)
@@ -792,7 +1139,10 @@ def plan(args):
         name = f"{args.name}-{i:02d}-{shot.kind}"
         (cams / f"{name}.json").write_text(json.dumps(shot.camera(), indent=1) + "\n")
         lines.append(f"{name} cameras/{args.name}/{name}.json {shot.start:.2f} {shot.end:.2f} {args.radius}")
-        report.append({"name": name, "kind": shot.kind, "start": shot.start, "end": shot.end, "attach_entity": shot.attach,
+        height, red, blue = mid_frame(tl, terrain, shot)
+        report.append({"name": name, "kind": shot.kind, "class": shot.cls, "pitch": round(median_pitch(shot.keys)),
+                       "height": None if height is None else round(height, 1), "frame": {"red": round(red), "blue": round(blue)},
+                       "start": shot.start, "end": shot.end, "attach_entity": shot.attach,
                        "where": None if shot.where is None else [round(v, 2) for v in shot.where],
                        "why": shot.why, "previews": shot.previews()})
     (out / "shots.txt").write_text("\n".join(lines) + "\n")
@@ -813,7 +1163,7 @@ def plan(args):
                for s in samples for side in ("red", "blue") if s["arrows"][side]["launched"] >= 20]
     (out / "plan.json").write_text(json.dumps({"timeline": str(args.timeline), "summary": summary, "candidates": counts,
                                                "rejected_placements": dict(vet.rejected.most_common()),
-                                               "order_decisions": decisions,
+                                               "order_decisions": decisions, "variety_decisions": variety,
                                                "cut_seconds": round(sum(s.end - s.start for s in shots), 2),
                                                "shots": report, "melee_windows": windows, "volleys": volleys}, indent=1) + "\n")
     log = [f"melee windows (contact = opposite sides within 2.5 blocks): {len(windows)}"]
@@ -824,9 +1174,12 @@ def plan(args):
     log.append(f"shot order (no backtrack unless a sharp angle change; position > {SHARP_POSITION:g} or look > {SHARP_LOOK:g} blocks, "
                f"yaw > {SHARP_YAW:g} deg; min shot {MIN_SHOT:g} s): {len(decisions)} decisions")
     log.extend(f"  {d}" for d in decisions)
+    log.append(f"variety (<= {MAX_RUN} adjacent shots of one class, >= {MIN_VARIED:.0%} low-side or shoulder): {len(variety)} decisions")
+    log.extend(f"  {d}" for d in variety)
     log.append(f"planned {len(shots)} shots, {sum(s.end - s.start for s in shots):.1f} s; candidates {counts}")
     for r in report:
-        log.append(f"  {r['name']}  {r['start']:.2f}-{r['end']:.2f}  {r['why']}")
+        log.append(f"  {r['name']}  [{r['class']}, pitch {r['pitch']}, {r['height']} up, red {r['frame']['red']:g} / blue {r['frame']['blue']:g} in frame]  "
+                   f"{r['start']:.2f}-{r['end']:.2f}  {r['why']}")
     (out / "plan.log").write_text("\n".join(log) + "\n")
     print("\n".join(log))
 
