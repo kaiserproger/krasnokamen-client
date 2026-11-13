@@ -366,6 +366,29 @@ its kind or is rejected (`plan.json` `rejected_placements` counts them by check)
 `battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
 per preview time through the kit's `bv-render.sh` (`BV_SIZE`, default 640x360).
 
+Shot order. Shots follow battle time: between two adjacent shots that are not a
+sharp angle change, the next must not start before the previous one ends
+(`next.START >= prev.END`), or the soldiers jump at the hard cut (the montage
+gives every cut a 12-frame transition, which does not hide a time step back).
+Forward jumps are always allowed. The cut compares the previous shot's pose at
+its END with the next shot's pose at its START and is a sharp angle change when
+the camera positions are more than 40 blocks apart, or the look targets are more
+than 40 blocks apart, or the horizontal view headings (camera to look target)
+differ by more than 60 degrees (`SHARP_POSITION`, `SHARP_LOOK`, `SHARP_YAW`). An
+`attach_entity` camera is an offset from its fighter, so its world position is
+the plan's `where` (the fighter's contact cluster) plus the offset; `plan.json`
+records `where` per shot, and for a plan without it `check` compares the heading
+only. `plan` keeps a backtrack across a sharp angle change; any other backtrack
+it trims forward (the next shot's START moves to the previous END) when at least
+`MIN_SHOT` = 2.5 s of the shot remain, else it drops the shot. Every keep, trim
+and drop is a line in `DIR/plan.log` and in `plan.json` `order_decisions`.
+
+`battle_shots.py check SHOTS_FILE CAMERA_DIR` applies the same rule to a final
+`shots.txt` (CAMERA_DIR is the root its camera paths are relative to; a
+`plan.json` there supplies `where`). It prints every adjacent pair with its time
+delta and whether the cut is a sharp angle change, and exits 1 on a forbidden
+backtrack; run it on the shot list before the montage step.
+
 ## Live filming clients (no replay)
 
 Real clients can also film a live battle from inside it. They join with the
@@ -413,7 +436,7 @@ easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain
 includes the replay settle beyond the CPU mesh budget (several upload rounds equal
 one round). `cargo test -p solaris-client --lib replay::scan` covers side
 classification, contact clustering, terrain columns and arrow flight;
-`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff and framing rules. These
+`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff, framing and shot-order rules. These
 do not replace the captured real-world smoke shot or a full 20k battle.
 
 The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):

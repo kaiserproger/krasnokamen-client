@@ -5,6 +5,10 @@
       DIR/cameras/NAME/*.json, DIR/shots.txt ("NAME CAMERA START END RADIUS", camera paths
       relative to the kit root), DIR/plan.json (why each shot was chosen, preview times,
       how many camera placements each check rejected).
+  battle_shots.py check SHOTS.txt CAMERA_DIR
+      lists every adjacent pair of a final shots.txt (camera paths resolved under CAMERA_DIR, plus
+      CAMERA_DIR/plan.json for the world position of attach_entity shots) with its time delta and whether
+      the cut is a sharp angle change; exits 1 on a forbidden backtrack (see "Shot order").
   battle_shots.py preview DIR --kit KIT --take TAKE.solrec [--size 640x360]
       renders one frame per preview time with KIT/bv-render.sh (BV_* env passes through)
       into KIT/shots and extracts DIR/previews/SHOT-N.png.
@@ -25,6 +29,21 @@ placement of its kind) or rejected when any check fails:
   decoded from the take's chunk sections plus later block updates;
 - framing: a cavalry shot keeps the group's centroid in the central half of the frame.
 Times are tick seconds, the unit of render-replay --timebase tick.
+
+Shot order: shots follow battle time. Between two adjacent shots that are not a sharp angle change the
+next must not start before the previous one ends (next.START >= prev.END), else the soldiers jump at
+the cut. The cut compares the previous shot's pose at its END with the next shot's pose at its START;
+it is a sharp angle change when any of these holds:
+- the camera positions are more than SHARP_POSITION (40) blocks apart;
+- the look targets are more than SHARP_LOOK (40) blocks apart;
+- the horizontal view directions (camera -> look target) differ by more than SHARP_YAW (60) degrees.
+An attach_entity camera is an offset from its fighter: its world position is the plan's `where`
+(the contact cluster) plus that offset; with no `where` (plans made before this rule) the position and
+look-target distances are not evaluated for it and only the yaw decides. A backtrack across a sharp
+change is allowed; forward jumps in time are always allowed. Otherwise the planner trims the next
+shot's start forward to the previous END when at least MIN_SHOT (2.5) seconds remain, else drops it;
+every trim, drop and allowed sharp backtrack is a line in DIR/plan.log and in plan.json
+`order_decisions`.
 """
 import argparse, bisect, hashlib, json, math, os, subprocess, sys
 from collections import Counter
@@ -39,6 +58,11 @@ BODY = 2.2            # helmet top above a fighter's feet
 RIDER = 2.8           # rider top above the ground
 LENS_CLEARANCE = 1.0  # lens above the ground of every column within 3 blocks
 HIGH = BODY + STANDOFF + 0.3  # lens height that clears every possible helmet by STANDOFF (+0.3 for uneven ground)
+SHARP_POSITION = 40.0  # camera positions farther apart than this (blocks) make a cut a sharp angle change
+SHARP_LOOK = 40.0      # ... look targets farther apart than this (blocks)
+SHARP_YAW = 60.0       # ... view directions differing by more than this (degrees)
+MIN_SHOT = 2.5         # a shot trimmed by the no-backtrack rule must keep at least this many seconds
+TIME_EPS = 1e-6
 
 
 def load(path):
@@ -639,6 +663,109 @@ def choose(candidates, seconds):
     return picked
 
 
+def view_at(keys, t, attach, where):
+    """(world camera position, world look target, view heading in degrees) at `t`. An attach_entity camera is an
+    offset from its fighter, whose position is `where`; without it position and look target are None."""
+    eye, look, _ = pose(keys, t)
+    heading = math.degrees(math.atan2(look[2] - eye[2], look[0] - eye[0]))
+    if attach is None:
+        return eye, look, heading
+    if where is None:
+        return None, None, heading
+    return add(eye, where), add(look, where), heading
+
+
+def angle_change(a, b):
+    """The cut from the view a shot ends on (`a`) to the one the next starts on (`b`), both `view_at` tuples:
+    the distances (None when unknown), the heading difference, and whether it is a sharp angle change."""
+    gap = lambda p, q: None if p is None or q is None else math.dist(p, q)
+    position, look = gap(a[0], b[0]), gap(a[1], b[1])
+    yaw = abs((a[2] - b[2] + 180.0) % 360.0 - 180.0)
+    why = []
+    if position is not None and position > SHARP_POSITION:
+        why.append(f"camera {position:.0f} blocks apart")
+    if look is not None and look > SHARP_LOOK:
+        why.append(f"look target {look:.0f} blocks apart")
+    if yaw > SHARP_YAW:
+        why.append(f"view heading {yaw:.0f} deg apart")
+    return {"position": position, "look": look, "yaw": yaw, "sharp": bool(why), "why": why}
+
+
+def describe_change(c):
+    fmt = lambda v, unit: "n/a" if v is None else f"{v:.0f}{unit}"
+    return f"camera {fmt(c['position'], ' blocks')}, look {fmt(c['look'], ' blocks')}, heading {fmt(c['yaw'], ' deg')}"
+
+
+def order_shots(shots):
+    """Shots in battle-time order with no backtrack unless the cut is a sharp angle change (see "Shot order").
+    A backtracking shot is trimmed forward to the previous END when MIN_SHOT seconds remain, else dropped.
+    Returns (kept shots, one decision line per backtrack)."""
+    kept, decisions = [], []
+    for shot in sorted(shots, key=lambda s: (s.start, s.end)):
+        prev = kept[-1] if kept else None
+        if prev is not None and shot.start < prev.end - TIME_EPS:
+            change = angle_change(view_at(prev.keys, prev.end, prev.attach, prev.where),
+                                  view_at(shot.keys, shot.start, shot.attach, shot.where))
+            back = prev.end - shot.start
+            label = f"{shot.kind} {shot.start:.2f}-{shot.end:.2f} after {prev.kind} {prev.start:.2f}-{prev.end:.2f}"
+            if change["sharp"]:
+                decisions.append(f"keep {label}: backtracks {back:.2f} s across a sharp angle change ({'; '.join(change['why'])})")
+            elif shot.end - prev.end >= MIN_SHOT - TIME_EPS:
+                decisions.append(f"trim {label}: backtracked {back:.2f} s ({describe_change(change)}), start {shot.start:.2f} -> {prev.end:.2f}")
+                shot.start = prev.end
+            else:
+                decisions.append(f"drop {label}: backtracked {back:.2f} s ({describe_change(change)}), "
+                                 f"trimmed to {shot.end - prev.end:.2f} s it would be under {MIN_SHOT:g} s")
+                continue
+        kept.append(shot)
+    return kept, decisions
+
+
+def read_shots(path):
+    """shots.txt lines as (name, camera path, start, end); comments and blanks skipped."""
+    shots = []
+    for n, line in enumerate(Path(path).read_text().splitlines(), 1):
+        f = line.split()
+        if not f or f[0].startswith("#"):
+            continue
+        if len(f) < 4:
+            raise SystemExit(f"{path}:{n}: expected NAME CAMERA START END [RADIUS]")
+        shots.append((f[0], f[1], float(f[2]), float(f[3])))
+    return shots
+
+
+def check(args):
+    """Every adjacent pair of a final shots.txt: time delta, sharp angle change or not; 1 on a forbidden backtrack."""
+    root = Path(args.camera_dir)
+    plan_json = root / "plan.json"
+    wheres = {}
+    if plan_json.exists():
+        wheres = {s["name"]: s.get("where") for s in json.loads(plan_json.read_text()).get("shots", [])}
+    views = []
+    for name, camera, start, end in read_shots(args.shots):
+        path = root / camera
+        if not path.is_file():
+            raise SystemExit(f"{name}: camera {path} not found under {root}")
+        doc = json.loads(path.read_text())
+        keys = keyed([k["time"] for k in doc["keyframes"]], [k["position"] for k in doc["keyframes"]],
+                     [k["look_target"] for k in doc["keyframes"]], [k["fov"] for k in doc["keyframes"]])
+        attach, where = doc.get("attach_entity"), wheres.get(name)
+        views.append((name, start, end, view_at(keys, start, attach, where), view_at(keys, end, attach, where)))
+    forbidden = 0
+    for (a, a_start, a_end, _, a_last), (b, b_start, b_end, b_first, _) in zip(views, views[1:]):
+        delta = b_start - a_end
+        change = angle_change(a_last, b_first)
+        backtrack = delta < -TIME_EPS
+        bad = backtrack and not change["sharp"]
+        forbidden += bad
+        kind = "sharp angle change" if change["sharp"] else "similar angle"
+        verdict = "FORBIDDEN BACKTRACK" if bad else ("backtrack allowed" if backtrack else "ok")
+        print(f"{a} -> {b}  delta {delta:+.2f} s  {kind} ({describe_change(change)})  {verdict}")
+    print(f"{len(views)} shots, {max(len(views) - 1, 0)} cuts, {forbidden} forbidden backtracks "
+          f"(sharp: camera > {SHARP_POSITION:g} or look > {SHARP_LOOK:g} blocks, heading > {SHARP_YAW:g} deg)")
+    return 1 if forbidden else 0
+
+
 def plan(args):
     header, samples, entities, terrain, summary = load(args.timeline)
     if len(samples) < 8:
@@ -654,7 +781,7 @@ def plan(args):
         front = best["contacts"][0]["centroid"]
     candidates = (dolly_shots(tl, terrain, vet) + push_shots(tl, terrain, vet) + shoulder_shots(tl, terrain, entities, vet)
                   + volley_shots(tl, terrain, vet) + cavalry_shots(tl, terrain, front, vet) + establishing_shot(tl, terrain, vet))
-    shots = choose(candidates, args.seconds)
+    shots, decisions = order_shots(choose(candidates, args.seconds))
     out = Path(args.out)
     cams = out / "cameras" / args.name
     cams.mkdir(parents=True, exist_ok=False)
@@ -665,8 +792,9 @@ def plan(args):
         name = f"{args.name}-{i:02d}-{shot.kind}"
         (cams / f"{name}.json").write_text(json.dumps(shot.camera(), indent=1) + "\n")
         lines.append(f"{name} cameras/{args.name}/{name}.json {shot.start:.2f} {shot.end:.2f} {args.radius}")
-        report.append({"name": name, "kind": shot.kind, "start": shot.start, "end": shot.end,
-                       "attach_entity": shot.attach, "why": shot.why, "previews": shot.previews()})
+        report.append({"name": name, "kind": shot.kind, "start": shot.start, "end": shot.end, "attach_entity": shot.attach,
+                       "where": None if shot.where is None else [round(v, 2) for v in shot.where],
+                       "why": shot.why, "previews": shot.previews()})
     (out / "shots.txt").write_text("\n".join(lines) + "\n")
     counts = {k: sum(1 for c in candidates if c.kind == k) for k in QUOTA}
     windows = []
@@ -685,16 +813,22 @@ def plan(args):
                for s in samples for side in ("red", "blue") if s["arrows"][side]["launched"] >= 20]
     (out / "plan.json").write_text(json.dumps({"timeline": str(args.timeline), "summary": summary, "candidates": counts,
                                                "rejected_placements": dict(vet.rejected.most_common()),
+                                               "order_decisions": decisions,
                                                "cut_seconds": round(sum(s.end - s.start for s in shots), 2),
                                                "shots": report, "melee_windows": windows, "volleys": volleys}, indent=1) + "\n")
-    print(f"melee windows (contact = opposite sides within 2.5 blocks): {len(windows)}")
+    log = [f"melee windows (contact = opposite sides within 2.5 blocks): {len(windows)}"]
     for w in windows:
-        print(f"  t {w['start']:.2f}-{w['end']:.2f}  peak {w['peak']} fighters at t {w['peak_t']:.2f} in {w['clusters']} clusters, top at {w['where']}")
-    print(f"volleys (>= 20 arrows per 0.5 s): " + ", ".join(f"{v['side']} t {v['t']:.2f} x{v['launched']} from {[round(c) for c in v['from']]}" for v in volleys))
-    print("rejected placements: " + ", ".join(f"{n} {why}" for why, n in vet.rejected.most_common()))
-    print(f"planned {len(shots)} shots, {sum(s.end - s.start for s in shots):.1f} s; candidates {counts}")
+        log.append(f"  t {w['start']:.2f}-{w['end']:.2f}  peak {w['peak']} fighters at t {w['peak_t']:.2f} in {w['clusters']} clusters, top at {w['where']}")
+    log.append(f"volleys (>= 20 arrows per 0.5 s): " + ", ".join(f"{v['side']} t {v['t']:.2f} x{v['launched']} from {[round(c) for c in v['from']]}" for v in volleys))
+    log.append("rejected placements: " + ", ".join(f"{n} {why}" for why, n in vet.rejected.most_common()))
+    log.append(f"shot order (no backtrack unless a sharp angle change; position > {SHARP_POSITION:g} or look > {SHARP_LOOK:g} blocks, "
+               f"yaw > {SHARP_YAW:g} deg; min shot {MIN_SHOT:g} s): {len(decisions)} decisions")
+    log.extend(f"  {d}" for d in decisions)
+    log.append(f"planned {len(shots)} shots, {sum(s.end - s.start for s in shots):.1f} s; candidates {counts}")
     for r in report:
-        print(f"  {r['name']}  {r['start']:.2f}-{r['end']:.2f}  {r['why']}")
+        log.append(f"  {r['name']}  {r['start']:.2f}-{r['end']:.2f}  {r['why']}")
+    (out / "plan.log").write_text("\n".join(log) + "\n")
+    print("\n".join(log))
 
 
 def preview(args):
@@ -747,9 +881,14 @@ def main():
     v.add_argument("--radius", type=int, default=20)
     v.add_argument("--only", nargs="*")
     v.add_argument("--index", type=int, nargs="*", default=[0, 1, 2], help="which of the 3 preview times (start, mid, end)")
+    c = sub.add_parser("check")
+    c.add_argument("shots", metavar="SHOTS_FILE")
+    c.add_argument("camera_dir", metavar="CAMERA_DIR", help="root the shots' camera paths are relative to")
     args = parser.parse_args()
     if args.command == "plan":
         plan(args)
+    elif args.command == "check":
+        sys.exit(check(args))
     else:
         sys.exit(preview(args))
 

@@ -1,10 +1,19 @@
-"""Planner rules: camera height per column, line of sight over hills and trees, and the
-standoff / terrain / framing checks every pose of a shot must pass."""
+"""Planner rules: camera height per column, line of sight over hills and trees, the
+standoff / terrain / framing checks every pose of a shot must pass, and the shot order
+(no backtrack in battle time unless the cut is a sharp angle change)."""
+import contextlib
+import io
+import json
 import math
+import tempfile
 import unittest
+from argparse import Namespace
+from pathlib import Path
+from unittest import mock
 
-from tools.battle_shots import (HIGH, STANDOFF, Terrain, Timeline, Vet, crowding, dolly_shots, keyed, off_centre, place,
-                                pose, terrain_view)
+from tools import battle_shots
+from tools.battle_shots import (HIGH, MIN_SHOT, STANDOFF, Shot, Terrain, Timeline, Vet, angle_change, check, crowding,
+                                dolly_shots, keyed, off_centre, order_shots, place, pose, terrain_view, view_at)
 
 
 def terrain(ground=70, hill=None, tree=None):
@@ -162,6 +171,162 @@ class FramingTests(unittest.TestCase):
         self.assertFalse(off_centre(eye, look, 70.0, [1.0, 71.0, 10.0]))
         self.assertTrue(off_centre(eye, look, 70.0, [8.0, 71.0, 10.0]), "at the frame edge")
         self.assertTrue(off_centre(eye, look, 70.0, [0.0, 64.0, 10.0]), "at the frame bottom")
+
+
+def shot(start, end, eye=(0.0, 80.0, 0.0), look=(100.0, 70.0, 0.0), kind="dolly", attach=None, where=None):
+    """A shot holding one fixed pose from `start` to `end`."""
+    mid = (start + end) / 2
+    keys = keyed([start, mid, end], [list(eye)] * 3, [list(look)] * 3, [70.0] * 3)
+    return Shot(kind, start, end, keys, "test", 1.0, attach=attach, where=where)
+
+
+def violations(shots):
+    """Adjacent pairs that start before the previous one ends without a sharp angle change (an independent
+    re-derivation of the rule from the views, not from `order_shots`)."""
+    bad = []
+    for a, b in zip(shots, shots[1:]):
+        change = angle_change(view_at(a.keys, a.end, a.attach, a.where), view_at(b.keys, b.start, b.attach, b.where))
+        if b.start < a.end - 1e-6 and not change["sharp"]:
+            bad.append((a.start, b.start))
+    return bad
+
+
+class ShotOrderTests(unittest.TestCase):
+    def test_backtrack_between_similar_shots_is_trimmed(self):
+        a, b = shot(10.0, 15.0), shot(12.0, 18.0, eye=(3.0, 80.0, 1.0))
+        kept, decisions = order_shots([a, b])
+        self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0), (15.0, 18.0)])
+        self.assertEqual(violations(kept), [])
+        self.assertEqual(len(decisions), 1)
+        self.assertTrue(decisions[0].startswith("trim "), decisions[0])
+        self.assertIn("12.00 -> 15.00", decisions[0])
+
+    def test_backtrack_leaving_less_than_the_minimum_shot_is_dropped(self):
+        a, b = shot(10.0, 15.0), shot(12.0, 15.0 + MIN_SHOT - 0.5)
+        kept, decisions = order_shots([a, b])
+        self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0)])
+        self.assertTrue(decisions[0].startswith("drop "), decisions[0])
+        # exactly the minimum survives
+        kept, _ = order_shots([shot(10.0, 15.0), shot(12.0, 15.0 + MIN_SHOT)])
+        self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0), (15.0, 15.0 + MIN_SHOT)])
+
+    def test_backtrack_across_a_sharp_angle_change_is_allowed(self):
+        short = dict(look=(10.0, 70.0, 0.0))
+        cases = {  # message word: (shot before, shot after) whose cut is sharp for that reason alone
+            "camera": (shot(10.0, 15.0), shot(12.0, 17.0, eye=(0.0, 80.0, 45.0), look=(100.0, 70.0, 20.0))),
+            "look target": (shot(10.0, 15.0), shot(12.0, 17.0, look=(100.0, 70.0, 45.0))),
+            "heading": (shot(10.0, 15.0, **short), shot(12.0, 17.0, look=(0.0, 70.0, 10.0))),
+        }
+        for what, (before, after) in cases.items():
+            with self.subTest(what):
+                change = angle_change(view_at(before.keys, before.end, None, None), view_at(after.keys, after.start, None, None))
+                self.assertTrue(change["sharp"])
+                self.assertEqual(len(change["why"]), 1, change)
+                kept, decisions = order_shots([before, after])
+                self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0), (12.0, 17.0)])
+                self.assertTrue(decisions[0].startswith("keep "), decisions[0])
+                self.assertIn(what, decisions[0])
+
+    def test_just_inside_the_thresholds_is_not_sharp(self):
+        a = shot(10.0, 15.0)
+        b = shot(12.0, 17.0, eye=(0.0, 80.0, 39.0), look=(100.0, 70.0, 39.0))  # 39 blocks apart, same heading
+        self.assertFalse(angle_change(view_at(a.keys, 15.0, None, None), view_at(b.keys, 12.0, None, None))["sharp"])
+        short = shot(10.0, 15.0, look=(10.0, 70.0, 0.0))
+        for degrees, sharp in ((59.0, False), (61.0, True)):
+            turn = math.radians(degrees)
+            c = shot(12.0, 17.0, look=(10.0 * math.cos(turn), 70.0, 10.0 * math.sin(turn)))
+            change = angle_change(view_at(short.keys, 15.0, None, None), view_at(c.keys, 12.0, None, None))
+            self.assertAlmostEqual(change["yaw"], degrees, places=3)
+            self.assertEqual(change["sharp"], sharp, change)
+
+    def test_forward_jumps_are_untouched(self):
+        shots = [shot(10.0, 15.0), shot(15.0, 19.0, eye=(2.0, 80.0, 0.0)), shot(30.0, 34.0, eye=(1.0, 80.0, 0.0)),
+                 shot(200.0, 205.0, eye=(500.0, 90.0, 0.0), look=(400.0, 70.0, 0.0))]
+        before = [(s.start, s.end) for s in shots]
+        kept, decisions = order_shots(shots)
+        self.assertEqual([(s.start, s.end) for s in kept], before)
+        self.assertEqual(decisions, [])
+
+    def test_input_in_any_order_comes_out_in_battle_time(self):
+        kept, _ = order_shots([shot(30.0, 34.0), shot(10.0, 15.0), shot(20.0, 24.0)])
+        self.assertEqual([s.start for s in kept], [10.0, 20.0, 30.0])
+
+    def test_a_trim_moves_the_next_comparison_to_the_trimmed_shot(self):
+        kept, decisions = order_shots([shot(10.0, 15.0), shot(12.0, 19.0), shot(16.0, 22.0)])
+        self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0), (15.0, 19.0), (19.0, 22.0)])
+        self.assertEqual(violations(kept), [])
+        self.assertEqual(len(decisions), 2)
+
+    def test_attached_camera_is_placed_at_its_fighter(self):
+        far = shot(12.0, 17.0, eye=(1.0, 5.5, -3.0), look=(10.0, 0.3, 0.0), kind="shoulder", attach=7, where=[500.0, 90.0, 0.0])
+        near = shot(12.0, 17.0, eye=(1.0, 5.5, -3.0), look=(10.0, 0.3, 0.0), kind="shoulder", attach=7, where=[2.0, 80.0, 0.0])
+        free = shot(10.0, 15.0, eye=(0.0, 85.0, -3.0), look=(10.0, 80.0, 0.0))
+        self.assertTrue(angle_change(view_at(free.keys, 15.0, None, None), view_at(far.keys, 12.0, 7, far.where))["sharp"])
+        self.assertFalse(angle_change(view_at(free.keys, 15.0, None, None), view_at(near.keys, 12.0, 7, near.where))["sharp"])
+        unknown = view_at(near.keys, 12.0, 7, None)
+        self.assertEqual(unknown[:2], (None, None))
+        self.assertFalse(angle_change(view_at(free.keys, 15.0, None, None), unknown)["sharp"], "heading alone decides")
+
+    def test_negative_control_without_the_rule_the_backtrack_stays(self):
+        similar = lambda: [shot(10.0, 15.0), shot(12.0, 17.0, eye=(3.0, 80.0, 1.0))]
+        self.assertEqual(violations(order_shots(similar())[0]), [])
+        # Disabled rule: every cut counts as a sharp angle change, so nothing is trimmed and the check sees the backtrack.
+        with mock.patch.object(battle_shots, "angle_change",
+                               lambda a, b: {"position": 0.0, "look": 0.0, "yaw": 0.0, "sharp": True, "why": ["disabled"]}):
+            kept, _ = order_shots(similar())
+        self.assertEqual([(s.start, s.end) for s in kept], [(10.0, 15.0), (12.0, 17.0)])
+        self.assertEqual(violations(kept), [(10.0, 12.0)])
+
+
+class CheckTests(unittest.TestCase):
+    def run_check(self, rows, where=None):
+        """`check` on a shots.txt of (name, Shot) rows with their cameras written under a temp dir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cameras").mkdir()
+            lines = ["# NAME CAMERA START END [RADIUS]"]
+            for name, s in rows:
+                (root / "cameras" / f"{name}.json").write_text(json.dumps(s.camera()))
+                lines.append(f"{name} cameras/{name}.json {s.start:.2f} {s.end:.2f} 20")
+            (root / "shots.txt").write_text("\n".join(lines) + "\n")
+            if where is not None:
+                (root / "plan.json").write_text(json.dumps({"shots": [{"name": n, "where": w} for n, w in where.items()]}))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                status = check(Namespace(shots=str(root / "shots.txt"), camera_dir=str(root)))
+            return status, out.getvalue()
+
+    def test_forbidden_backtrack_fails_and_is_listed(self):
+        status, out = self.run_check([("a", shot(10.0, 15.0)), ("b", shot(12.0, 17.0, eye=(3.0, 80.0, 1.0)))])
+        self.assertEqual(status, 1)
+        self.assertIn("a -> b  delta -3.00 s  similar angle", out)
+        self.assertIn("FORBIDDEN BACKTRACK", out)
+        self.assertIn("1 forbidden backtracks", out)
+
+    def test_sharp_backtrack_and_forward_jumps_pass(self):
+        status, out = self.run_check([("a", shot(10.0, 15.0)),
+                                      ("b", shot(12.0, 17.0, look=(100.0, 70.0, 45.0))),  # sharp backtrack
+                                      ("c", shot(40.0, 44.0, look=(100.0, 70.0, 45.0))),  # forward, similar
+                                      ("d", shot(60.0, 64.0, eye=(300.0, 80.0, 0.0), look=(400.0, 70.0, 0.0)))])  # forward, sharp
+        self.assertEqual(status, 0, out)
+        self.assertIn("a -> b  delta -3.00 s  sharp angle change", out)
+        self.assertIn("backtrack allowed", out)
+        self.assertIn("b -> c  delta +23.00 s  similar angle", out)
+        self.assertNotIn("FORBIDDEN", out)
+
+    def test_a_plan_the_planner_made_passes_its_own_check(self):
+        kept, _ = order_shots([shot(10.0, 15.0), shot(12.0, 17.0, eye=(3.0, 80.0, 1.0)), shot(14.0, 18.0)])
+        status, out = self.run_check([(f"s{i}", s) for i, s in enumerate(kept)])
+        self.assertEqual(status, 0, out)
+
+    def test_attached_shot_world_position_comes_from_plan_json(self):
+        a = shot(10.0, 15.0, eye=(0.0, 85.0, -3.0), look=(10.0, 80.0, 0.0))
+        b = shot(12.0, 17.0, eye=(1.0, 5.5, -3.0), look=(10.0, 0.3, 0.0), kind="shoulder", attach=7)
+        status, out = self.run_check([("a", a), ("b", b)], where={"a": None, "b": [500.0, 90.0, 0.0]})
+        self.assertEqual(status, 0, out)
+        self.assertIn("sharp angle change (camera 5", out)
+        status, out = self.run_check([("a", a), ("b", b)], where={"a": None, "b": [2.0, 80.0, 0.0]})
+        self.assertEqual(status, 1, out)
 
 
 if __name__ == "__main__":
