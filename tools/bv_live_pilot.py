@@ -426,6 +426,44 @@ def crosshair(client: Client):
     return ("block" if target.get("type") == "block" else "none"), None, target
 
 
+DIAG_LIMIT = 400
+
+
+def clip(value) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return text if len(text) <= DIAG_LIMIT else text[:DIAG_LIMIT - 3] + "..."
+
+
+def diag_before(observed: dict, item) -> str:
+    """The one diagnostic line before an attack: `using` whole, held inputs, game mode, the crosshair target, main hand."""
+    return clip("attack diag before: using=" + json.dumps(observed.get("using"), sort_keys=True, separators=(",", ":"))
+                + " held=" + json.dumps((observed.get("inputs") or {}).get("held"), sort_keys=True)
+                + " game_mode=" + json.dumps((observed.get("player") or {}).get("game_mode"))
+                + " target=" + json.dumps(observed.get("target"), sort_keys=True, separators=(",", ":"))
+                + " main_hand=" + (item if isinstance(item, str) else json.dumps(item, sort_keys=True, separators=(",", ":"))))
+
+
+def main_hand(client: Client):
+    try:
+        return client.tool("minecraft_read_item_components", {"source": "selected"})
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        return "unreadable: " + str(error)[:120]
+
+
+def press_attack(client: Client):
+    """The attack input for one tick with the diagnostic lines: the observation taken right before it, and the
+    tool's whole answer (clipped to DIAG_LIMIT characters) right after."""
+    log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
+    try:
+        answer = client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
+    except RuntimeError as error:
+        log(clip("attack diag after: error " + str(error)))
+        raise
+    log(clip("attack diag after: " + json.dumps(answer, sort_keys=True, separators=(",", ":"))))
+
+
 def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
     """One swing at `target` through the ordinary inputs, as a player does: the shield is let go, the look is put on a
     point of the enemy's box, the client's own crosshair target (`minecraft_observe` `target`) must be an enemy within
@@ -470,7 +508,7 @@ def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dic
                 seen.append(f"enemy {struck} out of reach {away:.2f}")
                 continue
             note = "" if struck == ident else f" instead of {ident}"
-            client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
+            press_attack(client)
             log(f"attack sent (crosshair enemy {struck}{note}, aim {fractions}, distance {away:.2f})")
             return True
         seen.append(kind)

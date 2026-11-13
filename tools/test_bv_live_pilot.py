@@ -118,7 +118,8 @@ class MarchingRank:
             return {}
         if name == "minecraft_observe":
             return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
-                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
+                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False, "game_mode": 0},
+                    "inputs": {"held": sorted(self.held)},
                     "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
                     "target": self.crosshair()}
         if name == "minecraft_list_entities":
@@ -628,6 +629,27 @@ class Fighting(unittest.TestCase):
         self.assertEqual([line for line in logs if line.startswith("attack")][1:], [], "no aiming at him either (only the interval line)")
         sim, logs = duel({1000: (0.0, 2.5, 63.0)})
         self.assertTrue(sim.hits, "the same distance at his height is struck")
+
+    def test_every_attack_press_is_framed_by_a_diagnostic_before_and_after(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)})
+        sent = [i for i, line in enumerate(logs) if line.startswith("attack sent")]
+        self.assertTrue(sent)
+        for i in sent:
+            before, after = logs[i - 2], logs[i - 1]
+            self.assertTrue(before.startswith("attack diag before: using=null held=[] game_mode=0 target={"), before)
+            self.assertIn('"entity_id":1000', before)
+            self.assertIn("main_hand=unreadable: no held item data", before)
+            self.assertEqual(after, 'attack diag after: {}')
+        self.assertEqual(len(sim.attacks), len(sent))
+
+    def test_the_diagnostic_line_format_and_clipping(self):
+        line = pilot.diag_before({"using": {"hand": 1, "item_id": 7, "remaining": 40}, "inputs": {"held": ["use", "forward"]},
+                                  "player": {"game_mode": 3}, "target": {"type": "none"}}, {"components": {"x": 1}})
+        self.assertEqual(line, 'attack diag before: using={"hand":1,"item_id":7,"remaining":40} held=["use", "forward"] '
+                               'game_mode=3 target={"type":"none"} main_hand={"components":{"x":1}}')
+        long = pilot.clip({"k": "v" * 1000})
+        self.assertEqual(len(long), 400)
+        self.assertTrue(long.endswith("..."))
 
     def test_the_look_is_in_whole_degrees_and_the_old_swing_tool_is_not_used(self):
         sim, logs = duel({1000: (0.7, 2.1, 64.0)})  # the sim raises on attack_entity_once and on fractional looks
