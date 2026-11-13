@@ -181,7 +181,10 @@ impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
     /// passenger attachments through `Store::presented_transform`.
     pub fn presented_transform(&self, _tick: u64, partial: f32) -> Transform {
+        // Ticks a mob waited outside the camera's box count as elapsed (`tick_presentation`),
+        // so it is drawn and new motion starts where a mob ticked all along would be.
         let elapsed = (f64::from(self.physical.lerp_progress)
+            + f64::from(self.physical.waited)
             + if self.physical.frozen {
                 0.
             } else {
@@ -238,6 +241,7 @@ impl Entity {
         self.on_ground = ground;
         self.observed_tick = tick;
         self.physical.lerp_progress = if snap { self.physical.lerp_duration } else { 0 };
+        self.physical.waited = 0;
         self.physical.lerp_phase = if snap { 0. } else { phase.clamp(0., 0.999) };
     }
 }

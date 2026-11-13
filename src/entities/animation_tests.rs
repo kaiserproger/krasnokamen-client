@@ -2172,6 +2172,22 @@ fn falling_block_moves_between_received_updates_and_lands() {
     assert!((rest - 3.).abs() < 1e-9, "rests on the cube: {rest}");
 }
 
+/// A store with one fixture mob part way through a received move to (3, 0, 0).
+fn mob_store() -> (Store, i32) {
+    let (models, mut entity) = fixture();
+    let mut target = entity.transform;
+    target.position = [3., 0., 0.];
+    entity.move_to(target, None, true, 0, false, 0.);
+    entity.physical.lerp_duration = 3;
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    let id = entity.handle.network_id;
+    store.slots.push(entity);
+    store.ids.insert(id, 0);
+    store.physical_active.insert(id);
+    (store, id)
+}
+
 /// While frames draw entities, a mob outside the camera's box waits (its animation does not
 /// advance) and on entering the box is drawn where a mob ticked all along is; without frames
 /// it ticks as before.
@@ -2179,24 +2195,10 @@ fn falling_block_moves_between_received_updates_and_lands() {
 fn offscreen_mob_waits_and_catches_up_on_entry() {
     let world = crate::protocol::world::World::new(0, 384);
     let content = Content::test_cube();
-    let store = || {
-        let (models, mut entity) = fixture();
-        let mut target = entity.transform;
-        target.position = [3., 0., 0.];
-        entity.move_to(target, None, true, 0, false, 0.);
-        entity.physical.lerp_duration = 3;
-        let mut store = Store::new();
-        store.models = Some(Arc::new(models));
-        let id = entity.handle.network_id;
-        store.slots.push(entity);
-        store.ids.insert(id, 0);
-        store.physical_active.insert(id);
-        (store, id)
-    };
     let age = |store: &Store, id| store.get(id).unwrap().source.as_ref().unwrap().age;
-    let (mut seen, id) = store();
-    let (mut hidden, _) = store();
-    let (mut headless, _) = store();
+    let (mut seen, id) = mob_store();
+    let (mut hidden, _) = mob_store();
+    let (mut headless, _) = mob_store();
     assert!(hidden.get(id).unwrap().source.as_ref().unwrap().living.is_some(), "the fixture is a mob");
     let start = age(&seen, id);
     for tick in 11..=12 {
@@ -2221,4 +2223,32 @@ fn offscreen_mob_waits_and_catches_up_on_entry() {
     let at = |store: &Store| store.get(id).unwrap().presented_transform(13, 0.).position;
     assert_eq!(at(&hidden), at(&seen), "on entry it is drawn where it would have been");
     assert_eq!(at(&seen), [3., 0., 0.]);
+}
+
+/// The camera jumps (a respawn) to a mob that waited outside its box while updates carried it
+/// 120 blocks: the first frame draws it where a mob ticked all along is, not where it stopped,
+/// and its motion span (which pads every spatial query) stays one update long.
+#[test]
+fn waiting_mob_carried_far_is_drawn_fresh_when_the_camera_jumps_to_it() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let (mut seen, id) = mob_store();
+    let (mut hidden, _) = mob_store();
+    for tick in 11..=130 {
+        for (store, shown) in [(&mut seen, true), (&mut hidden, false)] {
+            store.frame_tick = tick - 1;
+            if shown {
+                store.slots[0].physical.shown_tick = tick - 1;
+            }
+            let mut target = store.get(id).unwrap().transform;
+            target.position[0] += 1.;
+            store.move_entity(id, target, None, true, tick, false);
+            store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        }
+    }
+    let at = |store: &Store| store.get(id).unwrap().presented_transform(130, 0.5).position;
+    assert_eq!(at(&hidden), at(&seen), "drawn where it would have been");
+    assert!(at(&seen)[0] > 121., "{:?}", at(&seen));
+    assert_eq!(hidden.motion_spans, seen.motion_spans);
+    assert!(hidden.query_padding() <= 4., "padding {}", hidden.query_padding());
 }
