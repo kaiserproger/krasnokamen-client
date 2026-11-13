@@ -264,6 +264,39 @@ class RouteGuard(unittest.TestCase):
         self.assertEqual(kept, {"back"})
         self.assertIn("keepout refused forward", logs[0])
 
+    def test_the_diagonal_of_two_keys_is_checked_too(self):
+        # Forward (+X) and right (+Z) are each safe cell by cell; the diagonal cell (101, 101) is a pit.
+        pit = FakeWorld(cells={(101, y, 101): block() for y in range(60, 73)})
+        kept, logs = self.run_filter(pit, {"forward", "right", "sprint"})
+        self.assertEqual(kept, {"forward", "sprint"}, "the sideways key goes")
+        self.assertEqual(len(logs), 1)
+        self.assertRegex(logs[0], r"^edge refused forward\+right at 101,73,101 drop=4\+")
+        kept, logs = self.run_filter(FakeWorld(), {"forward", "right", "sprint"})
+        self.assertEqual((kept, logs), ({"forward", "right", "sprint"}, []))
+        kept, _ = self.run_filter(pit, {"forward", "back"})
+        self.assertEqual(kept, {"forward", "back"}, "opposite keys cancel: no diagonal")
+
+    def test_the_diagonal_into_the_keepout_box_is_refused(self):
+        # South-west of the box (x -192..-184, z 21..30): forward (+X) runs below z 21 and right (+Z) west of
+        # x -192, both outside, but their diagonal runs into the box.
+        here = [-193.2, 73.0, 20.0]
+        kept, logs = self.run_filter(FakeWorld(), {"forward", "right"}, here=here, reach=3.0)
+        self.assertEqual(kept, {"forward"})
+        self.assertRegex(logs[0], r"^keepout refused forward\+right")
+
+    def test_the_way_out_of_the_box_is_checked_for_drops_and_water(self):
+        here = [-188.5, 73.0, 24.5]  # inside; back is -X and leaves
+        kept, _ = self.run_filter(FakeWorld(), {"back"}, here=here)
+        self.assertEqual(kept, {"back"})
+        pit = FakeWorld(cells={(-190, y, 24): block() for y in range(60, 73)})
+        kept, logs = self.run_filter(pit, {"back"}, here=here)
+        self.assertEqual(kept, set())
+        self.assertIn("edge refused back at -190,73,24", logs[0])
+        lake = FakeWorld(cells={(-190, 72, 24): block(water=True)})
+        kept, logs = self.run_filter(lake, {"back"}, here=here)
+        self.assertEqual(kept, set())
+        self.assertIn("water", logs[0])
+
     def test_no_keepout_box_walks_in(self):
         kept, _ = self.run_filter(FakeWorld(), {"forward"}, here=[-194.5, 73.0, 25.5], keepout=None)
         self.assertEqual(kept, {"forward"})
@@ -308,6 +341,14 @@ class RouteGuardMarch(unittest.TestCase):
         self.assertLess(max(s[1] + 1.2 * s[0] for s in sim.samples), 40.0, "he walked off the cliff")  # his z
         self.assertTrue(any(line.startswith("edge refused forward at") for line in logs), logs[-5:])
         self.assertTrue(any(f"drop=4+" in line for line in logs))
+
+    def test_a_slow_client_does_not_walk_past_the_ground_it_checked(self):
+        # 0.4 s per MCP call: 3-4 s steps, so a held or pulsed key carries him 10+ blocks between checks, far
+        # beyond a 3-block look. The cliff is 6+ blocks past where he starts to lag behind the marching rank.
+        logs = []
+        sim = march(call=0.4, floor=lambda x, z: 63 if z < 40 else None, logs=logs)
+        self.assertLess(max(s[1] + 1.2 * s[0] for s in sim.samples), 40.0, "walked off the cliff between checks")
+        self.assertTrue(any(line.startswith("edge refused forward at") for line in logs), logs[-5:])
 
     def test_the_cliff_is_crossed_when_the_guard_is_off(self):
         sim = march(call=0.05, floor=lambda x, z: 63 if z < 40 else None, argv=["--no-guard"])

@@ -128,6 +128,8 @@ MAX_DROP = 3
 KEEPOUT = (-192.0, -184.0, 21.0, 30.0)  # x0, x1, z0, z1: the mine's box, blocks (cells -192..-184 / 21..30), any height
 PLAYER_RADIUS = 0.3
 LOOK_STEP = 0.7  # blocks between checked points along a key's direction, from the feet
+GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key
+GUARD_MARGIN = 1.5  # a key held for a step is taken to carry him this many times the slowest recent step's distance
 LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
 
 
@@ -227,37 +229,52 @@ class Guard:
             self.logged[key] = now
             log(line)
 
+    def refused(self, name: str, vector, here, reach: float):
+        """Why walking along `vector` (a unit vector, named `name` in the log) is refused, as (log line, key), else None.
+        Keep-out first (from inside the box only a way out passes), then the terrain under every cell on the way."""
+        feet_y = math.floor(here[1])
+        place = [round(v, 1) for v in here]
+        if self.keepout is not None:
+            x0, x1, z0, z1 = self.keepout
+            if in_keepout(here[0], here[2], self.keepout):
+                centre = ((x0 + x1 + 1) / 2, (z0 + z1 + 1) / 2)
+                if vector[0] * (here[0] - centre[0]) + vector[1] * (here[2] - centre[1]) <= 0:
+                    return (f"keepout refused {name} at {place} (inside the box, key leads deeper)", ("keepout", name))
+            elif any(in_keepout(here[0] + vector[0] * k, here[2] + vector[1] * k, self.keepout)
+                     for k in [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP) + 2)]):
+                return (f"keepout refused {name} at {place} (box x {x0:g}..{x1:g}, z {z0:g}..{z1:g})", ("keepout", name))
+        bad = self.judge(self.cells(here, vector, reach), feet_y)
+        if bad is not None:
+            (cx, cz), drop, why = bad
+            return (f"edge refused {name} at {cx},{feet_y},{cz} drop={drop if drop <= MAX_DROP else str(MAX_DROP + 1) + '+'} ({why})",
+                    ("edge", name, cx, cz))
+        return None
+
     def filter(self, wanted: set, here, yaw: float, reach: float) -> set:
         """`wanted` without the horizontal keys that walk into the keep-out box, off a drop of more than MAX_DROP
         blocks, or into water or lava; sprint and jump go with their last walking key. `reach` is how far (blocks)
-        the key can carry him before the next check. From inside the box only keys that lead out are allowed."""
-        feet_y = math.floor(here[1])
-        inside = in_keepout(here[0], here[2], self.keepout)
-        centre = None if self.keepout is None else ((self.keepout[0] + self.keepout[1] + 1) / 2, (self.keepout[2] + self.keepout[3] + 1) / 2)
+        the key can carry him before the next check. Every key is checked alone, then the keys left together
+        along their summed direction (forward + right walks the diagonal, whose cells neither key alone reaches);
+        a refused diagonal drops its sideways key. From inside the box only a way out passes, and it is still
+        checked against drops and water."""
         keep = set(wanted)
         for key in WALK_KEYS:
-            if key not in wanted:
-                continue
-            vector = key_vector(key, yaw)
-            if inside:
-                leaves = vector[0] * (here[0] - centre[0]) + vector[1] * (here[2] - centre[1]) > 0
-                if not leaves:
+            if key in wanted:
+                no = self.refused(key, key_vector(key, yaw), here, reach)
+                if no:
                     keep.discard(key)
-                    self.refuse(f"keepout refused {key} at {[round(v, 1) for v in here]} (inside the box, key leads deeper)", ("keepout", key))
-                continue
-            ahead = [(here[0] + vector[0] * k, here[2] + vector[1] * k)
-                     for k in [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP) + 2)]]
-            if any(in_keepout(x, z, self.keepout) for x, z in ahead):
-                keep.discard(key)
-                self.refuse(f"keepout refused {key} at {[round(v, 1) for v in here]} "
-                            f"(box x {self.keepout[0]:g}..{self.keepout[1]:g}, z {self.keepout[2]:g}..{self.keepout[3]:g})", ("keepout", key))
-                continue
-            bad = self.judge(self.cells(here, vector, reach), feet_y)
-            if bad is not None:
-                (cx, cz), drop, why = bad
-                keep.discard(key)
-                self.refuse(f"edge refused {key} at {cx},{feet_y},{cz} drop={drop if drop <= MAX_DROP else str(MAX_DROP + 1) + '+'} ({why})",
-                            ("edge", key, cx, cz))
+                    self.refuse(*no)
+        ahead = ("forward" in keep) - ("back" in keep)
+        side = ("right" in keep) - ("left" in keep)
+        if ahead and side:
+            f, r = key_vector("forward", yaw), key_vector("right", yaw)
+            norm = math.hypot(ahead * f[0] + side * r[0], ahead * f[1] + side * r[1])
+            vector = [(ahead * f[a] + side * r[a]) / norm for a in (0, 1)]
+            name = ("forward" if ahead > 0 else "back") + "+" + ("right" if side > 0 else "left")
+            no = self.refused(name, vector, here, reach)
+            if no:
+                keep.discard("right" if side > 0 else "left")
+                self.refuse(*no)
         if not keep & set(WALK_KEYS):
             keep -= {"sprint", "jump"}
         elif "forward" not in keep:
@@ -362,6 +379,7 @@ def rank(args, client: Client):
     drift = [0.0, 0.0]  # blocks/s of his place, measured between steps
     last = None
     last_step = time.monotonic()
+    slowest = 0.0
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
@@ -393,6 +411,7 @@ def rank(args, client: Client):
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
         step_time = stepped - last_step
+        slowest = max(step_time, 0.7 * slowest)  # the step to come is taken to be as slow as the slowest lately
         if last is not None and math.dist(here, last) > 4.0 + 8.0 * step_time:
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
             offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
@@ -517,21 +536,25 @@ def rank(args, client: Client):
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
         # Route guard: no key that walks into the keep-out box, off a drop or into water or lava.
+        checked = None  # blocks along each key that the guard has read ground for
         if guard is not None:
             speed = 5.6 if "sprint" in wanted else 4.3
-            wanted = guard.filter(wanted, here, yaw, min(3.0, max(1.5, speed * step_time + 1.0)))
+            checked = min(GUARD_REACH, max(1.5, GUARD_MARGIN * speed * slowest + 1.0))
+            wanted = guard.filter(wanted, here, yaw, checked)
         # Held keys stay down for the whole step. When the last step was so long that
-        # holding would carry him past his place, walk a bounded pulse of ticks instead.
+        # holding would carry him past his place, or past the ground the guard has read (a held key keeps
+        # walking through every blocking MCP call of the step), walk a bounded pulse of ticks instead.
         pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
         speed = 5.6 if "sprint" in pulse else 4.3
-        if pulse and step_time * speed > distance + 0.5:
+        outruns = checked is not None and GUARD_MARGIN * speed * slowest + 0.5 > checked
+        if pulse and (step_time * speed > distance + 0.5 or outruns):
             wanted -= pulse
         else:
             pulse = set()
         pilot.keys(wanted)
         if pulse:
-            client.tool("minecraft_press_inputs",
-                        {"keys": sorted(pulse), "ticks": max(1, min(40, round(distance / speed * 20)))})
+            walk = distance if checked is None else min(distance, checked - 0.5)
+            client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, round(walk / speed * 20)))})
         if strike:
             # The ordinary attack: aim at any visible part of the enemy's box, attack
             # input, then wait briefly for authoritative damage or removal.
