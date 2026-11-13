@@ -387,14 +387,20 @@ ordinary direct-join launch (`--server HOST:PORT --username NAME`) plus:
 
 `tools/bv_live_pilot.py RUNTIME_DIR` drives one such client (started with
 `--automation --mcp-http 127.0.0.1:0 --windowed --runtime-dir RUNTIME_DIR`) through
-its MCP endpoint as a rank soldier: it keeps the join-time offset to the centroid
-of the 8 nearest same-side soldiers (side from `solaris_battle:red_*`/`blue_*`
-shields and surcoats, else red/blue dye), walks with held movement keys, eases its
-look toward the nearest enemy (at most 6° per step), attacks enemies in reach with
-`minecraft_attack_entity_once` once per full weapon cooldown (from the held
-weapon's `attack_speed` modifier) and logs each confirmed health drop, raises the
-off-hand shield (use input) while an enemy is within 6 blocks and lowers it for
-each swing, presses Respawn on death and re-takes its offset after any teleport.
+its MCP endpoint as a rank soldier. When the server places it (join, respawn
+re-slot, any teleport) it lists its neighbours once and, after reading their sides
+(`solaris_battle:red_*`/`blue_*` shields and surcoats, else red/blue dye), keeps
+the offset it had at that instant to the centroid of the 8 nearest same-side
+soldiers, following those same soldiers by id (a late measurement is capped at 3
+blocks); when fewer than 3 of them remain in its nearest 64 entities the place is
+handed, unchanged, to the 8 soldiers nearest it. Its place is eased over 0.3 s of
+client time and led by its measured drift over one step. It walks with held
+movement keys, or a bounded pulse of ticks when the last step was so slow that
+held keys would carry it past its place; eases its look toward the nearest enemy
+(at most 6° per step); attacks enemies in reach with `minecraft_attack_entity_once`
+once per full weapon cooldown (from the held weapon's `attack_speed` modifier) and
+logs each confirmed health drop; raises the off-hand shield (use input) while an
+enemy is within 6 blocks and lowers it for each swing; presses Respawn on death.
 It never sleeps: each step waits on the reply to its MCP calls and two client
 ticks. MCP input needs the window focused; on `window_not_focused` or a respawn
 the pilot waits for the next client state event and resumes, a writer lease held
@@ -413,7 +419,9 @@ easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain
 includes the replay settle beyond the CPU mesh budget (several upload rounds equal
 one round). `cargo test -p solaris-client --lib replay::scan` covers side
 classification, contact clustering, terrain columns and arrow flight;
-`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff and framing rules. These
+`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff and framing rules;
+`python3 -m unittest tools.test_bv_live_pilot` the live pilot against a simulated marching rank
+with slow (0.4 s) and fast MCP calls. These
 do not replace the captured real-world smoke shot or a full 20k battle.
 
 The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):

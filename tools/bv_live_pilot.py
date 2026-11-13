@@ -207,7 +207,8 @@ def rank(args, client: Client):
     sides: dict[int, str | None] = {}
     offset = anchor = None
     members: set[int] = set()
-    target = None
+    target = last_goal = None
+    drift = [0.0, 0.0]  # blocks/s of his place, measured between steps
     last = None
     last_step = time.monotonic()
     flow = [0.0, 0.0]
@@ -234,14 +235,16 @@ def rank(args, client: Client):
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
             offset, anchor, target, last, last_step = None, None, None, position(me), time.monotonic()
+            last_goal, drift = None, [0.0, 0.0]
             pilot.sent_look = None
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             continue
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
-        if last is not None and math.dist(here, last) > 4.0 + 8.0 * (stepped - last_step):
+        step_time = stepped - last_step
+        if last is not None and math.dist(here, last) > 4.0 + 8.0 * step_time:
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
-            offset, anchor, target = None, None, None
+            offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
             interval = attack_interval(client, args.attack_interval)
@@ -299,13 +302,26 @@ def rank(args, client: Client):
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
         if offset is not None:
             tracked = [e for e in friends if e["entity_id"] in members]
+            if len(tracked) < min(args.k, 3) and len(near) >= min(args.k, 3):
+                # His soldiers left the nearest page (he lags or leads a few blocks, or they
+                # fell): hand his place, unchanged, to the soldiers nearest him now. Any
+                # soldiers who keep formation can carry it.
+                place = target if target is not None else [here[0], here[2]]
+                centroid = [sum(e[a] for e in near) / len(near) for a in ("x", "z")]
+                offset = [place[0] - centroid[0], place[1] - centroid[1]]
+                members = {e["entity_id"] for e in near}
+                tracked = near
+                log("rank place handed to", len(near), "nearer soldiers; offset", [round(v, 2) for v in offset])
             if len(tracked) >= min(args.k, 3):
                 centroid = [sum(e[a] for e in tracked) / len(tracked) for a in ("x", "z")]
                 goal = [centroid[0] + offset[0], centroid[1] + offset[1]]
-                target = goal if target is None else [0.7 * target[i] + 0.3 * goal[i] for i in range(2)]
-            else:
-                log("rank neighbours gone (", len(tracked), "left in view ); measuring the place again")
-                offset = anchor = None
+                if last_goal is not None:
+                    drift = [(goal[i] - last_goal[i]) / max(step_time, 0.05) for i in range(2)]
+                last_goal = goal
+                # Eased over ~0.3 s of client time, not per step: a per-step blend lags far
+                # behind a marching rank when steps are slow.
+                blend = 1.0 - math.exp(-step_time / 0.3)
+                target = goal if target is None else [target[i] + blend * (goal[i] - target[i]) for i in range(2)]
         enemy = min(enemies, key=lambda e: e["distance"]) if enemies else None
         # Facing: the nearest enemy, else the rank's own motion, else the join-time facing.
         if enemy is not None and enemy["distance"] <= args.face_enemy:
@@ -320,7 +336,10 @@ def rank(args, client: Client):
         pilot.look(yaw, pitch)
         wanted: set[str] = set()
         if target is not None:
-            dx, dz = target[0] - here[0], target[1] - here[2]
+            # Aim where his place will be a step from now: the rank keeps marching while
+            # the step's other calls run, and the next correction comes a step later.
+            aim = [target[i] + drift[i] * step_time for i in range(2)]
+            dx, dz = aim[0] - here[0], aim[1] - here[2]
             distance = math.hypot(dx, dz)
             moving = distance > (0.4 if moving else 1.0)
             if moving:
@@ -346,7 +365,18 @@ def rank(args, client: Client):
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
+        # Held keys stay down for the whole step. When the last step was so long that
+        # holding would carry him past his place, walk a bounded pulse of ticks instead.
+        pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
+        speed = 5.6 if "sprint" in pulse else 4.3
+        if pulse and step_time * speed > distance + 0.5:
+            wanted -= pulse
+        else:
+            pulse = set()
         pilot.keys(wanted)
+        if pulse:
+            client.tool("minecraft_press_inputs",
+                        {"keys": sorted(pulse), "ticks": max(1, min(40, round(distance / speed * 20)))})
         if strike:
             # The ordinary attack: aim at any visible part of the enemy's box, attack
             # input, then wait briefly for authoritative damage or removal.
@@ -376,7 +406,7 @@ def rank(args, client: Client):
             last_status, steps = time.monotonic(), 0
 
 
-def main():
+def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runtime", type=pathlib.Path, help="the client's --runtime-dir")
     parser.add_argument("--evidence", type=pathlib.Path, default=pathlib.Path("pilot-evidence"))
@@ -396,7 +426,11 @@ def main():
                         help="side reads per step until his place is measured (then 2)")
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main():
+    args = arguments()
     signal.signal(signal.SIGTERM, interrupt)
     signal.signal(signal.SIGHUP, interrupt)
     client = connect(args.runtime, args.evidence, args.transcript)
