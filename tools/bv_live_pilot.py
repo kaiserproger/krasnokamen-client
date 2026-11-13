@@ -59,7 +59,7 @@ def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> 
 
 
 RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen")
-MOVE_KEYS = ("forward", "back", "left", "right", "sprint")
+MOVE_KEYS = ("forward", "back", "left", "right", "sprint", "jump")
 
 
 def interrupt(*_):
@@ -280,6 +280,9 @@ def rank(args, client: Client):
                     wanted.add("left")
                 if distance > 4.0 and "forward" in wanted and "back" not in wanted:
                     wanted.add("sprint")
+                # Steps and pit walls: jump while walking into a block.
+                if me.get("horizontal_collision"):
+                    wanted.add("jump")
         pilot.keys(wanted)
         now = time.monotonic()
         if enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval:
