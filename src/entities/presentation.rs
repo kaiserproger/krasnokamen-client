@@ -1275,6 +1275,19 @@ fn use_action(content: &Content, stack: &Stack) -> ArmAction {
     ArmAction::Item
 }
 
+/// Anatomical arm (0 right, 1 left) holding the item in vanilla BLOCK use:
+/// living flags say an item is in use and its hand's stack blocks attacks.
+fn blocking_arm(e: &Entity, models: &Models, content: &Content) -> Option<usize> {
+    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    if flags & 1 == 0 {
+        return None;
+    }
+    let hand = usize::from(flags & 2 != 0);
+    e.equipment_value(hand)
+        .filter(|stack| !stack.empty() && use_action(content, stack) == ArmAction::Block)
+        .map(|_| usize::from(left_main_arm(models, e)) ^ hand)
+}
+
 /// Independent angular fits to local HumanoidModel/AnimationUtils observations.
 /// Eating/drinking retains ITEM, as AvatarRenderer does; aimed actions use both arms.
 fn equipped_arm_rotations(
@@ -1526,6 +1539,10 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let zombie_arms_raised = zombie_arms && (!boolean(models, e, "DATA_BABY_ID")
         || e.equipment_value(0).is_none_or(|stack| stack.empty()));
     let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
+    // Vanilla animateZombieArms yields to a SPEAR pose. A Solaris battle husk
+    // raising its shield (living flags: using, that hand holds a blocking item)
+    // likewise keeps HumanoidModel's BLOCK pose on the shield arm.
+    let blocking_arm = zombie_arms_raised.then(|| blocking_arm(e, models, content)).flatten();
     let spell = number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0);
     let left_main = left_main_arm(models, e);
     let attack_hand = e.animation.map_or(0, |(action, _)| usize::from(action == 3));
@@ -1542,7 +1559,7 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         {
             map.offset.x -= (a * std::f32::consts::PI).sin() * 1.2;
         }
-        if zombie_arms_raised {
+        if zombie_arms_raised && blocking_arm != Some(arm) {
             // Observed vanilla idle silhouette is 80 degrees forward, not horizontal.
             let side = if arm == 0 { 1. } else { -1. };
             let bob = (age * 0.07).sin() * 0.05 * side;
