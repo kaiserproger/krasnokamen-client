@@ -86,6 +86,9 @@ pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool
 fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
     match e.type_name.as_str() {
         "minecraft:giant" => 6.,
+        // 26.3 `LayerDefinitions`: the HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
+        // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`.
+        "minecraft:horse" => 1.1,
         "minecraft:wither" => {
             let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
             2. - if remaining > 0 { (remaining as f32 - partial) / 220. * 0.5 } else { 0. }
@@ -1463,8 +1466,13 @@ impl AxisMap {
     }
 }
 
-/// Leg pitch of seated passengers.
+/// Seated passenger pose, 26.3 `HumanoidModel.setupAnim` (javap) while `isPassenger`: both
+/// arms pitch by `-PI/5` before the item pose; the right leg (model -X) takes
+/// `(-1.4137167, PI/10, 0.07853982)` and the left leg the mirrored yaw and roll.
 pub(super) const RIDING_LEG_PITCH: f32 = -1.4137167;
+pub(super) const RIDING_LEG_YAW: f32 = 0.31415927;
+pub(super) const RIDING_LEG_ROLL: f32 = 0.07853982;
+const RIDING_ARM_PITCH: f32 = -0.62831855;
 
 /// Entity-level pose of the role-driven bones: the part of `evaluate_rig` that depends
 /// on a bone's role only. The GPU crowd renderer replays it per bone of every part.
@@ -1510,8 +1518,10 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let head = Vec3::new(t.pitch.to_radians(),
         ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.).clamp(-85., 85.).to_radians(), 0.);
     let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
+    let riding_arms = if e.vehicle.is_some() { RIDING_ARM_PITCH } else { 0. };
     let gait = equipped_arm_rotations(e, models, content, head,
-        [(phase + std::f32::consts::PI).cos() * amplitude, phase.cos() * amplitude], age, partial);
+        [(phase + std::f32::consts::PI).cos() * amplitude + riding_arms, phase.cos() * amplitude + riding_arms],
+        age, partial);
     // A received `swing_animation` without a clip sets the vanilla swing's duration.
     let swing_ticks = e.physical.combat.vanilla_ticks().max(1) as f32;
     let attack = e
@@ -1717,7 +1727,8 @@ pub(super) fn evaluate_posed_rig(
             pivot.y += 0.2;
         }
         if pose.riding && matches!(bone.role, BoneRole::RightLeg | BoneRole::LeftLeg) {
-            rotation.x = RIDING_LEG_PITCH;
+            let side = if bone.role == BoneRole::RightLeg { 1. } else { -1. };
+            rotation = Vec3::new(RIDING_LEG_PITCH, side * RIDING_LEG_YAW, side * RIDING_LEG_ROLL);
         }
         if e.type_name == "minecraft:armor_stand" {
             let field = match bone.name.as_str() {
@@ -3261,6 +3272,17 @@ mod tests {
         for (normal_y, giant_y) in normal.iter().zip(&giant) {
             assert!((giant_y - 6. * normal_y).abs() < 1e-5);
         }
+    }
+
+    /// BV-HORSE: 26.3 `LayerDefinitions` bakes the adult HORSE layer (and its armour and
+    /// saddle layers) through `MeshTransformer.scaling(1.1F)`, about the feet.
+    #[test]
+    fn adult_horse_renders_at_the_vanilla_layer_scale() {
+        let (models, mut entity) = fixture();
+        entity.type_name = "minecraft:horse".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.1);
+        entity.type_name = "minecraft:pig".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.);
     }
 
     #[test]
