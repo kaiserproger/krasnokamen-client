@@ -639,7 +639,7 @@ mod tests {
             .entities
             .activate_models(Arc::new(crate::entities::Models {
                 rigs: BTreeMap::new(),
-                schemas: std::collections::HashMap::new(),
+                schemas: Default::default(),
                 families: BTreeMap::new(),
                 builtin_variants: BTreeMap::new(),
                 simple_particles: Vec::new(),

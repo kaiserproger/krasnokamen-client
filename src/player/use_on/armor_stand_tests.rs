@@ -70,7 +70,7 @@ fn models(hard: bool) -> Models {
     .unwrap();
     Models {
         rigs: BTreeMap::new(),
-        schemas: std::collections::HashMap::from([("test:entity".into(), schema)]),
+        schemas: [("test:entity".into(), schema)].into_iter().collect(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),

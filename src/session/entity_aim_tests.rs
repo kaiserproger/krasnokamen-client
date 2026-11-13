@@ -28,7 +28,7 @@ fn models() -> Models {
     .unwrap();
     Models {
         rigs: BTreeMap::new(),
-        schemas: std::collections::HashMap::from([("test:villager".into(), schema)]),
+        schemas: [("test:villager".into(), schema)].into_iter().collect(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),

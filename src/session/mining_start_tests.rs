@@ -48,7 +48,7 @@ pub(super) fn session() -> Session {
     session.environment.publish_world(&mut session.world).unwrap();
     session.entities.models = Some(Arc::new(Models {
         rigs: BTreeMap::new(),
-        schemas: std::collections::HashMap::new(),
+        schemas: Default::default(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),

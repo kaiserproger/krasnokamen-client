@@ -6,6 +6,44 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{BuildHasherDefault, Hasher};
+
+/// Map from the short, trusted names entity facts are looked up by (kinds, metadata
+/// accessors), many times per entity each tick and frame.
+pub type NameMap<V> = HashMap<String, V, BuildHasherDefault<NameHasher>>;
+
+/// Multiply-rotate hash over 8-byte words (the FxHash step): a fraction of SipHash's cost
+/// for the bundled fact names, which are not attacker-chosen.
+#[derive(Clone, Copy, Default)]
+pub struct NameHasher(u64);
+impl NameHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+impl Hasher for NameHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for word in &mut words {
+            self.add(u64::from_le_bytes(word.try_into().unwrap()));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut word = [0; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+    fn write_u8(&mut self, value: u8) {
+        self.add(u64::from(value));
+    }
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
 
 /// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
@@ -16,7 +54,7 @@ const FACTS_SCHEMA: u32 = 1;
 struct Document {
     schema: u32,
     game_version: String,
-    entities: HashMap<String, EntitySchema>,
+    entities: NameMap<EntitySchema>,
     families: BTreeMap<String, Family>,
     armor_models: BTreeMap<String, ArmorModels>,
     simple_particles: Vec<String>,
@@ -89,7 +127,95 @@ pub struct EntitySchema {
     pub default_attributes: BTreeMap<String, DefaultAttribute>,
     pub height: f32,
     /// Hashed, not ordered: looked up by name per entity many times a tick and frame.
-    pub accessors: HashMap<String, [u32; 2]>,
+    pub accessors: NameMap<[u32; 2]>,
+    /// What `Models::dimensions` reads of this schema, resolved from its names on first use
+    /// (a schema does not change once its models are activated).
+    #[serde(skip)]
+    pub sizing: std::sync::OnceLock<Sizing>,
+}
+
+/// The parts of a schema `Models::dimensions` consults on every call, resolved once.
+#[derive(Debug)]
+pub struct Sizing {
+    pose: Option<u8>,
+    client_flags: Option<u8>,
+    baby: Option<u8>,
+    state: Option<u8>,
+    puff: Option<u8>,
+    variant: Option<u8>,
+    size: Option<u8>,
+    living: bool,
+    camel: bool,
+    /// `minecraft:scale` attribute id and default value.
+    scale: Option<(u32, f64)>,
+    sanitize: Sanitize,
+    /// `getAgeScale` of a baby.
+    baby_scale: f32,
+    /// Owner of `getDefaultDimensions`.
+    owner: SizeOwner,
+}
+
+/// `sanitizeScale` owner of a kind.
+#[derive(Debug)]
+enum Sanitize {
+    Keep,
+    AtMost(f32),
+    One,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SizeOwner {
+    Other,
+    ChestedHorse,
+    CubeMob,
+    Pufferfish,
+    Salmon,
+    Phantom,
+}
+
+impl Sizing {
+    fn of(schema: &EntitySchema) -> Self {
+        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
+        let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
+        let owner = |method: &str| schema.method_owners.get(method).map(String::as_str);
+        Self {
+            pose: id("DATA_POSE"),
+            client_flags: id("DATA_CLIENT_FLAGS"),
+            baby: id("DATA_BABY_ID"),
+            state: id("DATA_STATE"),
+            puff: id("PUFF_STATE"),
+            variant: id("DATA_TYPE"),
+            size: id("ID_SIZE"),
+            living: inherits("net.minecraft.world.entity.LivingEntity"),
+            camel: inherits("net.minecraft.world.entity.animal.camel.Camel"),
+            scale: schema.default_attributes.get("minecraft:scale").map(|scale| (scale.id, scale.value)),
+            sanitize: match owner("sanitizeScale") {
+                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => Sanitize::AtMost(1.),
+                Some("net.minecraft.world.entity.monster.Shulker") => Sanitize::AtMost(3.),
+                Some("net.minecraft.world.entity.boss.enderdragon.EnderDragon") => Sanitize::One,
+                _ => Sanitize::Keep,
+            },
+            baby_scale: match owner("getAgeScale") {
+                Some(
+                    "net.minecraft.world.entity.animal.armadillo.Armadillo"
+                    | "net.minecraft.world.entity.animal.camel.Camel",
+                ) => 0.6,
+                Some("net.minecraft.world.entity.animal.dolphin.Dolphin") => 0.65,
+                Some("net.minecraft.world.entity.animal.goat.Goat") => 0.55,
+                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => 0.2375,
+                Some("net.minecraft.world.entity.animal.turtle.Turtle") => 0.3,
+                _ => 0.5,
+            },
+            owner: match owner("getDefaultDimensions") {
+                Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse") => SizeOwner::ChestedHorse,
+                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => SizeOwner::CubeMob,
+                Some("net.minecraft.world.entity.animal.fish.Pufferfish") => SizeOwner::Pufferfish,
+                Some("net.minecraft.world.entity.animal.fish.Salmon") => SizeOwner::Salmon,
+                Some("net.minecraft.world.entity.monster.Phantom") => SizeOwner::Phantom,
+                _ => SizeOwner::Other,
+            },
+        }
+    }
 }
 #[derive(Deserialize, Debug)]
 pub struct Family {
@@ -132,7 +258,7 @@ pub struct Rig {
 pub struct Models {
     pub rigs: BTreeMap<String, Rig>,
     /// Hashed, not ordered: looked up by kind per entity many times a tick and frame.
-    pub schemas: HashMap<String, EntitySchema>,
+    pub schemas: NameMap<EntitySchema>,
     pub families: BTreeMap<String, Family>,
     pub builtin_variants: BTreeMap<String, BTreeMap<String, Value>>,
     pub simple_particles: Vec<String>,
@@ -304,14 +430,12 @@ impl Models {
             .schemas
             .get(&entity.type_name)
             .ok_or("entity dimensions source not activated")?;
-        let number = |key: &str| {
-            self.accessor(&entity.type_name, key)
-                .and_then(|id| entity.metadata_value(id))
-                .and_then(super::Metadata::int)
+        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema));
+        let number = |id: Option<u8>| {
+            id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
         };
-        let boolean = |key: &str| {
-            self.accessor(&entity.type_name, key)
-                .and_then(|id| entity.metadata_value(id))
+        let boolean = |id: Option<u8>| {
+            id.and_then(|id| entity.metadata_value(id))
                 .and_then(super::Metadata::boolean)
                 .unwrap_or(false)
         };
@@ -321,39 +445,22 @@ impl Models {
         };
         let pose = self
             .poses
-            .get(&(number("DATA_POSE").unwrap_or(0) as u8))
+            .get(&(number(sizing.pose).unwrap_or(0) as u8))
             .ok_or("unknown entity pose")?;
-        let living = schema
-            .hierarchy
-            .iter()
-            .any(|class| class == "net.minecraft.world.entity.LivingEntity");
+        let living = sizing.living;
         let mut attribute_scale = if living {
-            let definition = schema
-                .default_attributes
-                .get("minecraft:scale")
-                .ok_or("source scale attribute missing")?;
-            entity
-                .attributes
-                .get(&definition.id)
-                .copied()
-                .unwrap_or(definition.value) as f32
+            let (id, default) = sizing.scale.ok_or("source scale attribute missing")?;
+            entity.attributes.get(&id).copied().unwrap_or(default) as f32
         } else {
             1.
         };
         if !attribute_scale.is_finite() || attribute_scale <= 0. {
             return Err("invalid entity scale".into());
         }
-        attribute_scale = match schema
-            .method_owners
-            .get("sanitizeScale")
-            .map(String::as_str)
-        {
-            Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => {
-                attribute_scale.min(1.)
-            }
-            Some("net.minecraft.world.entity.monster.Shulker") => attribute_scale.min(3.),
-            Some("net.minecraft.world.entity.boss.enderdragon.EnderDragon") => 1.,
-            _ => attribute_scale,
+        attribute_scale = match sizing.sanitize {
+            Sanitize::Keep => attribute_scale,
+            Sanitize::AtMost(most) => attribute_scale.min(most),
+            Sanitize::One => 1.,
         };
         if living && pose == "SLEEPING" {
             return Ok((
@@ -362,7 +469,7 @@ impl Models {
             ));
         }
         if entity.type_name == "minecraft:armor_stand" {
-            let flags = number("DATA_CLIENT_FLAGS").unwrap_or(0);
+            let flags = number(sizing.client_flags).unwrap_or(0);
             return Ok((
                 if flags & 16 != 0 {
                     constant("MARKER_DIMENSIONS").ok_or("source marker dimensions missing")?
@@ -384,25 +491,8 @@ impl Models {
                 attribute_scale,
             ));
         }
-        let camel = schema
-            .hierarchy
-            .iter()
-            .any(|class| class == "net.minecraft.world.entity.animal.camel.Camel");
-        let age_scale = if boolean("DATA_BABY_ID") {
-            match schema.method_owners.get("getAgeScale").map(String::as_str) {
-                Some(
-                    "net.minecraft.world.entity.animal.armadillo.Armadillo"
-                    | "net.minecraft.world.entity.animal.camel.Camel",
-                ) => 0.6,
-                Some("net.minecraft.world.entity.animal.dolphin.Dolphin") => 0.65,
-                Some("net.minecraft.world.entity.animal.goat.Goat") => 0.55,
-                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => 0.2375,
-                Some("net.minecraft.world.entity.animal.turtle.Turtle") => 0.3,
-                _ => 0.5,
-            }
-        } else {
-            1.
-        };
+        let camel = sizing.camel;
+        let age_scale = if boolean(sizing.baby) { sizing.baby_scale } else { 1. };
         if camel && pose == "SITTING" {
             return Ok((
                 constant("SITTING_DIMENSIONS").ok_or("source camel sitting dimensions missing")?,
@@ -425,7 +515,7 @@ impl Models {
             && schema
                 .enum_ids
                 .get("State")
-                .and_then(|ids| ids.get(&number("DATA_STATE").unwrap_or(0)))
+                .and_then(|ids| ids.get(&number(sizing.state).unwrap_or(0)))
                 .is_some_and(|v| v == "DIGGING")
         {
             let d = constant("DIGGING_DIMENSIONS")
@@ -441,7 +531,7 @@ impl Models {
         }
         if let Some(baby) = constant("BABY_DIMENSIONS") {
             return Ok((
-                if boolean("DATA_BABY_ID") {
+                if boolean(sizing.baby) {
                     baby
                 } else {
                     &schema.dimensions
@@ -449,43 +539,28 @@ impl Models {
                 attribute_scale,
             ));
         }
-        let owner = schema
-            .method_owners
-            .get("getDefaultDimensions")
-            .map(String::as_str);
-        if owner == Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse")
-            && !boolean("DATA_BABY_ID")
-        {
+        let owner = &sizing.owner;
+        if *owner == SizeOwner::ChestedHorse && !boolean(sizing.baby) {
             return Ok((&schema.dimensions, attribute_scale));
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
-        let age_scale = if owner == Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") {
-            1.
-        } else {
-            age_scale
-        };
+        let age_scale = if *owner == SizeOwner::CubeMob { 1. } else { age_scale };
         let family_scale = match owner {
-            Some("net.minecraft.world.entity.animal.fish.Pufferfish") => {
-                match number("PUFF_STATE").unwrap_or(0) {
-                    0 => 0.5,
-                    1 => 0.7,
-                    _ => 1.,
-                }
-            }
-            Some("net.minecraft.world.entity.animal.fish.Salmon") => *schema
+            SizeOwner::Pufferfish => match number(sizing.puff).unwrap_or(0) {
+                0 => 0.5,
+                1 => 0.7,
+                _ => 1.,
+            },
+            SizeOwner::Salmon => *schema
                 .enum_numbers
                 .get("Variant")
-                .and_then(|variants| variants.get(&number("DATA_TYPE").unwrap_or(1)))
+                .and_then(|variants| variants.get(&number(sizing.variant).unwrap_or(1)))
                 .and_then(|fields| fields.get("boundingBoxScale"))
                 .ok_or("source salmon numeric variant missing")?,
-            Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => {
-                number("ID_SIZE").unwrap_or(1) as f32
-            }
-            Some("net.minecraft.world.entity.monster.Phantom") => {
-                1. + 0.15 * number("ID_SIZE").unwrap_or(0) as f32
-            }
-            _ => 1.,
+            SizeOwner::CubeMob => number(sizing.size).unwrap_or(1) as f32,
+            SizeOwner::Phantom => 1. + 0.15 * number(sizing.size).unwrap_or(0) as f32,
+            SizeOwner::Other | SizeOwner::ChestedHorse => 1.,
         };
         Ok((
             &schema.dimensions,
