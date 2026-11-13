@@ -103,6 +103,7 @@ pub(super) fn fixture() -> (Models, Entity) {
             height: 1.,
             accessors: Default::default(),
             sizing: Default::default(),
+            ids: Default::default(),
         },
     );
     entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());

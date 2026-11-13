@@ -383,7 +383,8 @@ pub(crate) fn tick(
             };
             let sitting = last_pose < 0;
             let pose_time = game_time.wrapping_sub(last_pose.wrapping_abs());
-            let flags = p::number(models, entity, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+            let ids = models.ids(entity);
+            let flags = p::int_at(entity, ids.living_flags).unwrap_or(0);
             let using = flags & 1 != 0;
             let blocking = using
                 && entity
@@ -398,13 +399,13 @@ pub(crate) fn tick(
                     position: transform.position,
                     yaw: transform.yaw,
                     alive: entity.death_tick.is_none()
-                        && match p::value(models, entity, "DATA_HEALTH_ID") {
+                        && match ids.health.and_then(|id| entity.metadata_value(id)) {
                             Some(Metadata::Float(health)) => *health > 0.,
                             _ => true,
                         },
                     passenger: entity.vehicle.is_some(),
-                    baby: p::boolean(models, entity, "DATA_BABY_ID"),
-                    visually_swimming: p::number(models, entity, "DATA_POSE") == Some(3),
+                    baby: p::flag_at(entity, ids.baby),
+                    visually_swimming: p::int_at(entity, ids.pose) == Some(3),
                     in_water: in_water == Some(true),
                     uses_y_for_walk: facts.walk_uses_y(entity),
                     rotation_changed_before_base_tick: transform.yaw != source.previous_yaw,

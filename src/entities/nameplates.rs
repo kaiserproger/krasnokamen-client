@@ -328,6 +328,7 @@ mod tests {
             .into_iter()
             .collect(),
             sizing: Default::default(),
+            ids: Default::default(),
         };
         let models = Models {
             rigs: BTreeMap::new(),

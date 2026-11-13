@@ -132,6 +132,78 @@ pub struct EntitySchema {
     /// (a schema does not change once its models are activated).
     #[serde(skip)]
     pub sizing: std::sync::OnceLock<Sizing>,
+    /// Metadata indices of the accessors read per entity each frame and tick, resolved from
+    /// their names on first use.
+    #[serde(skip)]
+    pub ids: std::sync::OnceLock<Ids>,
+}
+
+/// Metadata indices of the accessors the frame and tick read for every entity, resolved once
+/// per kind (`Models::ids`); `None` where the kind has no such accessor.
+#[derive(Debug)]
+pub struct Ids {
+    pub baby: Option<u8>,
+    pub pose: Option<u8>,
+    pub shared_flags: Option<u8>,
+    pub mob_flags: Option<u8>,
+    pub client_flags: Option<u8>,
+    pub living_flags: Option<u8>,
+    pub spell: Option<u8>,
+    pub main_hand: Option<u8>,
+    pub sleeping_pos: Option<u8>,
+    pub size: Option<u8>,
+    pub item: Option<u8>,
+    pub item_stack: Option<u8>,
+    pub peek: Option<u8>,
+    pub standing: Option<u8>,
+    pub id_flags: Option<u8>,
+    pub health: Option<u8>,
+    /// `IS_CHARGING_CROSSBOW` (pillager) and `DATA_IS_CHARGING_CROSSBOW` (piglin).
+    pub charging: [Option<u8>; 2],
+}
+
+impl Ids {
+    const NONE: Self = Self {
+        baby: None,
+        pose: None,
+        shared_flags: None,
+        mob_flags: None,
+        client_flags: None,
+        living_flags: None,
+        spell: None,
+        main_hand: None,
+        sleeping_pos: None,
+        size: None,
+        item: None,
+        item_stack: None,
+        peek: None,
+        standing: None,
+        id_flags: None,
+        health: None,
+        charging: [None; 2],
+    };
+    fn of(schema: &EntitySchema) -> Self {
+        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
+        Self {
+            baby: id("DATA_BABY_ID"),
+            pose: id("DATA_POSE"),
+            shared_flags: id("DATA_SHARED_FLAGS_ID"),
+            mob_flags: id("DATA_MOB_FLAGS_ID"),
+            client_flags: id("DATA_CLIENT_FLAGS"),
+            living_flags: id("DATA_LIVING_ENTITY_FLAGS"),
+            spell: id("DATA_SPELL_CASTING_ID"),
+            main_hand: id("DATA_PLAYER_MAIN_HAND"),
+            sleeping_pos: id("SLEEPING_POS_ID"),
+            size: id("ID_SIZE"),
+            item: id("DATA_ITEM"),
+            item_stack: id("DATA_ITEM_STACK_ID"),
+            peek: id("DATA_PEEK_ID"),
+            standing: id("DATA_STANDING_ID"),
+            id_flags: id("DATA_ID_FLAGS"),
+            health: id("DATA_HEALTH_ID"),
+            charging: [id("IS_CHARGING_CROSSBOW"), id("DATA_IS_CHARGING_CROSSBOW")],
+        }
+    }
 }
 
 /// The parts of a schema `Models::dimensions` consults on every call, resolved once.
@@ -222,6 +294,7 @@ impl EntitySchema {
     /// Forgets the facts resolved from this schema's names (it may be about to change).
     fn forget_resolved(&mut self) {
         self.sizing = std::sync::OnceLock::new();
+        self.ids = std::sync::OnceLock::new();
     }
 }
 
@@ -521,6 +594,10 @@ impl Models {
     /// Metadata index of `e`'s accessor `name`.
     pub(crate) fn entity_accessor(&self, e: &super::Entity, name: &str) -> Option<u8> {
         self.schema_of(e)?.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok())
+    }
+    /// `e`'s resolved per-frame accessor indices (all `None` for an unknown kind).
+    pub(crate) fn ids(&self, e: &super::Entity) -> &Ids {
+        self.schema_of(e).map_or(&Ids::NONE, |schema| schema.ids.get_or_init(|| Ids::of(schema)))
     }
     pub fn default_skin(&self, uuid: Option<&str>) -> Result<&DefaultSkin> {
         let index = if let Some(uuid) = uuid {

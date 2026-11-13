@@ -754,8 +754,9 @@ impl Store {
             let paused = frozen
                 && !hierarchy(&models, e, "net.minecraft.world.entity.player.Player")
                 && !self.root_has_player(self.root_vehicle(*id)?, &models, 0)?;
-            let peek = number(&models, e, "DATA_PEEK_ID", 0) as f32 * 0.01;
-            let standing = boolean(&models, e, "DATA_STANDING_ID", false);
+            let ids = models.ids(e);
+            let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
+            let standing = super::presentation::flag_at(e, ids.standing);
             let before_bounds = self.bounds(e.handle, tick, 0.)?;
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);

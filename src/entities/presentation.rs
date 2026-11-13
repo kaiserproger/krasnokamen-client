@@ -67,6 +67,14 @@ pub(super) fn boolean(models: &Models, e: &Entity, name: &str) -> bool {
         .and_then(Metadata::boolean)
         .unwrap_or(false)
 }
+/// `e`'s integer metadata at an accessor index resolved for its kind (`Models::ids`).
+pub(super) fn int_at(e: &Entity, id: Option<u8>) -> Option<i32> {
+    id.and_then(|id| e.metadata_value(id)).and_then(Metadata::int)
+}
+/// `e`'s boolean metadata at an accessor index resolved for its kind (`Models::ids`).
+pub(super) fn flag_at(e: &Entity, id: Option<u8>) -> bool {
+    id.and_then(|id| e.metadata_value(id)).and_then(Metadata::boolean).unwrap_or(false)
+}
 
 fn anger(models: &Models, e: &Entity, game_time: i64) -> Option<bool> {
     if !matches!(e.type_name.as_str(), "minecraft:bee" | "minecraft:wolf") {
@@ -89,7 +97,7 @@ fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
         "minecraft:giant" => 6.,
         // 26.3 `LayerDefinitions`: the adult HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
         // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`; HORSE_BABY does not.
-        "minecraft:horse" if !boolean(models, e, "DATA_BABY_ID") => 1.1,
+        "minecraft:horse" if !flag_at(e, models.ids(e).baby) => 1.1,
         "minecraft:wither" => {
             let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
             2. - if remaining > 0 { (remaining as f32 - partial) / 220. * 0.5 } else { 0. }
@@ -276,7 +284,7 @@ pub(super) fn material(
         .families
         .get(&e.type_name)
         .ok_or_else(|| format!("no activated rig family for {}", e.type_name))?;
-    let baby = boolean(models, e, "DATA_BABY_ID");
+    let baby = flag_at(e, models.ids(e).baby);
     let mut rig = if baby {
         family.baby_rig.as_ref().unwrap_or(&family.rig)
     } else {
@@ -555,7 +563,7 @@ fn append_entity_fire(
     transform: super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let flags = number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
+    let flags = int_at(entity, models.ids(entity).shared_flags).unwrap_or(0);
     if flags & 1 == 0 || flags & 32 != 0 || entity.type_name == "minecraft:falling_block" {
         return Ok(());
     }
@@ -664,8 +672,9 @@ pub fn append(
         }
         let mut clock = store.slots[slot].clock.take();
         let entity = &store.slots[slot];
-        let item = value(&models, entity, "DATA_ITEM")
-            .or_else(|| value(&models, entity, "DATA_ITEM_STACK_ID"));
+        let ids = models.ids(entity);
+        let item = ids.item.and_then(|id| entity.metadata_value(id))
+            .or_else(|| ids.item_stack.and_then(|id| entity.metadata_value(id)));
         let stack = match item { Some(Metadata::Item(stack)) => Some(stack), _ => None };
         let stacks = [stack.or_else(|| entity.equipment_value(0)),
             entity.equipment_value(1), entity.equipment_value(5)];
@@ -834,10 +843,11 @@ pub(super) fn root_matrix(
             Mat4::from_translation(relative) * Mat4::from_rotation_y(t.yaw.to_radians())
         }
     };
-    let pose = number(models, entity, "DATA_POSE").unwrap_or(0);
+    let ids = models.ids(entity);
+    let pose = int_at(entity, ids.pose).unwrap_or(0);
     if pose == 2 && matches!(binding.style, RootStyle::Living) {
         // Lay the rig along the bed axis, with its head at the received bed head.
-        let direction = match value(models, entity, "SLEEPING_POS_ID") {
+        let direction = match ids.sleeping_pos.and_then(|id| entity.metadata_value(id)) {
             Some(Metadata::OptionalBlockPosition(Some(position))) => bed_direction(*position),
             _ => None,
         };
@@ -849,7 +859,7 @@ pub(super) fn root_matrix(
                     _ => body_yaw,
                 };
                 let schema = &models.schemas[&entity.type_name];
-                let eye = match (boolean(models, entity, "DATA_BABY_ID"), schema.dimension_constants.get("BABY_DIMENSIONS")) {
+                let eye = match (flag_at(entity, ids.baby), schema.dimension_constants.get("BABY_DIMENSIONS")) {
                     (true, Some(resources::DimensionConstant::Dimensions(d))) => d.eye_height,
                     _ => schema.dimensions.eye_height,
                 };
@@ -884,11 +894,11 @@ pub(super) fn root_matrix(
         matrix = scale_cube_model(
             matrix,
             relative,
-            number(models, entity, "ID_SIZE"),
+            int_at(entity, ids.size),
         );
     }
     if entity.type_name == "minecraft:armor_stand"
-        && number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0
+        && int_at(entity, ids.client_flags).unwrap_or(0) & 1 != 0
     {
         matrix = Mat4::from_translation(relative)
             * Mat4::from_scale(Vec3::splat(0.5))
@@ -998,7 +1008,7 @@ pub(super) fn draw_entity(
                 let matrix = root_matrix(entity, models, binding, frame, store.bed_direction);
                 let swell = super::creeper::swell(entity, partial);
                 let invisible =
-                    number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
+                    int_at(entity, models.ids(entity).shared_flags).unwrap_or(0) & 32 != 0;
                 evaluate_rig(rig, entity, models, content, tick, partial, matrix, store.transforms);
                 if !invisible {
                     emit_rig_parts(
@@ -1006,7 +1016,7 @@ pub(super) fn draw_entity(
                         store.transforms,
                         RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light },
                         (entity.type_name == "minecraft:armor_stand")
-                            .then(|| number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0)),
+                            .then(|| int_at(entity, models.ids(entity).client_flags).unwrap_or(0)),
                         entity.type_name == "minecraft:end_crystal"
                             && value(models, entity, "DATA_SHOW_BOTTOM")
                                 .and_then(Metadata::boolean) == Some(false),
@@ -1048,7 +1058,7 @@ pub(super) fn draw_entity(
                         }
                     }
                     if entity.type_name == "minecraft:mooshroom"
-                        && !boolean(models, entity, "DATA_BABY_ID")
+                        && !flag_at(entity, models.ids(entity).baby)
                     {
                         let result = (|| {
                             let brown = number(models, entity, "DATA_TYPE").unwrap_or(0) == 1;
@@ -1120,7 +1130,7 @@ pub(super) fn draw_entity(
                     if matches!(entity.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
                         && number(models, entity, "DATA_FLAGS_ID").unwrap_or(0) & 4 != 0
                     {
-                        let baby = boolean(models, entity, "DATA_BABY_ID");
+                        let baby = flag_at(entity, models.ids(entity).baby);
                         let path = match (entity.type_name.as_str(), baby) {
                             ("minecraft:cat", false) => "minecraft:entity/cat/cat_collar",
                             ("minecraft:cat", true) => "minecraft:entity/cat/cat_collar_baby",
@@ -1157,7 +1167,7 @@ pub(super) fn draw_entity(
                         models,
                         content,
                         super::sheep::CoatFrame {
-                            baby: boolean(models, entity, "DATA_BABY_ID"),
+                            baby: flag_at(entity, models.ids(entity).baby),
                             base_rig: rig, tick, partial, root: matrix, light,
                         },
                         store.transforms,
@@ -1219,8 +1229,9 @@ pub(super) fn draw_entity(
 
 /// Equipment slots are logical hands; rigs and display transforms are anatomical sides.
 pub(super) fn left_main_arm(models: &Models, e: &Entity) -> bool {
-    number(models, e, "DATA_PLAYER_MAIN_HAND").map_or_else(
-        || number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 2 != 0,
+    let ids = models.ids(e);
+    int_at(e, ids.main_hand).map_or_else(
+        || int_at(e, ids.mob_flags).unwrap_or(0) & 2 != 0,
         |arm| arm == 0,
     )
 }
@@ -1241,7 +1252,7 @@ pub(super) fn held_item_context(
     } else {
         "head"
     };
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
     let (using_item, use_ticks, crossbow_pull) = held_item_use(e, flags, slot, partial);
     (context, crate::ui::items::ItemContext {
         display: context.into(),
@@ -1299,7 +1310,7 @@ fn use_action(content: &Content, stack: &Stack) -> ArmAction {
 /// Anatomical arm (0 right, 1 left) holding the item in vanilla BLOCK use:
 /// living flags say an item is in use and its hand's stack blocks attacks.
 fn blocking_arm(e: &Entity, models: &Models, content: &Content) -> Option<usize> {
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
     if flags & 1 == 0 {
         return None;
     }
@@ -1317,7 +1328,7 @@ fn equipped_arm_rotations(
 ) -> [Vec3; 2] {
     let mut arms = gait.map(|x| Vec3::new(x, 0., 0.));
     let main = usize::from(left_main_arm(models, e));
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
     let charging = boolean(models, e, "IS_CHARGING_CROSSBOW")
         || boolean(models, e, "DATA_IS_CHARGING_CROSSBOW");
     let using = flags & 1 != 0 || charging;
@@ -1397,7 +1408,7 @@ fn equipped_arm_rotations(
             _ => {}
         }
     }
-    if number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0) {
+    if int_at(e, models.ids(e).spell).is_some_and(|spell| spell != 0) {
         let wave = (age * 0.65).cos() * 14_f32.to_radians();
         arms = [Vec3::new(wave, 0., 135_f32.to_radians()), Vec3::new(wave, 0., -135_f32.to_radians())];
     }
@@ -1564,14 +1575,15 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         "minecraft:zombie" | "minecraft:husk" | "minecraft:drowned" | "minecraft:giant"
             | "minecraft:zombie_villager" | "minecraft:zombified_piglin"
     );
-    let zombie_arms_raised = zombie_arms && (!boolean(models, e, "DATA_BABY_ID")
+    let ids = models.ids(e);
+    let zombie_arms_raised = zombie_arms && (!flag_at(e, ids.baby)
         || e.equipment_value(0).is_none_or(|stack| stack.empty()));
-    let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
+    let aggressive = zombie_arms && int_at(e, ids.mob_flags).unwrap_or(0) & 4 != 0;
     // Vanilla animateZombieArms yields to a SPEAR pose. A Solaris battle husk
     // raising its shield (living flags: using, that hand holds a blocking item)
     // likewise keeps HumanoidModel's BLOCK pose on the shield arm.
     let blocking_arm = zombie_arms_raised.then(|| blocking_arm(e, models, content)).flatten();
-    let spell = number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0);
+    let spell = int_at(e, ids.spell).is_some_and(|spell| spell != 0);
     let left_main = left_main_arm(models, e);
     let attack_hand = e.animation.map_or(0, |(action, _)| usize::from(action == 3));
     let trident = e.type_name == "minecraft:drowned" && aggressive
@@ -1680,7 +1692,7 @@ pub(super) fn evaluate_posed_rig(
     let RolePose { phase, amplitude, age, .. } = *pose;
     let pet_sitting = matches!(e.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
         && number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 1 != 0;
-    let pet_baby = pet_sitting && boolean(models, e, "DATA_BABY_ID");
+    let pet_baby = pet_sitting && flag_at(e, models.ids(e).baby);
     let wing_beat = if super::render_living::folds_wings(&e.type_name) {
         living.map_or(0., |state| state.wings(partial))
     } else {

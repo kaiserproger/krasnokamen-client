@@ -575,9 +575,9 @@ impl State {
         })
     }
     fn update_item_use(&mut self, models: &Models, entity: &Entity, age: i32) {
-        let flags = p::number(models, entity, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
-        let charging = p::boolean(models, entity, "IS_CHARGING_CROSSBOW")
-            || p::boolean(models, entity, "DATA_IS_CHARGING_CROSSBOW");
+        let ids = models.ids(entity);
+        let flags = p::int_at(entity, ids.living_flags).unwrap_or(0);
+        let charging = p::flag_at(entity, ids.charging[0]) || p::flag_at(entity, ids.charging[1]);
         let hand = usize::from(flags & 2 != 0);
         let active = (flags & 1 != 0 || charging)
             .then(|| entity.equipment_value(hand))
@@ -625,7 +625,7 @@ impl State {
                 .accessor(&entity.type_name, name)
                 .is_some_and(|id| changed[usize::from(id)])
         };
-        let pose = p::number(models, entity, "DATA_POSE").unwrap_or(0);
+        let pose = p::int_at(entity, models.ids(entity).pose).unwrap_or(0);
         match &mut self.modern {
             Modern::Frog {
                 jump,

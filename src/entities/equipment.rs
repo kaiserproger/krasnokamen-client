@@ -574,6 +574,7 @@ mod tests {
             default_attributes: BTreeMap::new(),
             accessors: [("DATA_BABY_ID".into(), [0, 8])].into_iter().collect(),
             sizing: Default::default(),
+            ids: Default::default(),
         };
         let models = Models {
             rigs,
