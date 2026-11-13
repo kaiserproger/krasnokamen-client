@@ -14,7 +14,7 @@
 //!   An entity that never received such a swing keeps the vanilla look.
 mod bake;
 mod format;
-mod select;
+pub(super) mod select;
 #[cfg(test)]
 mod tests;
 

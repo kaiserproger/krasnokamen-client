@@ -86,6 +86,9 @@ pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool
 fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
     match e.type_name.as_str() {
         "minecraft:giant" => 6.,
+        // 26.3 `LayerDefinitions`: the adult HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
+        // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`; HORSE_BABY does not.
+        "minecraft:horse" if !boolean(models, e, "DATA_BABY_ID") => 1.1,
         "minecraft:wither" => {
             let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
             2. - if remaining > 0 { (remaining as f32 - partial) / 220. * 0.5 } else { 0. }
@@ -1463,8 +1466,13 @@ impl AxisMap {
     }
 }
 
-/// Leg pitch of seated passengers.
+/// Seated passenger pose, 26.3 `HumanoidModel.setupAnim` (javap) while `isPassenger`: both
+/// arms pitch by `-PI/5` before the item pose; the right leg (model -X) takes
+/// `(-1.4137167, PI/10, 0.07853982)` and the left leg the mirrored yaw and roll.
 pub(super) const RIDING_LEG_PITCH: f32 = -1.4137167;
+pub(super) const RIDING_LEG_YAW: f32 = 0.31415927;
+pub(super) const RIDING_LEG_ROLL: f32 = 0.07853982;
+const RIDING_ARM_PITCH: f32 = -0.62831855;
 
 /// Entity-level pose of the role-driven bones: the part of `evaluate_rig` that depends
 /// on a bone's role only. The GPU crowd renderer replays it per bone of every part.
@@ -1510,8 +1518,10 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let head = Vec3::new(t.pitch.to_radians(),
         ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.).clamp(-85., 85.).to_radians(), 0.);
     let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
+    let riding_arms = if e.vehicle.is_some() { RIDING_ARM_PITCH } else { 0. };
     let gait = equipped_arm_rotations(e, models, content, head,
-        [(phase + std::f32::consts::PI).cos() * amplitude, phase.cos() * amplitude], age, partial);
+        [(phase + std::f32::consts::PI).cos() * amplitude + riding_arms, phase.cos() * amplitude + riding_arms],
+        age, partial);
     // A received `swing_animation` without a clip sets the vanilla swing's duration.
     let swing_ticks = e.physical.combat.vanilla_ticks().max(1) as f32;
     let attack = e
@@ -1580,11 +1590,22 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         pitch = crate::motion::lerp(pitch, look_pitch, weight);
     }
     let swing = 1.4 * amplitude * leg_swing;
+    let mut legs = [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing];
+    if super::animation::select::horse_like(&e.type_name) {
+        // 26.3 `AbstractEquineModel.setupAnim` (javap): with c = cos(walkPos * 0.6662 + PI) the
+        // right hind and left front legs swing +0.5c and +0.8c times the walk speed, the other
+        // diagonal pair the negatives, and the head parts turn at most 20 degrees. The role
+        // gait carries one amplitude per diagonal pair: their mean, 0.65 (not the humanoid 1.4,
+        // which threw the legs out nearly flat at a gallop).
+        let pair = (phase + std::f32::consts::PI).cos() * amplitude * 0.65;
+        legs = [pair, -pair];
+        yaw_rel = yaw_rel.clamp(-20., 20.);
+    }
     RolePose {
         head: [pitch.to_radians(), yaw_rel.to_radians()],
         arms,
         arm_pivot_z_zero: spell,
-        legs: [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing],
+        legs,
         riding: e.vehicle.is_some(),
         crouch: number(models, e, "DATA_POSE") == Some(5),
         phase,
@@ -1717,7 +1738,8 @@ pub(super) fn evaluate_posed_rig(
             pivot.y += 0.2;
         }
         if pose.riding && matches!(bone.role, BoneRole::RightLeg | BoneRole::LeftLeg) {
-            rotation.x = RIDING_LEG_PITCH;
+            let side = if bone.role == BoneRole::RightLeg { 1. } else { -1. };
+            rotation = Vec3::new(RIDING_LEG_PITCH, side * RIDING_LEG_YAW, side * RIDING_LEG_ROLL);
         }
         if e.type_name == "minecraft:armor_stand" {
             let field = match bone.name.as_str() {
@@ -3261,6 +3283,48 @@ mod tests {
         for (normal_y, giant_y) in normal.iter().zip(&giant) {
             assert!((giant_y - 6. * normal_y).abs() < 1e-5);
         }
+    }
+
+    /// BV-HORSE: 26.3 `LayerDefinitions` bakes the adult HORSE layer (and its armour and
+    /// saddle layers) through `MeshTransformer.scaling(1.1F)`, about the feet.
+    #[test]
+    fn adult_horse_renders_at_the_vanilla_layer_scale() {
+        let (models, mut entity) = fixture();
+        entity.type_name = "minecraft:horse".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.1);
+        entity.type_name = "minecraft:pig".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.);
+    }
+
+    /// BV-HORSE ("splayed legs"): equines take the 26.3 `AbstractEquineModel` gait (diagonal
+    /// pairs, 0.65 x walk speed), not the humanoid 1.4 that threw a galloping horse's legs out
+    /// nearly flat; a zombie at the same walk keeps 1.4.
+    #[test]
+    fn walking_horse_legs_take_the_equine_gait() {
+        use super::super::{animation_tests, render_living};
+        let pose_of = |type_name: &str| {
+            let (models, mut entity) = animation_tests::fixture();
+            entity.type_name = type_name.into();
+            let mut source = entity.source.take().unwrap();
+            for x in [0.2, 0.5, 0.8] {
+                source.living.as_mut().unwrap().tick(&models, &entity, &render_living::TickInput {
+                    age: 1, position: [x, 0., 0.], yaw: 0., alive: true, passenger: false,
+                    baby: false, visually_swimming: false, in_water: false, uses_y_for_walk: false,
+                    rotation_changed_before_base_tick: false, is_mob: true,
+                    first_passenger_is_mob: false, max_head_yaw: 75., max_body_head_yaw: 75.,
+                    attack_active: false, camel_sitting: false, camel_visually_sitting: false,
+                    camel_sitting_down: false, camel_pose_transition: false, camel_pose_time: 0,
+                });
+            }
+            entity.source = Some(source);
+            role_pose(&entity, &models, &Content::test_cube(), 2, 0.5)
+        };
+        let horse = pose_of("minecraft:horse");
+        assert!(horse.amplitude > 0.1, "walking: {}", horse.amplitude);
+        let pair = (horse.phase + std::f32::consts::PI).cos() * horse.amplitude * 0.65;
+        assert!((horse.legs[0] - pair).abs() < 1e-6 && (horse.legs[1] + pair).abs() < 1e-6, "{:?}", horse.legs);
+        let zombie = pose_of("minecraft:zombie");
+        assert!((zombie.legs[0] - zombie.phase.cos() * 1.4 * zombie.amplitude).abs() < 1e-6);
     }
 
     #[test]

@@ -453,3 +453,24 @@ fn polar_bear_has_a_long_two_section_torso_and_grounded_paws() {
         }
     }
 }
+
+/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos"): the adult horse rig follows
+/// the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a 10 x 10 x 22 body
+/// (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs, and the head carried
+/// forward of the chest on a neck raised 30 degrees. The pre-fix rig had a 10 x 10 x 10 body.
+#[test]
+fn adult_horse_rig_has_vanilla_equine_proportions() {
+    let horse = rig("horse");
+    let transforms = rest(horse);
+    let (low, high) = bounds(horse, &transforms, "body");
+    let size = (high - low) * 16.;
+    assert!((size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3, "body {size}");
+    assert!((low.y * 16. - 2.95).abs() < 1e-3, "back height {}", low.y * 16.);
+    for leg in ["left_front_leg", "right_front_leg", "left_hind_leg", "right_hind_leg"] {
+        let (leg_low, leg_high) = bounds(horse, &transforms, leg);
+        assert!((leg_high.y * 16. - 23.99).abs() < 1e-3, "{leg} reaches the ground");
+        assert!(((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3, "{leg} length");
+    }
+    let (head_low, _) = bounds(horse, &transforms, "head");
+    assert!(head_low.z < low.z - 6. / 16., "head forward of the chest: {} vs {}", head_low.z, low.z);
+}

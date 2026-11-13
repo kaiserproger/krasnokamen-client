@@ -787,7 +787,8 @@ pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &C
             _ => {}
         }
         if flags & INSTANCE_RIDING != 0 && matches!(bone.role, ROLE_RIGHT_LEG | ROLE_LEFT_LEG) {
-            rotation.x = p::RIDING_LEG_PITCH;
+            let side = if bone.role == ROLE_RIGHT_LEG { 1. } else { -1. };
+            rotation = Vec3::new(p::RIDING_LEG_PITCH, side * p::RIDING_LEG_YAW, side * p::RIDING_LEG_ROLL);
         }
         if bone.channel != NO_CHANNEL {
             let channel = [

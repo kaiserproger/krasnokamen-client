@@ -433,6 +433,16 @@ fn riding_passengers_pose_their_legs_like_the_cpu_pose() {
     }
     let standing = evaluate(store.crowd.meshes(), &CrowdInstance { words: [instance.words[0], 0, instance.words[2] & !INSTANCE_RIDING, 0], ..instance }, &library);
     assert!(!standing[leg].abs_diff_eq(gpu[leg], 1e-3), "the riding flag moves the legs");
+    // 26.3 HumanoidModel (javap): seated legs also turn out (yaw +-PI/10, roll +-0.0785), so the
+    // feet hang over the mount's flanks instead of running straight into its back.
+    let mut local = Vec::new();
+    p::evaluate_posed_rig(main, entity, &models, (TICK, PARTIAL), &pose, &library, glam::Mat4::IDENTITY, &mut local);
+    let foot = |role: BoneRole| {
+        let index = main.bones.iter().position(|bone| bone.role == role).unwrap();
+        local[index].transform_point3(glam::Vec3::new(0., 0.75, 0.)) - local[index].transform_point3(glam::Vec3::ZERO)
+    };
+    assert!(foot(BoneRole::RightLeg).x < -0.15 && foot(BoneRole::LeftLeg).x > 0.15,
+        "right foot {} left foot {}", foot(BoneRole::RightLeg), foot(BoneRole::LeftLeg));
 }
 
 /// NATIVE-DEATH-TILT-PIVOT on the crowd path: a dying soldier's instance carries the vanilla
