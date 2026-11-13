@@ -86,9 +86,9 @@ pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool
 fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
     match e.type_name.as_str() {
         "minecraft:giant" => 6.,
-        // 26.3 `LayerDefinitions`: the HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
-        // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`.
-        "minecraft:horse" => 1.1,
+        // 26.3 `LayerDefinitions`: the adult HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
+        // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`; HORSE_BABY does not.
+        "minecraft:horse" if !boolean(models, e, "DATA_BABY_ID") => 1.1,
         "minecraft:wither" => {
             let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
             2. - if remaining > 0 { (remaining as f32 - partial) / 220. * 0.5 } else { 0. }
