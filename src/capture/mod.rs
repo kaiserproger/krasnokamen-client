@@ -141,22 +141,26 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
         sum.fill(0);
         let mut sample_ticks=[None;16];
         let mut entity_extract_ms=0.;
-        // Main-thread wall time per phase: packets/ticks, scene preparation, draw+readback.
+        // Main-thread wall time per phase: packets/ticks, scene preparation, draw+readback;
+        // and the main thread's own CPU time per phase (unaffected by preemption).
         let mut main_ms=[0.;3];
+        let mut thread_ms=thread_cpu_s().map(|_|[0.;3]);
         let mut upload_frames=0;
         for sample in 0..samples {
             // 180 degree shutter: sample only the first half of this frame.
             let time=base+frame_time(u64::from(sample),120*samples);
-            let phase=std::time::Instant::now();
+            let (phase,cpu)=(std::time::Instant::now(),thread_cpu_s());
             if index==0 && sample==0 {replay.seek(time)?;} else {replay.advance_to(time)?;}
             if replay.last_tick.is_none() { return Err("replay has no solaris:tick marker at shot start; configure recorder account".into()); }
             let partial=replay.partial();
             replay.session.replay_camera(&path,time.as_secs_f64(),partial)?;
             main_ms[0]+=phase.elapsed().as_secs_f64()*1e3;
-            let phase=std::time::Instant::now();
+            phase_cpu(&mut thread_ms,0,cpu);
+            let (phase,cpu)=(std::time::Instant::now(),thread_cpu_s());
             replay.session.prepare_frame(partial)?;
             main_ms[1]+=phase.elapsed().as_secs_f64()*1e3;
-            let phase=std::time::Instant::now();
+            phase_cpu(&mut thread_ms,1,cpu);
+            let (phase,cpu)=(std::time::Instant::now(),thread_cpu_s());
             upload_frames+=settle_terrain(&mut replay,&mut renderer,
                 |renderer,scene,observation|renderer.replay_rgba(scene,observation,&readback,&mut pixels))?;
             if replay.session.phase()!="play" {return Err(format!("render starts before Play at {:.3}s",time.as_secs_f64()));}
@@ -165,6 +169,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
             replay.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());
             replay.session.far_generated(renderer.far_gpu_generation(),renderer.drain_far_generated());
             main_ms[2]+=phase.elapsed().as_secs_f64()*1e3;
+            phase_cpu(&mut thread_ms,2,cpu);
             if let Some([_,entities,_])=replay.session.take_scene_profile() {
                 entity_extract_ms+=entities;
             }
@@ -181,6 +186,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
             "camera":replay.session.replay_pose(),"cpu_state_sha256":replay.frame_hash(),
             "presentation":presentation_metadata(replay.session.scene(),entity_extract_ms),
             "cpu_main_ms":{"advance":main_ms[0],"prepare_frame":main_ms[1],"draw_readback":main_ms[2]},
+            "cpu_thread_ms":thread_ms.map(|ms|serde_json::json!({"advance":ms[0],"prepare_frame":ms[1],"draw_readback":ms[2]})),
             "terrain":{"upload_frames":upload_frames,
                 "cpu_mesh_resident_peak_bytes":replay.session.replay_terrain_metrics()["cpu_mesh_resident_peak_bytes"]},
             "rgba_sha256":format!("{:x}",Sha256::digest(&frame)),"supersampling":2,"motion_samples":samples,"taa":false}))
@@ -191,6 +197,25 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     metadata.flush().map_err(|e|format!("flush frame metadata: {e}"))?;
     eprintln!("rendered {index} frames: {} (metadata {})",output.display(),metadata_path.display());
     Ok(())
+}
+
+/// CPU time the calling thread has run, in seconds; `None` where the platform clock is
+/// unavailable.
+#[cfg(unix)]
+fn thread_cpu_s()->Option<f64> {
+    let mut time=libc::timespec{tv_sec:0,tv_nsec:0};
+    // SAFETY: clock_gettime writes into this live, exclusive timespec.
+    let status=unsafe{libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID,&mut time)};
+    (status==0).then(||time.tv_sec as f64+time.tv_nsec as f64*1e-9)
+}
+#[cfg(not(unix))]
+fn thread_cpu_s()->Option<f64> {None}
+
+/// Adds the thread CPU time since `start` to phase `index`.
+fn phase_cpu(phases:&mut Option<[f64;3]>,index:usize,start:Option<f64>) {
+    if let (Some(phases),Some(start),Some(now))=(phases.as_mut(),start,thread_cpu_s()) {
+        phases[index]+=(now-start)*1e3;
+    }
 }
 
 #[cfg(test)]
