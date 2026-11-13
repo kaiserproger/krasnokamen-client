@@ -128,8 +128,7 @@ MAX_DROP = 3
 KEEPOUT = (-192.0, -184.0, 21.0, 30.0)  # x0, x1, z0, z1: the mine's box, blocks (cells -192..-184 / 21..30), any height
 PLAYER_RADIUS = 0.3
 LOOK_STEP = 0.7  # blocks between checked points along a key's direction, from the feet
-GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key
-GUARD_MARGIN = 1.5  # a key held for a step is taken to carry him this many times the slowest recent step's distance
+GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key (a pulse walks at most this less 0.5)
 LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
 
 
@@ -379,7 +378,6 @@ def rank(args, client: Client):
     drift = [0.0, 0.0]  # blocks/s of his place, measured between steps
     last = None
     last_step = time.monotonic()
-    slowest = 0.0
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
@@ -411,7 +409,6 @@ def rank(args, client: Client):
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
         step_time = stepped - last_step
-        slowest = max(step_time, 0.7 * slowest)  # the step to come is taken to be as slow as the slowest lately
         if last is not None and math.dist(here, last) > 4.0 + 8.0 * step_time:
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
             offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
@@ -536,25 +533,25 @@ def rank(args, client: Client):
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
         # Route guard: no key that walks into the keep-out box, off a drop or into water or lava.
+        # With the guard on, movement is never held: a held key walks through every blocking MCP call of the step
+        # (a call can stall for seconds), past the ground the guard has read. Each step is one bounded pulse of
+        # ticks, shorter than the ground read ahead along every key; the next step reads the position again.
         checked = None  # blocks along each key that the guard has read ground for
         if guard is not None:
-            speed = 5.6 if "sprint" in wanted else 4.3
-            checked = min(GUARD_REACH, max(1.5, GUARD_MARGIN * speed * slowest + 1.0))
+            checked = min(GUARD_REACH, max(1.5, (distance if target is not None else 0.0) + 1.0))
             wanted = guard.filter(wanted, here, yaw, checked)
-        # Held keys stay down for the whole step. When the last step was so long that
-        # holding would carry him past his place, or past the ground the guard has read (a held key keeps
-        # walking through every blocking MCP call of the step), walk a bounded pulse of ticks instead.
         pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
         speed = 5.6 if "sprint" in pulse else 4.3
-        outruns = checked is not None and GUARD_MARGIN * speed * slowest + 0.5 > checked
-        if pulse and (step_time * speed > distance + 0.5 or outruns):
+        # Without the guard, held keys stay down for the whole step. When the last step was so long that
+        # holding would carry him past his place, walk a bounded pulse of ticks instead.
+        if pulse and (guard is not None or step_time * speed > distance + 0.5):
             wanted -= pulse
         else:
             pulse = set()
         pilot.keys(wanted)
         if pulse:
             walk = distance if checked is None else min(distance, checked - 0.5)
-            client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, round(walk / speed * 20)))})
+            client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, math.ceil(walk / speed * 20)))})
         if strike:
             # The ordinary attack: aim at any visible part of the enemy's box, attack
             # input, then wait briefly for authoritative damage or removal.

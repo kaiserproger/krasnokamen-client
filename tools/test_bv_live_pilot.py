@@ -22,8 +22,10 @@ class MarchingRank:
     rank, 1.5 between ranks; PovRed's slot is rank 0, file 0 (left empty). `call` seconds of
     client time pass on every MCP call, as with a slow frame rate."""
 
-    def __init__(self, call: float, march: float = 1.2, duration: float = 60.0, floor=lambda x, z: 63):
+    def __init__(self, call: float, march: float = 1.2, duration: float = 60.0, floor=lambda x, z: 63, spike=None):
         self.now, self.call, self.march, self.duration = 0.0, call, march, duration
+        self.spike = spike  # (time, seconds): from that client time on, every call takes that long
+        self.held_during = []  # tools called while a movement key was held down
         self.floor = floor  # y of the solid block under column (x, z), or None for a void
         self.me, self.yaw = [0.0, 0.0], 0.0
         self.held: set[str] = set()
@@ -67,7 +69,9 @@ class MarchingRank:
 
     def tool(self, name, arguments=None):
         arguments = arguments or {}
-        self.advance(self.call)
+        if name != "minecraft_press_inputs" and self.held & {"forward", "back", "left", "right", "sprint", "jump"}:
+            self.held_during.append(name)
+        self.advance(self.spike[1] if self.spike and self.now >= self.spike[0] else self.call)
         if name == "minecraft_wait_for_play":
             return {}
         if name == "minecraft_observe":
@@ -114,8 +118,8 @@ def scan(cell, arguments):
     return {"count": len(rows), "total_count": len(rows), "truncated": False, "blocks": rows}
 
 
-def march(call: float, floor=lambda x, z: 63, logs=None, **options) -> MarchingRank:
-    sim = MarchingRank(call, floor=floor)
+def march(call: float, floor=lambda x, z: 63, logs=None, spike=None, **options) -> MarchingRank:
+    sim = MarchingRank(call, floor=floor, spike=spike)
     saved = pilot.time, pilot.log
     pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
     pilot.log = (lambda *parts: logs.append(" ".join(str(p) for p in parts))) if logs is not None else (lambda *parts: None)
@@ -143,7 +147,10 @@ class RankPilot(unittest.TestCase):
 
     def test_fast_client_holds_his_place(self):
         sim = march(call=0.03)
-        self.assertLess(max(s[2] for s in self.settled(sim)), 1.5)
+        # Bounded pulses instead of held keys lag a little more than held keys did (max 1.5 -> 1.6, mean the same).
+        settled = self.settled(sim)
+        self.assertLess(max(s[2] for s in settled), 1.75)
+        self.assertLess(sum(s[2] for s in settled) / len(settled), 0.8)
 
 
 class FakeWorld:
@@ -349,6 +356,23 @@ class RouteGuardMarch(unittest.TestCase):
         sim = march(call=0.4, floor=lambda x, z: 63 if z < 40 else None, logs=logs)
         self.assertLess(max(s[1] + 1.2 * s[0] for s in sim.samples), 40.0, "walked off the cliff between checks")
         self.assertTrue(any(line.startswith("edge refused forward at") for line in logs), logs[-5:])
+
+    def test_movement_is_never_held_down_during_another_call(self):
+        for call in (0.03, 0.4):
+            sim = march(call=call)
+            self.assertEqual(sim.held_during, [], f"call {call}: a held key walks through the next MCP call")
+
+    def test_a_sudden_stall_after_the_step_began_does_not_carry_him_over_the_edge(self):
+        # Fast calls, then from t 20 s every call takes 5 s (a stalled frame or window): a key held for the
+        # step would walk 20+ blocks through the stalled calls. The cliff is a few blocks ahead of his place.
+        sim = march(call=0.03, floor=lambda x, z: 63 if z < 30 else None, spike=(20.0, 5.0))
+        self.assertLess(max(s[1] + 1.2 * s[0] for s in sim.samples), 30.0, "walked off the cliff in a stalled call")
+        self.assertEqual(sim.held_during, [])
+
+    def test_the_stall_walks_him_off_when_keys_are_held(self):
+        # The same run with the guard off holds keys (the older behaviour) and does go over: the test above bites.
+        sim = march(call=0.03, floor=lambda x, z: 63 if z < 30 else None, spike=(20.0, 5.0), argv=["--no-guard"])
+        self.assertGreater(max(s[1] + 1.2 * s[0] for s in sim.samples), 30.0)
 
     def test_the_cliff_is_crossed_when_the_guard_is_off(self):
         sim = march(call=0.05, floor=lambda x, z: 63 if z < 40 else None, argv=["--no-guard"])
