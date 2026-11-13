@@ -17,6 +17,15 @@ class Stop(Exception):
     """End of the simulated run (not a RuntimeError, so the pilot does not swallow it)."""
 
 
+def client_reach(me, entity) -> float:
+    """The client's reach measure, independent of the pilot's: eye (1.62 up) to the nearest point of the entity's box."""
+    box = entity["bounding_box"]
+    eye = (me[0], 64.0 + 1.62, me[1])
+    near = (min(max(eye[0], box["min_x"]), box["max_x"]), min(max(eye[1], box["min_y"]), box["max_y"]),
+            min(max(eye[2], box["min_z"]), box["max_z"]))
+    return math.dist(eye, near)
+
+
 class MarchingRank:
     """The client side of the pilot's MCP calls. Soldiers: 3 ranks x 13 files, 1 block apart in a
     rank, 1.5 between ranks; PovRed's slot is rank 0, file 0 (left empty). `call` seconds of
@@ -29,6 +38,12 @@ class MarchingRank:
         self.floor = floor  # y of the solid block under column (x, z), or None for a void
         self.me, self.yaw = [0.0, 0.0], 0.0
         self.held: set[str] = set()
+        self.ys: dict[int, float] = {}  # feet y of soldiers that are not at 64
+        self.using_ticks = 0  # ticks the client still reports an item in use after the use key is let go
+        self.always_using = False
+        self.flaky_attack = False  # attack_entity_once refuses ("not dispatched") for no visible reason
+        self.occlusions: dict[int, int] = {}  # target id -> id of the entity standing in the way
+        self.attacks, self.hits = [], []
         self.soldiers = {}
         ident = 100
         for rank in range(3):
@@ -56,6 +71,7 @@ class MarchingRank:
             for position in self.soldiers.values():
                 position[1] += self.march * TICK
             self.now += TICK
+            self.using_ticks = max(0, self.using_ticks - 1)
             slot = [0.0, self.march * self.now]
             self.samples.append((self.now, self.me[1] - slot[1], math.dist(self.me, slot)))
         if self.now >= self.duration:
@@ -63,8 +79,11 @@ class MarchingRank:
 
     def entity(self, ident, position):
         dx, dz = position[0] - self.me[0], position[1] - self.me[1]
-        return {"entity_id": ident, "entity_uuid": f"uuid-{ident}", "entity_type": "minecraft:husk",
-                "x": position[0], "y": 64.0, "z": position[1], "distance": math.hypot(dx, dz),
+        y = self.ys.get(ident, 64.0)
+        box = {"min_x": position[0] - 0.3, "max_x": position[0] + 0.3, "min_y": y, "max_y": y + 1.95,
+               "min_z": position[1] - 0.3, "max_z": position[1] + 0.3}
+        return {"entity_id": ident, "entity_uuid": f"uuid-{ident}", "entity_type": "minecraft:husk", "bounding_box": box,
+                "x": position[0], "y": y, "z": position[1], "distance": math.hypot(dx, dz),
                 "velocity": {"x": 0.0, "y": 0.0, "z": self.march * TICK}, "health": 20.0}
 
     def tool(self, name, arguments=None):
@@ -76,14 +95,28 @@ class MarchingRank:
             return {}
         if name == "minecraft_observe":
             return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
-                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False}}
+                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
+                    "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None}
         if name == "minecraft_list_entities":
             listed = sorted((self.entity(i, p) for i, p in self.soldiers.items()), key=lambda e: e["distance"])
             return {"entities": [e for e in listed if e["distance"] <= arguments["radius"]][: arguments["limit"]]}
         if name == "minecraft_read_item_components":
             if arguments["source"] == "selected":
                 raise RuntimeError("no held item data")
-            return {"components": {"minecraft:item_model": "solaris_battle:red_shield"}}
+            side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
+            return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
+        if name == "minecraft_attack_entity_once":
+            target = arguments["entity_id"]
+            self.attacks.append(target)
+            if self.always_using or "use" in self.held or self.using_ticks or self.flaky_attack:
+                raise RuntimeError("ordinary entity attack was not dispatched")
+            where = self.entity(target, self.soldiers[target])
+            if client_reach(self.me, where) > 3.0:
+                raise RuntimeError("target entity is out of interaction reach: 4.1 blocks; approach first")
+            if target in self.occlusions:
+                raise RuntimeError(f"target entity is occluded by entity {self.occlusions[target]}; reposition for a clear line")
+            self.hits.append(target)
+            return {"result": "attack", "consumes_action": True}
         if name == "minecraft_scan_blocks":
             return scan(lambda x, y, z: block(solid=self.floor(x, z) is not None and y <= self.floor(x, z)), arguments)
         if name == "minecraft_look":
@@ -92,6 +125,8 @@ class MarchingRank:
         if name == "minecraft_press_inputs":
             keys = set(arguments["keys"])
             if "hold" in arguments:
+                if not arguments["hold"] and "use" in keys and "use" in self.held:
+                    self.using_ticks = 2  # the client reports the item in use until two ticks after the release
                 self.held = self.held | keys if arguments["hold"] else self.held - keys
             else:
                 self.advance(arguments["ticks"] * TICK, self.held | keys)
@@ -509,6 +544,68 @@ class StairsEdge(unittest.TestCase):
             finally:
                 pilot.time, pilot.log = saved
             self.assertGreaterEqual(sim.me[0] - 188.0, self.EDGE + 1.5 - 1e-6, f"start {start}")
+
+
+def duel(enemies, occlusions=None, duration=10.0, call=0.05, always_using=False, flaky=False, argv=()):
+    """The rank standing still (march 0) with PovRed in his slot and blue enemies at {id: (x, z, y)}: (sim, log lines)."""
+    sim = MarchingRank(call, march=0.0, duration=duration)
+    for ident, (x, z, y) in enemies.items():
+        sim.soldiers[ident] = [x, z]
+        sim.ys[ident] = y
+    sim.occlusions, sim.always_using, sim.flaky_attack = occlusions or {}, always_using, flaky
+    logs = []
+    saved = pilot.time, pilot.log
+    pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
+    pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+    try:
+        pilot.rank(pilot.arguments(["runtime", *argv]), sim)
+    except Stop:
+        pass
+    finally:
+        pilot.time, pilot.log = saved
+    return sim, logs
+
+
+class Fighting(unittest.TestCase):
+    """Swings: the shield is let go and the client must say nothing is in use before one is made; an enemy in the
+    way is struck, a friend is not; reach is measured from the eye; every refusal is told apart in the log."""
+
+    def test_a_swing_after_the_shield_is_dispatched(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)})
+        self.assertGreaterEqual(len(sim.hits), 5, logs[-6:])
+        self.assertFalse([line for line in logs if "not dispatched" in line], "no swing may be dropped")
+        self.assertTrue(any(line.startswith("attack dispatched 1000") for line in logs))
+
+    def test_no_swing_is_made_while_the_client_still_reports_the_item_in_use(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, always_using=True)
+        self.assertEqual(sim.attacks, [], "a swing in use is dropped silently by the client: none is sent")
+        self.assertTrue(any("attack not dispatched (item still in use after" in line for line in logs), logs[-4:])
+
+    def test_a_refusal_with_nothing_in_use_is_told_apart(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, flaky=True)
+        self.assertTrue(sim.attacks)
+        self.assertTrue(any("attack not dispatched 1000 (target changed between aim and raycast, or other)" in line for line in logs), logs[-4:])
+
+    def test_an_enemy_in_the_way_is_struck_instead(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0), 1001: (0.0, 2.4, 64.0)}, occlusions={1000: 1001})
+        self.assertIn(1001, sim.hits, "the enemy behind the blocked one is struck")
+        self.assertNotIn(1000, sim.hits)
+        self.assertTrue(any(line.startswith("attack occluded by enemy 1001") for line in logs), logs[-4:])
+
+    def test_a_friend_in_the_way_is_not_struck_and_the_target_is_left_alone_a_while(self):
+        friend = 105  # a soldier of his own side in the rank
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, occlusions={1000: friend}, duration=8.0)
+        self.assertNotIn(friend, sim.attacks)
+        self.assertEqual(sim.hits, [])
+        self.assertTrue(any(line.startswith(f"attack occluded by friend {friend}") for line in logs), logs[-4:])
+        self.assertLessEqual(sim.attacks.count(1000), 5, "not 12 swings in 8 s into the same friend")
+
+    def test_an_enemy_far_below_is_out_of_reach_from_the_eye_though_close_on_the_ground(self):
+        # 2.5 blocks away on the ground plane but 3.5 below: the eye is over 4 blocks from his box.
+        sim, logs = duel({1000: (0.0, 2.5, 60.5)})
+        self.assertEqual(sim.attacks, [], "no swing is sent beyond the eye reach")
+        sim, logs = duel({1000: (0.0, 2.5, 63.0)})
+        self.assertTrue(sim.hits, "the same distance at his height is struck")
 
 
 if __name__ == "__main__":

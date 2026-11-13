@@ -374,6 +374,97 @@ def side_of(client: Client, entity) -> str | None:
     return None
 
 
+EYE = 1.62
+BLOCK_FOR = 1.5   # seconds a target is not struck again after a friend stood in the way
+USE_TICKS = 2     # client ticks to wait after the shield key is let go before a swing
+USE_RECHECKS = 4  # further one-tick waits for the client to report the item no longer in use
+OCCLUDED = re.compile(r"occluded by entity (\d+)")
+
+
+def eye_distance(me, entity) -> float:
+    """Blocks from PovRed's eyes to the nearest point of the entity's box (the client's own reach measure);
+    without a box, to its middle."""
+    eye = (float(me["x"]), float(me["y"]) + EYE, float(me["z"]))
+    box = entity.get("bounding_box")
+    if box:
+        lo, hi = (box["min_x"], box["min_y"], box["min_z"]), (box["max_x"], box["max_y"], box["max_z"])
+    else:
+        lo = hi = (float(entity["x"]), float(entity["y"]) + 0.9, float(entity["z"]))
+    return math.dist(eye, [min(max(eye[a], lo[a]), hi[a]) for a in range(3)])
+
+
+def release_use(client: Client, pilot: Pilot, waited: bool) -> bool:
+    """Let go of the shield and wait until the client says no item is in use: a swing while an item is in use is
+    silently dropped by the client (`ordinary entity attack was not dispatched`). Returns whether it is free."""
+    if "use" in pilot.held:
+        pilot.keys(pilot.held - {"use"})
+        waited = False
+    if not waited:
+        client.tool("minecraft_wait_ticks", {"ticks": USE_TICKS})
+    for _ in range(USE_RECHECKS):
+        if client.tool("minecraft_observe").get("using") is None:
+            return True
+        client.tool("minecraft_wait_ticks", {"ticks": 1})
+    return client.tool("minecraft_observe").get("using") is None
+
+
+def attack(client: Client, pilot: Pilot, target, args, sides: dict, listed: dict, blocked: dict, waited: bool, hops: int = 2):
+    """One swing at `target` with every refusal told apart in the log: `attack dispatched`, `attack not dispatched
+    (<why>)`, `attack occluded by enemy|friend|block ...`, `attack out of reach`. The shield is let go first and the
+    reach is measured again from the eye (the entity moved since the list). An entity in the way that is an enemy
+    is struck instead; a friend is not, and the target is left alone for BLOCK_FOR seconds. Returns True when dispatched."""
+    ident = target["entity_id"]
+    if not release_use(client, pilot, waited):
+        log("attack not dispatched (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
+        return False
+    me = pilot.player()
+    page = client.tool("minecraft_list_entities", {"radius": args.reach + 4.0, "limit": 32})["entities"]
+    fresh = next((e for e in page if e["entity_id"] == ident), None)
+    if fresh is None:
+        log("attack skipped: entity", ident, "left the page")
+        return False
+    reach = eye_distance(me, fresh)
+    if reach > args.reach:
+        log("attack out of reach", ident, "eye distance", round(reach, 2), ">", args.reach)
+        return False
+    before = fresh.get("health")
+    try:
+        result = client.tool("minecraft_attack_entity_once", {**identity(fresh), "timeout_seconds": 1.0})
+    except RuntimeError as error:
+        text = str(error)
+        if any(code in text for code in RECOVERABLE):
+            raise
+        in_way = OCCLUDED.search(text)
+        if in_way:
+            other = int(in_way.group(1))
+            entity = next((e for e in page if e["entity_id"] == other), None)
+            side = sides.get(other) if other in sides else (side_of(client, entity) if entity is not None else None)
+            if entity is not None:
+                sides[other] = side
+            if side is not None and side != args.side:
+                log("attack occluded by enemy", other, "(", ident, "behind it): striking", other)
+                if hops > 0 and entity is not None:
+                    return attack(client, pilot, entity, args, sides, listed, blocked, True, hops - 1)
+                return False
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+            log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
+                "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
+            return False
+        if "occluded by" in text:
+            log("attack occluded by block:", text[:160])
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+        elif "reach" in text:
+            log("attack out of reach (client):", text[:160])
+        elif "not dispatched" in text:
+            using = client.tool("minecraft_observe").get("using") is not None
+            log("attack not dispatched", ident, "(item in use)" if using else "(target changed between aim and raycast, or other)")
+        else:
+            log("attack failed", ident, text[:200])
+        return False
+    log("attack dispatched", ident, "health before", before, "->", json.dumps(result)[:240])
+    return True
+
+
 def rank(args, client: Client):
     pilot = Pilot(client)
     guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
@@ -392,6 +483,7 @@ def rank(args, client: Client):
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
+    blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
     last_status, steps = time.monotonic(), 0
     interval = attack_interval(client, args.attack_interval)
     log("attack interval", round(interval, 2), "s")
@@ -500,7 +592,8 @@ def rank(args, client: Client):
                 # behind a marching rank when steps are slow.
                 blend = 1.0 - math.exp(-step_time / 0.3)
                 target = goal if target is None else [target[i] + blend * (goal[i] - target[i]) for i in range(2)]
-        enemy = min(enemies, key=lambda e: e["distance"]) if enemies else None
+        now = time.monotonic()
+        enemy = min((e for e in enemies if blocked.get(e["entity_id"], 0.0) <= now), key=lambda e: e["distance"], default=None)
         # Facing: the nearest enemy, else the rank's own motion, else the join-time facing.
         if enemy is not None and enemy["distance"] <= args.face_enemy:
             face_yaw, face_pitch = look_angles([here[0], here[1] + 1.62, here[2]],
@@ -538,21 +631,16 @@ def rank(args, client: Client):
                 if me.get("horizontal_collision"):
                     wanted.add("jump")
         now = time.monotonic()
-        strike = enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval
+        strike = enemy is not None and eye_distance(me, enemy) <= args.reach and now - last_attack >= interval
         # Shield up (the ordinary use input on the off-hand shield) while an enemy is
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
+        was_using = "use" in pilot.held
         move(client, pilot, guard, wanted, here, yaw, distance if target is not None else 0.0, step_time)
         if strike:
-            # The ordinary attack: aim at any visible part of the enemy's box, attack
-            # input, then wait briefly for authoritative damage or removal.
-            before = enemy.get("health")
-            try:
-                result = client.tool("minecraft_attack_entity_once", {**identity(enemy), "timeout_seconds": 1.0})
-                log("hit", enemy["entity_id"], "health before", before, "->", json.dumps(result)[:240])
-            except RuntimeError as error:
-                log("swing at", enemy["entity_id"], "no confirmed damage:", str(error)[:200])
+            # The ordinary attack, with the shield let go and the client's word that nothing is in use.
+            attack(client, pilot, enemy, args, sides, {e["entity_id"]: e for e in listed}, blocked, not was_using)
             last_attack = time.monotonic()
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
@@ -650,7 +738,7 @@ def arguments(argv=None):
     parser.add_argument("--max-offset", type=float, default=3.0,
                         help="cap (blocks) on PovRed's place relative to that centroid")
     parser.add_argument("--radius", type=float, default=24.0)
-    parser.add_argument("--reach", type=float, default=2.8, help="feet distance; the client's own limit is 3 blocks eye to box")
+    parser.add_argument("--reach", type=float, default=3.0, help="blocks from the eye to the enemy's box, measured again before each swing (the client's own limit is 3)")
     parser.add_argument("--guard", type=float, default=6.0,
                         help="raise the off-hand shield while an enemy is this close (0 = never)")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
