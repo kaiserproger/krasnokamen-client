@@ -733,15 +733,21 @@ impl Session {
             0.,
             (self.player.position[2] / 256.).floor() * 256.,
         ];
-        self.scene.dynamic.vertices.clear();
-        for indices in &mut self.scene.dynamic.indices {
-            indices.clear();
+        // A frame-driven session rebuilds the animated geometry in `prepare_frame` before
+        // every draw (same predicate there); a state refresh leaves it to that frame rather
+        // than extracting every entity twice.
+        let dynamic = animation_only || !(self.frame_driven && self.phase == "play" && self.player.pose_known);
+        if dynamic {
+            self.scene.dynamic.vertices.clear();
+            for indices in &mut self.scene.dynamic.indices {
+                indices.clear();
+            }
+            self.scene.first_person.vertices.clear();
+            for indices in &mut self.scene.first_person.indices {
+                indices.clear();
+            }
+            self.scene.entity_presentation = Default::default();
         }
-        self.scene.first_person.vertices.clear();
-        for indices in &mut self.scene.first_person.indices {
-            indices.clear();
-        }
-        self.scene.entity_presentation = Default::default();
         if !animation_only {
         self.scene.overlay.vertices.clear();
         for indices in &mut self.scene.overlay.indices {
@@ -808,6 +814,8 @@ impl Session {
             self.scene.shader_game_time =
                 Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
             }
+        }
+        if world_ready && dynamic {
             super::weather::append(
                 &self.world,
                 self.content.as_ref().ok_or("content unavailable")?,
@@ -994,7 +1002,9 @@ impl Session {
             }
         }
         // This frame's crowd instances (none when the entity pass did not run).
-        self.entities.take_crowd(&mut self.scene.crowd);
+        if dynamic {
+            self.entities.take_crowd(&mut self.scene.crowd);
+        }
         let ui_start = self.profile_scene_ms.as_ref().map(|_| std::time::Instant::now());
         if !animation_only && let Some(ui) = &mut self.ui {
             let content = self.content.as_ref().ok_or("content unavailable")?;
@@ -1704,6 +1714,30 @@ mod destruction_tests {
             (without_far.render_fog_start, without_far.render_fog_end),
             "a far-terrain offer must not push the environment-owned haze away",
         );
+    }
+
+    /// A state refresh (tick, packets) of a frame-driven session leaves the animated
+    /// geometry to `prepare_frame`, which rebuilds it before every draw; without frames the
+    /// state refresh still builds it.
+    #[test]
+    fn state_refresh_leaves_animated_geometry_to_the_frame() {
+        let mut session = ready_presentation_session();
+        session.phase = "play".into();
+        let mark = |session: &mut Session| {
+            session.scene.dynamic.vertices.push(crate::api::Vertex { position: [1e9; 3], ..bytemuck::Zeroable::zeroed() });
+        };
+        let marked = |session: &Session| session.scene.dynamic.vertices.iter().any(|v| v.position[0] == 1e9);
+        mark(&mut session);
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert!(!marked(&session), "without frames the state refresh builds the animated geometry");
+        session.prepare_frame(0.5).unwrap();
+        mark(&mut session);
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert!(marked(&session), "a frame-driven state refresh leaves the animated geometry to the frame");
+        session.prepare_frame(0.5).unwrap();
+        assert!(!marked(&session), "the frame rebuilds it");
     }
 
     fn with_stage_texture(session: &mut Session, stage: u8) {

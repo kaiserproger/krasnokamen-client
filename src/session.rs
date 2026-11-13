@@ -76,6 +76,9 @@ pub(crate) const TICK_DETAIL_NAMES: [&str; 11] = [
 pub struct Session {
     instance_id: String,
     presentation: bool,
+    /// `prepare_frame` rebuilds the animated geometry (entities, weather, clouds, effects)
+    /// before every draw, so a state refresh of the scene leaves that part to it.
+    frame_driven: bool,
     network: Option<Network>,
     replaying: bool,
     replay_seek: Option<replay::SeekState>,
@@ -205,6 +208,7 @@ impl Session {
         let mut out = Self {
             instance_id,
             presentation,
+            frame_driven: false,
             network: None,
             replaying: false,
             replay_seek: None,
@@ -1226,6 +1230,7 @@ impl Session {
                 self.block_motion.step(terrain, &self.world, now)?;
             }
             // Animated geometry samples the same tick pair as the camera.
+            self.frame_driven = true;
             self.refresh_scene_mode(true)?;
         }
         Ok(())
