@@ -383,18 +383,46 @@ def choose_melee(client: Client, choice: str) -> None:
     log("no non-piercing melee weapon in hotbar")
 
 
-def attack_interval(client: Client, fallback: float) -> float:
-    """Seconds between full-strength hits with the selected weapon: 1 / (4 + attack_speed modifier)."""
+SPEAR_RANGE = (2.0, 4.5)  # vanilla attack_range of a piercing weapon, blocks from the eye along the look
+SPEAR_ENGAGE = 3.0
+
+
+def weapon_profile(client: Client, args) -> float:
+    """Read the selected weapon and set what its use needs on `args`: `charge` (attack strength from which a swing
+    counts: the item's minimum_attack_charge, else 1.0 for a piercing weapon, else STRENGTH_READY), `min_reach` and
+    `reach` (eye to the enemy's box; the item's attack_range, else 2.0..4.5 for a piercing weapon, else 0..the
+    --reach option) and `engage` (the walk-up distance). Returns the fallback swing interval in seconds without
+    the HUD: (ceil(20 / attack speed) + 1) ticks, `--attack-interval` when the weapon is unreadable."""
+    if not hasattr(args, "base_reach"):
+        args.base_reach = args.reach
+    args.charge, args.min_reach, args.reach, args.engage = STRENGTH_READY, 0.0, args.base_reach, ENGAGE
     try:
         stack = client.tool("minecraft_read_item_components", {"source": "selected"})
-    except RuntimeError:
-        return fallback
-    for modifier in (stack.get("components") or {}).get("minecraft:attribute_modifiers") or []:
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        log("weapon unreadable:", str(error)[:120], "; defaults")
+        return args.attack_interval
+    components = components_of(stack)
+    piercing = PIERCING in components
+    if piercing:
+        args.charge, (args.min_reach, args.reach), args.engage = 1.0, SPEAR_RANGE, SPEAR_ENGAGE
+    charge = components.get("minecraft:minimum_attack_charge")
+    if isinstance(charge, dict):
+        charge = charge.get("value", charge.get("charge"))
+    if isinstance(charge, (int, float)):
+        args.charge = float(charge)
+    attack_range = components.get("minecraft:attack_range")
+    if isinstance(attack_range, dict) and "max_reach" in attack_range:
+        args.min_reach, args.reach = float(attack_range.get("min_reach", 0.0)), float(attack_range["max_reach"])
+    interval = args.attack_interval
+    for modifier in components.get("minecraft:attribute_modifiers") or []:
         if isinstance(modifier, dict) and modifier.get("type") == "minecraft:attack_speed":
             speed = 4.0 + float(modifier.get("amount", 0.0))
             if speed > 0:
-                return 1.0 / speed + 0.05
-    return fallback
+                interval = (math.ceil(20.0 / speed) + 1) / 20.0
+    log(f"weapon: piercing={piercing} charge={args.charge} reach={args.min_reach}..{args.reach} engage={args.engage} interval={interval:.2f} s")
+    return interval
 
 
 def identity(entity):
@@ -495,10 +523,10 @@ def attack_strength(observed: dict):
     return max(0.0, min(1.0, float(bar["bounds"][2]) / float(cross["bounds"][2])))
 
 
-def attack_ready(observed: dict, now: float, last_attack: float, interval: float) -> bool:
-    """A swing is due at attack strength >= STRENGTH_READY when the client reports it, else after the weapon's interval."""
+def attack_ready(observed: dict, now: float, last_attack: float, interval: float, charge: float = STRENGTH_READY) -> bool:
+    """A swing is due at attack strength >= `charge` (STRENGTH_READY unless the weapon says otherwise) when the client reports it, else after the weapon's interval."""
     strength = attack_strength(observed)
-    return now - last_attack >= interval if strength is None else strength >= STRENGTH_READY
+    return now - last_attack >= interval if strength is None else strength >= charge
 
 
 def crosshair(client: Client):
@@ -572,8 +600,8 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
         log("attack skipped (entity", ident, "left the page)")
         return False
     reach = eye_distance(me, fresh)
-    if reach > args.reach:
-        log("attack skipped (out of reach:", ident, "eye distance", round(reach, 2), ">", args.reach, ")")
+    if not args.min_reach <= reach <= args.reach:
+        log("attack skipped (out of reach:", ident, "eye distance", round(reach, 2), "outside", args.min_reach, "..", args.reach, ")")
         return False
     seen = []
     for fractions in AIM_POINTS:
@@ -592,7 +620,7 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
             if side is None or side == args.side:
                 seen.append(f"{'unknown-side' if side is None else 'friend'} {struck}")
                 continue
-            if away > args.reach:
+            if not args.min_reach <= away <= args.reach:
                 seen.append(f"enemy {struck} out of reach {away:.2f}")
                 continue
             note = "" if struck == ident else f" instead of {ident}"
@@ -624,8 +652,8 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
         log("attack skipped: entity", ident, "left the page")
         return False
     reach = eye_distance(me, fresh)
-    if reach > args.reach:
-        log("attack out of reach", ident, "eye distance", round(reach, 2), ">", args.reach)
+    if not args.min_reach <= reach <= args.reach:
+        log("attack out of reach", ident, "eye distance", round(reach, 2), "outside", args.min_reach, "..", args.reach)
         return False
     before = fresh.get("health")
     log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
@@ -694,8 +722,7 @@ def rank(args, client: Client):
     last_attack = 0.0
     blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
     last_status, steps = time.monotonic(), 0
-    interval = attack_interval(client, args.attack_interval)
-    log("attack interval", round(interval, 2), "s")
+    interval = weapon_profile(client, args)
     while True:
         me = pilot.player()
         here = position(me)
@@ -718,7 +745,7 @@ def rank(args, client: Client):
             pilot.sent_look = None
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             choose_melee(client, args.melee_slot)
-            interval = attack_interval(client, args.attack_interval)
+            interval = weapon_profile(client, args)
             continue
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
@@ -728,8 +755,7 @@ def rank(args, client: Client):
             offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
-            interval = attack_interval(client, args.attack_interval)
-            log("attack interval", round(interval, 2), "s")
+            interval = weapon_profile(client, args)
         last, last_step = here, stepped
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
         soldiers = sorted((e for e in listed if soldier(e)), key=lambda e: e["distance"])
@@ -821,11 +847,12 @@ def rank(args, client: Client):
         wanted: set[str] = set()
         steer = None
         if contact:
-            if enemy is not None and enemy["distance"] > ENGAGE:
-                # Up to ENGAGE blocks short of him, along the line from him to here.
+            too_close = enemy is not None and eye_distance(me, enemy) < args.min_reach  # a spear misses inside its minimum reach
+            if enemy is not None and (enemy["distance"] > args.engage or too_close):
+                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
                 gap = [here[0] - enemy["x"], here[2] - enemy["z"]]
                 length = math.hypot(*gap) or 1.0
-                steer = [enemy["x"] + gap[0] / length * ENGAGE, enemy["z"] + gap[1] / length * ENGAGE]
+                steer = [enemy["x"] + gap[0] / length * args.engage, enemy["z"] + gap[1] / length * args.engage]
             else:
                 steer = [here[0], here[2]]  # close enough, or the only enemy is blocked: hold the place
         elif target is not None:
@@ -855,8 +882,8 @@ def rank(args, client: Client):
                 if me.get("horizontal_collision"):
                     wanted.add("jump")
         now = time.monotonic()
-        strike = (enemy is not None and eye_distance(me, enemy) <= args.reach
-                  and attack_ready(pilot.observed, now, last_attack, interval))
+        strike = (enemy is not None and args.min_reach <= eye_distance(me, enemy) <= args.reach
+                  and attack_ready(pilot.observed, now, last_attack, interval, args.charge))
         # Shield up (the ordinary use input on the off-hand shield) while an enemy is
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
@@ -993,6 +1020,7 @@ def arguments(argv=None):
     parser.add_argument("--probe-arrive", type=float, default=0.6)
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
+    parser.set_defaults(min_reach=0.0, charge=STRENGTH_READY, engage=ENGAGE)  # the selected weapon sets them (weapon_profile)
     return parser.parse_args(argv)
 
 

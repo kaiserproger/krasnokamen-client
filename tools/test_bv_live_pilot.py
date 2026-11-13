@@ -47,6 +47,8 @@ class MarchingRank:
         self.vanish = None  # (time, ids): from that time those soldiers are far away
         self.selected_free = True  # reads of the selected item (the weapon interval) also take no march time
         self.since_attack, self.charge_full, self.hud = 99, 13, True  # ticks since the last attack; ticks to full strength; HUD in observe
+        self.reach_limit = 3.0  # the client's raycast reach for entities
+        self.press_distances = []  # eye distance to the entity under the crosshair at each attack press
         self.press_strengths = []  # attack strength at each attack press
         self.other = {}  # slot -> stack outside the hotbar (armour 36-39, offhand 40)
         self.hotbar, self.selected = {}, 0  # slot -> stack; selected slot
@@ -110,7 +112,7 @@ class MarchingRank:
         best = None
         for ident, position in self.soldiers.items():
             box = self.entity(ident, position)["bounding_box"]
-            near, far = 0.0, 3.0
+            near, far = 0.0, self.reach_limit
             for axis, name in enumerate("xyz"):
                 lo, hi = box[f"min_{name}"], box[f"max_{name}"]
                 if abs(direction[axis]) < 1e-9:
@@ -211,6 +213,10 @@ class MarchingRank:
                     self.press_strengths.append(self.strength())
                     self.since_attack = 0
                     self.press_times.append(self.now)
+                    seen = self.crosshair()
+                    if seen["type"] == "entity":
+                        spot = seen["location"]
+                        self.press_distances.append(math.dist((self.me[0], 65.62, self.me[1]), (spot["x"], spot["y"], spot["z"])))
                     # The client's ordinary attack edge: dropped while an item is in use, else it strikes the crosshair entity.
                     self.attacks.append(self.crosshair().get("entity_id"))
                     if not (self.always_using or "use" in self.held or self.using_ticks):
@@ -816,6 +822,16 @@ SWORD = {"components": {"minecraft:attribute_modifiers": [{"type": "minecraft:at
                                                           {"type": "minecraft:attack_speed", "amount": -2.4}]}}
 SPEAR = {"components": {"minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage", "amount": 4.0}],
                         "minecraft:piercing_weapon": {}}}
+IRON_SPEAR = {"components": {"minecraft:piercing_weapon": {}, "minecraft:minimum_attack_charge": 1.0,
+                              "minecraft:attack_range": {"min_reach": 2.0, "max_reach": 4.5, "hitbox_margin": 0.125},
+                              "minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage", "amount": 4.0},
+                                                                {"type": "minecraft:attack_speed", "amount": -2.95}]}}
+
+
+def pilot_interval(sim, args):
+    result = []
+    logged(sim, lambda: result.append(pilot.weapon_profile(sim, args)))
+    return result[0]
 
 
 def logged(sim, call):
@@ -877,6 +893,8 @@ class Fight(unittest.TestCase):
         self.assertTrue(pilot.attack_ready(nodes(), 0.0, 0.0, 9.0))
         self.assertFalse(pilot.attack_ready(nodes(24.0), 100.0, 0.0, 0.0))
         self.assertTrue(pilot.attack_ready(nodes(27.5), 0.0, 0.0, 9.0))
+        self.assertFalse(pilot.attack_ready(nodes(29.0), 0.0, 0.0, 9.0, 1.0), "a spear needs full charge, 97% is rejected by the server")
+        self.assertTrue(pilot.attack_ready(nodes(), 0.0, 0.0, 9.0, 1.0))
 
     def test_the_place_is_not_handed_away_and_he_does_not_leave_while_an_enemy_is_near(self):
         def fight():
@@ -889,6 +907,55 @@ class Fight(unittest.TestCase):
         self.assertEqual([line for line in logs if "handed" in line], [], logs[-6:])
         self.assertLessEqual(math.dist(sim.me, [0.0, 5.0]), 3.0, "he left the fight")
         self.assertTrue(sim.hits)
+
+    def spear_run(self, enemy_z, duration=30.0, hud=True, charge_full=21):
+        sim = MarchingRank(0.05, march=0.0, duration=duration)
+        sim.hotbar, sim.selected = {0: IRON_SPEAR}, 0
+        sim.soldiers[1000] = [0.0, enemy_z]
+        sim.hud, sim.charge_full = hud, charge_full
+        sim.reach_limit = 4.5  # the server side takes the spear's reach
+        logs = logged(sim, lambda: self.run_rank(sim))
+        return sim, logs
+
+    def test_the_weapon_profile_of_a_spear_and_of_a_sword(self):
+        sim = MarchingRank(0.05)
+        sim.hotbar, sim.selected = {0: IRON_SPEAR}, 0
+        args = pilot.arguments(["runtime"])
+        interval = pilot_interval(sim, args)
+        self.assertEqual((args.charge, args.min_reach, args.reach, args.engage), (1.0, 2.0, 4.5, 3.0))
+        self.assertAlmostEqual(interval, (math.ceil(20 / 1.05) + 1) / 20)  # 22 ticks
+        sim.hotbar = {0: SWORD}
+        args = pilot.arguments(["runtime"])
+        interval = pilot_interval(sim, args)
+        self.assertEqual((args.charge, args.min_reach, args.reach, args.engage), (pilot.STRENGTH_READY, 0.0, 3.0, pilot.ENGAGE))
+        self.assertAlmostEqual(interval, (math.ceil(20 / 1.6) + 1) / 20)  # 14 ticks
+        sim.hotbar = {}
+        args = pilot.arguments(["runtime"])
+        self.assertEqual(pilot_interval(sim, args), 0.65, "unreadable weapon: the --attack-interval fallback")
+
+    def test_a_spear_waits_for_full_charge_not_for_ninety_percent(self):
+        sim, logs = self.spear_run(3.2, duration=60.0, charge_full=60)
+        self.assertGreaterEqual(len(sim.press_strengths), 3, logs[-5:])
+        self.assertEqual(min(sim.press_strengths), 1.0, "a swing below the spear's minimum_attack_charge")
+
+    def test_a_spear_is_not_swung_inside_its_minimum_reach_and_he_backs_off(self):
+        sim, logs = self.spear_run(1.9, duration=15.0)
+        near = [h for h in sim.press_distances if h < 2.0]
+        self.assertEqual(near, [], "a swing at an enemy inside the spear's 2.0 minimum reach")
+        self.assertGreaterEqual(math.dist(sim.me, [0.0, 1.9]), 2.4, "he did not back off")
+
+    def test_a_spear_engages_at_three_blocks_and_swings_out_to_four_and_a_half(self):
+        sim, logs = self.spear_run(5.5)
+        self.assertLessEqual(math.dist(sim.me, [0.0, 5.5]), 3.4)
+        self.assertGreaterEqual(math.dist(sim.me, [0.0, 5.5]), 2.6)
+        self.assertGreaterEqual(len(sim.hits), 3, logs[-5:])
+        self.assertGreater(max(sim.press_distances), 2.5, "he swung only at sword range")
+
+    def test_without_the_hud_a_spear_swings_by_its_twenty_two_tick_interval(self):
+        sim, logs = self.spear_run(3.2, hud=False, charge_full=1)
+        gaps = [b - a for a, b in zip(sim.press_times, sim.press_times[1:])]
+        self.assertTrue(gaps)
+        self.assertGreaterEqual(min(gaps), 1.1 - 0.05, "swings closer than 22 ticks")
 
     def run_rank(self, sim):
         saved = pilot.time
