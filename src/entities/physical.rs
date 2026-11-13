@@ -757,7 +757,12 @@ impl Store {
             let ids = models.ids(e);
             let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
             let standing = super::presentation::flag_at(e, ids.standing);
-            let before_bounds = self.bounds(e.handle, tick, 0.)?;
+            // Only a boat reads its bounds from before the tick (`source_state::tick`).
+            let boat_bounds = if hierarchy(&models, e, "net.minecraft.world.entity.vehicle.boat.AbstractBoat") {
+                Some(self.bounds(e.handle, tick, 0.)?)
+            } else {
+                None
+            };
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
             let controlling_passenger = e.passenger_ids.first().is_some_and(|passenger| {
@@ -810,7 +815,7 @@ impl Store {
                 tick,
                 first_passenger_is_mob,
                 controlling_passenger,
-                before_bounds,
+                boat_bounds,
             )?;
             let (walk_speed, body_yaw) = e
                 .source

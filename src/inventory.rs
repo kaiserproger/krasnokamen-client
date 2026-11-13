@@ -93,13 +93,15 @@ impl Stack {
         self.count <= 0
     }
     pub fn same_item(&self, other: &Self) -> bool {
+        // A stack and its clone share their components and patch.
         self.id == other.id
-            && self.components == other.components
-            && self.patch.added.values().all(|value| {
-                other
-                    .typed_component(&value.name)
-                    .is_none_or(|other| other == &value.value)
-            })
+            && (Arc::ptr_eq(&self.components, &other.components) || self.components == other.components)
+            && (Arc::ptr_eq(&self.patch, &other.patch)
+                || self.patch.added.values().all(|value| {
+                    other
+                        .typed_component(&value.name)
+                        .is_none_or(|other| other == &value.value)
+                }))
     }
     pub fn component(&self, name: &str) -> Option<&Value> {
         self.components.get(name)

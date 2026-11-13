@@ -285,8 +285,7 @@ fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
         entity.transform.position = entity.position;
         entity.previous = entity.transform;
         for _ in 0..6 {
-            let bounds = physical::bounds(&models, entity, 0, 0.).unwrap();
-            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, bounds).unwrap();
+            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, None).unwrap();
         }
     };
     settle_at(&mut entity, 16.);

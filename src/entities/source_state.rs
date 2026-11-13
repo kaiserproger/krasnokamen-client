@@ -301,7 +301,8 @@ pub(crate) fn tick(
     tick: u64,
     first_passenger_is_mob: bool,
     controlling_passenger: bool,
-    before_bounds: Bounds,
+    // A boat's bounds before this tick moved it; `None` for every other entity.
+    boat_bounds: Option<Bounds>,
 ) -> Result<render_special::TickEffects> {
     let Some(mut source) = entity.source.take() else {
         return Ok(render_special::TickEffects::default());
@@ -327,20 +328,15 @@ pub(crate) fn tick(
         } else {
             Some(false)
         };
-        let boat = models.schemas[&entity.type_name]
-            .hierarchy
-            .iter()
-            .any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat");
-        let under_water = if boat {
-            water_contact(world, content, before_bounds, true)?
-        } else {
-            Some(false)
+        let under_water = match boat_bounds {
+            Some(bounds) => water_contact(world, content, bounds, true)?,
+            None => Some(false),
         };
         source.pending_world = in_water.is_none() || under_water.is_none();
         if source.pending_world {
             return Ok(render_special::TickEffects::default());
         }
-        if boat {
+        if boat_bounds.is_some() {
             source.boat_out_of_control = if under_water == Some(true) {
                 source.boat_out_of_control + 1.
             } else {

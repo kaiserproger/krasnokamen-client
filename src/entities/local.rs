@@ -170,7 +170,7 @@ impl Store {
             tick,
             false,
             false,
-            player.bounds(),
+            None,
         )?;
         e.physical.lerp_progress = 0;
         self.local_avatar_tick = Some(tick);
