@@ -36,14 +36,12 @@ class MarchingRank:
         self.spike = spike  # (time, seconds): from that client time on, every call takes that long
         self.held_during = []  # tools called while a movement key was held down
         self.floor = floor  # y of the solid block under column (x, z), or None for a void
-        self.me, self.yaw = [0.0, 0.0], 0.0
+        self.me, self.yaw, self.pitch = [0.0, 0.0], 0.0, 0.0
         self.held: set[str] = set()
         self.ys: dict[int, float] = {}  # feet y of soldiers that are not at 64
         self.using_ticks = 0  # ticks the client still reports an item in use after the use key is let go
         self.always_using = False
-        self.flaky_attack = False  # attack_entity_once refuses ("not dispatched") for no visible reason
-        self.occlusions: dict[int, int] = {}  # target id -> id of the entity standing in the way
-        self.attacks, self.hits = [], []
+        self.attacks, self.hits = [], []  # attack inputs pressed / entities they struck
         self.soldiers = {}
         ident = 100
         for rank in range(3):
@@ -77,6 +75,31 @@ class MarchingRank:
         if self.now >= self.duration:
             raise Stop
 
+    def crosshair(self):
+        """The client's raycast from the eye along the look: the nearest soldier box within 3 blocks of reach."""
+        yaw, pitch = math.radians(self.yaw), math.radians(self.pitch)
+        direction = (-math.sin(yaw) * math.cos(pitch), -math.sin(pitch), math.cos(yaw) * math.cos(pitch))
+        eye = (self.me[0], 64.0 + 1.62, self.me[1])
+        best = None
+        for ident, position in self.soldiers.items():
+            box = self.entity(ident, position)["bounding_box"]
+            near, far = 0.0, 3.0
+            for axis, name in enumerate("xyz"):
+                lo, hi = box[f"min_{name}"], box[f"max_{name}"]
+                if abs(direction[axis]) < 1e-9:
+                    if not lo <= eye[axis] <= hi:
+                        near, far = 1.0, 0.0
+                    continue
+                t1, t2 = (lo - eye[axis]) / direction[axis], (hi - eye[axis]) / direction[axis]
+                near, far = max(near, min(t1, t2)), min(far, max(t1, t2))
+            if near <= far and (best is None or near < best[0]):
+                best = (near, ident)
+        if best is None:
+            return {"type": "none"}
+        point = [eye[axis] + best[0] * direction[axis] for axis in range(3)]
+        return {"type": "entity", "location": dict(zip("xyz", point)), "entity_id": best[1],
+                "entity_uuid": f"uuid-{best[1]}", "entity_type": "minecraft:husk"}
+
     def entity(self, ident, position):
         dx, dz = position[0] - self.me[0], position[1] - self.me[1]
         y = self.ys.get(ident, 64.0)
@@ -96,7 +119,8 @@ class MarchingRank:
         if name == "minecraft_observe":
             return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
                                                   "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
-                    "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None}
+                    "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
+                    "target": self.crosshair()}
         if name == "minecraft_list_entities":
             listed = sorted((self.entity(i, p) for i, p in self.soldiers.items()), key=lambda e: e["distance"])
             return {"entities": [e for e in listed if e["distance"] <= arguments["radius"]][: arguments["limit"]]}
@@ -106,21 +130,12 @@ class MarchingRank:
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
             return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
         if name == "minecraft_attack_entity_once":
-            target = arguments["entity_id"]
-            self.attacks.append(target)
-            if self.always_using or "use" in self.held or self.using_ticks or self.flaky_attack:
-                raise RuntimeError("ordinary entity attack was not dispatched")
-            where = self.entity(target, self.soldiers[target])
-            if client_reach(self.me, where) > 3.0:
-                raise RuntimeError("target entity is out of interaction reach: 4.1 blocks; approach first")
-            if target in self.occlusions:
-                raise RuntimeError(f"target entity is occluded by entity {self.occlusions[target]}; reposition for a clear line")
-            self.hits.append(target)
-            return {"result": "attack", "consumes_action": True}
+            raise AssertionError("the pilot must not use minecraft_attack_entity_once")
         if name == "minecraft_scan_blocks":
             return scan(lambda x, y, z: block(solid=self.floor(x, z) is not None and y <= self.floor(x, z)), arguments)
         if name == "minecraft_look":
-            self.yaw = float(arguments["yaw_deg"])
+            assert float(arguments["yaw_deg"]).is_integer() and float(arguments["pitch_deg"]).is_integer(), "the client takes whole degrees"
+            self.yaw, self.pitch = float(arguments["yaw_deg"]), float(arguments["pitch_deg"])
             return {}
         if name == "minecraft_press_inputs":
             keys = set(arguments["keys"])
@@ -129,6 +144,13 @@ class MarchingRank:
                     self.using_ticks = 2  # the client reports the item in use until two ticks after the release
                 self.held = self.held | keys if arguments["hold"] else self.held - keys
             else:
+                if "attack" in keys:
+                    # The client's ordinary attack edge: dropped while an item is in use, else it strikes the crosshair entity.
+                    self.attacks.append(self.crosshair().get("entity_id"))
+                    if not (self.always_using or "use" in self.held or self.using_ticks):
+                        kind = self.crosshair()
+                        if kind["type"] == "entity":
+                            self.hits.append(kind["entity_id"])
                 self.advance(arguments["ticks"] * TICK, self.held | keys)
             return {}
         if name == "minecraft_wait_ticks":
@@ -546,13 +568,13 @@ class StairsEdge(unittest.TestCase):
             self.assertGreaterEqual(sim.me[0] - 188.0, self.EDGE + 1.5 - 1e-6, f"start {start}")
 
 
-def duel(enemies, occlusions=None, duration=10.0, call=0.05, always_using=False, flaky=False, argv=()):
-    """The rank standing still (march 0) with PovRed in his slot and blue enemies at {id: (x, z, y)}: (sim, log lines)."""
+def duel(enemies, friends=None, duration=10.0, call=0.05, always_using=False, argv=()):
+    """The rank standing still (march 0) with PovRed in his slot, enemies and extra friends at {id: (x, z, y)}: (sim, log lines)."""
     sim = MarchingRank(call, march=0.0, duration=duration)
-    for ident, (x, z, y) in enemies.items():
+    for ident, (x, z, y) in {**enemies, **(friends or {})}.items():
         sim.soldiers[ident] = [x, z]
         sim.ys[ident] = y
-    sim.occlusions, sim.always_using, sim.flaky_attack = occlusions or {}, always_using, flaky
+    sim.always_using = always_using
     logs = []
     saved = pilot.time, pilot.log
     pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
@@ -567,45 +589,49 @@ def duel(enemies, occlusions=None, duration=10.0, call=0.05, always_using=False,
 
 
 class Fighting(unittest.TestCase):
-    """Swings: the shield is let go and the client must say nothing is in use before one is made; an enemy in the
-    way is struck, a friend is not; reach is measured from the eye; every refusal is told apart in the log."""
+    """Swings go through the ordinary inputs: shield let go and nothing in use, the look on the enemy, the client's
+    crosshair target an enemy within reach, then the attack input; every skip says why."""
 
-    def test_a_swing_after_the_shield_is_dispatched(self):
+    def test_a_swing_after_the_shield_strikes_the_enemy(self):
         sim, logs = duel({1000: (0.0, 2.0, 64.0)})
-        self.assertGreaterEqual(len(sim.hits), 5, logs[-6:])
-        self.assertFalse([line for line in logs if "not dispatched" in line], "no swing may be dropped")
-        self.assertTrue(any(line.startswith("attack dispatched 1000") for line in logs))
+        self.assertGreaterEqual(sim.hits.count(1000), 5, logs[-6:])
+        self.assertTrue(any(line.startswith("attack sent (crosshair enemy 1000") for line in logs))
+        self.assertEqual([h for h in sim.attacks if h is None], [], "no attack input is pressed on an empty crosshair")
 
-    def test_no_swing_is_made_while_the_client_still_reports_the_item_in_use(self):
+    def test_no_attack_is_pressed_while_the_client_still_reports_the_item_in_use(self):
         sim, logs = duel({1000: (0.0, 2.0, 64.0)}, always_using=True)
-        self.assertEqual(sim.attacks, [], "a swing in use is dropped silently by the client: none is sent")
-        self.assertTrue(any("attack not dispatched (item still in use after" in line for line in logs), logs[-4:])
+        self.assertEqual(sim.attacks, [], "an attack in use is dropped silently by the client: none is pressed")
+        self.assertTrue(any("attack skipped (item still in use after" in line for line in logs), logs[-4:])
 
-    def test_a_refusal_with_nothing_in_use_is_told_apart(self):
-        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, flaky=True)
-        self.assertTrue(sim.attacks)
-        self.assertTrue(any("attack not dispatched 1000 (target changed between aim and raycast, or other)" in line for line in logs), logs[-4:])
+    def test_a_friend_under_the_crosshair_is_never_struck(self):
+        # a friend fills the whole line to the enemy: no aim point passes him
+        sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=30.0)
+        self.assertEqual(sim.hits, [], "the friend is not struck, nor the enemy through him")
+        self.assertEqual(sim.attacks, [])
+        self.assertTrue(any(line.startswith("attack skipped (crosshair friend 500") for line in logs), logs[-4:])
+        self.assertLessEqual(sum(1 for line in logs if line.startswith("attack skipped (crosshair friend")), 11,
+                        "the target is left alone for a while after every point failed")
+
+    def test_the_aim_moves_past_a_friends_shoulder(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, friends={500: (0.25, 1.0, 64.0)})
+        self.assertIn(1000, sim.hits, logs[-6:])
+        self.assertNotIn(500, sim.hits)
 
     def test_an_enemy_in_the_way_is_struck_instead(self):
-        sim, logs = duel({1000: (0.0, 2.0, 64.0), 1001: (0.0, 2.4, 64.0)}, occlusions={1000: 1001})
-        self.assertIn(1001, sim.hits, "the enemy behind the blocked one is struck")
-        self.assertNotIn(1000, sim.hits)
-        self.assertTrue(any(line.startswith("attack occluded by enemy 1001") for line in logs), logs[-4:])
-
-    def test_a_friend_in_the_way_is_not_struck_and_the_target_is_left_alone_a_while(self):
-        friend = 105  # a soldier of his own side in the rank
-        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, occlusions={1000: friend}, duration=8.0)
-        self.assertNotIn(friend, sim.attacks)
-        self.assertEqual(sim.hits, [])
-        self.assertTrue(any(line.startswith(f"attack occluded by friend {friend}") for line in logs), logs[-4:])
-        self.assertLessEqual(sim.attacks.count(1000), 5, "not 12 swings in 8 s into the same friend")
+        sim, logs = duel({1000: (0.0, 2.0, 64.0), 1001: (0.0, 1.2, 64.0)})
+        self.assertIn(1001, sim.hits)
+        self.assertTrue(any("attack sent (crosshair enemy 1001 instead of 1000" in line or "attack sent (crosshair enemy 1001" in line for line in logs), logs[-4:])
 
     def test_an_enemy_far_below_is_out_of_reach_from_the_eye_though_close_on_the_ground(self):
-        # 2.5 blocks away on the ground plane but 3.5 below: the eye is over 4 blocks from his box.
         sim, logs = duel({1000: (0.0, 2.5, 60.5)})
-        self.assertEqual(sim.attacks, [], "no swing is sent beyond the eye reach")
+        self.assertEqual(sim.attacks, [], "no attack beyond the eye reach")
+        self.assertEqual([line for line in logs if line.startswith("attack")][1:], [], "no aiming at him either (only the interval line)")
         sim, logs = duel({1000: (0.0, 2.5, 63.0)})
         self.assertTrue(sim.hits, "the same distance at his height is struck")
+
+    def test_the_look_is_in_whole_degrees_and_the_old_swing_tool_is_not_used(self):
+        sim, logs = duel({1000: (0.7, 2.1, 64.0)})  # the sim raises on attack_entity_once and on fractional looks
+        self.assertTrue(sim.hits)
 
 
 if __name__ == "__main__":

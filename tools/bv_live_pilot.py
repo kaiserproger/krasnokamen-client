@@ -378,7 +378,6 @@ EYE = 1.62
 BLOCK_FOR = 1.5   # seconds a target is not struck again after a friend stood in the way
 USE_TICKS = 2     # client ticks to wait after the shield key is let go before a swing
 USE_RECHECKS = 4  # further one-tick waits for the client to report the item no longer in use
-OCCLUDED = re.compile(r"occluded by entity (\d+)")
 
 
 def eye_distance(me, entity) -> float:
@@ -408,61 +407,76 @@ def release_use(client: Client, pilot: Pilot, waited: bool) -> bool:
     return client.tool("minecraft_observe").get("using") is None
 
 
-def attack(client: Client, pilot: Pilot, target, args, sides: dict, listed: dict, blocked: dict, waited: bool, hops: int = 2):
-    """One swing at `target` with every refusal told apart in the log: `attack dispatched`, `attack not dispatched
-    (<why>)`, `attack occluded by enemy|friend|block ...`, `attack out of reach`. The shield is let go first and the
-    reach is measured again from the eye (the entity moved since the list). An entity in the way that is an enemy
-    is struck instead; a friend is not, and the target is left alone for BLOCK_FOR seconds. Returns True when dispatched."""
+# Where in the enemy's box the look is tried, as fractions of (x, y, z): the middle first (the order is the client's
+# own aim_at_entity order), then past a friend's shoulder (left, right) and over/under him (head, legs).
+AIM_POINTS = ((0.5, 0.5, 0.5), (0.2, 0.5, 0.5), (0.8, 0.5, 0.5), (0.5, 0.85, 0.5), (0.5, 0.15, 0.5))
+
+
+def aim_point(entity, fractions):
+    box = entity["bounding_box"]
+    return [box[f"min_{axis}"] + (box[f"max_{axis}"] - box[f"min_{axis}"]) * fraction
+            for axis, fraction in zip("xyz", fractions)]
+
+
+def crosshair(client: Client):
+    """What the client's own raycast says is under the crosshair: ('entity', id, observed target) | ('block', None, t) | ('none', None, t)."""
+    target = client.tool("minecraft_observe").get("target") or {"type": "none"}
+    if target.get("type") == "entity":
+        return "entity", int(target["entity_id"]), target
+    return ("block" if target.get("type") == "block" else "none"), None, target
+
+
+def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
+    """One swing at `target` through the ordinary inputs, as a player does: the shield is let go, the look is put on a
+    point of the enemy's box, the client's own crosshair target (`minecraft_observe` `target`) must be an enemy within
+    reach, and only then the ordinary `attack` input is pressed for one tick. (`minecraft_attack_entity_once` is not
+    used: its aim and its raycast at the swing can disagree and the swing is then dropped silently.) The point is moved
+    past a friend or a block in the way; an enemy that stands in the way is struck instead; a friend never is; when no
+    point works the target is left alone for BLOCK_FOR seconds. Logs `attack sent (crosshair enemy N ...)` or
+    `attack skipped (crosshair friend|block|none|enemy out of reach ...)`. Returns True when the input was sent."""
     ident = target["entity_id"]
     if not release_use(client, pilot, waited):
-        log("attack not dispatched (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
+        log("attack skipped (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
         return False
     me = pilot.player()
+    eye = [float(me["x"]), float(me["y"]) + EYE, float(me["z"])]
     page = client.tool("minecraft_list_entities", {"radius": args.reach + 4.0, "limit": 32})["entities"]
     fresh = next((e for e in page if e["entity_id"] == ident), None)
     if fresh is None:
-        log("attack skipped: entity", ident, "left the page")
+        log("attack skipped (entity", ident, "left the page)")
         return False
     reach = eye_distance(me, fresh)
     if reach > args.reach:
-        log("attack out of reach", ident, "eye distance", round(reach, 2), ">", args.reach)
+        log("attack skipped (out of reach:", ident, "eye distance", round(reach, 2), ">", args.reach, ")")
         return False
-    before = fresh.get("health")
-    try:
-        result = client.tool("minecraft_attack_entity_once", {**identity(fresh), "timeout_seconds": 1.0})
-    except RuntimeError as error:
-        text = str(error)
-        if any(code in text for code in RECOVERABLE):
-            raise
-        in_way = OCCLUDED.search(text)
-        if in_way:
-            other = int(in_way.group(1))
-            entity = next((e for e in page if e["entity_id"] == other), None)
-            side = sides.get(other) if other in sides else (side_of(client, entity) if entity is not None else None)
-            if entity is not None:
-                sides[other] = side
-            if side is not None and side != args.side:
-                log("attack occluded by enemy", other, "(", ident, "behind it): striking", other)
-                if hops > 0 and entity is not None:
-                    return attack(client, pilot, entity, args, sides, listed, blocked, True, hops - 1)
-                return False
-            blocked[ident] = time.monotonic() + BLOCK_FOR
-            log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
-                "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
-            return False
-        if "occluded by" in text:
-            log("attack occluded by block:", text[:160])
-            blocked[ident] = time.monotonic() + BLOCK_FOR
-        elif "reach" in text:
-            log("attack out of reach (client):", text[:160])
-        elif "not dispatched" in text:
-            using = client.tool("minecraft_observe").get("using") is not None
-            log("attack not dispatched", ident, "(item in use)" if using else "(target changed between aim and raycast, or other)")
-        else:
-            log("attack failed", ident, text[:200])
-        return False
-    log("attack dispatched", ident, "health before", before, "->", json.dumps(result)[:240])
-    return True
+    seen = []
+    for fractions in AIM_POINTS:
+        yaw, pitch = look_angles(eye, aim_point(fresh, fractions))
+        look = (int(round(wrap(yaw))), int(round(pitch)))
+        client.tool("minecraft_look", {"yaw_deg": look[0], "pitch_deg": look[1]})
+        pilot.sent_look = look
+        client.tool("minecraft_wait_ticks", {"ticks": 1})
+        kind, struck, observed = crosshair(client)
+        if kind == "entity":
+            side = sides.get(struck)
+            if side is None and struck not in sides:
+                side = sides[struck] = side_of(client, observed)
+            hit = observed.get("location") or {}
+            away = math.dist(eye, [float(hit[axis]) for axis in "xyz"]) if hit else 0.0
+            if side is not None and side == args.side:
+                seen.append(f"friend {struck}")
+                continue
+            if away > args.reach:
+                seen.append(f"enemy {struck} out of reach {away:.2f}")
+                continue
+            note = "" if struck == ident else f" instead of {ident}"
+            client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
+            log(f"attack sent (crosshair enemy {struck}{note}, aim {fractions}, distance {away:.2f})")
+            return True
+        seen.append(kind)
+    blocked[ident] = time.monotonic() + BLOCK_FOR
+    log(f"attack skipped (crosshair {', '.join(seen)}; target {ident} left alone {BLOCK_FOR} s)")
+    return False
 
 
 def rank(args, client: Client):
@@ -640,7 +654,7 @@ def rank(args, client: Client):
         move(client, pilot, guard, wanted, here, yaw, distance if target is not None else 0.0, step_time)
         if strike:
             # The ordinary attack, with the shield let go and the client's word that nothing is in use.
-            attack(client, pilot, enemy, args, sides, {e["entity_id"]: e for e in listed}, blocked, not was_using)
+            attack(client, pilot, enemy, args, sides, blocked, not was_using)
             last_attack = time.monotonic()
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
