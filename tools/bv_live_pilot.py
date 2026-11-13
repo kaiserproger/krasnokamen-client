@@ -297,6 +297,7 @@ class Pilot:
         self.c = client
         self.held: set[str] = set()
         self.sent_look = None
+        self.observed: dict = {}  # the whole last minecraft_observe taken by player()
 
     def keys(self, wanted: set[str]):
         release = self.held - wanted
@@ -322,11 +323,64 @@ class Pilot:
         observed = self.c.tool("minecraft_observe")
         if "player" not in observed:
             raise RuntimeError("not in play (respawning or loading)")
+        self.observed = observed
         return observed["player"]
 
 
 def position(record) -> list[float]:
     return [float(record["x"]), float(record["y"]), float(record["z"])]
+
+
+PIERCING = "minecraft:piercing_weapon"
+HOTBAR_FIRST = 36  # hotbar slot 0 in the player-inventory numbering of minecraft_read_item_components
+
+
+def components_of(stack) -> dict:
+    return (stack.get("components") or {}) if isinstance(stack, dict) else {}
+
+
+def melee_weapon(stack) -> bool:
+    """A stack that carries an attack_damage or attack_speed attribute modifier."""
+    return any(isinstance(modifier, dict) and modifier.get("type") in ("minecraft:attack_damage", "minecraft:attack_speed")
+               for modifier in components_of(stack).get("minecraft:attribute_modifiers") or [])
+
+
+def choose_melee(client: Client, choice: str) -> None:
+    """Read the hotbar (logged) and select the melee slot with the ordinary hotbar input. `auto` keeps the selected
+    slot when its item has no piercing_weapon component (a spear stabs with a different packet); otherwise it takes the
+    first hotbar slot with a melee weapon without it, or logs `no non-piercing melee weapon in hotbar` and leaves the
+    selection. A number selects that slot."""
+    if choice != "auto":
+        client.tool("minecraft_set_hotbar_slot", {"slot": int(choice)})
+        log("melee slot", choice, "selected by the option")
+        return
+    hotbar = []
+    for slot in range(9):
+        try:
+            stack = client.tool("minecraft_read_item_components", {"source": "player", "slot": HOTBAR_FIRST + slot})
+        except RuntimeError as error:
+            if any(code in str(error) for code in RECOVERABLE):
+                raise
+            stack = None
+            log("hotbar", slot, "unreadable:", str(error)[:120])
+        hotbar.append(stack)
+        if stack is not None:
+            log("hotbar", slot, compact(stack))
+    try:
+        selected = client.tool("minecraft_read_item_components", {"source": "selected"})
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        selected = None
+    if selected is not None and PIERCING not in components_of(selected) and melee_weapon(selected):
+        log("selected item is a melee weapon without piercing_weapon; kept")
+        return
+    for slot, stack in enumerate(hotbar):
+        if stack is not None and melee_weapon(stack) and PIERCING not in components_of(stack):
+            client.tool("minecraft_set_hotbar_slot", {"slot": slot})
+            log("melee slot", slot, "selected (melee weapon without piercing_weapon)")
+            return
+    log("no non-piercing melee weapon in hotbar")
 
 
 def attack_interval(client: Client, fallback: float) -> float:
@@ -375,6 +429,12 @@ def side_of(client: Client, entity) -> str | None:
 
 
 EYE = 1.62
+CONTACT = 6.0     # an enemy this close (blocks) is a fight: short steps, no walking off, no handing the place away
+ENGAGE = 2.5      # blocks short of the nearest enemy that he walks up to in a fight
+CONTACT_READ = CONTACT + 2.0  # in a fight only neighbours this close (blocks) are classified
+CONTACT_CLASSIFY = 1    # unread neighbours classified per step in a fight (nearest, within CONTACT + 2)
+STRENGTH_READY = 0.9    # attack strength (client HUD bar) from which a swing is made
+MAIN_HAND_TTL = 30.0    # seconds the main-hand item read for the diagnostics is reused
 BLOCK_FOR = 1.5   # seconds a target is not struck again after a friend stood in the way
 USE_TICKS = 2     # client ticks to wait after the shield key is let go before a swing
 USE_RECHECKS = 4  # further one-tick waits for the client to report the item no longer in use
@@ -418,12 +478,36 @@ def aim_point(entity, fractions):
             for axis, fraction in zip("xyz", fractions)]
 
 
+def attack_strength(observed: dict):
+    """The weapon's attack strength 0..1 from the client HUD in `minecraft_observe` `ui_nodes`: the `hud/attack`
+    progress bar is as wide as that fraction of the 15-pixel `hud/crosshair` and absent at full charge. None when the
+    observation does not carry the HUD (no crosshair node)."""
+    nodes = observed.get("ui_nodes")
+    if not isinstance(nodes, list):
+        return None
+    by_id = {node.get("id"): node for node in nodes if isinstance(node, dict)}
+    cross = by_id.get("hud/crosshair")
+    if not cross or not cross.get("bounds") or float(cross["bounds"][2]) <= 0:
+        return None
+    bar = by_id.get("hud/attack")
+    if bar is None:
+        return 1.0
+    return max(0.0, min(1.0, float(bar["bounds"][2]) / float(cross["bounds"][2])))
+
+
+def attack_ready(observed: dict, now: float, last_attack: float, interval: float) -> bool:
+    """A swing is due at attack strength >= STRENGTH_READY when the client reports it, else after the weapon's interval."""
+    strength = attack_strength(observed)
+    return now - last_attack >= interval if strength is None else strength >= STRENGTH_READY
+
+
 def crosshair(client: Client):
     """What the client's own raycast says is under the crosshair: ('entity', id, observed target) | ('block', None, t) | ('none', None, t)."""
-    target = client.tool("minecraft_observe").get("target") or {"type": "none"}
+    observed = client.tool("minecraft_observe")
+    target = observed.get("target") or {"type": "none"}
     if target.get("type") == "entity":
-        return "entity", int(target["entity_id"]), target
-    return ("block" if target.get("type") == "block" else "none"), None, target
+        return "entity", int(target["entity_id"]), target, observed
+    return ("block" if target.get("type") == "block" else "none"), None, target, observed
 
 
 def compact(value) -> str:
@@ -441,18 +525,25 @@ def diag_before(observed: dict, item) -> str:
 
 
 def main_hand(client: Client):
+    """The selected item's components for the diagnostics, read at most once per MAIN_HAND_TTL seconds."""
+    now = time.monotonic()
+    cached = getattr(client, "main_hand_read", None)
+    if cached is not None and 0 <= now - cached[0] < MAIN_HAND_TTL:
+        return cached[1]
     try:
-        return client.tool("minecraft_read_item_components", {"source": "selected"})
+        item = client.tool("minecraft_read_item_components", {"source": "selected"})
     except RuntimeError as error:
         if any(code in str(error) for code in RECOVERABLE):
             raise
-        return "unreadable: " + str(error)[:120]
+        item = "unreadable: " + str(error)[:120]
+    client.main_hand_read = (now, item)
+    return item
 
 
-def press_attack(client: Client):
-    """The attack input for one tick with the diagnostic lines: the observation taken right before it, and the
-    tool's whole answer (never cut) right after."""
-    log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
+def press_attack(client: Client, observed: dict):
+    """The attack input for one tick with the diagnostic lines: `observed`, the observation taken right before it
+    (the crosshair check), and the tool's whole answer (never cut) right after."""
+    log(diag_before(observed, main_hand(client)))
     try:
         answer = client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
     except RuntimeError as error:
@@ -491,7 +582,7 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
         client.tool("minecraft_look", {"yaw_deg": look[0], "pitch_deg": look[1]})
         pilot.sent_look = look
         client.tool("minecraft_wait_ticks", {"ticks": 1})
-        kind, struck, observed = crosshair(client)
+        kind, struck, observed, whole = crosshair(client)
         if kind == "entity":
             side = sides.get(struck)
             if side is None and struck not in sides:
@@ -505,7 +596,7 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
                 seen.append(f"enemy {struck} out of reach {away:.2f}")
                 continue
             note = "" if struck == ident else f" instead of {ident}"
-            press_attack(client)
+            press_attack(client, whole)
             log(f"attack sent (crosshair enemy {struck}{note}, aim {fractions}, distance {away:.2f})")
             return True
         seen.append(kind)
@@ -587,6 +678,7 @@ def rank(args, client: Client):
     guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
     client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
     log("in play; holding rank")
+    choose_melee(client, args.melee_slot)
     me = pilot.player()
     yaw, pitch = float(me.get("yaw", 0.0)), float(me.get("pitch", 0.0))
     rest_yaw = yaw
@@ -625,6 +717,8 @@ def rank(args, client: Client):
             last_goal, drift = None, [0.0, 0.0]
             pilot.sent_look = None
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
+            choose_melee(client, args.melee_slot)
+            interval = attack_interval(client, args.attack_interval)
             continue
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
@@ -649,6 +743,8 @@ def rank(args, client: Client):
                 friends.append(entity)
             elif side is not None:
                 enemies.append(entity)
+        # A fight: any enemy this close, blocked or not. Steps are short, the place is not handed away and he does not walk off.
+        contact = bool(enemies) and enemies[0]["distance"] <= CONTACT
         if offset is None and anchor is None:
             # The rank place is measured from one instant, right after join, respawn or
             # re-slot: PovRed and his nearest 2K neighbours as listed now, however long
@@ -689,7 +785,7 @@ def rank(args, client: Client):
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
         if offset is not None:
             tracked = [e for e in friends if e["entity_id"] in members]
-            if len(tracked) < min(args.k, 3) and len(near) >= min(args.k, 3):
+            if len(tracked) < min(args.k, 3) and len(near) >= min(args.k, 3) and not contact:
                 # His soldiers left the nearest page (he lags or leads a few blocks, or they
                 # fell): hand his place, unchanged, to the soldiers nearest him now. Any
                 # soldiers who keep formation can carry it.
@@ -723,10 +819,21 @@ def rank(args, client: Client):
         pitch = pitch + max(-3.0, min(3.0, (max(-20.0, min(30.0, face_pitch)) - pitch) * 0.25))
         pilot.look(yaw, pitch)
         wanted: set[str] = set()
-        if target is not None:
+        steer = None
+        if contact:
+            if enemy is not None and enemy["distance"] > ENGAGE:
+                # Up to ENGAGE blocks short of him, along the line from him to here.
+                gap = [here[0] - enemy["x"], here[2] - enemy["z"]]
+                length = math.hypot(*gap) or 1.0
+                steer = [enemy["x"] + gap[0] / length * ENGAGE, enemy["z"] + gap[1] / length * ENGAGE]
+            else:
+                steer = [here[0], here[2]]  # close enough, or the only enemy is blocked: hold the place
+        elif target is not None:
             # Aim where his place will be a step from now: the rank keeps marching while
             # the step's other calls run, and the next correction comes a step later.
-            aim = [target[i] + drift[i] * step_time for i in range(2)]
+            steer = [target[i] + drift[i] * step_time for i in range(2)]
+        if steer is not None:
+            aim = steer
             dx, dz = aim[0] - here[0], aim[1] - here[2]
             distance = math.hypot(dx, dz)
             moving = distance > (0.4 if moving else 1.0)
@@ -748,13 +855,14 @@ def rank(args, client: Client):
                 if me.get("horizontal_collision"):
                     wanted.add("jump")
         now = time.monotonic()
-        strike = enemy is not None and eye_distance(me, enemy) <= args.reach and now - last_attack >= interval
+        strike = (enemy is not None and eye_distance(me, enemy) <= args.reach
+                  and attack_ready(pilot.observed, now, last_attack, interval))
         # Shield up (the ordinary use input on the off-hand shield) while an enemy is
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
         was_using = "use" in pilot.held
-        move(client, pilot, guard, wanted, here, yaw, distance if target is not None else 0.0, step_time)
+        walked = move(client, pilot, guard, wanted, here, yaw, distance if steer is not None else 0.0, step_time)
         if strike:
             # The ordinary attack, with the shield let go and the client's word that nothing is in use.
             attack(client, pilot, enemy, args, sides, blocked, not was_using)
@@ -766,9 +874,16 @@ def rank(args, client: Client):
         # still, so many per step; afterwards two, because movement keys stay held for a
         # whole step and a long step overshoots his place (each read waits a client frame).
         budget = args.classify_per_step if offset is None else 2
+        if contact:
+            # In a fight only the neighbours who can matter are read, one per step; the rest wait for the lull.
+            budget = CONTACT_CLASSIFY
+            unread = [e for e in unread if e["distance"] <= CONTACT_READ]
         for entity in unread[:budget]:
             sides[entity["entity_id"]] = side_of(client, entity)
-        client.tool("minecraft_wait_ticks", {"ticks": 2})
+        if not contact:
+            client.tool("minecraft_wait_ticks", {"ticks": 2})
+        elif not (walked or strike):
+            client.tool("minecraft_wait_ticks", {"ticks": 1})
         steps += 1
         if time.monotonic() - last_status >= 5.0:
             elapsed = time.monotonic() - last_status
@@ -860,6 +975,8 @@ def arguments(argv=None):
                         help="raise the off-hand shield while an enemy is this close (0 = never)")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
+    parser.add_argument("--melee-slot", default="auto",
+                        help="auto: a melee weapon without piercing_weapon from the hotbar (logged); N: hotbar slot 0..8")
     parser.add_argument("--attack-mode", default="input", choices=("input", "once"),
                         help="input: look at the enemy and press the attack input (default); once: minecraft_attack_entity_once")
     parser.add_argument("--attack-interval", type=float, default=0.65)

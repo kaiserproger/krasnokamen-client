@@ -41,6 +41,14 @@ class MarchingRank:
         self.ys: dict[int, float] = {}  # feet y of soldiers that are not at 64
         self.using_ticks = 0  # ticks the client still reports an item in use after the use key is let go
         self.always_using = False
+        self.waits, self.entity_reads, self.press_times = [], [], []  # wait_ticks counts; ids whose side was read; client time of each attack press
+        self.spawn = []  # (time, id, [x, z]): a soldier that appears
+        self.list_times = []  # client time of each entity list: one per pilot step
+        self.vanish = None  # (time, ids): from that time those soldiers are far away
+        self.selected_free = True  # reads of the selected item (the weapon interval) also take no march time
+        self.since_attack, self.charge_full, self.hud = 99, 13, True  # ticks since the last attack; ticks to full strength; HUD in observe
+        self.press_strengths = []  # attack strength at each attack press
+        self.hotbar, self.selected = {}, 0  # slot -> stack; selected slot
         self.mode, self.once_calls = "input", []  # the pilot's --attack-mode; targets of minecraft_attack_entity_once
         self.attacks, self.hits = [], []  # attack inputs pressed / entities they struck
         self.soldiers = {}
@@ -67,14 +75,31 @@ class MarchingRank:
                 speed = 5.6 if "sprint" in keys else 4.3
                 self.me[0] += speed * vx / norm * TICK
                 self.me[1] += speed * vz / norm * TICK
+            for appearing in [w for w in self.spawn if self.now >= w[0]]:
+                self.spawn.remove(appearing)
+                self.soldiers[appearing[1]] = list(appearing[2])
+            if self.vanish and self.now >= self.vanish[0]:
+                for ident in self.vanish[1]:
+                    self.soldiers[ident] = [500.0, 500.0]
             for position in self.soldiers.values():
                 position[1] += self.march * TICK
             self.now += TICK
             self.using_ticks = max(0, self.using_ticks - 1)
+            self.since_attack += 1
             slot = [0.0, self.march * self.now]
             self.samples.append((self.now, self.me[1] - slot[1], math.dist(self.me, slot)))
         if self.now >= self.duration:
             raise Stop
+
+    def strength(self):
+        return min(1.0, self.since_attack / self.charge_full)
+
+    def ui_nodes(self):
+        """The HUD as the client observes it: a 30-pixel crosshair, and the attack bar below full strength."""
+        nodes = [{"id": "hud/crosshair", "role": "image", "bounds": [100.0, 100.0, 30.0, 30.0]}]
+        if self.strength() < 1.0:
+            nodes.append({"id": "hud/attack", "role": "progressbar", "bounds": [100.0, 140.0, 30.0 * self.strength(), 4.0]})
+        return nodes
 
     def crosshair(self, look=None):
         """The client's raycast from the eye along the look: the nearest soldier box within 3 blocks of reach."""
@@ -114,7 +139,10 @@ class MarchingRank:
         arguments = arguments or {}
         if name != "minecraft_press_inputs" and self.held & {"forward", "back", "left", "right", "sprint", "jump"}:
             self.held_during.append(name)
-        self.advance(self.spike[1] if self.spike and self.now >= self.spike[0] else self.call)
+        # The hotbar reads and the slot choice happen at join, before the march begins on the real server: they take no march time here.
+        startup = name == "minecraft_set_hotbar_slot" or (name == "minecraft_read_item_components" and arguments["source"] in ("player", "selected") and self.selected_free)
+        if not startup:
+            self.advance(self.spike[1] if self.spike and self.now >= self.spike[0] else self.call)
         if name == "minecraft_wait_for_play":
             return {}
         if name == "minecraft_observe":
@@ -122,15 +150,26 @@ class MarchingRank:
                                                   "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
                     "inputs": {"held": sorted(self.held)},
                     "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
-                    "target": self.crosshair()}
+                    "target": self.crosshair(), **({"ui_nodes": self.ui_nodes()} if self.hud else {})}
         if name == "minecraft_list_entities":
+            self.list_times.append(self.now)
             listed = sorted((self.entity(i, p) for i, p in self.soldiers.items()), key=lambda e: e["distance"])
             return {"entities": [e for e in listed if e["distance"] <= arguments["radius"]][: arguments["limit"]]}
         if name == "minecraft_read_item_components":
             if arguments["source"] == "selected":
-                raise RuntimeError("no held item data")
+                if self.selected not in self.hotbar:
+                    raise RuntimeError("no held item data")
+                return self.hotbar[self.selected]
+            if arguments["source"] == "player":
+                if arguments["slot"] - 36 not in self.hotbar:
+                    raise RuntimeError("player inventory slot not received")
+                return self.hotbar[arguments["slot"] - 36]
+            self.entity_reads.append(arguments.get("entity_id"))
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
             return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
+        if name == "minecraft_set_hotbar_slot":
+            self.selected = arguments["slot"]
+            return {"status": "ok"}
         if name == "minecraft_attack_entity_once":
             if self.mode != "once":
                 raise AssertionError("--attack-mode input must not use minecraft_attack_entity_once")
@@ -165,6 +204,9 @@ class MarchingRank:
                 self.held = self.held | keys if arguments["hold"] else self.held - keys
             else:
                 if "attack" in keys:
+                    self.press_strengths.append(self.strength())
+                    self.since_attack = 0
+                    self.press_times.append(self.now)
                     # The client's ordinary attack edge: dropped while an item is in use, else it strikes the crosshair entity.
                     self.attacks.append(self.crosshair().get("entity_id"))
                     if not (self.always_using or "use" in self.held or self.using_ticks):
@@ -174,6 +216,7 @@ class MarchingRank:
                 self.advance(arguments["ticks"] * TICK, self.held | keys)
             return {}
         if name == "minecraft_wait_ticks":
+            self.waits.append((self.now, arguments["ticks"]))
             self.advance(arguments["ticks"] * TICK)
             return {}
         raise AssertionError(f"unexpected tool {name}")
@@ -763,6 +806,129 @@ class Fighting(unittest.TestCase):
     def test_the_look_is_in_whole_degrees_and_the_old_swing_tool_is_not_used(self):
         sim, logs = duel({1000: (0.7, 2.1, 64.0)})  # the sim raises on attack_entity_once and on fractional looks
         self.assertTrue(sim.hits)
+
+
+SWORD = {"components": {"minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage", "amount": 5.0},
+                                                          {"type": "minecraft:attack_speed", "amount": -2.4}]}}
+SPEAR = {"components": {"minecraft:attribute_modifiers": [{"type": "minecraft:attack_damage", "amount": 4.0}],
+                        "minecraft:piercing_weapon": {}}}
+
+
+def logged(sim, call):
+    logs = []
+    saved = pilot.log
+    pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+    try:
+        call()
+    finally:
+        pilot.log = saved
+    return logs
+
+
+class Fight(unittest.TestCase):
+    """The pace of a fight: short steps, a walk up to the enemy, swings by attack strength, the place kept, the
+    right weapon in hand."""
+
+    CROWD = {600 + i: (8.0 + 0.3 * i, 3.0 + 0.4 * i, 64.0) for i in range(30)}  # friends beyond the fight, not yet read
+
+    def test_in_a_fight_the_crowd_beyond_it_is_not_read_and_no_step_waits_two_ticks(self):
+        with mock.patch.object(pilot, "USE_TICKS", 1):  # the shield release has its own wait
+            sim, logs = duel({1000: (0.0, 4.5, 64.0)}, friends=self.CROWD, duration=20.0)
+        self.assertTrue(sim.hits)
+        self.assertEqual([r for r in sim.entity_reads if r in self.CROWD], [], "soldiers beyond the fight are read after it")
+        self.assertEqual([w for w in sim.waits if w[1] > 1 and w[0] > 8.0], [], "a fight step does not wait two ticks")
+        steps = [b - a for a, b in zip(sim.list_times, sim.list_times[1:])]
+        self.assertLessEqual(sum(steps) / len(steps), 0.5, "mean step in a fight, client seconds")
+
+    def test_he_walks_up_to_the_nearest_enemy(self):
+        sim, logs = duel({1000: (0.0, 5.0, 64.0)}, duration=20.0)
+        self.assertLessEqual(math.dist(sim.me, [0.0, 5.0]), 2.8, "he stopped far from the enemy")
+        self.assertGreaterEqual(math.dist(sim.me, [0.0, 5.0]), 2.0, "he walked into the enemy")
+        self.assertGreaterEqual(sim.hits.count(1000), 5, logs[-5:])
+
+    def test_a_swing_waits_for_the_attack_strength_not_for_a_fixed_interval(self):
+        sim = MarchingRank(0.05, march=0.0, duration=30.0)
+        sim.charge_full = 60  # 3 s to full strength, far slower than the 0.65 s fallback interval and the pilot's step
+        sim.soldiers[1000] = [0.0, 2.0]
+        logs = logged(sim, lambda: self.run_rank(sim))
+        self.assertGreaterEqual(len(sim.press_strengths), 5, logs[-4:])
+        self.assertGreaterEqual(min(sim.press_strengths), 0.9, "a swing at low charge")
+
+    def test_without_the_hud_in_the_observation_the_weapon_interval_spaces_the_swings(self):
+        sim = MarchingRank(0.05, march=0.0, duration=20.0)
+        sim.hud, sim.charge_full = False, 1
+        sim.soldiers[1000] = [0.0, 2.0]
+        logged(sim, lambda: self.run_rank(sim))
+        gaps = [b - a for a, b in zip(sim.press_times, sim.press_times[1:])]
+        self.assertTrue(gaps)
+        self.assertGreaterEqual(min(gaps), 0.6, "swings closer than the 0.65 s interval")
+
+    def test_the_attack_strength_is_read_from_the_hud(self):
+        nodes = lambda *bar: {"ui_nodes": [{"id": "hud/crosshair", "bounds": [0, 0, 30.0, 30.0]},
+                                           *([{"id": "hud/attack", "bounds": [0, 0, bar[0], 4.0]}] if bar else [])]}
+        self.assertEqual(pilot.attack_strength(nodes()), 1.0)
+        self.assertAlmostEqual(pilot.attack_strength(nodes(15.0)), 0.5)
+        self.assertIsNone(pilot.attack_strength({}))
+        self.assertIsNone(pilot.attack_strength({"ui_nodes": [{"id": "hud/hotbar", "bounds": [0, 0, 1, 1]}]}))
+        self.assertTrue(pilot.attack_ready(nodes(), 0.0, 0.0, 9.0))
+        self.assertFalse(pilot.attack_ready(nodes(24.0), 100.0, 0.0, 0.0))
+        self.assertTrue(pilot.attack_ready(nodes(27.5), 0.0, 0.0, 9.0))
+
+    def test_the_place_is_not_handed_away_and_he_does_not_leave_while_an_enemy_is_near(self):
+        def fight():
+            sim = MarchingRank(0.05, march=0.0, duration=30.0)
+            sim.spawn = [(6.0, 1000, [0.0, 5.0])]
+            sim.vanish = (9.0, set(range(100, 124)))  # his rank's soldiers leave the page
+            logs = logged(sim, lambda: self.run_rank(sim))
+            return sim, logs
+        sim, logs = fight()
+        self.assertEqual([line for line in logs if "handed" in line], [], logs[-6:])
+        self.assertLessEqual(math.dist(sim.me, [0.0, 5.0]), 3.0, "he left the fight")
+        self.assertTrue(sim.hits)
+
+    def run_rank(self, sim):
+        saved = pilot.time
+        pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
+        try:
+            pilot.rank(pilot.arguments(["runtime"]), sim)
+        except Stop:
+            pass
+        finally:
+            pilot.time = saved
+
+    def test_auto_takes_the_melee_weapon_without_piercing(self):
+        sim = MarchingRank(0.05)
+        sim.hotbar, sim.selected = {0: SPEAR, 1: SWORD}, 0
+        logs = logged(sim, lambda: pilot.choose_melee(sim, "auto"))
+        self.assertEqual(sim.selected, 1)
+        self.assertTrue(any(line.startswith("hotbar 0 ") and "piercing_weapon" in line for line in logs), logs)
+        self.assertTrue(any(line.startswith("hotbar 1 ") for line in logs))
+        self.assertIn("melee slot 1 selected (melee weapon without piercing_weapon)", logs)
+
+    def test_auto_keeps_a_selected_non_piercing_weapon(self):
+        sim = MarchingRank(0.05)
+        sim.hotbar, sim.selected = {0: SWORD, 3: SWORD}, 0
+        logs = logged(sim, lambda: pilot.choose_melee(sim, "auto"))
+        self.assertEqual(sim.selected, 0)
+        self.assertIn("selected item is a melee weapon without piercing_weapon; kept", logs)
+
+    def test_auto_with_only_a_spear_says_so_and_leaves_the_selection(self):
+        sim = MarchingRank(0.05)
+        sim.hotbar, sim.selected = {0: SPEAR, 2: {"components": {}}}, 2
+        logs = logged(sim, lambda: pilot.choose_melee(sim, "auto"))
+        self.assertEqual(sim.selected, 2)
+        self.assertIn("no non-piercing melee weapon in hotbar", logs)
+
+    def test_a_number_selects_that_slot_and_the_rank_chooses_at_start(self):
+        sim = MarchingRank(0.05)
+        logged(sim, lambda: pilot.choose_melee(sim, "4"))
+        self.assertEqual(sim.selected, 4)
+        sim, logs = duel({}, duration=2.0)
+        self.assertEqual(sim.selected, 0)
+        sim = MarchingRank(0.05, march=0.0, duration=2.0)
+        sim.hotbar, sim.selected = {0: SPEAR, 5: SWORD}, 0
+        logged(sim, lambda: self.run_rank(sim))
+        self.assertEqual(sim.selected, 5, "the rank loop chooses the weapon at join")
 
 
 if __name__ == "__main__":
