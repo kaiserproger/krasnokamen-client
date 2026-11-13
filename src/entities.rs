@@ -337,13 +337,15 @@ impl Store {
             entity.binding = None;
         }
         self.revision += 1;
+        // Spatial queries pad by the widest present kind at the largest scale, not by every
+        // kind the registry knows (the ender dragon's 256 blocks made every query, raycasts
+        // and the frame's candidates included, visit every received entity).
+        let models = self.models.clone().unwrap();
         self.spatial_padding = self
-            .models_ref()
-            .unwrap()
-            .schemas
-            .values()
-            .map(|schema| f64::from(schema.width) * 16.)
-            .fold(32., f64::max);
+            .slots
+            .iter()
+            .map(|entity| kind_padding(&models, &entity.type_name))
+            .fold(MIN_SPATIAL_PADDING, f64::max);
     }
     pub fn models(&self) -> Option<Arc<Models>> {
         self.models.clone()
@@ -877,6 +879,7 @@ impl Store {
                 if let Some(models) = self.models.as_ref() {
                     let source =
                         source_state::SourceState::new(self.get(entity_id).unwrap(), models)?;
+                    self.spatial_padding = self.spatial_padding.max(kind_padding(models, &name));
                     self.get_mut(entity_id).unwrap().source = Some(source);
                     self.physical_active.insert(entity_id);
                 }
@@ -1663,6 +1666,14 @@ impl Store {
 }
 fn cell(p: [f64; 3]) -> [i32; 2] {
     [(p[0] / 16.).floor() as i32, (p[2] / 16.).floor() as i32]
+}
+/// Floor of `Store::spatial_padding`: two spatial cells.
+const MIN_SPATIAL_PADDING: f64 = 32.;
+/// Spatial query padding a received entity of `type_name` needs: its source width at the
+/// largest `minecraft:scale` (16). Metadata that resizes an entity widens the padding again
+/// from its actual bounds (SET_ENTITY_DATA).
+fn kind_padding(models: &Models, type_name: &str) -> f64 {
+    models.schemas.get(type_name).map_or(0., |schema| f64::from(schema.width) * 16.)
 }
 fn degrees(v: u8) -> f32 {
     f32::from(v) * 360. / 256.

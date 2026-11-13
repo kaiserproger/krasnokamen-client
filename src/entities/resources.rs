@@ -818,6 +818,46 @@ mod tests {
         out
     }
 
+    /// Spatial queries pad by the widest received kind, not by every kind of the registry:
+    /// with only soldiers present a query near the camera visits no distant entity, and a
+    /// dragon widens the padding once it arrives.
+    #[test]
+    fn spatial_padding_follows_present_kinds() {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        assert_eq!(store.query_padding(), 32.);
+        let spawn = |store: &mut super::super::Store, id: i32, kind: &str, x: f64| {
+            let mut spawn = Writer::default();
+            spawn.var(id);
+            spawn.0.extend_from_slice(&[0; 16]);
+            spawn.var(doc.entities[kind].protocol_id as i32);
+            for coordinate in [x, 64., 0.] {
+                spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+            }
+            spawn.0.extend_from_slice(&[0; 4]);
+            spawn.var(0);
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        };
+        spawn(&mut store, 1, "minecraft:zombie", 0.);
+        spawn(&mut store, 2, "minecraft:zombie", 1000.);
+        assert_eq!(store.query_padding(), 32.);
+        let near = crate::player::Bounds { min: [-1., 60., -1.], max: [1., 70., 1.] };
+        let ids: Vec<_> = store.candidates(near).map(|e| e.handle.network_id).collect();
+        assert_eq!(ids, [1]);
+        spawn(&mut store, 3, "minecraft:ender_dragon", 2000.);
+        let dragon = f64::from(doc.entities["minecraft:ender_dragon"].width) * 16.;
+        assert!(dragon > 32. && store.query_padding() == dragon);
+        // Models activated again keep the padding of the kinds present.
+        store.activate_models(models);
+        assert_eq!(store.query_padding(), dragon);
+    }
+
     #[test]
     fn entity_render_rc1_empty_item_frame_has_body_at_packet_anchor() {
         let out = render_received_fixture("minecraft:item_frame", 2, &[]);
