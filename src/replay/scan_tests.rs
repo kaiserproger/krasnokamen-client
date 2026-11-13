@@ -159,3 +159,46 @@ fn arrow_velocity_is_rederived_from_sparse_server_positions() {
     let (resumed, landed) = fly(arrow.position, arrow.velocity, 180, ground);
     assert!(landed && (direct[2] - resumed[2]).abs() < 3., "{direct:?} vs {resumed:?}");
 }
+
+fn fighter(position: [f64; 3], side: Side, weapon: &str) -> Tracked {
+    Tracked { role: Role::Fighter, position, spawn: position, sampled: position, side: Some(side), weapon: Some(weapon.into()),
+        vehicle: None, dead: false, stopped: false, velocity: [0.; 3], base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None }
+}
+
+#[test]
+fn melee_attackers_count_distinct_main_hand_swingers_in_a_sliding_two_second_window() {
+    let content = Content::test_cube();
+    let mut scan = Scan::new(-64, 384);
+    for (id, e) in [
+        (1, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword")),
+        (2, fighter([1., 64., 0.], Side::Blue, "minecraft:iron_sword")),
+        (3, fighter([0., 64., 1.], Side::Red, "minecraft:bow")),
+        (4, fighter([0., 64., 2.], Side::Red, "minecraft:iron_sword")),
+        (5, fighter([0., 64., 3.], Side::Red, "minecraft:iron_sword")),
+        (6, fighter([50., 64., 0.], Side::Red, "minecraft:iron_sword")),
+        (7, fighter([51., 64., 0.], Side::Blue, "minecraft:iron_sword")),
+    ] { scan.entities.insert(id, e); }
+    let mut apply = |scan: &mut Scan, id: i32, body: &[u8]| scan.apply(id, body, &content).unwrap();
+    // SWING_ANIMATION body: entity, hand (0 main, 1 off), type (0 none, 1 whack), duration.
+    scan.tick = Some(100);
+    apply(&mut scan, cb::SWING_ANIMATION, &[1, 0, 1, 21]);
+    apply(&mut scan, cb::SWING_ANIMATION, &[1, 0, 1, 21]); // the same soldier twice
+    apply(&mut scan, cb::SWING_ANIMATION, &[3, 0, 1, 21]); // bow holder
+    apply(&mut scan, cb::ANIMATE, &[4, 3]); // off-hand swing (ANIMATE action 3)
+    apply(&mut scan, cb::SWING_ANIMATION, &[4, 1, 1, 10]); // off-hand parry
+    apply(&mut scan, cb::SWING_ANIMATION, &[5, 0, 0, 10]); // main hand, type none: a stagger
+    apply(&mut scan, cb::ANIMATE, &[2, 0]); // ANIMATE action 0: main hand
+    apply(&mut scan, cb::SWING_ANIMATION, &[6, 0, 1, 21]);
+    apply(&mut scan, cb::SWING_ANIMATION, &[99, 0, 1, 21]); // not tracked
+    apply(&mut scan, cb::DAMAGE_EVENT, &[2]); // blue 2 hurt one block from red 1 only
+    let events = |row: &Value| ["melee_attack_swings", "melee_attackers_2s", "melee_hitters_2s"].map(|k| row["events"][k].as_u64().unwrap());
+    assert_eq!(events(&scan.sample(100, 0.)), [4, 3, 1]);
+    // 6 swung at tick 100, so its hurt victim 7 at tick 115 is 15 ticks too late for a hit.
+    scan.tick = Some(115);
+    apply(&mut scan, cb::DAMAGE_EVENT, &[7]);
+    scan.tick = Some(120);
+    apply(&mut scan, cb::SWING_ANIMATION, &[1, 0, 1, 21]);
+    assert_eq!(events(&scan.sample(120, 1.)), [1, 3, 1], "1 counted once; 2 and 6 still inside 40 ticks");
+    assert_eq!(events(&scan.sample(139, 1.95))[1], 3, "tick 100 is the 40th tick back from 139");
+    assert_eq!(events(&scan.sample(140, 2.)), [0, 1, 0], "only the swing of tick 120 is left, the hit of tick 100 dropped");
+}
