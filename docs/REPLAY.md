@@ -390,12 +390,15 @@ ordinary direct-join launch (`--server HOST:PORT --username NAME`) plus:
 its MCP endpoint as a rank soldier: it keeps the join-time offset to the centroid
 of the 8 nearest same-side soldiers (side from `solaris_battle:red_*`/`blue_*`
 shields and surcoats, else red/blue dye), walks with held movement keys, eases its
-look toward the nearest enemy (60°/s at most), attacks enemies in reach with
+look toward the nearest enemy (at most 6° per step), attacks enemies in reach with
 `minecraft_attack_entity_once` once per full weapon cooldown (from the held
-weapon's `attack_speed` modifier) and logs each confirmed health drop, presses
-Respawn on death and re-takes its offset after any teleport. MCP input needs the
-window focused; the pilot pauses and resumes on `window_not_focused` or an idle
-writer lease, and releases its keys and session on exit.
+weapon's `attack_speed` modifier) and logs each confirmed health drop, raises the
+off-hand shield (use input) while an enemy is within 6 blocks and lowers it for
+each swing, presses Respawn on death and re-takes its offset after any teleport.
+It never sleeps: each step waits on the reply to its MCP calls and two client
+ticks. MCP input needs the window focused; on `window_not_focused` or a respawn
+the pilot waits for the next client state event and resumes, a writer lease held
+by another MCP session fails closed, and on exit it releases its keys and session.
 
 ## Focused checks and provenance
 
