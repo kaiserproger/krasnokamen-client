@@ -34,6 +34,10 @@ pub(crate) struct AnimationState {
     pub seat_game_time: i64,
     /// Combat clip selection (swing counter, armed flag, vanilla swing duration).
     pub combat: super::animation::Selection,
+    /// Frame tick at which the entity was last inside the camera's presentation box.
+    pub shown_tick: u64,
+    /// Ticks this mob waited outside the box (see `tick_presentation`).
+    pub waited: u32,
 }
 impl Default for AnimationState {
     fn default() -> Self {
@@ -54,6 +58,8 @@ impl Default for AnimationState {
             seat_motion: Some(crate::player::vehicle::SeatMotion::default()),
             seat_game_time: 0,
             combat: super::animation::Selection::default(),
+            shown_tick: 0,
+            waited: 0,
         }
     }
 }
@@ -728,8 +734,25 @@ impl Store {
         };
         let mut active = std::mem::take(&mut self.physical_active);
         let look_target = self.look_target;
+        // While frames draw entities (one did since the last tick), a mob outside the camera's
+        // presentation box waits: its animation resumes where it stopped (no jump) and its
+        // interpolation catches up on entry. Without frames (headless, seek warm-up, several
+        // ticks in one frame) every entity ticks.
+        let presenting = !frozen && self.frame_tick + 1 >= tick;
         for id in &active {
             let Some(e) = self.get(*id) else { continue };
+            if presenting
+                && e.physical.shown_tick + 1 < tick
+                && self.local_entity_id != Some(*id)
+                && e.source.as_ref().is_some_and(|source| source.living.is_some())
+                && e.passenger_ids.is_empty()
+                && e.vehicle.is_none()
+                && e.physical.dragon.is_none()
+            {
+                let e = self.get_mut(*id).unwrap();
+                e.physical.waited = e.physical.waited.saturating_add(1);
+                continue;
+            }
             let paused = frozen
                 && !hierarchy(&models, e, "net.minecraft.world.entity.player.Player")
                 && !self.root_has_player(self.root_vehicle(*id)?, &models, 0)?;
@@ -749,10 +772,12 @@ impl Store {
                 continue;
             }
             let e = self.get_mut(*id).unwrap();
+            let waited = u8::try_from(std::mem::take(&mut e.physical.waited)).unwrap_or(u8::MAX);
             e.physical.lerp_progress = e
                 .physical
                 .lerp_progress
                 .saturating_add(1)
+                .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
             if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
@@ -808,7 +833,7 @@ impl Store {
                 can_look,
                 target: look_target,
             });
-            let span = if e.physical.lerp_progress == e.physical.lerp_duration {
+            let span = if e.physical.lerp_progress >= e.physical.lerp_duration {
                 std::mem::take(&mut e.physical.lerp_span)
             } else {
                 0

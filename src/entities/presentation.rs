@@ -626,6 +626,7 @@ pub fn append(
         } else {
             store.ids[&visible[index]]
         };
+        store.slots[slot].physical.shown_tick = tick;
         let entity = &store.slots[slot];
         let transform = match store.presented_transform(entity, tick, partial) {
             Ok(transform) => transform,

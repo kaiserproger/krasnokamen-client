@@ -2168,3 +2168,54 @@ fn falling_block_moves_between_received_updates_and_lands() {
     let rest = store.get(id).unwrap().transform.position[1];
     assert!((rest - 3.).abs() < 1e-9, "rests on the cube: {rest}");
 }
+
+/// While frames draw entities, a mob outside the camera's box waits (its animation does not
+/// advance) and on entering the box is drawn where a mob ticked all along is; without frames
+/// it ticks as before.
+#[test]
+fn offscreen_mob_waits_and_catches_up_on_entry() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let store = || {
+        let (models, mut entity) = fixture();
+        let mut target = entity.transform;
+        target.position = [3., 0., 0.];
+        entity.move_to(target, None, true, 0, false, 0.);
+        entity.physical.lerp_duration = 3;
+        let mut store = Store::new();
+        store.models = Some(Arc::new(models));
+        let id = entity.handle.network_id;
+        store.slots.push(entity);
+        store.ids.insert(id, 0);
+        store.physical_active.insert(id);
+        (store, id)
+    };
+    let age = |store: &Store, id| store.get(id).unwrap().source.as_ref().unwrap().age;
+    let (mut seen, id) = store();
+    let (mut hidden, _) = store();
+    let (mut headless, _) = store();
+    assert!(hidden.get(id).unwrap().source.as_ref().unwrap().living.is_some(), "the fixture is a mob");
+    let start = age(&seen, id);
+    for tick in 11..=12 {
+        for (store, shown) in [(&mut seen, true), (&mut hidden, false)] {
+            // The frame before this tick drew entities; only `seen` was inside the box.
+            store.frame_tick = tick - 1;
+            if shown {
+                store.slots[0].physical.shown_tick = tick - 1;
+            }
+            store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        }
+        headless.tick_presentation(tick, false, &world, &content, 0).unwrap();
+    }
+    assert_eq!(age(&hidden, id), start, "an off-screen mob waits");
+    assert_eq!(age(&seen, id), start + 2);
+    assert_eq!(age(&headless, id), start + 2, "without frames every mob ticks");
+    for store in [&mut seen, &mut hidden] {
+        store.frame_tick = 12;
+        store.slots[0].physical.shown_tick = 12;
+        store.tick_presentation(13, false, &world, &content, 0).unwrap();
+    }
+    let at = |store: &Store| store.get(id).unwrap().presented_transform(13, 0.).position;
+    assert_eq!(at(&hidden), at(&seen), "on entry it is drawn where it would have been");
+    assert_eq!(at(&seen), [3., 0., 0.]);
+}
