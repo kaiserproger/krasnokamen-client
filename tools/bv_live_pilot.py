@@ -501,8 +501,8 @@ def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dic
                 side = sides[struck] = side_of(client, observed)
             hit = observed.get("location") or {}
             away = math.dist(eye, [float(hit[axis]) for axis in "xyz"]) if hit else 0.0
-            if side is not None and side == args.side:
-                seen.append(f"friend {struck}")
+            if side is None or side == args.side:
+                seen.append(f"{'unknown-side' if side is None else 'friend'} {struck}")
                 continue
             if away > args.reach:
                 seen.append(f"enemy {struck} out of reach {away:.2f}")

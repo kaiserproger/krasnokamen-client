@@ -613,6 +613,13 @@ class Fighting(unittest.TestCase):
         self.assertLessEqual(sum(1 for line in logs if line.startswith("attack skipped (crosshair friend")), 11,
                         "the target is left alone for a while after every point failed")
 
+    def test_an_entity_of_unknown_side_under_the_crosshair_is_never_struck(self):
+        with mock.patch.object(pilot, "side_of", lambda client, entity: None if entity["entity_id"] == 500 else ("blue" if entity["entity_id"] >= 1000 else "red")):
+            sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=8.0)
+        self.assertEqual(sim.hits, [], "nothing is struck through or at an entity whose side is unknown")
+        self.assertEqual(sim.attacks, [])
+        self.assertTrue(any(line.startswith("attack skipped (crosshair unknown-side 500") for line in logs), logs[-4:])
+
     def test_the_aim_moves_past_a_friends_shoulder(self):
         sim, logs = duel({1000: (0.0, 2.0, 64.0)}, friends={500: (0.25, 1.0, 64.0)})
         self.assertIn(1000, sim.hits, logs[-6:])
