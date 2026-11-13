@@ -21,19 +21,22 @@ const IDS_PER_SIDE: usize = 6;
 /// Attackers window: a fighter is an attacker while his last main-hand melee
 /// swing is within the last 40 ticks (2 s) ending at the sample's tick.
 const ATTACK_WINDOW: u64 = 40;
-/// `max_reach` default of the `minecraft:attack_range` component codec (this client's
-/// `src/inventory/components.rs` "attack_range" decoder, i.e. vanilla's `AttackRange` default), used
-/// when the main-hand item has no such component (swords, axes, bare hands).
-const DEFAULT_REACH: f64 = 3.;
+/// `Mob.DEFAULT_ATTACK_REACH`: sqrt(2.04) - 0.6 with both float constants widened to double
+/// (javap: 2.0399999618530273, 0.6000000238418579); the maximum range without an `attack_range` component.
+const DEFAULT_MELEE_REACH: f64 = 1.428_285_672_354_458_4 - 0.600_000_023_841_857_9;
+const DEFAULT_RANGE: [f64; 2] = [0., DEFAULT_MELEE_REACH];
 /// Entity types the scan treats as fighters.
 const FIGHTER_KINDS: [&str; 5] = ["minecraft:husk", "minecraft:zombie", "minecraft:skeleton", "minecraft:pillager", "minecraft:vindicator"];
 /// Field definitions, repeated in the header row so receipts are self-describing.
 const SWING_DEFINITIONS: &str = "events.melee_attack_swings: main-hand melee swings in this interval by fighters not holding a bow or crossbow \
     (SWING_ANIMATION hand 0 with swing type whack/stab; ANIMATE is never an attack on 26.3, where its action 0 is wake-up; off-hand swings, i.e. shield parries, and type none, i.e. staggers, are not attacks). \
     events.melee_attackers_2s: distinct such fighters with an attack swing in the 40 ticks ending at the sample tick.";
-const COMBAT_DEFINITIONS: &str = "reach: per fighter, max_reach of the minecraft:attack_range component of the main-hand item (stack components, item defaults merged), \
-    else 3.0 (codec default); mob_factor and hitbox margin are ignored. contact_fighters: fighters with an enemy-side fighter within their OWN reach \
-    (horizontal distance between positions, |dy| <= 2); contact_fighters_legacy: the old symmetric 2.5-block count (contact_reach); `contacts` clusters still use contact_reach. \
+const COMBAT_DEFINITIONS: &str = "reach: per fighter, the melee range [min, max] of the main-hand item by vanilla 26.3 Mob.isWithinMeleeAttackRange (javap): \
+    [min_reach*mob_factor, max_reach*mob_factor] of the minecraft:attack_range component (stack components, item defaults merged; no hitbox margin), \
+    without the component [0, Mob.DEFAULT_ATTACK_REACH = sqrt(2.04) - 0.6]. contact_fighters: fighters with an enemy-side fighter in range: the fighter's body box \
+    (joined sideways with his horse's box when mounted) grown in x and z by max touches the target's body box (hitbox size from the entity facts; riders and horses are at the horse position), \
+    and with min > 0 the box grown by min does not. Same rule as the server's in_melee_range. \
+    contact_fighters_legacy: the old symmetric 2.5-block count (contact_reach); `contacts` clusters still use contact_reach. \
     events.fighting_2s: contact_fighters that made a main-hand attack swing or had a raised shield in the last 40 ticks. \
     events.shields_raised: fighters at the sample tick using an item (DATA_LIVING_ENTITY_FLAGS bit 1) whose hand (bit 2: off hand) holds minecraft:shield. \
     events.shield_blocks: SOUND_ENTITY minecraft:item.shield.block on a fighter in this interval (the server announces a block with that sound, not with an entity event).";
@@ -219,11 +222,13 @@ struct Tracked {
     combat: Combat,
 }
 
-/// Per fighter: weapon reach and shield state (see `COMBAT_DEFINITIONS`).
+/// Per fighter: melee range, body size and shield state (see `COMBAT_DEFINITIONS`).
 #[derive(Debug)]
 struct Combat {
-    /// `max_reach` of the `minecraft:attack_range` component of the item in the main hand.
-    reach: f64,
+    /// `[min, max]` melee range of the main-hand item (see `attack_range`).
+    range: [f64; 2],
+    /// Hitbox `[width, height]` from the entity facts.
+    dims: [f64; 2],
     /// Item in the off hand (SET_EQUIPMENT slot 1).
     offhand: Option<String>,
     /// DATA_LIVING_ENTITY_FLAGS: bit 1 using an item, bit 2 the hand is the off hand.
@@ -233,12 +238,44 @@ struct Combat {
     shield_tick: Option<u64>,
 }
 impl Default for Combat {
-    fn default() -> Self { Self { reach: DEFAULT_REACH, offhand: None, flags: 0, shield_was_up: false, shield_tick: None } }
+    fn default() -> Self { Self { range: DEFAULT_RANGE, dims: [0.; 2], offhand: None, flags: 0, shield_was_up: false, shield_tick: None } }
 }
 
-/// `max_reach` of the stack's `minecraft:attack_range` (item defaults are merged into `components`).
-fn attack_reach(components: &BTreeMap<String, Value>) -> f64 {
-    components.get("minecraft:attack_range").and_then(|v| v.get("max_reach")).and_then(Value::as_f64).unwrap_or(DEFAULT_REACH)
+/// `[min, max]` melee range of a mob wielding the stack, vanilla 26.3 `Mob.isWithinMeleeAttackRange`
+/// (javap of minecraft-merged-deobf-26.3): the item's `minecraft:attack_range` gives
+/// `[min_reach * mob_factor, max_reach * mob_factor]` (`effectiveMinRange`/`effectiveMaxRange` of a
+/// non-player, float products; no hitbox margin); without the component the range is
+/// `[0, Mob.DEFAULT_ATTACK_REACH]`. Item defaults are merged into `components`; omitted component
+/// fields take the codec defaults (min 0, max 3, mob_factor 1).
+fn attack_range(components: &BTreeMap<String, Value>) -> [f64; 2] {
+    let Some(range) = components.get("minecraft:attack_range") else { return DEFAULT_RANGE };
+    let field = |key: &str, default: f32| range.get(key).and_then(Value::as_f64).map_or(default, |v| v as f32);
+    let mob_factor = field("mob_factor", 1.);
+    [f64::from(field("min_reach", 0.) * mob_factor), f64::from(field("max_reach", 3.) * mob_factor)]
+}
+
+/// Axis-aligned box `(min, max)`.
+type Aabb = ([f64; 3], [f64; 3]);
+/// Body box of an entity standing at `position` (feet) with hitbox `[width, height]`.
+fn body_box(position: [f64; 3], [width, height]: [f64; 2]) -> Aabb {
+    let half = width / 2.;
+    ([position[0] - half, position[1], position[2] - half], [position[0] + half, position[1] + height, position[2] + half])
+}
+/// `Mob.getAttackBoundingBox`: a rider's box joined sideways (x, z) with its mount's.
+fn join_horizontal(a: Aabb, b: Aabb) -> Aabb {
+    ([a.0[0].min(b.0[0]), a.0[1], a.0[2].min(b.0[2])], [a.1[0].max(b.1[0]), a.1[1], a.1[2].max(b.1[2])])
+}
+/// `AABB.intersects` of `strike` grown by `grow` in x and z (not y) with `target`.
+fn touches(strike: &Aabb, grow: f64, target: &Aabb) -> bool {
+    strike.0[0] - grow < target.1[0] && strike.1[0] + grow > target.0[0]
+        && strike.0[1] < target.1[1] && strike.1[1] > target.0[1]
+        && strike.0[2] - grow < target.1[2] && strike.1[2] + grow > target.0[2]
+}
+/// The single "in melee contact" rule (vanilla `Mob.isWithinMeleeAttackRange`): the striker's box
+/// (already joined with its mount's) grown horizontally by the maximum range touches the target's
+/// box, and with a positive minimum the box grown by the minimum does not.
+fn in_melee_range(range: [f64; 2], strike: &Aabb, target: &Aabb) -> bool {
+    touches(strike, range[1], target) && (range[0] <= 0. || !touches(strike, range[0], target))
 }
 
 impl Tracked {
@@ -457,9 +494,17 @@ impl Scan {
                     side
                 } else { None };
                 self.remove(entity);
+                // Hitbox size from the entity facts; without them (unit tests) a fighter has no body.
+                let dims = match &self.models {
+                    Some(models) if role != Role::Arrow => {
+                        let schema = models.schemas.get(name).ok_or_else(|| format!("no entity facts for {name}"))?;
+                        [f64::from(schema.width), f64::from(schema.height)]
+                    }
+                    _ => [0.; 2],
+                };
                 self.entities.insert(entity, Tracked { role, position, spawn: position, sampled: position, side,
                     weapon: None, vehicle: None, dead: false, stopped: false, velocity, base_tick: tick, spawn_tick: tick,
-                    first_contact: None, death_tick: None, combat: Combat::default() });
+                    first_contact: None, death_tick: None, combat: Combat { dims, ..Combat::default() } });
             }
             cb::MOVE_ENTITY_POS | cb::MOVE_ENTITY_POS_ROT => {
                 let target = r.var()?;
@@ -507,7 +552,7 @@ impl Scan {
             cb::SET_EQUIPMENT => {
                 let target = r.var()?;
                 let mut seen = 0u16;
-                let (mut side, mut weapon, mut reach) = (None, None, None);
+                let (mut side, mut weapon, mut range) = (None, None, None);
                 let mut offhand: Option<Option<String>> = None;
                 loop {
                     let b = r.u8()?;
@@ -519,9 +564,10 @@ impl Scan {
                         side = side.or_else(|| side_of_components(&stack.components));
                         if slot == 0 {
                             weapon = content.item_names.get(&stack.id).cloned();
-                            reach = Some(attack_reach(&stack.components));
+                            range = Some(attack_range(&stack.components));
                         }
                     }
+                    if slot == 0 && stack.empty() { range = Some(DEFAULT_RANGE); }
                     if slot == 1 { offhand = Some(if stack.empty() { None } else { content.item_names.get(&stack.id).cloned() }); }
                     if b & 128 == 0 { break; }
                 }
@@ -530,7 +576,7 @@ impl Scan {
                     if side.is_some() && e.side.is_none() { self.component_sides += 1; }
                     e.side = side.or(e.side);
                     e.weapon = weapon.or(e.weapon.take());
-                    if let Some(reach) = reach { e.combat.reach = reach; }
+                    if let Some(range) = range { e.combat.range = range; }
                     if let Some(offhand) = offhand { e.combat.offhand = offhand; }
                     e.note_shield(tick);
                 }
@@ -696,15 +742,25 @@ impl Scan {
         }
         fighters.sort_by_key(|f| f.id);
         let clusters = contact_clusters(&fighters, CONTACT_REACH, CONTACT_LINK);
-        // Contact by weapon: an enemy-side fighter within the fighter's own reach.
-        let reaches: Vec<f64> = fighters.iter().map(|f| self.entities[&f.id].combat.reach).collect();
-        let max_reach = reaches.iter().copied().fold(DEFAULT_REACH, f64::max);
-        let cells = grid(fighters.iter().map(|f| f.position), max_reach);
+        // Contact by weapon: an enemy-side fighter within the fighter's own melee range (`in_melee_range`).
+        // (own box, striking box, range, holds a bow or crossbow: ranged fighters do not melee)
+        let bodies: Vec<(Aabb, Aabb, [f64; 2], bool)> = fighters.iter().map(|f| {
+            let e = &self.entities[&f.id];
+            let own = body_box(f.position, e.combat.dims);
+            let strike = match e.vehicle.and_then(|v| self.entities.get(&v)) {
+                Some(mount) => join_horizontal(own, body_box(mount.position, mount.combat.dims)),
+                None => own,
+            };
+            (own, strike, e.combat.range, matches!(e.weapon.as_deref(), Some("minecraft:bow" | "minecraft:crossbow")))
+        }).collect();
+        // Centre distance bound of a touching pair: reach plus both half widths (a horse is at most 0.75 wide each side).
+        let cell = bodies.iter().map(|b| b.2[1]).fold(DEFAULT_MELEE_REACH, f64::max) + 1.5;
+        let cells = grid(fighters.iter().map(|f| f.position), cell);
         let (mut contact_by_weapon, mut fighting, mut shields_raised) = (0usize, 0usize, 0usize);
         let recent = |t: Option<u64>| t.is_some_and(|t| t + ATTACK_WINDOW > tick);
         for (i, f) in fighters.iter().enumerate() {
-            let in_reach = near(&cells, f.position, max_reach)
-                .any(|j| fighters[j].side != f.side && close(f.position, fighters[j].position, reaches[i]));
+            let in_reach = !bodies[i].3 && near(&cells, f.position, cell)
+                .any(|j| fighters[j].side != f.side && in_melee_range(bodies[i].2, &bodies[i].1, &bodies[j].0));
             let e = self.entities.get_mut(&f.id).unwrap();
             e.note_shield(tick);
             shields_raised += usize::from(e.shield_up());
@@ -816,7 +872,7 @@ impl Scan {
     fn entity_rows(&self) -> Vec<Value> {
         let row = |id: i32, e: &Tracked, removed: Option<u64>| json!({"kind":"entity","id":id,
             "role":if e.role == Role::Horse { "horse" } else { "fighter" },
-            "side":self.side(e).map(Side::name),"weapon":e.weapon,"reach":e.combat.reach,"vehicle":e.vehicle,
+            "side":self.side(e).map(Side::name),"weapon":e.weapon,"reach":e.combat.range,"vehicle":e.vehicle,
             "spawn_t":self.t(e.spawn_tick),"first_contact_t":e.first_contact.map(|t| self.t(t)),
             "death_t":e.death_tick.map(|t| self.t(t)),"removed_t":removed.map(|t| self.t(t))});
         let mut rows: Vec<(i32, Value)> = self.finished.iter().map(|(id, e, removed)| (*id, row(*id, e, Some(*removed)))).collect();
@@ -860,7 +916,7 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<()> {
     let mut write = |value: &Value| writeln!(out, "{value}").map_err(|e| format!("write timeline: {e}"));
     write(&json!({"kind":"header","recording":recording,"server_build":input.header.server_build,
         "interval_ticks":every,"contact_reach":CONTACT_REACH,"contact_link":CONTACT_LINK,"min_y":min_y,"height":height,
-        "attack_window_ticks":ATTACK_WINDOW,"default_reach":DEFAULT_REACH,"contact_reach_note":"legacy: only `contacts` and contact_fighters_legacy use it",
+        "attack_window_ticks":ATTACK_WINDOW,"default_melee_reach":DEFAULT_MELEE_REACH,"contact_reach_note":"legacy: only `contacts` and contact_fighters_legacy use it",
         "swing_definitions":SWING_DEFINITIONS,"combat_definitions":COMBAT_DEFINITIONS}))?;
     let (mut scan, mut phase, mut packets) = (Scan::new(min_y, height), Phase::Login, 0u64);
     scan.activate(crate::entities::Models::load_state(&content)?)?;

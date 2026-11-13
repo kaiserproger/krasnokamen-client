@@ -163,7 +163,8 @@ fn arrow_velocity_is_rederived_from_sparse_server_positions() {
 
 fn fighter(position: [f64; 3], side: Side, weapon: &str) -> Tracked {
     Tracked { role: Role::Fighter, position, spawn: position, sampled: position, side: Some(side), weapon: Some(weapon.into()),
-        vehicle: None, dead: false, stopped: false, velocity: [0.; 3], base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None, combat: Combat::default() }
+        vehicle: None, dead: false, stopped: false, velocity: [0.; 3], base_tick: 100, spawn_tick: 100, first_contact: None, death_tick: None,
+        combat: Combat { dims: [0.6, 1.95], ..Combat::default() } }
 }
 
 #[test]
@@ -208,9 +209,39 @@ fn bare_models() -> crate::entities::Models {
 }
 
 #[test]
-fn reach_is_the_main_hand_attack_range_with_the_codec_default_otherwise() {
-    assert_eq!(attack_reach(&components(&[("minecraft:attack_range", json!({"max_reach":4.5,"mob_factor":0.5}))])), 4.5);
-    assert_eq!(attack_reach(&components(&[("minecraft:weapon", json!({}))])), DEFAULT_REACH);
+fn strike_range_follows_the_vanilla_mob_attack_range_rule() {
+    // iron spear data: min 2, max 4.5, mob_factor 0.5 -> [1.0, 2.25]; no hitbox margin for a mob.
+    let spear = json!({"min_reach":2.0,"max_reach":4.5,"min_creative_reach":2.0,"max_creative_reach":6.5,"hitbox_margin":0.125,"mob_factor":0.5});
+    assert_eq!(attack_range(&components(&[("minecraft:attack_range", spear)])), [1., 2.25]);
+    // Codec defaults for omitted fields; no component: Mob.DEFAULT_ATTACK_REACH.
+    assert_eq!(attack_range(&components(&[("minecraft:attack_range", json!({}))])), [0., 3.]);
+    assert_eq!(attack_range(&components(&[("minecraft:weapon", json!({}))])), DEFAULT_RANGE);
+    assert!((DEFAULT_MELEE_REACH - (2.04f32 as f64).sqrt() + f64::from(0.6f32)).abs() < 1e-12, "{DEFAULT_MELEE_REACH}");
+}
+
+#[test]
+fn melee_range_is_a_box_test_with_height_overlap_a_minimum_and_the_mount() {
+    let body = |x: f64, y: f64| body_box([x, y, 0.], [0.6, 1.95]);
+    let sword = DEFAULT_RANGE;
+    let me = body(0., 0.);
+    // Gap between the boxes along x: centre distance minus the 0.6 width.
+    assert!(in_melee_range(sword, &me, &body(1.4, 0.)), "gap 0.8 <= 0.828");
+    assert!(!in_melee_range(sword, &me, &body(1.5, 0.)), "gap 0.9");
+    // Height: the boxes must overlap vertically (no 3D growth), whatever the centre distance says.
+    assert!(in_melee_range(sword, &me, &body(1.4, 1.9)), "overlap 0.05");
+    assert!(!in_melee_range(sword, &me, &body(1.4, 2.0)), "target starts above the head");
+    assert!(!in_melee_range(sword, &me, &body(1.4, -1.95)), "target ends at the feet");
+    // Spear [1.0, 2.25]: strikes at a gap of 2.0, not inside its minimum of 1.0.
+    let spear = [1., 2.25];
+    assert!(in_melee_range(spear, &me, &body(2.6, 0.)), "gap 2.0");
+    assert!(!in_melee_range(spear, &me, &body(3.0, 0.)), "gap 2.4");
+    assert!(!in_melee_range(spear, &me, &body(1.1, 0.)), "gap 0.5 is inside the minimum");
+    // A rider's box is joined sideways with his horse's (1.4 x 1.6): the strike reaches 0.4 farther.
+    let horse = body_box([0., 0., 0.], [1.4, 1.6]);
+    assert!(!in_melee_range(sword, &me, &body(1.8, 0.)), "gap 1.2 on foot");
+    assert!(in_melee_range(sword, &join_horizontal(me, horse), &body(1.8, 0.)), "gap 0.8 from the mount's flank");
+    // The target is never grown by the mount: a mounted target's own box is used.
+    assert!(!in_melee_range(sword, &body(1.8, 0.), &me));
 }
 
 #[test]
@@ -221,16 +252,20 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     let mut scan = Scan::new(-64, 384);
     scan.models = Some(bare_models());
     scan.living_flags = Some(8);
-    let mut shielded = fighter([2.8, 64., 0.], Side::Blue, "minecraft:iron_sword");
+    let mut shielded = fighter([1.4, 64., 0.], Side::Blue, "minecraft:iron_sword");
     shielded.combat.offhand = Some("minecraft:shield".into());
     let mut spear = fighter([100., 64., 0.], Side::Red, "minecraft:iron_spear");
-    spear.combat.reach = 4.5;
+    spear.combat.range = [1., 2.25];
+    let mut close_spear = fighter([300., 64., 0.], Side::Red, "minecraft:iron_spear");
+    close_spear.combat.range = [1., 2.25];
     for (id, e) in [
-        (1, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword")), // enemy 2.8 away: in its 3.0 reach, outside the legacy 2.5
+        (1, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword")), // enemy 1.4 away (box gap 0.8): in reach both ways
         (2, shielded),
-        (3, spear), // blue 4 away: in the spear's reach only
-        (4, fighter([104., 64., 0.], Side::Blue, "minecraft:iron_sword")),
+        (3, spear), // blue sword 2.8 away (gap 2.2): the spear reaches it (2.25), the sword does not reach the spear
+        (4, fighter([102.8, 64., 0.], Side::Blue, "minecraft:iron_sword")),
         (5, fighter([200., 64., 0.], Side::Red, "minecraft:iron_sword")), // nobody near
+        (6, close_spear), // blue gap 0.3: inside the spear's minimum, the sword still reaches
+        (7, fighter([300.9, 64., 0.], Side::Blue, "minecraft:iron_sword")),
     ] { scan.entities.insert(id, e); }
     let mut apply = |scan: &mut Scan, id: i32, body: &[u8]| scan.apply(id, body, &content).unwrap();
     let row = |scan: &mut Scan, tick: u64| { let v = scan.sample(tick, 0.); (
@@ -253,11 +288,11 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     let mut stranger = Writer::default();
     stranger.var(6); stranger.var(7); stranger.var(99); stranger.f32(1.); stranger.f32(1.); stranger.i64(0);
     apply(&mut scan, cb::SOUND_ENTITY, &stranger.0); // untracked entity
-    assert_eq!(row(&mut scan, 100), ([2, 1, 2], [3, 0]), "1 (swing) and 2 (shield) fight; 3 reaches 4 but not back; 5 touches nobody");
+    assert_eq!(row(&mut scan, 100), ([2, 1, 2], [4, 4]), "1 (swing) and 2 (shield) fight; 1, 2, 3 (spear reaches 4) and 7 (sword reaches the spear) are in reach; 4 and 6 are not; 5 touches nobody");
     // The shield goes down at tick 125: it still counts until tick 164, the swing of tick 100 until 139.
     scan.tick = Some(125);
     apply(&mut scan, cb::SET_ENTITY_DATA, &[2, 8, 0, 0, 255]);
-    assert_eq!(row(&mut scan, 130), ([2, 0, 0], [3, 0]));
-    assert_eq!(row(&mut scan, 140), ([1, 0, 0], [3, 0]), "only the lowered shield is left");
-    assert_eq!(row(&mut scan, 165), ([0, 0, 0], [3, 0]));
+    assert_eq!(row(&mut scan, 130), ([2, 0, 0], [4, 4]));
+    assert_eq!(row(&mut scan, 140), ([1, 0, 0], [4, 4]), "only the lowered shield is left");
+    assert_eq!(row(&mut scan, 165), ([0, 0, 0], [4, 4]));
 }
