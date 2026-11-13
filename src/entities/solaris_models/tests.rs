@@ -751,7 +751,7 @@ fn resolve_contract(
             row["accepted"] = false.into();
             return row;
         };
-        let id = model_id(key);
+        let id = model_id(key).into_owned();
         let rig = catalog.rigs.get(&id);
         let classification = if rig.is_some() {
             "simplified"

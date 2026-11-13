@@ -65,6 +65,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         submitted_revision: None,
         clip: Default::default(),
         crowd: None,
+        clock: None,
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},
@@ -1669,7 +1670,7 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
     let at = |_: [f64;3]| Ok((sample.get(), 0.));
     let mut equipment = equipment::Cache::default();
     let mut render = |e: &Entity, base: &ItemContext| {
-        let state = cache.item_context(e, [e.equipment_value(0), None, None], &content,
+        let state = cache.item_context(e, [e.equipment_value(0), None, None], &mut None, &content,
             e.position, Some((base, &at))).unwrap().unwrap();
         let transforms = action_pose(&models, e, &content, &rig);
         let mut out = DynamicGeometry::default();

@@ -61,6 +61,7 @@ fn fixture() -> (Store, Content) {
     let (mut models, mut entity) = animation_tests::fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();
     schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    schema.accessors.insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
     let motion = models.motion.remove("minecraft:pig").unwrap();
     entity.type_name = ZOMBIE.into();
     models.schemas.insert(ZOMBIE.into(), schema);
@@ -499,7 +500,7 @@ fn detail_levels_drop_thin_item_quads_then_trims() {
         model.quads.push(quad([[x, 0., 0.], [x, 0., 0.0625], [x, 1., 0.0625], [x, 1., 0.]]));
     }
     let main = super::super::solaris_models::authored("minecraft:zombie#main").unwrap();
-    let held = Held { slot: 0, hand: 0, bone: 3, context: "thirdperson_righthand", state: ItemContext::default(), shape: 1 };
+    let held = Held { slot: 0, hand: 0, bone: 3, context: "thirdperson_righthand", state: ItemContext::default(), shape: 1, reads: Reads::default() };
     let texture = crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 16, height: 16 };
     let parts = [
         Part::Rig { rig: main, texture, color: [1.; 3], material: EntityMaterial::EntityCutout, body: true },
@@ -565,4 +566,278 @@ fn gpu_layouts_match_the_wgsl_structs() {
     assert_eq!(std::mem::size_of::<CrowdBone>(), 64);
     assert_eq!(std::mem::size_of::<CrowdInstance>(), 144);
     assert_eq!(std::mem::size_of::<ChannelSample>(), 32);
+}
+
+/// A steady frame selects no held item again: each slot's selection is kept on the entity
+/// and follows its stack and exactly the frame-varying inputs its graph read (item use, use
+/// ticks, crossbow pull), here with no appearance change at all.
+#[test]
+fn held_item_selections_follow_stack_and_item_use() {
+    let (mut store, mut content) = fixture();
+    let cube = content.models[0].clone();
+    for (index, name) in ["test:lowered", "test:raised", "test:early", "test:late"].into_iter().enumerate() {
+        let mut model = cube.clone();
+        for quad in &mut model.quads {
+            for position in &mut quad.positions {
+                position[0] += index as f32 * 0.125;
+            }
+        }
+        store.items.insert_test_model(name, model);
+    }
+    let model = |name: &str| json!({"type": "minecraft:model", "model": name});
+    store.items.insert_test_graph("test:shield", json!({"type": "minecraft:condition",
+        "property": "minecraft:using_item", "on_false": model("test:lowered"), "on_true": model("test:raised")}));
+    store.items.insert_test_graph("test:held", json!({"type": "minecraft:range_dispatch",
+        "property": "minecraft:use_duration", "fallback": model("test:early"),
+        "entries": [{"threshold": 3.0, "model": model("test:late")}]}));
+    content.item_names.insert(7, "test:crossbow".into());
+    store.items.insert_test_graph("test:crossbow", json!({"type": "minecraft:range_dispatch",
+        "property": "minecraft:crossbow/pull", "fallback": model("test:early"),
+        "entries": [{"threshold": 0.5, "model": model("test:late")}]}));
+    let frame = |store: &mut Store| {
+        render(store, &content, true);
+        (store.crowd.instances()[0].words[0], store.items.selections())
+    };
+    let flags = |store: &mut Store, flags: i8| {
+        store.slots[0].metadata.insert(8, crate::entities::Metadata::Byte(flags));
+    };
+    let use_item = |store: &mut Store, ticks: f32, duration: f32| {
+        let models = store.models.clone().unwrap();
+        let entity = &mut store.slots[0];
+        let mut source = entity.source.take().unwrap();
+        let living = source.living.as_mut().unwrap();
+        living.set_local_item_use(Some((ticks, duration)));
+        living.prepare_item_use(&models, entity, &content, 0).unwrap();
+        entity.source = Some(source);
+    };
+    let (lowered, selections) = frame(&mut store);
+    assert_eq!(frame(&mut store), (lowered, selections), "a steady frame selects nothing");
+    // The off hand in use: the shield graph read the use state.
+    flags(&mut store, 3);
+    let (raised, _) = frame(&mut store);
+    assert_ne!(raised, lowered, "the raised shield is another composite");
+    flags(&mut store, 0);
+    assert_eq!(frame(&mut store).0, lowered);
+    // The main hand in use: its graph reads the use ticks, compared every frame.
+    flags(&mut store, 1);
+    use_item(&mut store, 1., 20.);
+    let (composite, before) = frame(&mut store);
+    assert_eq!(composite, lowered, "1.25 ticks stay below the threshold");
+    assert!(before > selections, "changed inputs select again");
+    use_item(&mut store, 5., 20.);
+    let (late, selections) = frame(&mut store);
+    assert_ne!(late, lowered, "5.25 ticks select the late model");
+    assert_eq!(frame(&mut store), (late, selections), "unchanged ticks select nothing");
+    // A new stack resolves again; its graph reads the crossbow pull.
+    store.slots[0].equipment[0] = Some(stack(7, json!({})));
+    use_item(&mut store, 0., 10.);
+    assert_eq!(frame(&mut store).0, lowered, "pull 0.025");
+    use_item(&mut store, 8., 10.);
+    assert_eq!(frame(&mut store).0, late, "pull 0.825");
+    // An equal stack in a new allocation keeps the composite and is kept again.
+    store.slots[0].equipment[1] = Some(stack(6, json!({})));
+    let (composite, selections) = frame(&mut store);
+    assert_eq!(composite, late);
+    assert_eq!(frame(&mut store), (late, selections));
+}
+
+/// G2 battle soldiers: zombies in the `assets/battle_video` armour holding its weapons and
+/// shields (carrier items with `item_model`/`equippable` patches), every stack its own
+/// component allocation as the wire decoder makes them. Melee soldiers carry a shield; a
+/// quarter of those block with it (off hand in use).
+fn battle_store(count: usize) -> (Store, Content) {
+    let (mut models, _) = animation_tests::fixture();
+    let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+    schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    schema.accessors.insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
+    let motion = models.motion.remove("minecraft:pig").unwrap();
+    models.schemas.insert(ZOMBIE.into(), schema);
+    models.motion.insert(ZOMBIE.into(), motion);
+    models.families.insert(ZOMBIE.into(), resources::Family {
+        rig: "minecraft:zombie#main".into(),
+        baby_rig: None,
+        texture: Some("minecraft:entity/zombie/zombie".into()),
+        textures: vec![],
+        renderer_class: None,
+        materials: BTreeMap::new(),
+    });
+    let parts: BTreeMap<String, String> = ["head", "chest", "legs", "feet"]
+        .into_iter()
+        .map(|part| (part.to_string(), format!("minecraft:armor_{part}#main")))
+        .collect();
+    models.armor_models.insert(ZOMBIE.into(), resources::ArmorModels { adult: parts.clone(), baby: parts });
+    let models = std::sync::Arc::new(models);
+    let mut content = Content::test_cube();
+    let region = |layer| crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer, width: 64, height: 64 };
+    content.insert_test_texture("minecraft:entity/zombie/zombie", region(0));
+    let pack = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/battle_video/assets/solaris_battle");
+    for dir in ["items", "models/item", "equipment"] {
+        for entry in std::fs::read_dir(pack.join(dir)).unwrap() {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            let name = path.file_name().unwrap().to_str().unwrap();
+            content.insert_test_resource(&format!("assets/solaris_battle/{dir}/{name}"), &bytes);
+            if dir == "models/item" {
+                let model: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                for texture in model["textures"].as_object().unwrap().values() {
+                    content.insert_test_texture(texture.as_str().unwrap(), region(1));
+                }
+            }
+        }
+    }
+    for kind in ["humanoid", "humanoid_leggings"] {
+        for entry in std::fs::read_dir(pack.join("textures/entity/equipment").join(kind)).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_stem().unwrap().to_str().unwrap();
+            content.insert_test_texture(&format!("solaris_battle:entity/equipment/{kind}/{name}"), region(2));
+        }
+    }
+    for (id, name) in [
+        (20, "minecraft:iron_sword"), (21, "minecraft:shield"), (22, "minecraft:bow"), (23, "minecraft:crossbow"),
+        (24, "minecraft:iron_helmet"), (25, "minecraft:iron_chestplate"), (26, "minecraft:iron_leggings"),
+        (27, "minecraft:iron_boots"),
+    ] {
+        content.item_names.insert(id, name.into());
+        // Vanilla carrier definitions (the clock-context check reads the head item's graph).
+        let path = name.strip_prefix("minecraft:").unwrap();
+        content.insert_test_resource(
+            &format!("assets/minecraft/items/{path}.json"),
+            format!(r#"{{"model":{{"type":"minecraft:model","model":"minecraft:item/{path}"}}}}"#).as_bytes(),
+        );
+    }
+    let mut store = Store::new();
+    store.items.set_entity_models(std::sync::Arc::clone(&models));
+    store.models = Some(std::sync::Arc::clone(&models));
+    let weapons = [
+        (20, "iron_longsword"), (20, "iron_spear"), (20, "iron_halberd"), (20, "iron_flanged_mace"),
+        (20, "iron_lance"), (22, "iron_longbow_standby"), (23, "iron_heavy_crossbow_standby"),
+    ];
+    let shields = ["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
+    let side = (count as f64).sqrt().ceil() as usize;
+    // Received stacks carry the item's default components plus their patch.
+    let patched = |id: u32, patch: serde_json::Value| {
+        let mut components = json!({
+            "minecraft:attribute_modifiers": [], "minecraft:break_sound": "minecraft:entity.item.break",
+            "minecraft:damage": 0, "minecraft:enchantable": {"value": 9}, "minecraft:enchantments": {},
+            "minecraft:item_name": {"translate": "item"}, "minecraft:lore": [], "minecraft:max_damage": 250,
+            "minecraft:max_stack_size": 1, "minecraft:rarity": "common", "minecraft:repair_cost": 0,
+            "minecraft:repairable": {"items": "#minecraft:iron_tool_materials"}, "minecraft:tooltip_display": {},
+        });
+        components.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+        stack(id, components)
+    };
+    for index in 0..count {
+        let (_, mut entity) = animation_tests::fixture();
+        let id = index as i32 + 1000;
+        entity.handle.network_id = id;
+        entity.type_name = ZOMBIE.into();
+        let position = [(index % side) as f64 * 1.2, 0., (index / side) as f64 * 1.2];
+        entity.position = position;
+        entity.transform.position = position;
+        entity.previous = entity.transform;
+        entity.source = Some(super::super::source_state::SourceState::new(&entity, &models).unwrap());
+        for step in 1..=3 {
+            walk(&models, &mut entity, f64::from(step) * 0.15);
+        }
+        let color = if index % 2 == 0 { 0xB9_25_29 } else { 0x29_4D_B7 };
+        let armour = if index % 2 == 0 { "solaris_battle:iron_plate" } else { "solaris_battle:holy" };
+        let helm = if index % 3 == 0 { "solaris_battle:crested_helm" } else { armour };
+        for (slot, id, part, asset) in [(5, 24, "head", helm), (4, 25, "chest", armour), (3, 26, "legs", armour), (2, 27, "feet", armour)] {
+            entity.equipment[slot] = Some(patched(id, json!({
+                "minecraft:equippable": {"slot": part, "asset_id": asset},
+                "minecraft:dyed_color": color,
+            })));
+        }
+        let (weapon_id, weapon) = weapons[index % weapons.len()];
+        entity.equipment[0] = Some(patched(weapon_id, json!({"minecraft:item_model": format!("solaris_battle:{weapon}")})));
+        let melee = weapon_id == 20;
+        if melee {
+            entity.equipment[1] = Some(patched(21, json!({
+                "minecraft:item_model": format!("solaris_battle:{}", shields[index % shields.len()]),
+                "minecraft:blocks_attacks": {},
+            })));
+        }
+        entity.metadata.insert(0, crate::entities::Metadata::Byte(0));
+        entity.metadata.insert(8, crate::entities::Metadata::Byte(if melee && index % 4 == 1 { 3 } else { 0 }));
+        store.ids.insert(id, store.slots.len());
+        store.spatial.entry(super::super::cell(position)).or_default().insert(id);
+        store.slots.push(entity);
+    }
+    (store, content)
+}
+
+/// Host CPU time of the entity frame (`Store::append_geometry`, crowd path) for 20 000
+/// battle-kit soldiers (`SOLARIS_BENCH_SOLDIERS` overrides the count): steady frames, then
+/// frames where 1 % of the soldiers raise or lower their shield as SET_ENTITY_DATA does.
+/// `cargo test --release --lib battle_crowd_frame_time -- --ignored --nocapture`
+#[test]
+#[ignore = "host timing bench"]
+fn battle_crowd_frame_time() {
+    let count = std::env::var("SOLARIS_BENCH_SOLDIERS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000);
+    let built = std::time::Instant::now();
+    let (mut store, content) = battle_store(count);
+    eprintln!("bench: {count} soldiers built in {:?}", built.elapsed());
+    store.set_crowd_instancing(true);
+    let maps = crate::ui::MapRenderFixture::empty();
+    let base = ItemContext::default();
+    let time_at = |_: [f64; 3]| -> crate::protocol::Result<(f32, f32)> { Ok((0., 0.)) };
+    let extent = ((count as f64).sqrt().ceil() * 1.2) as f32;
+    let center = f64::from(extent) / 2.;
+    let mut scene = CrowdScene::default();
+    let mut frame = |store: &mut Store, index: u64| {
+        let mut out = DynamicGeometry::default();
+        let start = std::time::Instant::now();
+        let stats = store
+            .append_geometry(EntityRenderFrame {
+                maps: maps.view(),
+                tint_source: &|_, _| Ok([1.; 3]),
+                content: &content,
+                origin: [0.; 3],
+                camera: [center, 2., center],
+                camera_rotation: [0.; 2],
+                radius: extent,
+                tick: TICK + index / 3,
+                partial: (index % 3) as f32 / 3.,
+                game_time: 0,
+                clock_environment: Some((&base, &time_at)),
+                light: &|_| Ok(Some([12., 3.])),
+                bed_direction: &|_| None,
+            }, &mut out)
+            .unwrap();
+        let elapsed = start.elapsed();
+        store.take_crowd(&mut scene);
+        (elapsed, stats, scene.meshes.groups.len())
+    };
+    let (first, stats, _) = frame(&mut store, 0);
+    assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+    assert_eq!(stats.crowd, count, "fallbacks {:?}", stats.crowd_fallback);
+    let report = |label: &str, mut times: Vec<std::time::Duration>| {
+        times.sort();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
+        let mean = times.iter().map(|d| ms(*d)).sum::<f64>() / times.len() as f64;
+        eprintln!(
+            "bench: {label}: {} frames, mean {mean:.2} ms, median {:.2} ms, min {:.2} ms, max {:.2} ms",
+            times.len(), ms(times[times.len() / 2]), ms(times[0]), ms(times[times.len() - 1]),
+        );
+    };
+    eprintln!("bench: first frame {:.2} ms", first.as_secs_f64() * 1e3);
+    report("steady", (1..=30).map(|index| frame(&mut store, index).0).collect());
+    let mut churn = Vec::new();
+    let mut composites = 0;
+    for index in 31..=60_u64 {
+        for k in 0..count / 100 {
+            let slot = (index as usize * 7919 + k * 101) % count;
+            let entity = &mut store.slots[slot];
+            let flags = entity.metadata.get(&8).and_then(crate::entities::Metadata::int).unwrap_or(0);
+            entity.metadata.insert(8, crate::entities::Metadata::Byte(if flags == 0 { 3 } else { 0 }));
+            entity.appearance_revision = entity.appearance_revision.wrapping_add(1);
+            entity.binding = None;
+        }
+        let (elapsed, stats, groups) = frame(&mut store, index);
+        assert_eq!(stats.crowd, count, "fallbacks {:?}", stats.crowd_fallback);
+        churn.push(elapsed);
+        composites = groups;
+    }
+    report("shield churn 1%/frame", churn);
+    eprintln!("bench: {composites} composites");
 }

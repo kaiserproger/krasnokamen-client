@@ -660,17 +660,21 @@ pub fn append(
             }
             continue;
         }
+        let mut clock = store.slots[slot].clock.take();
+        let entity = &store.slots[slot];
         let item = value(&models, entity, "DATA_ITEM")
             .or_else(|| value(&models, entity, "DATA_ITEM_STACK_ID"));
         let stack = match item { Some(Metadata::Item(stack)) => Some(stack), _ => None };
         let stacks = [stack.or_else(|| entity.equipment_value(0)),
             entity.equipment_value(1), entity.equipment_value(5)];
-        let clock_context = match store.special_render_cache.item_context(
-            entity, stacks, content, transform.position, clock_environment,
-        ) {
+        let clock_context = store.special_render_cache.item_context(
+            entity, stacks, &mut clock, content, transform.position, clock_environment,
+        );
+        store.slots[slot].clock = clock;
+        let clock_context = match clock_context {
             Ok(context) => context,
             Err(reason) => {
-                stats.unrendered.insert(entity.type_name.clone(), format!("item context: {reason}"));
+                stats.unrendered.insert(store.slots[slot].type_name.clone(), format!("item context: {reason}"));
                 continue;
             }
         };
@@ -1235,14 +1239,25 @@ pub(super) fn held_item_context(
         "head"
     };
     let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
-    let living = e.source.as_ref().and_then(|s| s.living.as_ref());
+    let (using_item, use_ticks, crossbow_pull) = held_item_use(e, flags, slot, partial);
     (context, crate::ui::items::ItemContext {
         display: context.into(),
-        using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
-        use_ticks: living.map_or(0., |s| s.item_use_ticks(partial)),
-        crossbow_pull: living.map_or(0., |s| s.crossbow_pull(partial)),
+        using_item,
+        use_ticks,
+        crossbow_pull,
         ..item_context.cloned().unwrap_or_default()
     })
+}
+
+/// The frame-varying item state `held_item_context` gives the item in `slot`: whether it is
+/// in use (living `flags`), its use ticks and crossbow pull.
+pub(super) fn held_item_use(e: &Entity, flags: i32, slot: usize, partial: f32) -> (bool, f32, f32) {
+    let living = e.source.as_ref().and_then(|s| s.living.as_ref());
+    (
+        flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
+        living.map_or(0., |s| s.item_use_ticks(partial)),
+        living.map_or(0., |s| s.crossbow_pull(partial)),
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

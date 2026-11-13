@@ -57,22 +57,47 @@ pub(crate) struct Cache {
     clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
     dynamic_models: BTreeMap<String, Result<bool>>,
     tnt_state: Option<u32>,
+    generation: Generation,
 }
+
+/// Process-unique identity of one `Cache`: a replaced cache never matches an old memo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Generation(u64);
+impl Default for Generation {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Whether an entity's item stacks have a clock/compass graph, kept on the entity for the
+/// stacks it was resolved from (their retained component handles and items), so a frame
+/// repeats no item definition lookup by name.
+#[derive(Debug)]
+pub(crate) struct ClockMemo {
+    generation: Generation,
+    stacks: [Option<(std::sync::Arc<BTreeMap<String, Value>>, u32)>; 3],
+    needs_world: bool,
+}
+
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
         self.text.remove(&handle);
         self.clock_needles.remove(&handle);
     }
+    /// The clock context of `entity`'s `stacks`; `memo` is the entity's [`ClockMemo`].
     pub(super) fn item_context(
         &mut self,
         entity: &Entity,
         stacks: [Option<&Stack>; 3],
+        memo: &mut Option<ClockMemo>,
         content: &Content,
         position: [f64; 3],
         environment: Option<super::ClockEnvironment<'_>>,
     ) -> Result<Option<ItemContext>> {
         let Some((base, time_at)) = environment else { return Ok(None) };
-        if !stacks.iter().flatten().any(|stack| !stack.empty()) {
+        let stacks = stacks.map(|stack| stack.filter(|stack| !stack.empty()));
+        if stacks.iter().all(Option::is_none) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
         }
@@ -87,22 +112,37 @@ impl Cache {
                 _ => false,
             }
         }
-        let mut needs_world = false;
-        for stack in stacks.into_iter().flatten().filter(|s| !s.empty()) {
-            let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
-            if !self.dynamic_models.contains_key(id) {
-                if self.dynamic_models.len() >= 4096 {
-                    return Err("dynamic item model cache bound".into());
+        let current = memo.as_ref().is_some_and(|memo| {
+            memo.generation == self.generation
+                && memo.stacks.iter().zip(stacks).all(|(held, stack)| match (held, stack) {
+                    (None, None) => true,
+                    (Some((components, id)), Some(stack)) => *id == stack.id && std::sync::Arc::ptr_eq(components, &stack.components),
+                    _ => false,
+                })
+        });
+        if !current {
+            let mut needs_world = false;
+            for stack in stacks.into_iter().flatten() {
+                let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
+                if !self.dynamic_models.contains_key(id) {
+                    if self.dynamic_models.len() >= 4096 {
+                        return Err("dynamic item model cache bound".into());
+                    }
+                    let (ns, path) = crate::ui::items::item_model_location(id);
+                    let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+                        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+                        .map(|graph| dynamic(&graph));
+                    self.dynamic_models.insert(id.into(), result);
                 }
-                let (ns, path) = crate::ui::items::item_model_location(id);
-                let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
-                    .map(|graph| dynamic(&graph));
-                self.dynamic_models.insert(id.into(), result);
+                needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
             }
-            needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
+            *memo = Some(ClockMemo {
+                generation: self.generation,
+                stacks: stacks.map(|stack| stack.map(|stack| (std::sync::Arc::clone(&stack.components), stack.id))),
+                needs_world,
+            });
         }
-        if !needs_world {
+        if !memo.as_ref().is_some_and(|memo| memo.needs_world) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
         }

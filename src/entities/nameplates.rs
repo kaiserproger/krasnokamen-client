@@ -387,6 +387,7 @@ mod tests {
             submitted_revision: None,
             clip: Default::default(),
             crowd: None,
+            clock: None,
         };
         (Store::default(), models, entity)
     }

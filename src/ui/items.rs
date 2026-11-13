@@ -117,6 +117,26 @@ pub(crate) fn item_model_location(id: &str) -> (&str, &str) {
     id.split_once(':').unwrap_or(("minecraft", id))
 }
 
+/// The presentation-context inputs one selection read on its graph path. A selection is a
+/// function of the definition, the stack, the display context and exactly these inputs, so a
+/// caller that keys them (and the stack and `ItemModels::generation`) may reuse its result.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Reads(u8);
+impl Reads {
+    pub(crate) const USING_ITEM: Self = Self(1);
+    pub(crate) const USE_TICKS: Self = Self(2);
+    pub(crate) const CROSSBOW_PULL: Self = Self(4);
+    /// Inputs a caller cannot key cheaply (world needles, time, dimension, date, bundle
+    /// selection, fishing cast): select again every frame.
+    pub(crate) const VOLATILE: Self = Self(8);
+    pub(crate) fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+    fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
 #[derive(Default)]
 pub struct ItemModels {
     definitions: BTreeMap<String, Arc<Value>>,
@@ -129,16 +149,36 @@ pub struct ItemModels {
     /// Shape of each distinct selected geometry, keyed by everything entity emission reads.
     shapes: BTreeMap<Vec<u32>, u64>,
     entities: Option<Arc<entities::Models>>,
+    /// Changes whenever retained resources are released (`generation`).
+    generation: u64,
+    /// Graph evaluations so far (tests prove memoized callers skip them).
+    #[cfg(test)]
+    selections: usize,
 }
 /// Shape identities are process-unique, so a cleared cache can never alias an old one.
 static NEXT_SHAPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// Generations are process-unique too: a new `ItemModels` never repeats an old one.
+static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 impl ItemModels {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Identity of the resources selections are made from: results a caller retained (shapes,
+    /// models it compared) stay valid while this is unchanged.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+    #[cfg(test)]
+    pub(crate) fn selections(&self) -> usize {
+        self.selections
+    }
+    fn release(&mut self) {
+        self.generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     pub fn set_entity_models(&mut self, models: Arc<entities::Models>) {
         self.entities = Some(models);
         self.selected.clear();
+        self.release();
     }
     /// Registers `model` under `id` with a one-node item graph (test fixtures only).
     #[cfg(test)]
@@ -159,6 +199,7 @@ impl ItemModels {
         self.selected.clear();
         // Texture layers and UVs in the keys refer to the released atlas.
         self.shapes.clear();
+        self.release();
     }
     /// GUI/icon variant of `model_with`: an item whose model cannot be baked is logged once per
     /// item/error and drawn as an empty icon. A single bad item must never end the session.
@@ -204,18 +245,18 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, [f32; 6])> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.2))
+        self.select(c, s, ctx).map(|(selected, _)| (&selected.1, selected.2))
     }
-    /// `model_with` plus the selection's shape: equal shapes mean identical entity geometry
-    /// (display transform of `ctx`, quad positions, UVs, colours, layers, materials, alpha
-    /// and emission), whichever stack or graph produced it.
+    /// `model_with` plus the selection's shape and the context inputs it read: equal shapes
+    /// mean identical entity geometry (display transform of `ctx`, quad positions, UVs,
+    /// colours, layers, materials, alpha and emission), whichever stack or graph produced it.
     pub(crate) fn model_shape<'a>(
         &'a mut self,
         c: &Content,
         s: &Stack,
         ctx: &ItemContext,
-    ) -> Result<(&'a BakedModel, u64)> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
+    ) -> Result<(&'a BakedModel, u64, Reads)> {
+        self.select(c, s, ctx).map(|(selected, reads)| (&selected.1, selected.3, reads))
     }
     /// The received stack's client item definition (`assets/<ns>/items/<path>.json`).
     fn definition(&mut self, c: &Content, s: &Stack) -> Result<Arc<Value>> {
@@ -247,16 +288,25 @@ impl ItemModels {
         c: &Content,
         s: &Stack,
         ctx: &ItemContext,
-    ) -> Result<&'a (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64)> {
+    ) -> Result<(&'a (Arc<BTreeMap<String, Value>>, BakedModel, [f32; 6], u64), Reads)> {
         if s.empty() {
             return Err("empty stack has no item model".into());
+        }
+        #[cfg(test)]
+        {
+            self.selections += 1;
         }
         let definition = self.definition(c, s)?;
         let graph = &definition["model"];
         let mut nodes = Vec::new();
-        evaluate(graph, s, ctx, 0, Mat4::IDENTITY, &mut nodes)?;
-        // Retain the immutable component handle alongside its identity, so address reuse cannot
-        // alias a different stack. The selected resource-node identities capture dynamic branches.
+        let mut reads = Reads::default();
+        evaluate(graph, s, ctx, 0, Mat4::IDENTITY, &mut nodes, &mut reads)?;
+        // The selected resource-node identities capture dynamic branches; a node also fixes its
+        // graph transformation (one path from the root). The geometry reads the stack itself
+        // only through special models, nested bundle items and stack tints: only then is the
+        // stack part of the key, its immutable component handle retained alongside, so address
+        // reuse cannot alias a different stack. Equal stacks in separate allocations (every
+        // received equipment stack) otherwise share one selection.
         let mut identities = Vec::with_capacity(nodes.len() + 1);
         identities.push(ctx.seed as u32 as usize);
         identities.extend(nodes.iter().map(|(node, _)| *node as *const Value as usize));
@@ -282,9 +332,10 @@ impl ItemModels {
             identities.push(usize::MAX);
             identities.extend(ctx.local_date.bytes().map(usize::from));
         }
+        let reads_stack = nodes.iter().any(|(node, _)| node_reads_stack(node));
         let key = (
             s.id,
-            Arc::as_ptr(&s.components) as usize,
+            if reads_stack { Arc::as_ptr(&s.components) as usize } else { 0 },
             ctx.display.clone(),
             identities,
         );
@@ -369,13 +420,24 @@ impl ItemModels {
             let shape = *self.shapes.entry(shape_key(&result, display)).or_insert_with(|| {
                 NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             });
-            return Ok(self
-                .selected
-                .entry(key)
-                .or_insert((Arc::clone(&s.components), result, bounds, shape)));
+            return Ok((
+                self.selected
+                    .entry(key)
+                    .or_insert((Arc::clone(&s.components), result, bounds, shape)),
+                reads,
+            ));
         }
-        Ok(&self.selected[&key])
+        Ok((&self.selected[&key], reads))
     }
+}
+/// Whether an evaluated node's geometry reads the stack: special models (banner patterns,
+/// profiles), nested bundle items and stack-sourced tints do; plain models with constant or
+/// grass tints are fixed by the node.
+fn node_reads_stack(node: &Value) -> bool {
+    short(node["type"].as_str().unwrap_or("")) != "model"
+        || node["tints"].as_array().is_some_and(|tints| {
+            tints.iter().any(|tint| !matches!(short(tint["type"].as_str().unwrap_or("")), "constant" | "grass"))
+        })
 }
 /// Everything entity emission (`presentation::append_baked`) reads from a selection in one
 /// display context, as bits: equal keys draw identical triangles.
@@ -464,6 +526,7 @@ fn evaluate<'a>(
     depth: u8,
     parent_transform: Mat4,
     out: &mut Vec<(&'a Value, Mat4)>,
+    reads: &mut Reads,
 ) -> Result<()> {
     if depth > 64 || out.len() > 256 {
         return Err("item graph resource bound".into());
@@ -473,7 +536,11 @@ fn evaluate<'a>(
     } else {
         parent_transform * graph_transform(&v["transformation"])?
     };
-    match short(v["type"].as_str().ok_or("item graph type missing")?) {
+    let kind = short(v["type"].as_str().ok_or("item graph type missing")?);
+    if matches!(kind, "condition" | "select" | "range_dispatch" | "bundle/selected_item") {
+        reads.insert(context_reads(kind, v));
+    }
+    match kind {
         "model" | "special" => out.push((v, transformation)),
         "empty" => {}
         "composite" => {
@@ -481,7 +548,7 @@ fn evaluate<'a>(
                 .as_array()
                 .ok_or("composite item models missing")?
             {
-                evaluate(node, s, c, depth + 1, transformation, out)?;
+                evaluate(node, s, c, depth + 1, transformation, out, reads)?;
             }
         }
         "condition" => {
@@ -493,6 +560,7 @@ fn evaluate<'a>(
                 depth + 1,
                 transformation,
                 out,
+                reads,
             )?;
         }
         "select" => {
@@ -510,7 +578,7 @@ fn evaluate<'a>(
                 }
             }
             if !chosen.is_null() {
-                evaluate(chosen, s, c, depth + 1, transformation, out)?;
+                evaluate(chosen, s, c, depth + 1, transformation, out, reads)?;
             }
         }
         "range_dispatch" => {
@@ -530,7 +598,7 @@ fn evaluate<'a>(
                 }
             }
             if !chosen.is_null() {
-                evaluate(chosen, s, c, depth + 1, transformation, out)?;
+                evaluate(chosen, s, c, depth + 1, transformation, out, reads)?;
             }
         }
         "bundle/selected_item" => {
@@ -541,6 +609,19 @@ fn evaluate<'a>(
         other => return Err(format!("unsupported item graph node {other}")),
     }
     Ok(())
+}
+/// The context inputs a `condition`, `select`, `range_dispatch` or `bundle/selected_item`
+/// node reads (`condition`, `selection`, `number`); stack components and the display
+/// context are keyed by every caller.
+fn context_reads(kind: &str, v: &Value) -> Reads {
+    match (kind, v["property"].as_str().map(short)) {
+        ("condition", Some("using_item")) => Reads::USING_ITEM,
+        ("condition", Some("has_component" | "broken"))
+        | ("select", Some("display_context" | "block_state" | "trim_material" | "charge_type")) => Reads::default(),
+        ("range_dispatch", Some("use_duration" | "use_cycle")) => Reads(Reads::USING_ITEM.0 | Reads::USE_TICKS.0),
+        ("range_dispatch", Some("crossbow/pull")) => Reads(Reads::USING_ITEM.0 | Reads::CROSSBOW_PULL.0),
+        _ => Reads::VOLATILE,
+    }
 }
 fn component<'a>(s: &'a Stack, k: &str) -> Option<&'a Value> {
     s.component(k)
@@ -828,7 +909,7 @@ mod tests {
         for display in ["gui", "firstperson_righthand"] {
             ctx.display = display.into();
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes).unwrap();
+            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
             assert_eq!(nodes[0].0["model"], "test:early");
         }
         let world = ctx.world.as_mut().unwrap();
@@ -837,7 +918,7 @@ mod tests {
         for display in ["gui", "firstperson_righthand"] {
             ctx.display = display.into();
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes).unwrap();
+            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
             assert_eq!(nodes[0].0["model"], "test:late");
         }
     }
@@ -929,7 +1010,7 @@ mod tests {
             assert_eq!(charge, ticks);
             let ctx = ItemContext { using_item, crossbow_pull: elapsed / charge, ..ItemContext::default() };
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes).unwrap();
+            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
             assert_eq!(nodes[0].0["model"], expected);
         }
     }
@@ -1400,5 +1481,54 @@ mod tests {
         // A healthy item next to it still bakes normally.
         let (content, mut models, good) = potion_tint_fixture(json!({"potion":"minecraft:water"}));
         assert_eq!(models.icon_model(&content, &good, &ctx).quads.len(), 6);
+    }
+
+    /// Received stacks are separate allocations: equal stacks share one retained selection
+    /// (a pointer key thrashed the bounded cache once a scene held thousands of them), and
+    /// every selection names the context inputs its graph path read.
+    #[test]
+    fn equal_stacks_share_a_selection_that_names_its_context_inputs() {
+        let content = Content::test_cube();
+        let mut models = ItemModels::new();
+        models.insert_test_model("test:lowered", content.models[0].clone());
+        let mut raised = content.models[0].clone();
+        for quad in &mut raised.quads {
+            for position in &mut quad.positions {
+                position[1] += 0.25;
+            }
+        }
+        models.insert_test_model("test:raised", raised);
+        models.insert_test_graph("test:shield", json!({"type":"minecraft:condition",
+            "property":"minecraft:using_item",
+            "on_false":{"type":"minecraft:model","model":"test:lowered"},
+            "on_true":{"type":"minecraft:range_dispatch","property":"minecraft:use_duration",
+                "fallback":{"type":"minecraft:model","model":"test:raised"},"entries":[]}}));
+        models.insert_test_graph("test:clock", json!({"type":"minecraft:range_dispatch",
+            "property":"minecraft:time","source":"daytime",
+            "fallback":{"type":"minecraft:model","model":"test:lowered"},"entries":[]}));
+        let stack = |model: &str| {
+            let mut stack = Stack::default();
+            stack.id = 1;
+            stack.count = 1;
+            stack.components = Arc::new(BTreeMap::from([("minecraft:item_model".to_string(), json!(model))]));
+            stack
+        };
+        let (first, second) = (stack("test:shield"), stack("test:shield"));
+        let mut ctx = ItemContext { display: "thirdperson_lefthand".into(), ..ItemContext::default() };
+        let (_, lowered, reads) = models.model_shape(&content, &first, &ctx).unwrap();
+        assert_eq!(reads, Reads::USING_ITEM);
+        let (_, shape, _) = models.model_shape(&content, &second, &ctx).unwrap();
+        assert_eq!(shape, lowered);
+        assert_eq!(models.selected.len(), 1, "equal stacks in two allocations share one selection");
+        ctx.using_item = true;
+        let (_, up, reads) = models.model_shape(&content, &second, &ctx).unwrap();
+        assert_ne!(up, lowered);
+        assert!(reads.contains(Reads::USING_ITEM) && reads.contains(Reads::USE_TICKS));
+        assert!(!reads.contains(Reads::CROSSBOW_PULL) && !reads.contains(Reads::VOLATILE));
+        let (_, _, reads) = models.model_shape(&content, &stack("test:clock"), &ctx).unwrap();
+        assert!(reads.contains(Reads::VOLATILE));
+        let generation = models.generation();
+        models.clear();
+        assert_ne!(models.generation(), generation);
     }
 }

@@ -19,7 +19,7 @@ use super::{
     equipment::{self, Worn},
     presentation::{self as p, Binding as Bound, EntityDrawFrame, RootStyle},
     resources::{BoneRole, Rig},
-    Entity, Models,
+    Entity, Metadata, Models,
 };
 use crate::{
     api::{EntityMaterial, RenderLayer},
@@ -28,11 +28,12 @@ use crate::{
         content::{Content, TextureRegion},
         models::{BakedModel, BakedQuad, TintKind},
     },
-    ui::items::{ItemContext, ItemModels},
+    ui::items::{ItemContext, ItemModels, Reads},
 };
 use glam::{Mat4, Vec3};
+use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -194,17 +195,64 @@ fn texture_key(texture: TextureRegion) -> [u32; 5] {
     [texture.layer, texture.uv[0].to_bits(), texture.uv[1].to_bits(), texture.uv[2].to_bits(), texture.uv[3].to_bits()]
 }
 
-/// An entity's last composite, valid while nothing it was resolved from changed.
+/// An entity's last composite, valid while nothing it was resolved from changed: the crowd
+/// and item generations, the appearance revision (every metadata and equipment change bumps
+/// it), the rig and texture, and per held/head slot the stack and the frame-varying item
+/// state its selection read. Checking it costs no lookup by name and no allocation.
 #[derive(Debug)]
 pub(crate) struct Binding {
     generation: u64,
+    items: u64,
     appearance: u64,
     rig: usize,
     texture: [u32; 5],
     left_main: bool,
-    /// Shapes of the items in slots 0, 1 and 5 (item selection depends on the frame).
-    shapes: [Option<u64>; 3],
+    /// Metadata index of the kind's living flags (item use), resolved once.
+    flags: Option<u8>,
+    /// Slots 0, 1 and 5 ([`HELD_SLOTS`]).
+    held: [HeldMemo; 3],
     composite: u32,
+}
+
+/// Held (0, 1) and head (5) slots: their item model is selected per frame.
+const HELD_SLOTS: [usize; 3] = [0, 1, 5];
+
+/// One held/head slot as its binding resolved it.
+#[derive(Debug)]
+struct HeldMemo {
+    /// The slot's stack: its component handle (retained, so the address cannot be reused)
+    /// and item.
+    stack: Option<(Arc<BTreeMap<String, Value>>, u32)>,
+    /// The held item's shape, the context inputs its selection read and their values
+    /// (in use, use ticks, crossbow pull); `None` when the slot holds nothing drawn as an item.
+    item: Option<(u64, Reads, ItemUse)>,
+}
+
+/// Frame-varying item state of a held slot (`presentation::held_item_use`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ItemUse {
+    using: bool,
+    ticks: f32,
+    pull: f32,
+}
+
+impl ItemUse {
+    /// Whether every input in `reads` is equal (bitwise for the floats).
+    fn same(self, other: Self, reads: Reads) -> bool {
+        (!reads.contains(Reads::USING_ITEM) || self.using == other.using)
+            && (!reads.contains(Reads::USE_TICKS) || self.ticks.to_bits() == other.ticks.to_bits())
+            && (!reads.contains(Reads::CROSSBOW_PULL) || self.pull.to_bits() == other.pull.to_bits())
+    }
+}
+
+impl HeldMemo {
+    fn same_stack(&self, stack: Option<&Stack>) -> bool {
+        match (&self.stack, stack) {
+            (None, None) => true,
+            (Some((components, id)), Some(stack)) => *id == stack.id && Arc::ptr_eq(components, &stack.components),
+            _ => false,
+        }
+    }
 }
 
 /// Composites and this frame's instances.
@@ -306,7 +354,7 @@ pub(super) fn try_instance(
     if p::number(models, entity, "DATA_POSE").unwrap_or(0) != 0 {
         return Err("pose");
     }
-    let composite = composite(registry, items, equipment, entity, &inputs)?;
+    let composite = composite(registry, items, equipment, entity, rig, &inputs)?;
     let bone_count = registry.meshes.groups[composite as usize].bone_count;
     if registry.bones + bone_count > MAX_BONES {
         return Err("bone budget");
@@ -393,43 +441,75 @@ struct Held {
     context: &'static str,
     state: ItemContext,
     shape: u64,
+    reads: Reads,
 }
 
-/// The composite of `entity`'s appearance, resolving and building it when needed.
+impl Held {
+    fn item_use(&self) -> ItemUse {
+        ItemUse { using: self.state.using_item, ticks: self.state.use_ticks, pull: self.state.crossbow_pull }
+    }
+}
+
+/// The composite of `entity`'s appearance (`rig` is its bound rig), resolving and building
+/// it when needed.
 fn composite(
     registry: &mut Registry,
     items: &mut ItemModels,
     equipment: &mut equipment::Cache,
     entity: &mut Entity,
+    rig: &Rig,
     inputs: &Inputs<'_>,
 ) -> Result<u32, Fallback> {
     let Inputs { models, content, frame, item_context, .. } = *inputs;
     let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
-    let rig = models.rig(&bound.rig);
     let rig_key = std::ptr::from_ref(rig) as usize;
     let texture = texture_key(bound.texture);
+    let bound_texture = bound.texture;
+    // Unchanged appearance: only the held items' frame-varying selection inputs can differ.
+    if let Some(mut binding) = entity.crowd.take()
+        && binding.generation == registry.generation
+        && binding.items == items.generation()
+        && binding.appearance == entity.appearance_revision
+        && binding.rig == rig_key
+        && binding.texture == texture
+    {
+        let mut current = true;
+        let mut flags = None;
+        for (memo, slot) in binding.held.iter_mut().zip(HELD_SLOTS) {
+            let stack = entity.equipment_value(slot);
+            if !memo.same_stack(stack) {
+                current = false;
+                break;
+            }
+            let (Some((shape, reads, used)), Some(stack)) = (memo.item, stack) else { continue };
+            let flags = *flags.get_or_insert_with(|| {
+                binding.flags.and_then(|index| entity.metadata_value(index)).and_then(Metadata::int).unwrap_or(0)
+            });
+            let (using, ticks, pull) = p::held_item_use(entity, flags, slot, frame.partial);
+            if !reads.contains(Reads::VOLATILE) && used.same(ItemUse { using, ticks, pull }, reads) {
+                continue;
+            }
+            let held = held_item(entity, models, content, items, rig, slot, stack, binding.left_main, frame.partial, item_context)?;
+            if held.shape != shape {
+                current = false;
+                break;
+            }
+            memo.item = Some((held.shape, held.reads, held.item_use()));
+        }
+        if current {
+            let composite = binding.composite;
+            entity.crowd = Some(binding);
+            return Ok(composite);
+        }
+    }
     let left_main = p::left_main_arm(models, entity);
-    // Items select their model per frame (use state, crossbow pull): re-check their shapes.
     let mut held = Vec::new();
-    for slot in [0, 1, 5] {
+    for slot in HELD_SLOTS {
         let Some(stack) = entity.equipment_value(slot) else { continue };
         if !matches!(equipment.resolve(entity, slot, stack, models, content), Ok(Worn::NotWorn)) {
             continue;
         }
         held.push(held_item(entity, models, content, items, rig, slot, stack, left_main, frame.partial, item_context)?);
-    }
-    let shapes: [Option<u64>; 3] = std::array::from_fn(|index| {
-        held.iter().find(|h| h.slot == [0, 1, 5][index]).map(|h| h.shape)
-    });
-    if let Some(binding) = &entity.crowd
-        && binding.generation == registry.generation
-        && binding.appearance == entity.appearance_revision
-        && binding.rig == rig_key
-        && binding.texture == texture
-        && binding.left_main == left_main
-        && binding.shapes == shapes
-    {
-        return Ok(binding.composite);
     }
     let mut worn = Vec::new();
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
@@ -466,7 +546,7 @@ fn composite(
     let composite = match registry.keys.get(&key) {
         Some(&composite) => composite,
         None => {
-            let mut parts = vec![Part::Rig { rig, texture: bound.texture, color: [1.; 3], material: EntityMaterial::EntityCutout, body: true }];
+            let mut parts = vec![Part::Rig { rig, texture: bound_texture, color: [1.; 3], material: EntityMaterial::EntityCutout, body: true }];
             parts.extend(worn.iter().map(|(rig, part)| Part::Rig {
                 rig: *rig,
                 texture: part.texture,
@@ -477,7 +557,7 @@ fn composite(
             let mut quads = Vec::new();
             for h in &held {
                 let stack = entity.equipment_value(h.slot).ok_or("held item")?;
-                let (model, _) = items.model_shape(content, stack, &h.state).map_err(|_| "held item model")?;
+                let (model, _, _) = items.model_shape(content, stack, &h.state).map_err(|_| "held item model")?;
                 quads.push((h, model.clone()));
             }
             parts.extend(quads.iter().map(|(h, model)| Part::Item { held: *h, model }));
@@ -490,13 +570,19 @@ fn composite(
             composite
         }
     };
+    let held = HELD_SLOTS.map(|slot| HeldMemo {
+        stack: entity.equipment_value(slot).map(|stack| (Arc::clone(&stack.components), stack.id)),
+        item: held.iter().find(|h| h.slot == slot).map(|h| (h.shape, h.reads, h.item_use())),
+    });
     entity.crowd = Some(Binding {
         generation: registry.generation,
+        items: items.generation(),
         appearance: entity.appearance_revision,
         rig: rig_key,
         texture,
         left_main,
-        shapes,
+        flags: models.accessor(&entity.type_name, "DATA_LIVING_ENTITY_FLAGS"),
+        held,
         composite,
     });
     Ok(composite)
@@ -530,12 +616,12 @@ fn held_item(
     if crate::ui::items::foil_texture(content, stack).map_err(|_| "held item model")?.is_some() {
         return Err("held item glint");
     }
-    let (model, shape) = items.model_shape(content, stack, &state).map_err(|_| "held item model")?;
+    let (model, shape, reads) = items.model_shape(content, stack, &state).map_err(|_| "held item model")?;
     // Plain models are item cutout; shields (special models) are entity solid.
     if model.quads.iter().any(|quad| !matches!(item_material(quad), EntityMaterial::ItemCutout | EntityMaterial::EntitySolid)) {
         return Err("held item material");
     }
-    Ok(Held { slot, hand, bone, context, state, shape })
+    Ok(Held { slot, hand, bone, context, state, shape, reads })
 }
 
 /// The material the CPU path draws an item quad with (`presentation::append_baked`).

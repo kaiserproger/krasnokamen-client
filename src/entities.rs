@@ -172,6 +172,8 @@ pub struct Entity {
     pub clip: clip_pose::ClipState,
     /// Cached crowd composite of this entity's appearance (`crowd`).
     pub(crate) crowd: Option<crowd::Binding>,
+    /// Whether this entity's item stacks need the clock context (`render_special`).
+    pub(crate) clock: Option<render_special::ClockMemo>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
@@ -861,6 +863,7 @@ impl Store {
                     submitted_revision: None,
                     clip: Default::default(),
                     crowd: None,
+                    clock: None,
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"
