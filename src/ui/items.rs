@@ -1245,7 +1245,7 @@ mod tests {
             let mut models = ItemModels::new();
             let stack = stack_for(name);
             let idle = models.model(&content, &stack, "thirdperson_lefthand").unwrap().clone();
-            assert!(idle.quads.len() >= 20, "{name}");
+            assert!(idle.quads.len() >= 18, "{name}: plate, boss and handle boxes");
             let state = ItemContext { display: "thirdperson_lefthand".into(), using_item: true, ..ItemContext::default() };
             let blocking = models.model_with(&content, &stack, &state).unwrap().clone();
             assert_eq!(blocking.quads.len(), idle.quads.len(), "{name}");

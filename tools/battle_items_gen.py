@@ -387,11 +387,20 @@ def plain_crest(im, fw, fh, px, mask):
 
 
 def banded_crest(col):
+    """Iron straps with rivets over the steel field: vertical centre strap and two cross straps."""
     def crest(im, fw, fh, px, mask):
         for y in range(fh):
             for x in range(fw):
-                if mask[y][x] and abs(x + 0.5 - fw / 2) <= 2 and 6 <= y <= fh - 8:
-                    px[x, y] = col + (255,)
+                if not mask[y][x]:
+                    continue
+                dx = abs(x + 0.5 - fw / 2)
+                inner = 5 <= x < fw - 5 and 5 <= y < fh - 5
+                strap = inner and (dx <= 3 or 9 <= y <= 13 or fh - 16 <= y <= fh - 12)
+                if strap:
+                    px[x, y] = tuple(int(v * (0.78 if (y // 3) % 2 else 0.9)) for v in col) + (255,)
+                    # rivets
+                    if (dx <= 3 and y % 9 == 5 and abs(dx - 0.5) < 1) or (9 <= y <= 13 and x % 8 == 4 and y == 11):
+                        px[x, y] = (236, 238, 242, 255)
     return crest
 
 
