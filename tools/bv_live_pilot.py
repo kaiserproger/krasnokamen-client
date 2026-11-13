@@ -242,21 +242,20 @@ def rank(args, client: Client):
             log("attack interval", round(interval, 2), "s")
         last, last_step = here, stepped
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
-        new = pending = eligible = 0
-        friends, enemies = [], []
+        pending = eligible = 0
+        friends, enemies, unread = [], [], []
         for entity in listed:
             if entity.get("local_player") or "horse" in entity["entity_type"] or entity.get("health", 1) <= 0:
                 continue
             eligible += 1
             ident = entity["entity_id"]
             if ident not in sides:
-                if new >= args.classify_per_step:
-                    # Only the nearest 2K soldiers gate the offset: a marching army keeps
-                    # bringing unread ids into the outer part of the page.
-                    pending += eligible <= 2 * args.k
-                    continue
-                sides[ident] = side_of(client, entity)
-                new += 1
+                # Read after this step's movement and attack, so combat is not delayed.
+                # Only the nearest 2K soldiers gate the offset: a marching army keeps
+                # bringing unread ids into the outer part of the page.
+                unread.append(entity)
+                pending += eligible <= 2 * args.k
+                continue
             side = sides[ident]
             if side == args.side:
                 friends.append(entity)
@@ -329,6 +328,10 @@ def rank(args, client: Client):
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
             pilot.sent_look = (int(round(wrap(yaw))), int(round(pitch)))
+        # Classify a few unread neighbours (nearest first); fewer while an enemy is close.
+        budget = 2 if enemy is not None and enemy["distance"] <= args.guard else args.classify_per_step
+        for entity in unread[:budget]:
+            sides[entity["entity_id"]] = side_of(client, entity)
         client.tool("minecraft_wait_ticks", {"ticks": 2})
         steps += 1
         if time.monotonic() - last_status >= 5.0:
