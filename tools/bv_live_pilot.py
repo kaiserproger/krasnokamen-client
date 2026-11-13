@@ -20,8 +20,10 @@ import math
 import os
 import pathlib
 import re
+import signal
 import sys
 import time
+import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from mcp_client import Client  # noqa: E402
@@ -30,6 +32,7 @@ from mcp_client import Client  # noqa: E402
 # padding), legs (dyed). Shields and surcoats carry solaris_battle:red_*/blue_*;
 # plain kit is told apart by its dye (red 0x6E1414-like, blue 0x243A7F-like).
 SIDE_SLOTS = (1, 4, 3)
+SIDE = re.compile(r"solaris_battle:(red|blue)_")
 
 
 def log(*parts):
@@ -53,6 +56,27 @@ def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> 
     client.initialize()
     log("attached", descriptors[-1])
     return client
+
+
+RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen")
+MOVE_KEYS = ("forward", "back", "left", "right", "sprint")
+
+
+def interrupt(*_):
+    raise KeyboardInterrupt
+
+
+def release(client: Client):
+    """End the MCP session so its writer lease frees at once (else it idles out in 120 s)."""
+    if not client.session:
+        return
+    request = urllib.request.Request(client.endpoint, method="DELETE", headers={
+        "Authorization": "Bearer " + client.token, "Mcp-Session-Id": client.session,
+        "MCP-Protocol-Version": "2025-11-25"})
+    try:
+        urllib.request.urlopen(request, timeout=10).close()
+    except OSError:
+        pass
 
 
 def wrap(angle: float) -> float:
@@ -281,11 +305,29 @@ def main():
     parser.add_argument("--attack-interval", type=float, default=0.65)
     parser.add_argument("--classify-per-step", type=int, default=24)
     args = parser.parse_args()
+    signal.signal(signal.SIGTERM, interrupt)
     client = connect(args.runtime, args.evidence, args.transcript)
     try:
-        rank(args, client)
+        while True:
+            try:
+                rank(args, client)
+            except RuntimeError as error:
+                # Recoverable: the window lost focus, a previous pilot's writer lease is
+                # still idle-expiring (up to 120 s), or play is between screens. The
+                # walk restarts from the current position with a fresh rank offset.
+                text = str(error)
+                if not any(code in text for code in RECOVERABLE):
+                    raise
+                log("paused:", next(code for code in RECOVERABLE if code in text), "- retrying in 2 s")
+                time.sleep(2)
     except KeyboardInterrupt:
         pass
+    finally:
+        try:
+            client.tool("minecraft_press_inputs", {"keys": list(MOVE_KEYS), "ticks": 1, "hold": False})
+        except RuntimeError as error:
+            log("could not release movement keys:", str(error)[:120])
+        release(client)
 
 
 if __name__ == "__main__":
