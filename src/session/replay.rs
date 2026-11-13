@@ -86,6 +86,16 @@ impl Session {
         }
         Ok(())
     }
+    /// Vanilla «Entity Distance» of a replay render (`--entity-distance`), not persisted.
+    pub(crate) fn replay_entity_distance(&mut self, scaling: f64) -> Result<()> {
+        use crate::entities::view_range::{MAX_SCALING, MIN_SCALING};
+        if !self.replaying { return Err("replay entity distance requested during live play".into()); }
+        if !(MIN_SCALING..=MAX_SCALING).contains(&scaling) {
+            return Err(format!("replay entity-distance must be {MIN_SCALING}..{MAX_SCALING}"));
+        }
+        self.entity_distance_scaling = scaling;
+        Ok(())
+    }
     pub(crate) fn replay_seek_phase(&mut self, phase: Option<SeekPhase>) -> Result<()> {
         if !self.replaying { return Err("replay seek requested during live play".into()); }
         self.replay_seek = phase.map(|phase| SeekState {

@@ -32,7 +32,7 @@ pub(super) const TABS: [&str; 4] = ["Video", "Controls", "Audio", "Interface"];
 /// Tab shown for the Accessibility entry of the pause menu.
 pub(super) const INTERFACE_TAB: usize = 3;
 
-const VIDEO: [Row; 6] = [
+const VIDEO: [Row; 7] = [
     row(
         "fov",
         "Field of view",
@@ -44,6 +44,12 @@ const VIDEO: [Row; 6] = [
         "Render distance",
         Kind::Slider,
         "Chunks drawn around you. Lower runs faster.",
+    ),
+    row(
+        "entity_distance_scaling",
+        "Entity distance",
+        Kind::Slider,
+        "How far away entities are drawn. Lower is faster.",
     ),
     row(
         "max_fps",
@@ -174,6 +180,8 @@ fn spec(key: &str) -> Option<Spec> {
     let (min, step, positions) = match key {
         "fov" => (30., 1., 81),
         "render_distance" => (2., 1., 31),
+        // Vanilla Options.entityDistanceScaling: stops 2..=20 as i / 4 (0.5..=5).
+        "entity_distance_scaling" => (0.5, 0.25, 19),
         "mouse_sensitivity" => (0.1, 0.05, 59),
         // 30..=260 in tens, then one extra stop for Unlimited (value 0).
         "max_fps" => (30., 10., 25),
@@ -255,6 +263,7 @@ pub(super) fn value_text(key: &str, value: Option<&Value>) -> String {
         "mouse_sensitivity" => pct(num.unwrap_or(1.)),
         "damage_tilt_strength" => pct(num.unwrap_or(1.)),
         "volume" => pct(num.unwrap_or(1.)),
+        "entity_distance_scaling" => pct(num.unwrap_or(1.)),
         "text_background_opacity" => pct(num.unwrap_or(0.5)),
         "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) { "Right" } else { "Left" }.into(),
         "narrator" => ["Off", "All", "Chat", "System"]

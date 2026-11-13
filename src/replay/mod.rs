@@ -84,6 +84,11 @@ impl Player {
         self.render_distance = distance;
         Ok(())
     }
+    /// Vanilla «Entity Distance» (0.5..=5) the replay draws entities with.
+    pub(crate) fn set_entity_distance(&mut self, scaling: f64) -> Result<(), String> {
+        self.session.replay_entity_distance(scaling)?;
+        Ok(())
+    }
     /// Cut-boundary seek: preserve every packet/world tick, discard uncaptured
     /// presentation history, then warm the normal entity owner before capture.
     /// During a shot use advance_to/step instead, so animation history continues.

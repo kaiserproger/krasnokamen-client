@@ -95,7 +95,9 @@ impl Store {
                     .zip(camera)
                     .map(|(a, b)| (a - b) * (a - b))
                     .sum::<f64>();
-                if distance_squared >= SHADOW_RANGE * SHADOW_RANGE {
+                if distance_squared >= SHADOW_RANGE * SHADOW_RANGE
+                    || !super::view_range::within(models, entity, position, distance_squared, self.view_scale.0)
+                {
                     continue;
                 }
                 let Some(radius) = radius(models, entity)? else {

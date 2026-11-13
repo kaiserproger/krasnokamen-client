@@ -73,9 +73,11 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     let mut ffmpeg="ffmpeg".to_string();
     let mut timebase=Timebase::Wall;
     let mut render_distance=None;
+    // Cinematic shots default to vanilla's largest «Entity Distance», so wide plans keep their crowds.
+    let mut entity_distance=crate::entities::view_range::MAX_SCALING;
     while let Some(arg)=args.next() {
         if arg=="--help" {
-            println!("render-replay --recording PATH --camera PATH --output NEW.mp4 [--data-dir PATH] [--start SECONDS --end SECONDS] [--timebase wall|tick] [--render-distance 2..32] [--size WIDTHxHEIGHT] [--motion-samples 1..16] [--ffmpeg PATH]");
+            println!("render-replay --recording PATH --camera PATH --output NEW.mp4 [--data-dir PATH] [--start SECONDS --end SECONDS] [--timebase wall|tick] [--render-distance 2..32] [--entity-distance 0.5..5 (default 5)] [--size WIDTHxHEIGHT] [--motion-samples 1..16] [--ffmpeg PATH]");
             return Ok(());
         }
         let value=args.next().ok_or_else(||format!("render-replay missing value for {arg}"))?;
@@ -87,6 +89,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
             "--motion-samples"=>samples=value.parse::<u32>().map_err(|e|e.to_string())?,
             "--timebase"=>timebase=value.parse()?,
             "--render-distance"=>render_distance=Some(value.parse::<u32>().map_err(|e|e.to_string())?),
+            "--entity-distance"=>entity_distance=value.parse::<f64>().map_err(|e|e.to_string())?,
             "--size"=>{let (w,h)=value.split_once('x').ok_or("size must be WIDTHxHEIGHT")?;width=w.parse::<u32>().map_err(|e|e.to_string())?;height=h.parse::<u32>().map_err(|e|e.to_string())?;},
             "--ffmpeg"=>ffmpeg=value,
             _=>return Err(format!("unknown render-replay argument {arg}")),
@@ -115,6 +118,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     let artifacts=output.parent().filter(|p|!p.as_os_str().is_empty()).unwrap_or_else(||Path::new("."));
     let mut replay=Player::open(&recording,true,timebase)?;
     replay.set_render_distance(render_distance)?;
+    replay.set_entity_distance(entity_distance)?;
     let mut renderer=pollster::block_on(Renderer::new_offscreen(width*2,height*2,artifacts.into()))?;
     // Which GPU renders the shot: hybrid laptops also expose integrated and software adapters.
     let metrics=renderer.metrics();
@@ -180,7 +184,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
         for (pixel,sum) in frame.iter_mut().zip(&sum) {*pixel=((sum+divisor/2)/divisor) as u8;}
         encoder.frame(&frame)?;
         writeln!(metadata,"{}",serde_json::json!({"frame":index,"replay_time":base.as_secs_f64(),
-            "timebase":timebase,"render_distance":replay.session.render_distance(),
+            "timebase":timebase,"render_distance":replay.session.render_distance(),"entity_distance":entity_distance,
             "seek_warmup_ticks":replay.seek_warmup_ticks,
             "last_applied_tick":replay.last_tick,"wall_ns":replay.last_wall_ns,"sample_ticks":&sample_ticks[..samples as usize],
             "camera":replay.session.replay_pose(),"cpu_state_sha256":replay.frame_hash(),

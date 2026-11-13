@@ -684,6 +684,7 @@ impl UiState {
     /// `UiState::settings` stays session-only.
     pub const MANAGED_SETTING_KEYS: &[&str] = &[
         "render_distance",
+        "entity_distance_scaling",
         "fov",
         "mouse_sensitivity",
         "damage_tilt_strength",
@@ -729,6 +730,11 @@ impl UiState {
                     Self::MIN_RENDER_DISTANCE as u64,
                     Self::MAX_RENDER_DISTANCE as u64
                 )))
+            }
+            "entity_distance_scaling" => {
+                use crate::entities::view_range::{MAX_SCALING, MIN_SCALING};
+                let f = Self::setting_f64(value)?;
+                f.is_finite().then(|| json!(f.clamp(MIN_SCALING, MAX_SCALING)))
             }
             "fov" => {
                 let f = Self::setting_f64(value)?;
@@ -777,6 +783,7 @@ impl UiState {
             "graphics_preset" => Some(json!(GraphicsPreset::default().as_str())),
             "max_fps" => Some(json!(120)),
             "render_distance" => Some(json!(Self::DEFAULT_RENDER_DISTANCE)),
+            "entity_distance_scaling" => Some(json!(crate::entities::view_range::DEFAULT_SCALING)),
             "fov" => Some(json!(Self::DEFAULT_FOV_DEG)),
             "mouse_sensitivity" => Some(json!(Self::DEFAULT_MOUSE_SENSITIVITY)),
             "damage_tilt_strength" => Some(json!(Self::DEFAULT_DAMAGE_TILT_STRENGTH)),
@@ -851,6 +858,17 @@ impl UiState {
                     0.
                 } else {
                     stepped.min(Self::MAX_VOLUME as f64)
+                }))
+            }
+            "entity_distance_scaling" => {
+                use crate::entities::view_range::{DEFAULT_SCALING, MAX_SCALING, MIN_SCALING, SCALING_STEP};
+                let Some(cur) = current.and_then(sane).and_then(|v| Self::setting_f64(&v)) else {
+                    return Some(json!(DEFAULT_SCALING));
+                };
+                Some(json!(if cur >= MAX_SCALING - 1e-9 {
+                    MIN_SCALING
+                } else {
+                    (cur + SCALING_STEP).min(MAX_SCALING)
                 }))
             }
             _ => None,

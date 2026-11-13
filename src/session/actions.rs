@@ -729,6 +729,11 @@ impl Session {
                 self.scene.render_distance = self.render_distance;
                 self.push_render_distance();
             }
+            "entity_distance_scaling" => {
+                self.entity_distance_scaling = clean
+                    .as_f64()
+                    .ok_or("client setting entity_distance_scaling lost its number")?;
+            }
             "main_arm_right" => {
                 let right = clean.as_bool().ok_or("client setting main_arm_right lost its boolean")?;
                 self.main_arm_right = right;
@@ -842,6 +847,11 @@ impl Session {
                         self.render_distance = n as u32;
                         self.world.set_view_distance(self.render_distance);
                         self.scene.render_distance = self.render_distance;
+                    }
+                }
+                "entity_distance_scaling" => {
+                    if let Some(scaling) = clean.as_f64() {
+                        self.entity_distance_scaling = scaling;
                     }
                 }
                 "main_arm_right" => {

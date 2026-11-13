@@ -138,8 +138,9 @@ pub struct EntitySchema {
     pub ids: std::sync::OnceLock<Ids>,
 }
 
-/// Metadata indices of the accessors the frame and tick read for every entity, resolved once
-/// per kind (`Models::ids`); `None` where the kind has no such accessor.
+/// Metadata indices of the accessors the frame and tick read for every entity, and the kind
+/// facts the tick reads, resolved once per kind (`Models::ids`); `None` where the kind has no
+/// such accessor.
 #[derive(Debug)]
 pub struct Ids {
     pub baby: Option<u8>,
@@ -160,6 +161,13 @@ pub struct Ids {
     pub health: Option<u8>,
     /// `IS_CHARGING_CROSSBOW` (pillager) and `DATA_IS_CHARGING_CROSSBOW` (piglin).
     pub charging: [Option<u8>; 2],
+    pub last_pose_change: Option<u8>,
+    /// An `AbstractBoat` (reads its pre-tick bounds, `source_state::tick`).
+    pub boat: bool,
+    /// Vanilla draw-distance rule of the kind (`view_range::within`).
+    pub view_rule: super::view_range::Rule,
+    /// `getPassengerAttachmentPoint` is AbstractHorse's or Strider's (`SeatMotion`).
+    pub seat_motion: bool,
 }
 
 impl Ids {
@@ -181,6 +189,10 @@ impl Ids {
         id_flags: None,
         health: None,
         charging: [None; 2],
+        last_pose_change: None,
+        boat: false,
+        seat_motion: false,
+        view_rule: super::view_range::Rule::Entity,
     };
     fn of(schema: &EntitySchema) -> Self {
         let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
@@ -202,6 +214,13 @@ impl Ids {
             id_flags: id("DATA_ID_FLAGS"),
             health: id("DATA_HEALTH_ID"),
             charging: [id("IS_CHARGING_CROSSBOW"), id("DATA_IS_CHARGING_CROSSBOW")],
+            last_pose_change: id("LAST_POSE_CHANGE_TICK"),
+            boat: schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
+            seat_motion: matches!(
+                schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str),
+                Some("net.minecraft.world.entity.animal.equine.AbstractHorse" | "net.minecraft.world.entity.monster.Strider")
+            ),
+            view_rule: super::view_range::Rule::of(&schema.hierarchy, schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.player.Player")),
         }
     }
 }
@@ -1140,6 +1159,45 @@ mod tests {
         // Models activated again keep the padding of the entities present.
         store.activate_models(models);
         assert_eq!(store.query_padding(), dragon);
+    }
+
+    /// A received husk and horse at render distance 8 and Entity Distance 100% are drawn just
+    /// inside vanilla's `AABB.getSize * 64` blocks (67.2 and 93.7) and not just outside; 200%
+    /// doubles it (`view_range`).
+    #[test]
+    fn husk_and_horse_draw_within_their_vanilla_distance() {
+        use super::super::view_range::{DEFAULT_SCALING, view_scale, within};
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        assert_eq!(view_scale(8, DEFAULT_SCALING), 1.);
+        assert_eq!(view_scale(20, DEFAULT_SCALING), 2.5);
+        assert_eq!(view_scale(4, 2.), 2.);
+        for (id, kind, reach) in [(1, "minecraft:husk", 67.2), (2, "minecraft:horse", 93.7167)] {
+            let mut spawn = Writer::default();
+            spawn.var(id);
+            spawn.0.extend_from_slice(&[0; 16]);
+            spawn.var(doc.entities[kind].protocol_id as i32);
+            for coordinate in [0f64, 64., 0.] {
+                spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+            }
+            spawn.0.extend_from_slice(&[0; 4]);
+            spawn.var(0);
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            let e = store.get(id).unwrap();
+            let position = e.transform.position;
+            let at = |distance: f64, scale| within(&models, e, position, distance * distance, scale);
+            for (scaling, factor) in [(DEFAULT_SCALING, 1.), (2., 2.)] {
+                let scale = view_scale(8, scaling);
+                assert!(at(reach * factor - 0.01, scale), "{kind} at {scaling} inside");
+                assert!(!at(reach * factor + 0.01, scale), "{kind} at {scaling} outside");
+            }
+        }
     }
 
     #[test]

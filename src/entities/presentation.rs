@@ -646,7 +646,9 @@ pub fn append(
             .zip(camera)
             .map(|(a, b)| (a - b) * (a - b))
             .sum::<f64>();
-        if distance > f64::from(radius) * f64::from(radius) {
+        if distance > f64::from(radius) * f64::from(radius)
+            || !super::view_range::within(&models, entity, transform.position, distance, store.view_scale.0)
+        {
             continue;
         }
         stats.eligible += 1;
@@ -1328,9 +1330,9 @@ fn equipped_arm_rotations(
 ) -> [Vec3; 2] {
     let mut arms = gait.map(|x| Vec3::new(x, 0., 0.));
     let main = usize::from(left_main_arm(models, e));
-    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
-    let charging = boolean(models, e, "IS_CHARGING_CROSSBOW")
-        || boolean(models, e, "DATA_IS_CHARGING_CROSSBOW");
+    let ids = models.ids(e);
+    let flags = int_at(e, ids.living_flags).unwrap_or(0);
+    let charging = flag_at(e, ids.charging[0]) || flag_at(e, ids.charging[1]);
     let using = flags & 1 != 0 || charging;
     let active = usize::from(flags & 2 != 0);
     let mut two_handed = None;
@@ -1371,7 +1373,7 @@ fn equipped_arm_rotations(
             }
             ArmAction::Spyglass => {
                 arms[arm].x = (head.x - 110_f32.to_radians()
-                    - if number(models, e, "DATA_POSE") == Some(5) { 15_f32.to_radians() } else { 0. })
+                    - if int_at(e, ids.pose) == Some(5) { 15_f32.to_radians() } else { 0. })
                     .clamp(-2.4, 3.3);
                 arms[arm].y = head.y - side * 15_f32.to_radians();
             }
@@ -1408,7 +1410,7 @@ fn equipped_arm_rotations(
             _ => {}
         }
     }
-    if int_at(e, models.ids(e).spell).is_some_and(|spell| spell != 0) {
+    if int_at(e, ids.spell).is_some_and(|spell| spell != 0) {
         let wave = (age * 0.65).cos() * 14_f32.to_radians();
         arms = [Vec3::new(wave, 0., 135_f32.to_radians()), Vec3::new(wave, 0., -135_f32.to_radians())];
     }
@@ -1654,7 +1656,7 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         arm_pivot_z_zero: spell,
         legs,
         riding: e.vehicle.is_some(),
-        crouch: number(models, e, "DATA_POSE") == Some(5),
+        crouch: int_at(e, models.ids(e).pose) == Some(5),
         phase,
         amplitude,
         age,

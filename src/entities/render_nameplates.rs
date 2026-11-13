@@ -384,7 +384,9 @@ impl Store {
                         .zip(camera)
                         .map(|(a, b)| (a - b) * (a - b))
                         .sum::<f64>();
-                    if distance_squared > range * range {
+                    if distance_squared > range * range
+                        || !super::view_range::within(models, entity, position, distance_squared, self.view_scale.0)
+                    {
                         continue;
                     }
                     stats.eligible += 1;
@@ -584,7 +586,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "protocol_id":1, "width":0., "height":0., "eye_height":0.,
             "fire_immune":false, "class":"net.minecraft.world.entity.Display$TextDisplay",
-            "hierarchy":["net.minecraft.world.entity.Entity"],
+            "hierarchy":["net.minecraft.world.entity.Display$TextDisplay", "net.minecraft.world.entity.Display", "net.minecraft.world.entity.Entity"],
             "dimension_constants":{}, "enum_ids":{}, "enum_numbers":{},
             "method_owners":{}, "default_attributes":{},
             "accessors":{

@@ -35,6 +35,7 @@ mod sheep;
 mod shadows;
 mod solaris_models;
 mod villagers;
+pub(crate) mod view_range;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
@@ -289,6 +290,8 @@ pub struct Store {
     pub(crate) frame_tick: u64,
     /// Local player eye for idle head look-at; `None` disables it.
     pub(crate) look_target: Option<[f32; 3]>,
+    /// Vanilla `Entity.viewScale` of the frames being drawn (`view_range::view_scale`).
+    pub(crate) view_scale: ViewScale,
     pub block_entities: BTreeMap<[i32; 3], BlockEntity>,
     predicted_block_data: BTreeMap<[i32; 3], Arc<Value>>,
     pub(crate) block_active: BTreeSet<[i32; 3]>,
@@ -316,12 +319,24 @@ pub struct Store {
     /// GPU crowd composites and this frame's instances (off until a renderer enables it).
     pub(crate) crowd: crowd::Registry,
 }
+/// `Entity.viewScale`, 1 until the session sets it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewScale(pub f64);
+impl Default for ViewScale {
+    fn default() -> Self {
+        Self(1.)
+    }
+}
 impl Store {
     pub fn new() -> Self {
         Self {
             items: crate::ui::items::ItemModels::new(),
             ..Self::default()
         }
+    }
+    /// Vanilla `Entity.setViewScale` for the frames that follow (`view_range::view_scale`).
+    pub fn set_view_scale(&mut self, scale: f64) {
+        self.view_scale = ViewScale(scale);
     }
     pub fn set_text_renderer(&mut self, text: Rc<crate::ui::render::TextRenderer>) {
         self.nameplate_cache = render_nameplates::Cache::default();
@@ -1225,13 +1240,22 @@ impl Store {
                 self.revision += 1;
                 let revision = self.revision;
                 if let Some(e) = self.get_mut(target) {
+                    // A battle re-sends unchanged equipment: an identical stack keeps the
+                    // received one, so the entity's appearance and its held item's per-tick
+                    // comparisons (`Stack::same_item`) stay.
+                    let mut changed = false;
                     for (slot, stack) in updates {
-                        e.equipment[slot] = stack;
-                        e.predicted_equipment[slot] = None;
+                        changed |= e.predicted_equipment[slot].take().is_some();
+                        if e.equipment[slot] != stack {
+                            e.equipment[slot] = stack;
+                            changed = true;
+                        }
                     }
                     e.revision = revision;
-                    e.appearance_revision = e.appearance_revision.wrapping_add(1);
-                    e.binding = None;
+                    if changed {
+                        e.appearance_revision = e.appearance_revision.wrapping_add(1);
+                        e.binding = None;
+                    }
                 }
             }
             cb::SET_PASSENGERS => {

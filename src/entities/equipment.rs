@@ -707,6 +707,42 @@ mod tests {
             Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 3, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).unwrap());
     }
 
+    /// A battle re-sends soldiers' unchanged equipment: an identical stack keeps the received
+    /// one (so a held item's per-tick comparison sees the same components) and the entity's
+    /// appearance; a different stack replaces both.
+    #[test]
+    fn resent_identical_equipment_keeps_the_received_stack() {
+        use crate::protocol::{Reader, Writer};
+        let (mut store, _models, mut content, _cache) = humanoid_fixture("minecraft:zombie");
+        for id in [5, 6] {
+            content.item_names.insert(id, format!("test:sword{id}"));
+            content.insert_test_item_components(id, BTreeMap::from([(
+                "minecraft:max_stack_size".into(), serde_json::json!(1),
+            )]));
+        }
+        let send = |store: &mut super::super::Store, item: i32, tick| {
+            let mut packet = Writer::default();
+            packet.var(4);
+            packet.byte(0);
+            packet.var(1);
+            packet.var(item);
+            packet.var(0);
+            packet.var(0);
+            store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&packet.0), &content, tick).unwrap();
+        };
+        send(&mut store, 5, 2);
+        let held = |store: &super::super::Store| store.get(4).unwrap().equipment_value(0).unwrap().clone();
+        let first = held(&store);
+        let appearance = store.get(4).unwrap().appearance_revision;
+        send(&mut store, 5, 3);
+        assert!(Arc::ptr_eq(&held(&store).wire, &first.wire), "the received stack stays");
+        assert_eq!(store.get(4).unwrap().appearance_revision, appearance);
+        send(&mut store, 6, 4);
+        assert_eq!(held(&store).id, 6);
+        assert_ne!(store.get(4).unwrap().appearance_revision, appearance);
+    }
+
     #[test]
     fn horse_overlay_joints_follow_authored_horse_pose() {
         use super::super::{animation_tests, render_living};

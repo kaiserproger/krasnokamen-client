@@ -371,7 +371,8 @@ pub(crate) fn tick(
                 .get(&entity.type_name)
                 .ok_or("entity Source motion missing")?;
             let transform = entity.presented_transform(0, 0.);
-            let last_pose = match p::value(models, entity, "LAST_POSE_CHANGE_TICK") {
+            let ids = models.ids(entity);
+            let last_pose = match ids.last_pose_change.and_then(|id| entity.metadata_value(id)) {
                 Some(Metadata::Long(value)) => value
                     .parse::<i64>()
                     .map_err(|_| "camel pose clock invalid")?,
@@ -379,7 +380,6 @@ pub(crate) fn tick(
             };
             let sitting = last_pose < 0;
             let pose_time = game_time.wrapping_sub(last_pose.wrapping_abs());
-            let ids = models.ids(entity);
             let flags = p::int_at(entity, ids.living_flags).unwrap_or(0);
             let using = flags & 1 != 0;
             let blocking = using

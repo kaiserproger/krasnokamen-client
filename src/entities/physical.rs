@@ -75,15 +75,26 @@ pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i
 /// entity. Vanilla clients never turn a NoAI mob's head (Mob flags bit 0): its
 /// look comes only from received rotation.
 pub(crate) fn may_glance(models: &Models, e: &Entity) -> bool {
+    let ids = models.ids(e);
     models.motion.get(&e.type_name).is_some_and(|f| f.is_mob)
         && e.source
             .as_ref()
             .is_some_and(|source| source.living.is_some())
         && e.vehicle.is_none()
         && e.death_tick.is_none()
-        && number(models, e, "DATA_POSE", 0) == 0
-        && number(models, e, "DATA_MOB_FLAGS_ID", 0) & 1 == 0
+        && super::presentation::int_at(e, ids.pose).unwrap_or(0) == 0
+        && super::presentation::int_at(e, ids.mob_flags).unwrap_or(0) & 1 == 0
         && e.type_name != "minecraft:armor_stand"
+}
+/// Whether `e`'s presentation still advances on its own after this tick.
+fn stays_active(e: &Entity) -> bool {
+    e.physical.lerp_progress < e.physical.lerp_duration
+        || e.source.is_some()
+        || super::display::is_display(e)
+        || matches!(
+            e.type_name.as_str(),
+            "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
+        )
 }
 pub(crate) fn boolean(models: &Models, e: &Entity, name: &str, default: bool) -> bool {
     value(models, e, name)
@@ -737,8 +748,15 @@ impl Store {
         // interpolation catches up on entry. Without frames (headless, seek warm-up, several
         // ticks in one frame) every entity ticks.
         let presenting = !frozen && self.frame_tick + 1 >= tick;
+        // Entities whose presentation stops moving leave `physical_active` after the loop.
+        let mut idle = Vec::new();
         for id in &active {
-            let Some(e) = self.get(*id) else { continue };
+            // Slots do not move during the tick: resolve each entity's once.
+            let Some(&slot) = self.ids.get(id) else {
+                idle.push(*id);
+                continue;
+            };
+            let e = &self.slots[slot];
             if presenting
                 && e.physical.shown_tick + 1 < tick
                 && self.local_entity_id != Some(*id)
@@ -747,7 +765,7 @@ impl Store {
                 && e.vehicle.is_none()
                 && e.physical.dragon.is_none()
             {
-                let e = self.get_mut(*id).unwrap();
+                let e = &mut self.slots[slot];
                 e.physical.waited = e.physical.waited.saturating_add(1);
                 continue;
             }
@@ -758,11 +776,8 @@ impl Store {
             let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
             let standing = super::presentation::flag_at(e, ids.standing);
             // Only a boat reads its bounds from before the tick (`source_state::tick`).
-            let boat_bounds = if hierarchy(&models, e, "net.minecraft.world.entity.vehicle.boat.AbstractBoat") {
-                Some(self.bounds(e.handle, tick, 0.)?)
-            } else {
-                None
-            };
+            let boat_bounds = if ids.boat { Some(self.bounds(e.handle, tick, 0.)?) } else { None };
+            let seat_motion = ids.seat_motion;
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
             let controlling_passenger = e.passenger_ids.first().is_some_and(|passenger| {
@@ -771,11 +786,14 @@ impl Store {
                         hierarchy(&models, p, "net.minecraft.world.entity.player.Player")
                     })
             });
-            self.get_mut(*id).unwrap().physical.frozen = paused;
+            let e = &mut self.slots[slot];
+            e.physical.frozen = paused;
             if paused {
+                if !stays_active(e) {
+                    idle.push(*id);
+                }
                 continue;
             }
-            let e = self.get_mut(*id).unwrap();
             let waited = u8::try_from(std::mem::take(&mut e.physical.waited)).unwrap_or(u8::MAX);
             e.physical.lerp_progress = e
                 .physical
@@ -784,12 +802,9 @@ impl Store {
                 .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
-            if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
-                "net.minecraft.world.entity.animal.equine.AbstractHorse"
-                    | "net.minecraft.world.entity.monster.Strider")
-            {
+            if seat_motion {
                 let position = e.presented_transform(tick, 0.).position;
-                let standing = number(&models, e, "DATA_ID_FLAGS", 0) & 32 != 0;
+                let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
                     &mut e.physical.seat_motion, e.handle, position, tick,
                     e.vehicle.is_some() || e.death_tick.is_some(), standing,
@@ -825,8 +840,8 @@ impl Store {
                     (living.walk.speed(1.), living.body(1.))
                 });
             let can_look = may_glance(&models, e);
-            let at = self.presented_transform(self.get(*id).unwrap(), tick, 0.)?;
-            let e = self.get_mut(*id).unwrap();
+            let at = self.presented_transform(&self.slots[slot], tick, 0.)?;
+            let e = &mut self.slots[slot];
             e.physical.motion.tick(&crate::motion::EntityTick {
                 tick,
                 on_ground: e.on_ground,
@@ -842,8 +857,9 @@ impl Store {
             } else {
                 0
             };
+            let falling = e.type_name == "minecraft:falling_block";
             self.remove_motion_span(span);
-            if self.get(*id).is_some_and(|e| e.type_name == "minecraft:falling_block") {
+            if falling {
                 let mut colliders = std::mem::take(&mut self.falling_colliders);
                 let result = self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
                 self.falling_colliders = colliders;
@@ -856,18 +872,13 @@ impl Store {
                     "origin": "source_client_tick",
                 }));
             }
+            if !stays_active(&self.slots[slot]) {
+                idle.push(*id);
+            }
         }
-        active.retain(|id| {
-            self.get(*id).is_some_and(|e| {
-                e.physical.lerp_progress < e.physical.lerp_duration
-                    || e.source.is_some()
-                    || super::display::is_display(e)
-                    || matches!(
-                        e.type_name.as_str(),
-                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
-                    )
-            })
-        });
+        for id in idle {
+            active.remove(&id);
+        }
         self.physical_active = active;
         self.tick_blocks(frozen)?;
         Ok(())

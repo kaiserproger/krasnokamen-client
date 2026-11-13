@@ -169,6 +169,8 @@ pub struct Session {
     /// distance is in chunks, FOV in degrees, sensitivity multiplies the 0.12
     /// base look scale, volume is the Master gain. All defaults live on UiState.
     render_distance: u32,
+    /// Vanilla «Entity Distance» (`Options.entityDistanceScaling`, 0.5..=5).
+    entity_distance_scaling: f64,
     main_arm_right: bool,
     /// Chunk radius the server last announced (login, set_chunk_cache_radius).
     server_view_distance: Option<u32>,
@@ -284,6 +286,7 @@ impl Session {
             shutdown_requested: false,
             debug_overlay_pending: false,
             render_distance: UiState::DEFAULT_RENDER_DISTANCE,
+            entity_distance_scaling: crate::entities::view_range::DEFAULT_SCALING,
             main_arm_right: true,
             server_view_distance: None,
             fov_deg: UiState::DEFAULT_FOV_DEG,
