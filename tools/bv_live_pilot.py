@@ -215,7 +215,7 @@ def rank(args, client: Client):
             interval = attack_interval(client, args.attack_interval)
             log("attack interval", round(interval, 2), "s")
         last = here
-        listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": 160})["entities"]
+        listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
         new = 0
         friends, enemies = [], []
         for entity in listed:
@@ -304,6 +304,8 @@ def main():
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
     parser.add_argument("--attack-interval", type=float, default=0.65)
     parser.add_argument("--classify-per-step", type=int, default=24)
+    parser.add_argument("--limit", type=int, default=64,
+                        help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, interrupt)
     client = connect(args.runtime, args.evidence, args.transcript)
