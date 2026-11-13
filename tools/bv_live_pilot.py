@@ -242,15 +242,18 @@ def rank(args, client: Client):
             log("attack interval", round(interval, 2), "s")
         last, last_step = here, stepped
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
-        new = pending = 0
+        new = pending = eligible = 0
         friends, enemies = [], []
         for entity in listed:
             if entity.get("local_player") or "horse" in entity["entity_type"] or entity.get("health", 1) <= 0:
                 continue
+            eligible += 1
             ident = entity["entity_id"]
             if ident not in sides:
                 if new >= args.classify_per_step:
-                    pending += 1
+                    # Only the nearest 2K soldiers gate the offset: a marching army keeps
+                    # bringing unread ids into the outer part of the page.
+                    pending += eligible <= 2 * args.k
                     continue
                 sides[ident] = side_of(client, entity)
                 new += 1
@@ -264,7 +267,7 @@ def rank(args, client: Client):
             centroid = [sum(e[a] for e in near) / len(near) for a in ("x", "z")]
             velocity = [sum(e["velocity"][a] for e in near) / len(near) for a in ("x", "z")]
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
-            # The join-time offset waits until every listed neighbour has a side, so
+            # The join-time offset waits until the nearest 2K soldiers have a side, so
             # late classification does not shift the centroid it is measured from.
             if offset is None and pending == 0:
                 offset = [here[0] - centroid[0], here[2] - centroid[1]]
