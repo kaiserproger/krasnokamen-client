@@ -21,17 +21,10 @@ const IDS_PER_SIDE: usize = 6;
 /// Attackers window: a fighter is an attacker while his last main-hand melee
 /// swing is within the last 40 ticks (2 s) ending at the sample's tick.
 const ATTACK_WINDOW: u64 = 40;
-/// A swing is a hit when a hurt on an enemy-side fighter follows within 10 ticks.
-const HIT_WINDOW: u64 = 10;
-/// ... and that victim is within contact reach + 1 block of the swinger.
-const HIT_REACH: f64 = CONTACT_REACH + 1.;
 /// Field definitions, repeated in the header row so receipts are self-describing.
 const SWING_DEFINITIONS: &str = "events.melee_attack_swings: main-hand melee swings in this interval by fighters not holding a bow or crossbow \
-    (ANIMATE action 0, or SWING_ANIMATION hand 0 with swing type whack/stab; off-hand swings, i.e. shield parries, and type none, i.e. staggers, are not attacks). \
-    events.melee_attackers_2s: distinct such fighters with an attack swing in the 40 ticks ending at the sample tick. \
-    events.melee_hitters_2s: distinct such fighters whose attack swing was followed within 10 ticks by a DAMAGE_EVENT/HURT_ANIMATION on an \
-    enemy-side fighter within contact_reach+1 blocks (horizontal, |dy| <= 2, positions at hurt time) of him, counted at the hurt tick \
-    over the same 40-tick window; fighters without a known side never count as hitters.";
+    (SWING_ANIMATION hand 0 with swing type whack/stab; ANIMATE is never an attack on 26.3, where its action 0 is wake-up; off-hand swings, i.e. shield parries, and type none, i.e. staggers, are not attacks). \
+    events.melee_attackers_2s: distinct such fighters with an attack swing in the 40 ticks ending at the sample tick.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Side { Red, Blue }
@@ -262,9 +255,7 @@ struct Interval {
 }
 
 /// A main-hand melee swing of a fighter (see `SWING_DEFINITIONS`).
-struct AttackSwing { tick: u64, id: i32, position: [f64; 3], side: Option<Side> }
-/// A hurt on a sided fighter, matched against attack swings at the next sample.
-struct Hurt { tick: u64, position: [f64; 3], side: Side }
+struct AttackSwing { tick: u64, id: i32 }
 
 #[derive(Default)]
 pub(crate) struct Scan {
@@ -277,11 +268,8 @@ pub(crate) struct Scan {
     pub(crate) first_tick: Option<u64>,
     pub(crate) tick: Option<u64>,
     component_sides: u64,
-    /// Attack swings of the last `ATTACK_WINDOW` ticks (tick ascending), hurts since the
-    /// previous sample, and (hurt tick, swinger) pairs of the last `ATTACK_WINDOW` ticks.
+    /// Attack swings of the last `ATTACK_WINDOW` ticks (tick ascending).
     attacks: VecDeque<AttackSwing>,
-    pending_hurts: Vec<Hurt>,
-    hitters: Vec<(u64, i32)>,
     samples: u64,
     last_sample_t: f64,
     /// Dimension layout (overworld default); chunk sections decode against it.
@@ -358,16 +346,11 @@ impl Scan {
             .or_else(|| self.split.map(|s| s.side([e.spawn[0], e.spawn[2]])))
     }
     fn tick(&self) -> u64 { self.tick.unwrap_or(0) }
-    /// A rider fights where its horse is; its own position is not streamed.
-    fn fight_position(&self, e: &Tracked) -> [f64; 3] {
-        e.vehicle.and_then(|v| self.entities.get(&v)).map_or(e.position, |v| v.position)
-    }
     /// Records a main-hand melee swing of `target` when it is a fighter without a bow or crossbow.
     fn attack(&mut self, target: i32) {
         let Some(e) = self.entities.get(&target) else { return };
         if e.role != Role::Fighter || matches!(e.weapon.as_deref(), Some("minecraft:bow" | "minecraft:crossbow")) { return; }
-        let attack = AttackSwing { tick: self.tick(), id: target, position: self.fight_position(e), side: self.side(e) };
-        self.attacks.push_back(attack);
+        self.attacks.push_back(AttackSwing { tick: self.tick(), id: target });
         self.interval.attack_swings += 1;
     }
     fn t(&self, tick: u64) -> f64 { round((tick.saturating_sub(self.first_tick.unwrap_or(tick))) as f64 * 0.05) }
@@ -511,13 +494,13 @@ impl Scan {
                     (e.position, e.velocity, e.base_tick) = (position, velocity, tick);
                 }
             }
-            // ANIMATE (vanilla): VarInt entity id, u8 action: 0 swing main hand, 3 swing off hand.
+            // ANIMATE: VarInt entity id, u8 action. On 26.3 (protocol 777) action 0 is wake-up, not a swing (arm
+            // swings moved to SWING_ANIMATION), so it never counts as an attack; `swings` keeps its old 0|3 rule.
             cb::ANIMATE => {
                 let target = r.var()?;
                 let action = r.u8()?;
                 r.done()?;
                 if matches!(action, 0 | 3) && self.entities.contains_key(&target) { self.interval.swings.push(target); }
-                if action == 0 { self.attack(target); }
             }
             // 26.3 SWING_ANIMATION: VarInt entity id, VarInt hand (0 main, 1 off), VarInt swing
             // type (0 none, 1 whack, 2 stab), VarInt duration (see Store::apply in entities.rs).
@@ -532,13 +515,7 @@ impl Scan {
             }
             cb::DAMAGE_EVENT | cb::HURT_ANIMATION => {
                 let target = r.var()?;
-                if let Some(e) = self.entities.get(&target) && e.role == Role::Fighter {
-                    self.interval.hurts += 1;
-                    if let Some(side) = self.side(e) {
-                        let hurt = Hurt { tick, position: self.fight_position(e), side };
-                        self.pending_hurts.push(hurt);
-                    }
-                }
+                if self.entities.get(&target).is_some_and(|e| e.role == Role::Fighter) { self.interval.hurts += 1; }
             }
             cb::ENTITY_EVENT => {
                 let target = r.i32()?;
@@ -587,31 +564,14 @@ impl Scan {
         }
     }
 
-    /// Distinct attackers and hitters of the `ATTACK_WINDOW` ticks ending at `tick`
-    /// (see `SWING_DEFINITIONS`); consumes the hurts since the previous call, then
-    /// drops what no later window can use.
-    fn swing_windows(&mut self, tick: u64) -> (usize, usize) {
-        let hurts = std::mem::take(&mut self.pending_hurts);
-        if !hurts.is_empty() {
-            let cells = grid(self.attacks.iter().map(|a| a.position), HIT_REACH);
-            for h in &hurts {
-                for j in near(&cells, h.position, HIT_REACH) {
-                    let a = &self.attacks[j];
-                    if a.tick <= h.tick && h.tick - a.tick <= HIT_WINDOW && a.side.is_some_and(|s| s != h.side)
-                        && close(a.position, h.position, HIT_REACH)
-                    {
-                        self.hitters.push((h.tick, a.id));
-                    }
-                }
-            }
-        }
+    /// Distinct attackers of the `ATTACK_WINDOW` ticks ending at `tick` (see
+    /// `SWING_DEFINITIONS`); drops the swings no later window can use.
+    fn attackers_in_window(&mut self, tick: u64) -> usize {
         let live = |t: u64| t + ATTACK_WINDOW > tick;
         let attackers: HashSet<i32> = self.attacks.iter().filter(|a| live(a.tick)).map(|a| a.id).collect();
-        let hitters: HashSet<i32> = self.hitters.iter().filter(|h| live(h.0)).map(|h| h.1).collect();
         // The next window ends later, so entries outside this one never count again.
         while self.attacks.front().is_some_and(|a| !live(a.tick)) { self.attacks.pop_front(); }
-        self.hitters.retain(|h| live(h.0));
-        (attackers.len(), hitters.len())
+        attackers.len()
     }
 
     /// One timeline row for the state after every packet of `tick`.
@@ -695,7 +655,7 @@ impl Scan {
             arrows.insert(side.name().into(), json!({"in_flight":f.len(),"launched":l.len(),"impacts":i.len(),
                 "flight":area(&f),"launch":area(&l),"impact":area(&i)}));
         }
-        let (attackers_2s, hitters_2s) = self.swing_windows(tick);
+        let attackers_2s = self.attackers_in_window(tick);
         let (mut melee_swings, mut bow_swings) = (0usize, 0usize);
         for id in &self.interval.swings {
             match self.entities.get(id).and_then(|e| e.weapon.as_deref()) {
@@ -731,7 +691,7 @@ impl Scan {
         self.last_sample_t = seconds;
         json!({"kind":"sample","t":seconds,"tick":tick,"live":live,
             "events":{"swings":interval.swings.len(),"melee_swings":melee_swings,"bow_swings":bow_swings,"hurts":interval.hurts,"deaths":interval.deaths,
-                "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s,"melee_hitters_2s":hitters_2s},
+                "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s},
             "contact_fighters":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
             "contacts":contacts,"arrows":arrows,"cavalry":cavalry,"armies":armies})
     }
@@ -783,7 +743,7 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<()> {
     let mut write = |value: &Value| writeln!(out, "{value}").map_err(|e| format!("write timeline: {e}"));
     write(&json!({"kind":"header","recording":recording,"server_build":input.header.server_build,
         "interval_ticks":every,"contact_reach":CONTACT_REACH,"contact_link":CONTACT_LINK,"min_y":min_y,"height":height,
-        "attack_window_ticks":ATTACK_WINDOW,"hit_window_ticks":HIT_WINDOW,"hit_reach":HIT_REACH,"swing_definitions":SWING_DEFINITIONS}))?;
+        "attack_window_ticks":ATTACK_WINDOW,"swing_definitions":SWING_DEFINITIONS}))?;
     let (mut scan, mut phase, mut packets) = (Scan::new(min_y, height), Phase::Login, 0u64);
     while let Some(packet) = input.next_packet()? {
         packets += 1;
