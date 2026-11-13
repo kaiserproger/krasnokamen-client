@@ -174,6 +174,8 @@ pub struct Entity {
     pub(crate) crowd: Option<crowd::Binding>,
     /// Whether this entity's item stacks need the clock context (`render_special`).
     pub(crate) clock: Option<render_special::ClockMemo>,
+    /// This entity's kind slot in the active schema table (`Models::schema_of`).
+    pub(crate) kind_slot: std::cell::Cell<resources::KindSlot>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
@@ -866,6 +868,7 @@ impl Store {
                     clip: Default::default(),
                     crowd: None,
                     clock: None,
+                    kind_slot: Default::default(),
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"

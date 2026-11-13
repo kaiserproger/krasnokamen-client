@@ -64,9 +64,7 @@ impl Default for AnimationState {
     }
 }
 pub(crate) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
-    models
-        .accessor(&e.type_name, name)
-        .and_then(|id| e.metadata_value(id))
+    models.entity_accessor(e, name).and_then(|id| e.metadata_value(id))
 }
 pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i32 {
     value(models, e, name)
@@ -99,13 +97,13 @@ fn float(models: &Models, e: &Entity, name: &str, default: f32) -> f32 {
     }
 }
 fn hierarchy(models: &Models, e: &Entity, class: &str) -> bool {
-    models.schemas[&e.type_name]
+    models.schema_of(e).expect("entity schema of a known kind")
         .hierarchy
         .iter()
         .any(|v| v == class)
 }
 fn owner<'a>(models: &'a Models, e: &Entity, method: &str) -> &'a str {
-    models.schemas[&e.type_name]
+    models.schema_of(e).expect("entity schema of a known kind")
         .method_owners
         .get(method)
         .map(String::as_str)

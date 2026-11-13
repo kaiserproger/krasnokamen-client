@@ -66,6 +66,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         clip: Default::default(),
         crowd: None,
         clock: None,
+        kind_slot: Default::default(),
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},

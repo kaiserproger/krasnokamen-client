@@ -391,6 +391,7 @@ mod tests {
             clip: Default::default(),
             crowd: None,
             clock: None,
+            kind_slot: Default::default(),
         };
         (Store::default(), models, entity)
     }

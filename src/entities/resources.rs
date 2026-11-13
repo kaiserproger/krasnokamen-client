@@ -217,6 +217,99 @@ impl Sizing {
         }
     }
 }
+
+impl EntitySchema {
+    /// Forgets the facts resolved from this schema's names (it may be about to change).
+    fn forget_resolved(&mut self) {
+        self.sizing = std::sync::OnceLock::new();
+    }
+}
+
+static SCHEMA_TABLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Entity schemas by kind name. A kind keeps its slot for the table's life, and an entity
+/// remembers its kind's slot (`Models::schema_of`), so per-entity lookups index instead of
+/// hashing the kind name. Changing a schema (`get_mut`, `insert`) forgets the facts resolved
+/// from its names.
+#[derive(Debug)]
+pub struct Schemas {
+    /// Process-unique: a slot an entity remembers belongs to one table.
+    table: u64,
+    slots: NameMap<u32>,
+    schemas: Vec<Option<(String, EntitySchema)>>,
+}
+
+impl Default for Schemas {
+    fn default() -> Self {
+        Self {
+            table: SCHEMA_TABLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            slots: NameMap::default(),
+            schemas: Vec::new(),
+        }
+    }
+}
+
+impl Schemas {
+    pub fn get(&self, kind: &str) -> Option<&EntitySchema> {
+        self.at(*self.slots.get(kind)?)
+    }
+    pub fn get_mut(&mut self, kind: &str) -> Option<&mut EntitySchema> {
+        let slot = *self.slots.get(kind)?;
+        let (_, schema) = self.schemas[slot as usize].as_mut()?;
+        schema.forget_resolved();
+        Some(schema)
+    }
+    pub fn contains_key(&self, kind: &str) -> bool {
+        self.slots.contains_key(kind)
+    }
+    pub fn insert(&mut self, kind: String, mut schema: EntitySchema) -> Option<EntitySchema> {
+        schema.forget_resolved();
+        if let Some(&slot) = self.slots.get(&kind) {
+            return self.schemas[slot as usize].replace((kind, schema)).map(|(_, old)| old);
+        }
+        let slot = u32::try_from(self.schemas.len()).expect("entity kinds fit u32");
+        self.slots.insert(kind.clone(), slot);
+        self.schemas.push(Some((kind, schema)));
+        None
+    }
+    /// Removes `kind`; its slot stays empty, so entities that remembered it look it up again.
+    pub fn remove(&mut self, kind: &str) -> Option<EntitySchema> {
+        let slot = self.slots.remove(kind)?;
+        self.schemas[slot as usize].take().map(|(_, schema)| schema)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &EntitySchema)> {
+        self.schemas.iter().flatten().map(|(kind, schema)| (kind, schema))
+    }
+    fn at(&self, slot: u32) -> Option<&EntitySchema> {
+        self.schemas.get(slot as usize)?.as_ref().map(|(_, schema)| schema)
+    }
+}
+
+impl FromIterator<(String, EntitySchema)> for Schemas {
+    fn from_iter<I: IntoIterator<Item = (String, EntitySchema)>>(entries: I) -> Self {
+        let mut schemas = Self::default();
+        for (kind, schema) in entries {
+            schemas.insert(kind, schema);
+        }
+        schemas
+    }
+}
+
+impl<K: AsRef<str> + ?Sized> std::ops::Index<&K> for Schemas {
+    type Output = EntitySchema;
+    fn index(&self, kind: &K) -> &EntitySchema {
+        self.get(kind.as_ref()).expect("entity schema of a known kind")
+    }
+}
+
+/// The schema slot an entity's kind had in a table (`Models::schema_of`), for the kind name
+/// string it was resolved from (address and length: an entity's kind name never changes).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct KindSlot {
+    table: u64,
+    name: (usize, usize),
+    slot: u32,
+}
 #[derive(Deserialize, Debug)]
 pub struct Family {
     pub rig: String,
@@ -257,8 +350,8 @@ pub struct Rig {
 }
 pub struct Models {
     pub rigs: BTreeMap<String, Rig>,
-    /// Hashed, not ordered: looked up by kind per entity many times a tick and frame.
-    pub schemas: NameMap<EntitySchema>,
+    /// Looked up by kind per entity many times a tick and frame (`Models::schema_of`).
+    pub schemas: Schemas,
     pub families: BTreeMap<String, Family>,
     pub builtin_variants: BTreeMap<String, BTreeMap<String, Value>>,
     pub simple_particles: Vec<String>,
@@ -336,7 +429,7 @@ impl Models {
             families: BTreeMap::new(),
             simple_particles: doc.simple_particles,
             default_skins: Vec::new(),
-            schemas: doc.entities,
+            schemas: doc.entities.into_iter().collect(),
             poses: doc.poses,
             builtin_variants: doc.builtin_variants,
             attribute_ids: Self::attribute_ids(&doc.attributes),
@@ -369,7 +462,7 @@ impl Models {
         }
         Ok(Self {
             rigs,
-            schemas: doc.entities,
+            schemas: doc.entities.into_iter().collect(),
             families: doc.families,
             builtin_variants: doc.builtin_variants,
             simple_particles: doc.simple_particles,
@@ -410,6 +503,25 @@ impl Models {
             .get(name)
             .and_then(|v| u8::try_from(v[0]).ok())
     }
+    /// `e`'s schema: by the slot `e` remembered from an earlier lookup in this table, else by
+    /// its kind name (and remembered).
+    pub(crate) fn schema_of(&self, e: &super::Entity) -> Option<&EntitySchema> {
+        let name = (e.type_name.as_ptr() as usize, e.type_name.len());
+        let known = e.kind_slot.get();
+        if known.table == self.schemas.table
+            && known.name == name
+            && let Some(schema) = self.schemas.at(known.slot)
+        {
+            return Some(schema);
+        }
+        let slot = *self.schemas.slots.get(e.type_name.as_str())?;
+        e.kind_slot.set(KindSlot { table: self.schemas.table, name, slot });
+        self.schemas.at(slot)
+    }
+    /// Metadata index of `e`'s accessor `name`.
+    pub(crate) fn entity_accessor(&self, e: &super::Entity, name: &str) -> Option<u8> {
+        self.schema_of(e)?.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok())
+    }
     pub fn default_skin(&self, uuid: Option<&str>) -> Result<&DefaultSkin> {
         let index = if let Some(uuid) = uuid {
             let value = uuid::Uuid::parse_str(uuid)
@@ -426,10 +538,7 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32)> {
-        let schema = self
-            .schemas
-            .get(&entity.type_name)
-            .ok_or("entity dimensions source not activated")?;
+        let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
         let sizing = schema.sizing.get_or_init(|| Sizing::of(schema));
         let number = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)

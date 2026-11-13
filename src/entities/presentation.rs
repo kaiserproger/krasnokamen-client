@@ -57,9 +57,7 @@ pub struct PresentationStats {
     pub unrendered: BTreeMap<String, String>,
 }
 pub(super) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
-    models
-        .accessor(&e.type_name, name)
-        .and_then(|i| e.metadata_value(i))
+    models.entity_accessor(e, name).and_then(|i| e.metadata_value(i))
 }
 pub(super) fn number(models: &Models, e: &Entity, name: &str) -> Option<i32> {
     value(models, e, name).and_then(Metadata::int)

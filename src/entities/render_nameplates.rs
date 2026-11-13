@@ -674,6 +674,7 @@ mod tests {
             clip: Default::default(),
             crowd: None,
             clock: None,
+            kind_slot: Default::default(),
         });
         handle
     }
@@ -1208,6 +1209,7 @@ mod tests {
             clip: Default::default(),
             crowd: None,
             clock: None,
+            kind_slot: Default::default(),
         };
         let received = entity.metadata.clone();
         super::super::display::on_metadata(&models, &mut entity, &received);
