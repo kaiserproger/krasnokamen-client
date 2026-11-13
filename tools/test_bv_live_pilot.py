@@ -308,21 +308,21 @@ class RouteGuard(unittest.TestCase):
         kept, _ = self.run_filter(FakeWorld(), {"forward"}, here=[-194.5, 73.0, 25.5], keepout=None)
         self.assertEqual(kept, {"forward"})
 
-    def test_blocks_are_read_once_per_column_and_incomplete_columns_are_read_again(self):
+    def test_every_step_reads_the_blocks_again(self):
         world = FakeWorld()
         guard = pilot.Guard(world)
-        for _ in range(3):
-            guard.filter({"forward"}, self.HERE, -90.0, 3.0)
+        self.assertEqual(guard.filter({"forward"}, self.HERE, -90.0, 3.0), {"forward"})
         self.assertEqual(len(world.scans), 1)
-        world = FakeWorld()
-        real = world.tool
-        calls = []
-        world.tool = lambda name, arguments=None: (calls.append(1), {**real(name, arguments), "blocks": []})[1]
-        guard = pilot.Guard(world)
+        # The ground under the next cell turns to water (or is dug away) between two steps.
+        world.cells[(101, 72, 100)] = block(water=True)
+        with mock.patch.object(pilot, "log") as log:
+            self.assertEqual(guard.filter({"forward"}, self.HERE, -90.0, 3.0), set())
+        self.assertEqual(len(world.scans), 2, "the same cell was asked again")
+        self.assertIn("water", log.call_args[0][0])
+        world.cells = {(101, y, 100): block() for y in range(60, 73)}
         with mock.patch.object(pilot, "log"):
-            guard.filter({"forward"}, self.HERE, -90.0, 3.0)
-            guard.filter({"forward"}, self.HERE, -90.0, 3.0)
-        self.assertEqual(len(calls), 2)
+            self.assertEqual(guard.filter({"forward"}, self.HERE, -90.0, 3.0), set())
+        self.assertEqual(len(world.scans), 3)
 
     def test_a_truncated_scan_is_continued_from_next_offset(self):
         world = FakeWorld()

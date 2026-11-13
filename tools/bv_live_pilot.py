@@ -168,7 +168,7 @@ class Guard:
 
     def __init__(self, client, keepout=KEEPOUT):
         self.c, self.keepout = client, keepout
-        self.cache: dict[tuple, dict] = {}  # (x, z, feet_y) -> {y: row} for fully read columns
+        self.cache: dict[tuple, dict] = {}  # (x, z, feet_y) -> {y: row}, columns read within one `filter` call
         self.logged: dict[tuple, float] = {}
 
     def cells(self, here, vector, reach):
@@ -256,6 +256,7 @@ class Guard:
         along their summed direction (forward + right walks the diagonal, whose cells neither key alone reaches);
         a refused diagonal drops its sideways key. From inside the box only a way out passes, and it is still
         checked against drops and water."""
+        self.cache.clear()  # blocks change (water, a dug pit): every step reads them again, the cache serves only this check
         keep = set(wanted)
         for key in WALK_KEYS:
             if key in wanted:
