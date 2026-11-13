@@ -265,6 +265,15 @@ fn body_box(position: [f64; 3], [width, height]: [f64; 2]) -> Aabb {
 fn join_horizontal(a: Aabb, b: Aabb) -> Aabb {
     ([a.0[0].min(b.0[0]), a.0[1], a.0[2].min(b.0[2])], [a.1[0].max(b.1[0]), a.1[1], a.1[2].max(b.1[2])])
 }
+/// A rider's own box and striking box. The server seats a rider (not a boat passenger) at the mount's
+/// x and z, 0.75 of the mount's height above its feet (mc-core mounts.rs); the striking box joins it
+/// with the mount's box sideways and keeps the rider's y (faction.rs `in_melee_range`). The client
+/// does not stream a rider's position, so it is derived from the mount's.
+fn mounted_boxes(mount_position: [f64; 3], mount_dims: [f64; 2], rider_dims: [f64; 2]) -> (Aabb, Aabb) {
+    let rider = [mount_position[0], mount_position[1] + mount_dims[1] * 0.75, mount_position[2]];
+    let own = body_box(rider, rider_dims);
+    (own, join_horizontal(own, body_box(mount_position, mount_dims)))
+}
 /// `AABB.intersects` of `strike` grown by `grow` in x and z (not y) with `target`.
 fn touches(strike: &Aabb, grow: f64, target: &Aabb) -> bool {
     strike.0[0] - grow < target.1[0] && strike.1[0] + grow > target.0[0]
@@ -586,6 +595,8 @@ impl Scan {
                 let n = r.count(4096)?;
                 let riders = (0..n).map(|_| r.var()).collect::<Result<Vec<_>>>()?;
                 r.done()?;
+                // The packet is the vehicle's whole passenger list: whoever it no longer names has dismounted.
+                for (id, e) in &mut self.entities { if e.vehicle == Some(vehicle) && !riders.contains(id) { e.vehicle = None; } }
                 for rider in riders { if let Some(e) = self.entities.get_mut(&rider) { e.vehicle = Some(vehicle); } }
             }
             cb::SET_ENTITY_MOTION => {
@@ -746,10 +757,9 @@ impl Scan {
         // (own box, striking box, range, holds a bow or crossbow: ranged fighters do not melee)
         let bodies: Vec<(Aabb, Aabb, [f64; 2], bool)> = fighters.iter().map(|f| {
             let e = &self.entities[&f.id];
-            let own = body_box(f.position, e.combat.dims);
-            let strike = match e.vehicle.and_then(|v| self.entities.get(&v)) {
-                Some(mount) => join_horizontal(own, body_box(mount.position, mount.combat.dims)),
-                None => own,
+            let (own, strike) = match e.vehicle.and_then(|v| self.entities.get(&v)) {
+                Some(mount) => mounted_boxes(mount.position, mount.combat.dims, e.combat.dims),
+                None => { let own = body_box(f.position, e.combat.dims); (own, own) }
             };
             (own, strike, e.combat.range, matches!(e.weapon.as_deref(), Some("minecraft:bow" | "minecraft:crossbow")))
         }).collect();

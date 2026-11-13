@@ -296,3 +296,26 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     assert_eq!(row(&mut scan, 140), ([1, 0, 0], [4, 4]), "only the lowered shield is left");
     assert_eq!(row(&mut scan, 165), ([0, 0, 0], [4, 4]));
 }
+
+#[test]
+fn a_rider_sits_three_quarters_up_the_horse_and_dismounting_frees_him() {
+    // Horse 1.4 x 1.6: the rider sits 1.2 up; the striking box joins sideways and keeps that y.
+    let (own, strike) = mounted_boxes([0., 0., 0.], [1.4, 1.6], [0.6, 1.95]);
+    assert!((own.0[1] - 1.2).abs() < 1e-12 && (strike.0[1] - 1.2).abs() < 1e-12, "{own:?} {strike:?}");
+    assert_eq!((strike.0[0], strike.1[0]), (-0.7, 0.7));
+    // A target on ground 0.8 lower (top 1.15) is under the mounted rider's feet but beside a rider on foot.
+    let low = body_box([1.4, -0.8, 0.], [0.6, 1.95]);
+    assert!(in_melee_range(DEFAULT_RANGE, &body_box([0., 0., 0.], [0.6, 1.95]), &low), "on foot");
+    assert!(!in_melee_range(DEFAULT_RANGE, &strike, &low), "mounted: no vertical overlap");
+
+    let content = Content::test_cube();
+    let mut scan = Scan::new(-64, 384);
+    let mut horse = fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword");
+    horse.role = Role::Horse;
+    scan.entities.insert(1, horse);
+    scan.entities.insert(2, fighter([0., 64., 0.], Side::Red, "minecraft:iron_sword"));
+    scan.apply(cb::SET_PASSENGERS, &[1, 1, 2], &content).unwrap();
+    assert_eq!(scan.entities[&2].vehicle, Some(1));
+    scan.apply(cb::SET_PASSENGERS, &[1, 0], &content).unwrap();
+    assert_eq!(scan.entities[&2].vehicle, None, "an empty passenger list dismounts him");
+}
