@@ -6,7 +6,11 @@
 Keeps PovRed's join-time place relative to the centroid of the K same-side soldiers
 nearest him at join, respawn or re-slot (side read from their shield/surcoat ids or dyed kit), walks with held movement
 keys, turns smoothly toward the nearest enemy (else along the rank's motion), and
-presses attack when an enemy is in reach. RUNTIME_DIR is the client's --runtime-dir;
+presses attack when an enemy is in reach. Route guard: before a movement key is held, the cells it walks into
+are read from the client's loaded blocks (minecraft_scan_blocks); a key toward a drop of more than 3 blocks (no ground
+within 4 below the feet), water, lava, unread blocks, or into the keep-out box (--keepout, default the mine
+x -192..-184, z 21..30) is not pressed and logs `edge refused <key> at X,Y,Z drop=N (why)` or `keepout refused <key> ...`.
+RUNTIME_DIR is the client's --runtime-dir;
 the client runs with `--automation --mcp-http 127.0.0.1:0 --windowed` and
 `--hide-hud-keep-hand`. MCP input needs the client window focused. Every action is an
 ordinary client input, never a packet bot; the loop is paced by client ticks.
@@ -115,6 +119,152 @@ def approach(current: float, target: float, rate: float, limit: float) -> float:
     return current + step
 
 
+# Route guard. Every horizontal key is checked against the client's own loaded blocks
+# (`minecraft_scan_blocks`) before it is held: the cells it walks into over the next step must have
+# standing ground within MAX_DROP blocks below the feet, with no water or lava on the way down, and
+# must stay out of the keep-out box. A refused key is not pressed (a held one is released).
+WALK_KEYS = ("forward", "back", "left", "right")
+MAX_DROP = 3
+KEEPOUT = (-192.0, -184.0, 21.0, 30.0)  # x0, x1, z0, z1: the mine's box, blocks (cells -192..-184 / 21..30), any height
+PLAYER_RADIUS = 0.3
+LOOK_STEP = 0.7  # blocks between checked points along a key's direction, from the feet
+LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
+
+
+def key_vector(key: str, yaw: float):
+    """Horizontal unit vector of a movement key for view yaw (forward (-sin, cos), right (-cos, -sin))."""
+    radians = math.radians(yaw)
+    return {"forward": (-math.sin(radians), math.cos(radians)), "back": (math.sin(radians), -math.cos(radians)),
+            "right": (-math.cos(radians), -math.sin(radians)), "left": (math.cos(radians), math.sin(radians))}[key]
+
+
+def in_keepout(x: float, z: float, box) -> bool:
+    """Whether (x, z) is in the keep-out box (cells x0..x1, z0..z1 inclusive) with the player's radius."""
+    if box is None:
+        return False
+    x0, x1, z0, z1 = box
+    return x0 - PLAYER_RADIUS < x < x1 + 1 + PLAYER_RADIUS and z0 - PLAYER_RADIUS < z < z1 + 1 + PLAYER_RADIUS
+
+
+def judge_column(rows: dict, feet_y: int):
+    """(ok, drop, why) for walking into a column: `rows` maps y to the scan row of that cell, feet_y the cell the
+    feet stand in. The ground is the first cell with collision at or below feet_y - 1, found within MAX_DROP + 1
+    cells; a drop is the free cells between the feet and it. Water or lava in a cell passed, an unread cell,
+    or no ground within reach all refuse. A solid cell at feet level (a step or wall) is not a drop."""
+    for y in range(feet_y, feet_y - MAX_DROP - 2, -1):
+        row = rows.get(y)
+        if row is None:
+            return False, feet_y - y, "unloaded"
+        if not row["fluid"]["empty"]:
+            return False, max(feet_y - y, 0), "lava" if "lava" in row["block_id"] else "water"
+        if not row["collision_empty"]:
+            return True, max(feet_y - 1 - y, 0), ""
+    return False, MAX_DROP + 1, "no ground"
+
+
+class Guard:
+    """Route guard over the client's MCP block reads; see the comment above."""
+
+    def __init__(self, client, keepout=KEEPOUT):
+        self.c, self.keepout = client, keepout
+        self.cache: dict[tuple, dict] = {}  # (x, z, feet_y) -> {y: row} for fully read columns
+        self.logged: dict[tuple, float] = {}
+
+    def cells(self, here, vector, reach):
+        """Distinct (x, z) cells along `vector` from the feet, 0.7 blocks apart up to `reach`, not the feet's own."""
+        own = (math.floor(here[0]), math.floor(here[2]))
+        out, k = [], LOOK_STEP
+        while k <= reach + 1e-9:
+            cell = (math.floor(here[0] + vector[0] * k), math.floor(here[2] + vector[1] * k))
+            if cell != own and cell not in out:
+                out.append(cell)
+            k += LOOK_STEP
+        return out
+
+    def columns(self, cells, feet_y):
+        """{cell: {y: row or None}} for columns feet_y - MAX_DROP - 1 .. feet_y; one scan for the cells not cached.
+        Only complete columns are cached, so a chunk that loads later is read again."""
+        need = [c for c in cells if (c[0], c[1], feet_y) not in self.cache]
+        got: dict = {}
+        if need:
+            low = feet_y - MAX_DROP - 1
+            box = {"min_x": min(c[0] for c in need), "max_x": max(c[0] for c in need), "min_z": min(c[1] for c in need),
+                   "max_z": max(c[1] for c in need), "min_y": low, "max_y": feet_y}
+            offset = 0
+            while True:
+                page = self.c.tool("minecraft_scan_blocks", {**box, "offset": offset} if offset else box)
+                for row in page["blocks"]:
+                    got[(row["x"], row["y"], row["z"])] = row
+                if not page.get("truncated"):
+                    break
+                offset = page["next_offset"]
+            for cell in need:
+                column = {y: got.get((cell[0], y, cell[1])) for y in range(low, feet_y + 1)}
+                if None not in column.values():
+                    self.cache[(cell[0], cell[1], feet_y)] = column
+                else:
+                    self.cache.pop((cell[0], cell[1], feet_y), None)
+                    got[("partial", cell)] = column
+        return {c: self.cache.get((c[0], c[1], feet_y)) or got[("partial", c)] for c in cells}
+
+    def judge(self, cells, feet_y):
+        """The first refused cell as (cell, drop, why), else None."""
+        try:
+            columns = self.columns(cells, feet_y)
+        except RuntimeError as error:
+            if any(code in str(error) for code in RECOVERABLE):
+                raise
+            return cells[0], MAX_DROP + 1, "block read failed: " + str(error)[:80]
+        for cell in cells:
+            ok, drop, why = judge_column(columns[cell], feet_y)
+            if not ok:
+                return cell, drop, why
+        return None
+
+    def refuse(self, line: str, key: tuple):
+        now = time.monotonic()
+        if now - self.logged.get(key, -1e9) >= LOG_AGAIN:
+            self.logged[key] = now
+            log(line)
+
+    def filter(self, wanted: set, here, yaw: float, reach: float) -> set:
+        """`wanted` without the horizontal keys that walk into the keep-out box, off a drop of more than MAX_DROP
+        blocks, or into water or lava; sprint and jump go with their last walking key. `reach` is how far (blocks)
+        the key can carry him before the next check. From inside the box only keys that lead out are allowed."""
+        feet_y = math.floor(here[1])
+        inside = in_keepout(here[0], here[2], self.keepout)
+        centre = None if self.keepout is None else ((self.keepout[0] + self.keepout[1] + 1) / 2, (self.keepout[2] + self.keepout[3] + 1) / 2)
+        keep = set(wanted)
+        for key in WALK_KEYS:
+            if key not in wanted:
+                continue
+            vector = key_vector(key, yaw)
+            if inside:
+                leaves = vector[0] * (here[0] - centre[0]) + vector[1] * (here[2] - centre[1]) > 0
+                if not leaves:
+                    keep.discard(key)
+                    self.refuse(f"keepout refused {key} at {[round(v, 1) for v in here]} (inside the box, key leads deeper)", ("keepout", key))
+                continue
+            ahead = [(here[0] + vector[0] * k, here[2] + vector[1] * k)
+                     for k in [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP) + 2)]]
+            if any(in_keepout(x, z, self.keepout) for x, z in ahead):
+                keep.discard(key)
+                self.refuse(f"keepout refused {key} at {[round(v, 1) for v in here]} "
+                            f"(box x {self.keepout[0]:g}..{self.keepout[1]:g}, z {self.keepout[2]:g}..{self.keepout[3]:g})", ("keepout", key))
+                continue
+            bad = self.judge(self.cells(here, vector, reach), feet_y)
+            if bad is not None:
+                (cx, cz), drop, why = bad
+                keep.discard(key)
+                self.refuse(f"edge refused {key} at {cx},{feet_y},{cz} drop={drop if drop <= MAX_DROP else str(MAX_DROP + 1) + '+'} ({why})",
+                            ("edge", key, cx, cz))
+        if not keep & set(WALK_KEYS):
+            keep -= {"sprint", "jump"}
+        elif "forward" not in keep:
+            keep.discard("sprint")
+        return keep
+
+
 class Pilot:
     def __init__(self, client: Client):
         self.c = client
@@ -199,6 +349,7 @@ def side_of(client: Client, entity) -> str | None:
 
 def rank(args, client: Client):
     pilot = Pilot(client)
+    guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
     client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
     log("in play; holding rank")
     me = pilot.player()
@@ -365,6 +516,10 @@ def rank(args, client: Client):
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
+        # Route guard: no key that walks into the keep-out box, off a drop or into water or lava.
+        if guard is not None:
+            speed = 5.6 if "sprint" in wanted else 4.3
+            wanted = guard.filter(wanted, here, yaw, min(3.0, max(1.5, speed * step_time + 1.0)))
         # Held keys stay down for the whole step. When the last step was so long that
         # holding would carry him past his place, walk a bounded pulse of ticks instead.
         pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
@@ -424,6 +579,10 @@ def arguments(argv=None):
     parser.add_argument("--attack-interval", type=float, default=0.65)
     parser.add_argument("--classify-per-step", type=int, default=8,
                         help="side reads per step until his place is measured (then 2)")
+    parser.add_argument("--keepout", type=float, nargs=4, metavar=("X0", "X1", "Z0", "Z1"), default=list(KEEPOUT),
+                        help="keep-out box in block cells, any height (default: the mine, x -192..-184, z 21..30)")
+    parser.add_argument("--no-keepout", action="store_true")
+    parser.add_argument("--no-guard", action="store_true", help="no block checks before steps (drops, water, lava)")
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     return parser.parse_args(argv)
