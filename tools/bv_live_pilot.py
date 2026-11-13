@@ -438,7 +438,8 @@ def diag_before(observed: dict, item) -> str:
     """The one diagnostic line before an attack: `using` whole, held inputs, game mode, the crosshair target, main hand."""
     return clip("attack diag before: using=" + json.dumps(observed.get("using"), sort_keys=True, separators=(",", ":"))
                 + " held=" + json.dumps((observed.get("inputs") or {}).get("held"), sort_keys=True)
-                + " game_mode=" + json.dumps((observed.get("player") or {}).get("game_mode"))
+                + " game_mode=" + json.dumps(next((found for found in ((observed.get("player") or {}).get("game_mode"), observed.get("game_mode"))
+                                                   if found is not None), "absent"))
                 + " target=" + json.dumps(observed.get("target"), sort_keys=True, separators=(",", ":"))
                 + " main_hand=" + (item if isinstance(item, str) else json.dumps(item, sort_keys=True, separators=(",", ":"))))
 
@@ -464,7 +465,7 @@ def press_attack(client: Client):
     log(clip("attack diag after: " + json.dumps(answer, sort_keys=True, separators=(",", ":"))))
 
 
-def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
+def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
     """One swing at `target` through the ordinary inputs, as a player does: the shield is let go, the look is put on a
     point of the enemy's box, the client's own crosshair target (`minecraft_observe` `target`) must be an enemy within
     reach, and only then the ordinary `attack` input is pressed for one tick. (`minecraft_attack_entity_once` is not
@@ -515,6 +516,74 @@ def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dic
     blocked[ident] = time.monotonic() + BLOCK_FOR
     log(f"attack skipped (crosshair {', '.join(seen)}; target {ident} left alone {BLOCK_FOR} s)")
     return False
+
+
+OCCLUDED = re.compile(r"occluded by entity (\d+)")
+
+
+def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool, hops: int = 2):
+    """One swing at `target` with the client's `minecraft_attack_entity_once` (`--attack-mode once`): the shield is let
+    go and nothing may be in use, reach is measured from the eye again, an enemy "occluded by entity N" is struck
+    instead, a friend or unknown-side entity never, and every refusal is told apart in the log. The observation before
+    the call and the tool's whole answer (or error) after it are logged. Returns True when dispatched."""
+    ident = target["entity_id"]
+    if not release_use(client, pilot, waited):
+        log("attack not dispatched (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
+        return False
+    me = pilot.player()
+    page = client.tool("minecraft_list_entities", {"radius": args.reach + 4.0, "limit": 32})["entities"]
+    fresh = next((e for e in page if e["entity_id"] == ident), None)
+    if fresh is None:
+        log("attack skipped: entity", ident, "left the page")
+        return False
+    reach = eye_distance(me, fresh)
+    if reach > args.reach:
+        log("attack out of reach", ident, "eye distance", round(reach, 2), ">", args.reach)
+        return False
+    before = fresh.get("health")
+    log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
+    try:
+        result = client.tool("minecraft_attack_entity_once", {**identity(fresh), "timeout_seconds": 1.0})
+    except RuntimeError as error:
+        text = str(error)
+        log(clip("attack diag after: error " + text))
+        if any(code in text for code in RECOVERABLE):
+            raise
+        in_way = OCCLUDED.search(text)
+        if in_way:
+            other = int(in_way.group(1))
+            entity = next((e for e in page if e["entity_id"] == other), None)
+            side = sides.get(other) if other in sides else (side_of(client, entity) if entity is not None else None)
+            if entity is not None:
+                sides[other] = side
+            if side is not None and side != args.side:
+                log("attack occluded by enemy", other, "(", ident, "behind it): striking", other)
+                if hops > 0 and entity is not None:
+                    return attack_once(client, pilot, entity, args, sides, blocked, True, hops - 1)
+                return False
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+            log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
+                "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
+            return False
+        if "occluded by" in text:
+            log("attack occluded by block:", text[:160])
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+        elif "reach" in text:
+            log("attack out of reach (client):", text[:160])
+        elif "not dispatched" in text:
+            log("attack not dispatched", ident, text[:200])
+        else:
+            log("attack failed", ident, text[:200])
+        return False
+    log(clip("attack diag after: " + json.dumps(result, sort_keys=True, separators=(",", ":"))))
+    log("attack dispatched", ident, "health before", before)
+    return True
+
+
+def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
+    """One swing by `--attack-mode`: `input` (the ordinary inputs, default) or `once` (minecraft_attack_entity_once)."""
+    swing = attack_once if args.attack_mode == "once" else attack_input
+    return swing(client, pilot, target, args, sides, blocked, waited)
 
 
 def rank(args, client: Client):
@@ -795,6 +864,8 @@ def arguments(argv=None):
                         help="raise the off-hand shield while an enemy is this close (0 = never)")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
+    parser.add_argument("--attack-mode", default="input", choices=("input", "once"),
+                        help="input: look at the enemy and press the attack input (default); once: minecraft_attack_entity_once")
     parser.add_argument("--attack-interval", type=float, default=0.65)
     parser.add_argument("--classify-per-step", type=int, default=8,
                         help="side reads per step until his place is measured (then 2)")

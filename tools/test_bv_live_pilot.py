@@ -41,6 +41,7 @@ class MarchingRank:
         self.ys: dict[int, float] = {}  # feet y of soldiers that are not at 64
         self.using_ticks = 0  # ticks the client still reports an item in use after the use key is let go
         self.always_using = False
+        self.mode, self.once_calls = "input", []  # the pilot's --attack-mode; targets of minecraft_attack_entity_once
         self.attacks, self.hits = [], []  # attack inputs pressed / entities they struck
         self.soldiers = {}
         ident = 100
@@ -75,9 +76,9 @@ class MarchingRank:
         if self.now >= self.duration:
             raise Stop
 
-    def crosshair(self):
+    def crosshair(self, look=None):
         """The client's raycast from the eye along the look: the nearest soldier box within 3 blocks of reach."""
-        yaw, pitch = math.radians(self.yaw), math.radians(self.pitch)
+        yaw, pitch = (math.radians(self.yaw), math.radians(self.pitch)) if look is None else map(math.radians, look)
         direction = (-math.sin(yaw) * math.cos(pitch), -math.sin(pitch), math.cos(yaw) * math.cos(pitch))
         eye = (self.me[0], 64.0 + 1.62, self.me[1])
         best = None
@@ -118,7 +119,7 @@ class MarchingRank:
             return {}
         if name == "minecraft_observe":
             return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
-                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False, "game_mode": 0},
+                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
                     "inputs": {"held": sorted(self.held)},
                     "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
                     "target": self.crosshair()}
@@ -131,7 +132,25 @@ class MarchingRank:
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
             return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
         if name == "minecraft_attack_entity_once":
-            raise AssertionError("the pilot must not use minecraft_attack_entity_once")
+            if self.mode != "once":
+                raise AssertionError("--attack-mode input must not use minecraft_attack_entity_once")
+            target = arguments["entity_id"]
+            self.once_calls.append(target)
+            if self.always_using or "use" in self.held or self.using_ticks:
+                raise RuntimeError("ordinary entity attack was not dispatched")
+            where = self.entity(target, self.soldiers[target])
+            if client_reach(self.me, where) > 3.0:
+                raise RuntimeError("target entity is out of interaction reach: 4.1 blocks; approach first")
+            box = where["bounding_box"]
+            centre = [(box["min_x"] + box["max_x"]) / 2, (box["min_y"] + box["max_y"]) / 2, (box["min_z"] + box["max_z"]) / 2]
+            eye = (self.me[0], 64.0 + 1.62, self.me[1])
+            yaw, pitch = pilot.look_angles(eye, [centre[0], centre[1], centre[2]])
+            # the client's aim: the centre ray; a different entity there is "occluded by entity N"
+            seen = self.crosshair((yaw, pitch))
+            if seen["type"] == "entity" and seen["entity_id"] != target:
+                raise RuntimeError(f"target entity is occluded by entity {seen['entity_id']}; reposition for a clear line")
+            self.hits.append(target)
+            return {"dispatched": True, "confirmed": False}
         if name == "minecraft_scan_blocks":
             return scan(lambda x, y, z: block(solid=self.floor(x, z) is not None and y <= self.floor(x, z)), arguments)
         if name == "minecraft_look":
@@ -576,6 +595,7 @@ def duel(enemies, friends=None, duration=10.0, call=0.05, always_using=False, ar
         sim.soldiers[ident] = [x, z]
         sim.ys[ident] = y
     sim.always_using = always_using
+    sim.mode = argv[argv.index("--attack-mode") + 1] if "--attack-mode" in argv else "input"
     logs = []
     saved = pilot.time, pilot.log
     pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
@@ -643,7 +663,7 @@ class Fighting(unittest.TestCase):
         self.assertTrue(sent)
         for i in sent:
             before, after = logs[i - 2], logs[i - 1]
-            self.assertTrue(before.startswith("attack diag before: using=null held=[] game_mode=0 target={"), before)
+            self.assertTrue(before.startswith("attack diag before: using=null held=[] game_mode=\"absent\" target={"), before)
             self.assertIn('"entity_id":1000', before)
             self.assertIn("main_hand=unreadable: no held item data", before)
             self.assertEqual(after, 'attack diag after: {}')
@@ -654,9 +674,54 @@ class Fighting(unittest.TestCase):
                                   "player": {"game_mode": 3}, "target": {"type": "none"}}, {"components": {"x": 1}})
         self.assertEqual(line, 'attack diag before: using={"hand":1,"item_id":7,"remaining":40} held=["use", "forward"] '
                                'game_mode=3 target={"type":"none"} main_hand={"components":{"x":1}}')
+        absent = pilot.diag_before({"using": None, "inputs": {"held": []}, "target": {"type": "none"}}, "unreadable: x")
+        self.assertIn(" game_mode=\"absent\" ", absent)
+        self.assertIn(" game_mode=1 ", pilot.diag_before({"game_mode": 1}, {}))
         long = pilot.clip({"k": "v" * 1000})
         self.assertEqual(len(long), 400)
         self.assertTrue(long.endswith("..."))
+
+    def test_once_mode_strikes_with_the_tool_and_frames_every_call_with_the_diagnostic(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, argv=("--attack-mode", "once"))
+        self.assertGreaterEqual(sim.hits.count(1000), 5, logs[-6:])
+        self.assertEqual(sim.attacks, [], "once mode never presses the attack input")
+        self.assertEqual(len(sim.once_calls), len([line for line in logs if line.startswith("attack dispatched")]))
+        for i, line in enumerate(logs):
+            if line.startswith("attack dispatched"):
+                self.assertTrue(logs[i - 2].startswith("attack diag before: using=null held=[] game_mode=\"absent\" target="), logs[i - 2])
+                self.assertEqual(logs[i - 1], 'attack diag after: {"confirmed":false,"dispatched":true}')
+
+    def test_once_mode_logs_the_error_text_after_a_refused_call(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, always_using=True, argv=("--attack-mode", "once"))
+        self.assertEqual(sim.once_calls, [], "no call while the client reports an item in use")
+        self.assertTrue(any("attack not dispatched (item still in use" in line for line in logs))
+        sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=6.0, argv=("--attack-mode", "once"))
+        self.assertEqual(sim.hits, [], "a friend in the way is not struck in once mode either")
+        self.assertTrue(any(line.startswith("attack diag after: error target entity is occluded by entity 500") for line in logs), logs[-6:])
+        self.assertTrue(any(line.startswith("attack occluded by friend 500") for line in logs))
+
+    def test_once_mode_strikes_an_enemy_in_the_way(self):
+        sim = MarchingRank(0.05, march=0.0, duration=60.0)
+        sim.soldiers = {1000: [0.0, 2.0], 1001: [0.0, 1.2]}
+        sim.mode = "once"
+        logs = []
+        saved = pilot.log
+        pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+        try:
+            target = next(e for e in sim.tool("minecraft_list_entities", {"radius": 9, "limit": 9})["entities"] if e["entity_id"] == 1000)
+            pilot.attack_once(sim, pilot.Pilot(sim), target, pilot.arguments(["runtime", "--attack-mode", "once"]),
+                              {1000: "blue", 1001: "blue"}, {}, True)
+        finally:
+            pilot.log = saved
+        self.assertEqual(sim.hits, [1001])
+        self.assertTrue(any(line.startswith("attack occluded by enemy 1001") for line in logs), logs)
+
+    def test_input_mode_is_the_default_and_never_calls_the_tool(self):
+        self.assertEqual(pilot.arguments(["runtime"]).attack_mode, "input")
+        self.assertEqual(pilot.arguments(["runtime", "--attack-mode", "once"]).attack_mode, "once")
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)})  # the sim raises if the tool is called in input mode
+        self.assertEqual(sim.once_calls, [])
+        self.assertTrue(sim.hits)
 
     def test_the_look_is_in_whole_degrees_and_the_old_swing_tool_is_not_used(self):
         sim, logs = duel({1000: (0.7, 2.1, 64.0)})  # the sim raises on attack_entity_once and on fractional looks
