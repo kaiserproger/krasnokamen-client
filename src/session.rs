@@ -1015,8 +1015,8 @@ impl Session {
                 self.world_tick,
                 &mut self.commands,
             )?;
-            if self.follow.is_some() {
-                self.follow_tick();
+            if let Some(follow) = &self.follow {
+                follow.trail(&self.entities, &mut self.player);
             }
             self.environment
                 .tick_vignette(&self.world, self.player.eye_position())?;

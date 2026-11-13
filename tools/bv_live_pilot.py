@@ -106,6 +106,20 @@ def position(record) -> list[float]:
     return [float(record["x"]), float(record["y"]), float(record["z"])]
 
 
+def attack_interval(client: Client, fallback: float) -> float:
+    """Seconds between full-strength hits with the selected weapon: 1 / (4 + attack_speed modifier)."""
+    try:
+        stack = client.tool("minecraft_read_item_components", {"source": "selected"})
+    except RuntimeError:
+        return fallback
+    for modifier in (stack.get("components") or {}).get("minecraft:attribute_modifiers") or []:
+        if isinstance(modifier, dict) and modifier.get("type") == "minecraft:attack_speed":
+            speed = 4.0 + float(modifier.get("amount", 0.0))
+            if speed > 0:
+                return 1.0 / speed + 0.05
+    return fallback
+
+
 def identity(entity):
     return {"entity_id": entity["entity_id"], "entity_uuid": entity["entity_uuid"],
             "entity_type": entity["entity_type"]}
@@ -146,6 +160,8 @@ def rank(args, client: Client):
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
+    interval = attack_interval(client, args.attack_interval)
+    log("attack interval", round(interval, 2), "s")
     while True:
         me = pilot.player()
         here = position(me)
@@ -172,6 +188,8 @@ def rank(args, client: Client):
             offset, target = None, None
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
+            interval = attack_interval(client, args.attack_interval)
+            log("attack interval", round(interval, 2), "s")
         last = here
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": 160})["entities"]
         new = 0
@@ -233,10 +251,19 @@ def rank(args, client: Client):
                     wanted.add("sprint")
         pilot.keys(wanted)
         now = time.monotonic()
-        if (enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= args.attack_interval
-                and abs(wrap(face_yaw - yaw)) < 25.0):
-            pilot.tap("attack")
-            last_attack = now
+        if enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval:
+            # The ordinary attack: aim at any visible part of the enemy's box, attack
+            # input, then wait briefly for authoritative damage or removal.
+            before = enemy.get("health")
+            try:
+                result = client.tool("minecraft_attack_entity_once", {**identity(enemy), "timeout_seconds": 1.0})
+                log("hit", enemy["entity_id"], "health before", before, "->", json.dumps(result)[:240])
+            except RuntimeError as error:
+                log("swing at", enemy["entity_id"], "no confirmed damage:", str(error)[:200])
+            last_attack = time.monotonic()
+            aimed = pilot.player()
+            yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
+            pilot.sent_look = (int(round(wrap(yaw))), int(round(pitch)))
         client.tool("minecraft_wait_ticks", {"ticks": 2})
 
 

@@ -19,25 +19,41 @@ pub(super) struct Follow {
     yaw: Option<(f64, f32)>,
 }
 
+impl Follow {
+    /// The followed player's entity, resolved by name through the received player
+    /// list and UUID on every call: a respawn or a new entity id is picked up at once.
+    fn entity<'a>(&self, entities: &'a crate::entities::Store) -> Option<&'a crate::entities::Entity> {
+        let profile = entities.profiles.values().find(|profile| profile.name == self.name)?;
+        entities.uuid_entities.get(&profile.uuid)?.iter()
+            .filter_map(|id| entities.get(*id))
+            .find(|entity| entity.type_name == "minecraft:player")
+    }
+
+    /// Each client tick the local spectator trails the camera, so the server streams
+    /// the area around the target. Spectators only: they fly through blocks anyway.
+    pub(super) fn trail(&self, entities: &crate::entities::Store, player: &mut crate::player::Player) {
+        if player.game_mode != 3 {
+            return;
+        }
+        let Some(entity) = self.entity(entities) else { return };
+        let yaw = self.yaw.map_or(entity.transform.head_yaw, |(_, yaw)| yaw);
+        let offset = boom(yaw);
+        player.position = std::array::from_fn(|i| entity.position[i] + offset[i]);
+        player.velocity = [0.; 3];
+        player.yaw = yaw;
+        player.pitch = PITCH;
+    }
+}
+
 impl Session {
     pub(crate) fn set_follow_player(&mut self, name: Option<String>) {
         self.follow = name.map(|name| Follow { name, yaw: None });
     }
 
-    /// The followed player's entity, resolved by name through the received player
-    /// list and UUID on every call: a respawn or a new entity id is picked up at once.
-    fn followed_entity(&self) -> Option<&crate::entities::Entity> {
-        let name = &self.follow.as_ref()?.name;
-        let profile = self.entities.profiles.values().find(|profile| profile.name == *name)?;
-        self.entities.uuid_entities.get(&profile.uuid)?.iter()
-            .filter_map(|id| self.entities.get(*id))
-            .find(|entity| entity.type_name == "minecraft:player")
-    }
-
     /// Camera over the followed player's shoulder, pulled in before terrain; None
     /// while he is not received (the spectator's own view stays until he is).
     pub(super) fn follow_camera(&mut self) -> Option<([f64; 3], f32, f32)> {
-        let entity = self.followed_entity()?;
+        let entity = self.follow.as_ref()?.entity(&self.entities)?;
         let (eye, head_yaw, _) = self.entities.eye_view(entity, self.world_tick, self.presentation_partial).ok()?;
         let now = self.client_tick as f64 + f64::from(self.local_partial);
         let follow = self.follow.as_mut()?;
@@ -57,22 +73,6 @@ impl Session {
             crate::player::camera_distance(&self.world, content, eye, direction).min(length)
         });
         Some((std::array::from_fn(|i| eye[i] + direction[i] * distance), wrap(yaw), PITCH))
-    }
-
-    /// Each client tick the local spectator trails the camera, so the server streams
-    /// the area around the target. Spectators only: they fly through blocks anyway.
-    pub(super) fn follow_tick(&mut self) {
-        if self.player.game_mode != 3 {
-            return;
-        }
-        let Some(entity) = self.followed_entity() else { return };
-        let yaw = self.follow.as_ref().and_then(|follow| follow.yaw).map_or(entity.transform.head_yaw, |(_, yaw)| yaw);
-        let offset = boom(yaw);
-        let position = entity.position;
-        self.player.position = std::array::from_fn(|i| position[i] + offset[i]);
-        self.player.velocity = [0.; 3];
-        self.player.yaw = yaw;
-        self.player.pitch = PITCH;
     }
 }
 
