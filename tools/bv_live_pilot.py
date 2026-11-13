@@ -10,6 +10,8 @@ presses attack when an enemy is in reach. Route guard: before a movement key is 
 are read from the client's loaded blocks (minecraft_scan_blocks); a key toward a drop of more than 3 blocks (no ground
 within 4 below the feet), water, lava, unread blocks, or into the keep-out box (--keepout, default the mine
 x -192..-184, z 21..30) is not pressed and logs `edge refused <key> at X,Y,Z drop=N (why)` or `keepout refused <key> ...`.
+`--probe X Z` walks to X Z through the same guard and bounded pulses, with no rank, for checking the guard at a chosen
+ledge, pit, water or the keep-out box on a real client (logs `probe step ...` and `probe done: ...`).
 RUNTIME_DIR is the client's --runtime-dir;
 the client runs with `--automation --mcp-http 127.0.0.1:0 --windowed` and
 `--hide-hud-keep-hand`. MCP input needs the client window focused. Every action is an
@@ -249,7 +251,7 @@ class Guard:
                     ("edge", name, cx, cz))
         return None
 
-    def filter(self, wanted: set, here, yaw: float, reach: float) -> set:
+    def filter(self, wanted: set, here, yaw: float, reach: float, quiet: bool = False) -> set:
         """`wanted` without the horizontal keys that walk into the keep-out box, off a drop of more than MAX_DROP
         blocks, or into water or lava; sprint and jump go with their last walking key. `reach` is how far (blocks)
         the key can carry him before the next check. Every key is checked alone, then the keys left together
@@ -263,7 +265,8 @@ class Guard:
                 no = self.refused(key, key_vector(key, yaw), here, reach)
                 if no:
                     keep.discard(key)
-                    self.refuse(*no)
+                    if not quiet:
+                        self.refuse(*no)
         ahead = ("forward" in keep) - ("back" in keep)
         side = ("right" in keep) - ("left" in keep)
         if ahead and side:
@@ -274,7 +277,8 @@ class Guard:
             no = self.refused(name, vector, here, reach)
             if no:
                 keep.discard("right" if side > 0 else "left")
-                self.refuse(*no)
+                if not quiet:
+                    self.refuse(*no)
         if not keep & set(WALK_KEYS):
             keep -= {"sprint", "jump"}
         elif "forward" not in keep:
@@ -533,26 +537,7 @@ def rank(args, client: Client):
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
-        # Route guard: no key that walks into the keep-out box, off a drop or into water or lava.
-        # With the guard on, movement is never held: a held key walks through every blocking MCP call of the step
-        # (a call can stall for seconds), past the ground the guard has read. Each step is one bounded pulse of
-        # ticks, shorter than the ground read ahead along every key; the next step reads the position again.
-        checked = None  # blocks along each key that the guard has read ground for
-        if guard is not None:
-            checked = min(GUARD_REACH, max(1.5, (distance if target is not None else 0.0) + 1.0))
-            wanted = guard.filter(wanted, here, yaw, checked)
-        pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
-        speed = 5.6 if "sprint" in pulse else 4.3
-        # Without the guard, held keys stay down for the whole step. When the last step was so long that
-        # holding would carry him past his place, walk a bounded pulse of ticks instead.
-        if pulse and (guard is not None or step_time * speed > distance + 0.5):
-            wanted -= pulse
-        else:
-            pulse = set()
-        pilot.keys(wanted)
-        if pulse:
-            walk = distance if checked is None else min(distance, checked - 0.5)
-            client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, math.ceil(walk / speed * 20)))})
+        move(client, pilot, guard, wanted, here, yaw, distance if target is not None else 0.0, step_time)
         if strike:
             # The ordinary attack: aim at any visible part of the enemy's box, attack
             # input, then wait briefly for authoritative damage or removal.
@@ -582,6 +567,70 @@ def rank(args, client: Client):
             last_status, steps = time.monotonic(), 0
 
 
+def move(client: Client, pilot: Pilot, guard, wanted: set, here, yaw: float, distance: float, step_time: float):
+    """The step's keys, through the route guard: no key that walks into the keep-out box, off a drop or into
+    water or lava. With the guard on, movement is never held: a held key walks through every blocking MCP call
+    of the step (a call can stall for seconds), past the ground the guard has read. Each step is one bounded
+    pulse of ticks, shorter than the ground read ahead along every key; the next step reads the position again.
+    Returns the keys that were walked (empty when refused)."""
+    wanted = set(wanted)
+    checked = None  # blocks along each key that the guard has read ground for
+    if guard is not None:
+        # Read as far as the walk goes; a drop, water or the box inside that range shortens the walk to the
+        # nearer reach that is clear (half, then 1.5 blocks), and only a refusal at 1.5 blocks is logged.
+        far = min(GUARD_REACH, max(1.5, distance + 1.0))
+        reaches = [far, max(1.5, far / 2), 1.5] if far > 1.5 else [1.5]
+        for checked in reaches[:-1]:
+            kept = guard.filter(wanted, here, yaw, checked, quiet=True)
+            if kept & {"forward", "back", "left", "right"} or not wanted & {"forward", "back", "left", "right"}:
+                break
+        else:
+            checked, kept = reaches[-1], None
+        wanted = kept if kept is not None else guard.filter(wanted, here, yaw, checked)
+    pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
+    speed = 5.6 if "sprint" in pulse else 4.3
+    # Without the guard, held keys stay down for the whole step. When the last step was so long that
+    # holding would carry him past his place, walk a bounded pulse of ticks instead.
+    if pulse and (guard is not None or step_time * speed > distance + 0.5):
+        wanted -= pulse
+    else:
+        pulse = set()
+    pilot.keys(wanted)
+    if pulse:
+        walk = distance if checked is None else min(distance, checked - 0.5)
+        client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, math.ceil(walk / speed * 20)))})
+    return pulse or (wanted & {"forward", "back", "left", "right"})
+
+
+def probe(args, client: Client):
+    """`--probe X Z`: walk to (X, Z) with the same route guard and bounded pulses as the rank, no rank, no
+    enemies. For checking the guard on a real client at a chosen ledge, pit, water or the keep-out box. Logs
+    `probe step ...` per step and `probe done: <reason>` (arrived / refused N steps in a row / step limit)."""
+    pilot = Pilot(client)
+    guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
+    client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
+    goal = args.probe
+    last_step, refused = time.monotonic(), 0
+    for step in range(args.probe_steps):
+        me = pilot.player()
+        here = position(me)
+        now = time.monotonic()
+        distance = math.hypot(goal[0] - here[0], goal[1] - here[2])
+        if distance < args.probe_arrive:
+            return log("probe done: arrived at", [round(v, 1) for v in here], "goal", goal)
+        yaw, _ = look_angles(here, [goal[0], here[1], goal[1]])
+        pilot.look(yaw, 8.0)
+        walked = move(client, pilot, guard, {"forward"}, here, yaw, distance, now - last_step)
+        last_step = now
+        refused = 0 if walked else refused + 1
+        log("probe step", step, "at", [round(v, 1) for v in here], "goal", goal, "distance", round(distance, 1),
+            "walked" if walked else "REFUSED")
+        if refused >= args.probe_refused:
+            return log("probe done: refused", refused, "steps in a row at", [round(v, 1) for v in here])
+        client.tool("minecraft_wait_ticks", {"ticks": 2})
+    log("probe done: step limit", args.probe_steps, "at", [round(v, 1) for v in position(pilot.player())])
+
+
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runtime", type=pathlib.Path, help="the client's --runtime-dir")
@@ -604,6 +653,11 @@ def arguments(argv=None):
                         help="keep-out box in block cells, any height (default: the mine, x -192..-184, z 21..30)")
     parser.add_argument("--no-keepout", action="store_true")
     parser.add_argument("--no-guard", action="store_true", help="no block checks before steps (drops, water, lava)")
+    parser.add_argument("--probe", type=float, nargs=2, metavar=("X", "Z"),
+                        help="no rank: walk to X Z through the route guard and stop (guard check on a real client)")
+    parser.add_argument("--probe-steps", type=int, default=60)
+    parser.add_argument("--probe-refused", type=int, default=3, help="stop after this many refused steps in a row")
+    parser.add_argument("--probe-arrive", type=float, default=0.6)
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     return parser.parse_args(argv)
@@ -617,6 +671,9 @@ def main():
     try:
         while True:
             try:
+                if args.probe:
+                    probe(args, client)
+                    break
                 rank(args, client)
             except RuntimeError as error:
                 # Recoverable: the window lost focus, or play is between screens. The

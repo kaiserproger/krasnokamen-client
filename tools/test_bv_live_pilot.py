@@ -384,5 +384,52 @@ class RouteGuardMarch(unittest.TestCase):
         self.assertLess(z, 30.0, "his place is inside the box from z 30; he stays at its edge")
 
 
+def run_probe(argv, floor=lambda x, z: 63):
+    """`--probe` against the simulated client (no soldiers matter): (sim, log lines)."""
+    sim = MarchingRank(0.05, floor=floor)
+    logs = []
+    saved = pilot.time, pilot.log
+    pilot.time = types.SimpleNamespace(monotonic=lambda: sim.now, strftime=time.strftime)
+    pilot.log = lambda *parts: logs.append(" ".join(str(p) for p in parts))
+    try:
+        pilot.probe(pilot.arguments(["runtime", "--probe", *argv]), sim)
+    except Stop:
+        pass
+    finally:
+        pilot.time, pilot.log = saved
+    return sim, logs
+
+
+class Probe(unittest.TestCase):
+    """`--probe X Z`: the same guard and pulses on a chosen spot, for the real-client check at the ledge or the box."""
+
+    def test_it_walks_to_the_goal_on_flat_ground(self):
+        sim, logs = run_probe(["0", "12"])
+        self.assertLess(math.dist(sim.me, [0.0, 12.0]), 0.7)
+        self.assertTrue(logs[-1].startswith("probe done: arrived"), logs[-1])
+        self.assertEqual(sim.held_during, [])
+
+    def test_it_stops_at_a_ledge_and_logs_the_refusal(self):
+        sim, logs = run_probe(["0", "50"], floor=lambda x, z: 63 if z < 20 else None)
+        self.assertLess(sim.me[1], 20.0, "walked off the ledge")
+        self.assertGreater(sim.me[1], 15.0, "did not come up to it")
+        self.assertTrue(any(line.startswith("edge refused forward at") and "drop=4+" in line for line in logs), logs)
+        self.assertTrue(any("REFUSED" in line for line in logs))
+        self.assertRegex(logs[-1], r"^probe done: refused 3 steps in a row at")
+
+    def test_it_stops_at_the_keepout_box(self):
+        sim, logs = run_probe(["0", "50", "--keepout", "-3", "3", "20", "30"])
+        self.assertLess(sim.me[1], 20.0)
+        self.assertTrue(any(line.startswith("keepout refused forward at") for line in logs), logs)
+
+    def test_without_the_guard_it_walks_over(self):
+        sim, _ = run_probe(["0", "30", "--no-guard"], floor=lambda x, z: 63 if z < 20 else None)
+        self.assertGreater(sim.me[1], 25.0)
+
+    def test_the_step_limit_ends_it(self):
+        sim, logs = run_probe(["0", "500", "--probe-steps", "3"])
+        self.assertRegex(logs[-1], r"^probe done: step limit 3")
+
+
 if __name__ == "__main__":
     unittest.main()
