@@ -22,6 +22,8 @@ const IDS_PER_SIDE: usize = 6;
 /// Attackers window: a fighter is an attacker while his last main-hand melee
 /// swing is within the last 40 ticks (2 s) ending at the sample's tick.
 const ATTACK_WINDOW: u64 = 40;
+/// The server's fight window: a contact fighter is fighting if he acted within this many ticks.
+const FIGHT_WINDOW: u64 = 25;
 /// Entity types the scan treats as fighters.
 const FIGHTER_KINDS: [&str; 5] = ["minecraft:husk", "minecraft:zombie", "minecraft:skeleton", "minecraft:pillager", "minecraft:vindicator"];
 /// Field definitions, repeated in the header row so receipts are self-describing.
@@ -34,7 +36,8 @@ const COMBAT_DEFINITIONS: &str = "reach: per fighter, the melee range [min, max]
     (joined sideways with his horse's box when mounted) grown in x and z by max touches the target's body box (hitbox size from the entity facts; riders and horses are at the horse position), \
     and with min > 0 the box grown by min does not. The rule is the shared mc-melee-range crate (`in_melee_range`). \
     contact_fighters_legacy: the old symmetric 2.5-block count (contact_reach); `contacts` clusters still use contact_reach. \
-    events.fighting_2s: contact_fighters that made a main-hand attack swing or had a raised shield in the last 40 ticks. \
+    events.fighting_25t: contact_fighters that made a main-hand attack swing or had a raised shield in the last 25 ticks (the server's fight window); events.fighting_2s: the same over 40 ticks. \
+    The scanner sees only visible actions (SWING_ANIMATION attack swings and raised shields), not the server's internal Windup, Strike and Guard states. \
     events.shields_raised: fighters at the sample tick using an item (DATA_LIVING_ENTITY_FLAGS bit 1) whose hand (bit 2: off hand) holds minecraft:shield. \
     events.shield_blocks: SOUND_ENTITY minecraft:item.shield.block on a fighter in this interval (the server announces a block with that sound, not with an entity event).";
 
@@ -226,6 +229,9 @@ struct Combat {
     range: MeleeReach,
     /// Hitbox `[width, height]` from the entity facts.
     dims: [f64; 2],
+    /// Heights of the entity's PASSENGER attachment (where a rider sits on it) and its own VEHICLE
+    /// attachment (the point of the rider that sits on the vehicle), from the entity facts.
+    attach: [f64; 2],
     /// Item in the off hand (SET_EQUIPMENT slot 1).
     offhand: Option<String>,
     /// DATA_LIVING_ENTITY_FLAGS: bit 1 using an item, bit 2 the hand is the off hand.
@@ -235,7 +241,7 @@ struct Combat {
     shield_tick: Option<u64>,
 }
 impl Default for Combat {
-    fn default() -> Self { Self { range: MeleeReach::mob(None), dims: [0.; 2], offhand: None, flags: 0, shield_was_up: false, shield_tick: None } }
+    fn default() -> Self { Self { range: MeleeReach::mob(None), dims: [0.; 2], attach: [0.; 2], offhand: None, flags: 0, shield_was_up: false, shield_tick: None } }
 }
 
 /// Melee reach of a mob wielding the stack (`MeleeReach::mob`): the item's `minecraft:attack_range`
@@ -247,14 +253,16 @@ fn attack_range(components: &BTreeMap<String, Value>) -> MeleeReach {
     MeleeReach::mob(Some((field("min_reach", 0.), field("max_reach", 3.), field("mob_factor", 1.))))
 }
 
-/// A rider's own box and attack box. The server seats a rider (not a boat passenger) at the mount's
-/// x and z, 0.75 of the mount's height above its feet (mc-core mounts.rs); the attack box joins it
-/// with the mount's box sideways and keeps the rider's y (`mc_melee_range::attack_box`). The client
-/// does not stream a rider's position, so it is derived from the mount's.
-fn mounted_boxes(mount_position: [f64; 3], mount_dims: [f64; 2], rider_dims: [f64; 2]) -> (Aabb, Aabb) {
-    let rider = [mount_position[0], mount_position[1] + mount_dims[1] * 0.75, mount_position[2]];
-    let own = Aabb::at(rider, rider_dims[0], rider_dims[1]);
-    (own, attack_box(own, Some(Aabb::at(mount_position, mount_dims[0], mount_dims[1]))))
+/// A rider's own box and attack box. A rider sits at the mount's x and z and at the mount's PASSENGER
+/// attachment height minus his own VEHICLE attachment height (`Entity.positionRider`:
+/// `getPassengerRidingPosition` minus `getVehicleAttachmentPoint`, javap of 26.3; attachment heights
+/// from the entity facts, the horse's rearing offset ignored). The attack box joins it with the
+/// mount's box sideways and keeps the rider's y (`mc_melee_range::attack_box`). The client does not
+/// stream a rider's position, so it is derived from the mount's.
+fn mounted_boxes(mount_position: [f64; 3], mount: &Combat, rider: &Combat) -> (Aabb, Aabb) {
+    let seat = [mount_position[0], mount_position[1] + mount.attach[0] - rider.attach[1], mount_position[2]];
+    let own = Aabb::at(seat, rider.dims[0], rider.dims[1]);
+    (own, attack_box(own, Some(Aabb::at(mount_position, mount.dims[0], mount.dims[1]))))
 }
 
 impl Tracked {
@@ -473,17 +481,19 @@ impl Scan {
                     side
                 } else { None };
                 self.remove(entity);
-                // Hitbox size from the entity facts; without them (unit tests) a fighter has no body.
-                let dims = match &self.models {
+                // Hitbox size and attachment heights from the entity facts; without them (unit tests) a fighter has no body.
+                let (dims, attach) = match &self.models {
                     Some(models) if role != Role::Arrow => {
                         let schema = models.schemas.get(name).ok_or_else(|| format!("no entity facts for {name}"))?;
-                        [f64::from(schema.width), f64::from(schema.height)]
+                        let attachment = |kind: &str| schema.dimensions.attachments.get(kind).and_then(|points| points.first())
+                            .map(|point| point[1]).ok_or_else(|| format!("no {kind} attachment for {name}"));
+                        ([f64::from(schema.width), f64::from(schema.height)], [attachment("PASSENGER")?, attachment("VEHICLE")?])
                     }
-                    _ => [0.; 2],
+                    _ => ([0.; 2], [0.; 2]),
                 };
                 self.entities.insert(entity, Tracked { role, position, spawn: position, sampled: position, side,
                     weapon: None, vehicle: None, dead: false, stopped: false, velocity, base_tick: tick, spawn_tick: tick,
-                    first_contact: None, death_tick: None, combat: Combat { dims, ..Combat::default() } });
+                    first_contact: None, death_tick: None, combat: Combat { dims, attach, ..Combat::default() } });
             }
             cb::MOVE_ENTITY_POS | cb::MOVE_ENTITY_POS_ROT => {
                 let target = r.var()?;
@@ -728,7 +738,7 @@ impl Scan {
         let bodies: Vec<(Aabb, Aabb, MeleeReach, bool)> = fighters.iter().map(|f| {
             let e = &self.entities[&f.id];
             let (own, strike) = match e.vehicle.and_then(|v| self.entities.get(&v)) {
-                Some(mount) => mounted_boxes(mount.position, mount.combat.dims, e.combat.dims),
+                Some(mount) => mounted_boxes(mount.position, &mount.combat, &e.combat),
                 None => { let own = Aabb::at(f.position, e.combat.dims[0], e.combat.dims[1]); (own, attack_box(own, None)) }
             };
             (own, strike, e.combat.range, matches!(e.weapon.as_deref(), Some("minecraft:bow" | "minecraft:crossbow")))
@@ -736,8 +746,7 @@ impl Scan {
         // Centre distance bound of a touching pair: reach plus both half widths (a horse is at most 0.75 wide each side).
         let cell = bodies.iter().map(|b| b.2.max).fold(DEFAULT_ATTACK_REACH, f64::max) + 1.5;
         let cells = grid(fighters.iter().map(|f| f.position), cell);
-        let (mut contact_by_weapon, mut fighting, mut shields_raised) = (0usize, 0usize, 0usize);
-        let recent = |t: Option<u64>| t.is_some_and(|t| t + ATTACK_WINDOW > tick);
+        let (mut contact_by_weapon, mut fighting_25t, mut fighting_2s, mut shields_raised) = (0usize, 0usize, 0usize, 0usize);
         for (i, f) in fighters.iter().enumerate() {
             let in_reach = !bodies[i].3 && near(&cells, f.position, cell)
                 .any(|j| fighters[j].side != f.side && in_melee_range(bodies[i].1, bodies[j].0, bodies[i].2));
@@ -746,7 +755,12 @@ impl Scan {
             shields_raised += usize::from(e.shield_up());
             if in_reach {
                 contact_by_weapon += 1;
-                if recent(self.last_attack.get(&f.id).copied()) || recent(e.combat.shield_tick) { fighting += 1; }
+                let acted = |window: u64| {
+                    let recent = |t: Option<u64>| t.is_some_and(|t| t + window > tick);
+                    recent(self.last_attack.get(&f.id).copied()) || recent(e.combat.shield_tick)
+                };
+                fighting_25t += usize::from(acted(FIGHT_WINDOW));
+                fighting_2s += usize::from(acted(ATTACK_WINDOW));
             }
         }
         let swings: std::collections::HashSet<i32> = self.interval.swings.iter().copied().collect();
@@ -843,7 +857,7 @@ impl Scan {
         json!({"kind":"sample","t":seconds,"tick":tick,"live":live,
             "events":{"swings":interval.swings.len(),"melee_swings":melee_swings,"bow_swings":bow_swings,"hurts":interval.hurts,"deaths":interval.deaths,
                 "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s,
-                "fighting_2s":fighting,"shields_raised":shields_raised,"shield_blocks":interval.shield_blocks},
+                "fighting_25t":fighting_25t,"fighting_2s":fighting_2s,"shields_raised":shields_raised,"shield_blocks":interval.shield_blocks},
             "contact_fighters":contact_by_weapon,
             "contact_fighters_legacy":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
             "contacts":contacts,"arrows":arrows,"cavalry":cavalry,"armies":armies})

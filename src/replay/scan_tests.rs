@@ -243,7 +243,7 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     ] { scan.entities.insert(id, e); }
     let mut apply = |scan: &mut Scan, id: i32, body: &[u8]| scan.apply(id, body, &content).unwrap();
     let row = |scan: &mut Scan, tick: u64| { let v = scan.sample(tick, 0.); (
-        ["fighting_2s", "shields_raised", "shield_blocks"].map(|k| v["events"][k].as_u64().unwrap()),
+        ["fighting_25t", "fighting_2s", "shields_raised", "shield_blocks"].map(|k| v["events"][k].as_u64().unwrap()),
         [v["contact_fighters"].as_u64().unwrap(), v["contact_fighters_legacy"].as_u64().unwrap()]) };
     scan.tick = Some(100);
     apply(&mut scan, cb::SWING_ANIMATION, &[1, 0, 1, 21]); // 1 attacks
@@ -262,23 +262,26 @@ fn fighting_needs_an_enemy_in_own_weapon_reach_and_a_recent_swing_or_raised_shie
     let mut stranger = Writer::default();
     stranger.var(6); stranger.var(7); stranger.var(99); stranger.f32(1.); stranger.f32(1.); stranger.i64(0);
     apply(&mut scan, cb::SOUND_ENTITY, &stranger.0); // untracked entity
-    assert_eq!(row(&mut scan, 100), ([2, 1, 2], [4, 4]), "1 (swing) and 2 (shield) fight; 1, 2, 3 (spear reaches 4) and 7 (sword reaches the spear) are in reach; 4 and 6 are not; 5 touches nobody");
-    // The shield goes down at tick 125: it still counts until tick 164, the swing of tick 100 until 139.
+    assert_eq!(row(&mut scan, 100), ([2, 2, 1, 2], [4, 4]), "1 (swing) and 2 (shield) fight; 1, 2, 3 (spear reaches 4) and 7 (sword reaches the spear) are in reach; 4 and 6 are not; 5 touches nobody");
+    // The shield goes down at tick 125: it still counts for 25 ticks, the swing of tick 100 for 25 (40 in `fighting_2s`).
     scan.tick = Some(125);
     apply(&mut scan, cb::SET_ENTITY_DATA, &[2, 8, 0, 0, 255]);
-    assert_eq!(row(&mut scan, 130), ([2, 0, 0], [4, 4]));
-    assert_eq!(row(&mut scan, 140), ([1, 0, 0], [4, 4]), "only the lowered shield is left");
-    assert_eq!(row(&mut scan, 165), ([0, 0, 0], [4, 4]));
+    assert_eq!(row(&mut scan, 130), ([1, 2, 0, 0], [4, 4]));
+    assert_eq!(row(&mut scan, 140), ([1, 1, 0, 0], [4, 4]), "the swing is 40 ticks old, only the lowered shield is left");
+    assert_eq!(row(&mut scan, 150), ([0, 1, 0, 0], [4, 4]));
+    assert_eq!(row(&mut scan, 165), ([0, 0, 0, 0], [4, 4]));
 }
 
 #[test]
-fn a_rider_sits_three_quarters_up_the_horse_and_dismounting_frees_him() {
-    // Horse 1.4 x 1.6: the rider sits 1.2 up; the striking box joins sideways and keeps that y.
-    let (own, strike) = mounted_boxes([0., 0., 0.], [1.4, 1.6], [0.6, 1.95]);
-    assert!((own.min[1] - 1.2).abs() < 1e-12 && (strike.min[1] - 1.2).abs() < 1e-12, "{own:?} {strike:?}");
+fn a_rider_sits_at_the_attachment_height_and_dismounting_frees_him() {
+    // Horse 1.4 x 1.6 with PASSENGER attachment 1.44375; zombie VEHICLE attachment 0.7: the rider sits 0.74375 up.
+    let horse_combat = Combat { dims: [1.4, 1.6], attach: [1.44375, 0.], ..Combat::default() };
+    let rider_combat = Combat { dims: [0.6, 1.95], attach: [2.0125, 0.7], ..Combat::default() };
+    let (own, strike) = mounted_boxes([0., 0., 0.], &horse_combat, &rider_combat);
+    assert!((own.min[1] - 0.74375).abs() < 1e-12 && (strike.min[1] - 0.74375).abs() < 1e-12, "{own:?} {strike:?}");
     assert_eq!((strike.min[0], strike.max[0]), (-0.7, 0.7));
-    // A target on ground 0.8 lower (top 1.15) is under the mounted rider's feet but beside a rider on foot.
-    let low = Aabb::at([1.4, -0.8, 0.], 0.6, 1.95);
+    // A target on ground 1.3 lower (top 0.65) is beside a rider on foot but under a mounted one.
+    let low = Aabb::at([1.4, -1.3, 0.], 0.6, 1.95);
     assert!(in_melee_range(Aabb::at([0., 0., 0.], 0.6, 1.95), low, MeleeReach::mob(None)), "on foot");
     assert!(!in_melee_range(strike, low, MeleeReach::mob(None)), "mounted: no vertical overlap");
 
