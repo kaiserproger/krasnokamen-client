@@ -349,13 +349,21 @@ writes a JSONL timeline for camera planning:
   gap between the two armies' spawn positions (`spawn_split`, lower half red).
 
 `tools/battle_shots.py plan timeline.jsonl --out DIR --name NAME` turns the
-timeline into kit cameras and a `bv-render.sh batch` shot list: low dollies
+timeline into kit cameras and a `bv-render.sh batch` shot list: dollies
 along contact lines, over-the-shoulder `attach_entity` shots on fighters
 reaching contact, volleys followed from behind the archers to the impact,
 cavalry tracking, push-ins into the densest melee and at most one high oblique
-establishing shot. Cameras sit at a height above their own column's ground and
-are rejected when terrain or trees block the view or the column was not
-recorded. `battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
+establishing shot. Cameras sit at a height above their own column's ground. Every
+pose of a shot (every 0.25 s on the client's Catmull-Rom/smoothstep path) must keep
+3 blocks between the lens and every fighter the timeline places (contact cluster
+box and contact-line rectangle, cavalry box) with none across the first 4 blocks of
+the view; inside an army's box, where rear ranks are not placed, the lens rides 5.5
+above the ground. It must see its target over the recorded terrain and trees, sit
+1 block over the ground within 3 blocks, not look up at fighters, keep nearby
+ground out of the lower and side frame quarters, and a cavalry shot keeps the
+group's centroid in the central half. A failing placement moves to the next one of
+its kind or is rejected (`plan.json` `rejected_placements` counts them by check).
+`battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
 per preview time through the kit's `bv-render.sh` (`BV_SIZE`, default 640x360).
 
 ## Focused checks and provenance
@@ -371,7 +379,7 @@ easing, and SSAA/shutter arithmetic. `cargo test -p solaris-client --lib terrain
 includes the replay settle beyond the CPU mesh budget (several upload rounds equal
 one round). `cargo test -p solaris-client --lib replay::scan` covers side
 classification, contact clustering, terrain columns and arrow flight;
-`python3 -m unittest tools.test_battle_shots` the planner's terrain rules. These
+`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff and framing rules. These
 do not replace the captured real-world smoke shot or a full 20k battle.
 
 The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):
