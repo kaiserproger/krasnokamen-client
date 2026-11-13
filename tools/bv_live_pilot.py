@@ -40,15 +40,12 @@ def log(*parts):
 
 
 def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> Client:
-    """The newest instance descriptor in RUNTIME_DIR (the client writes it at startup)."""
-    deadline = time.monotonic() + 120
-    while True:
-        descriptors = sorted(runtime.glob("*.json"), key=lambda p: p.stat().st_mtime)
-        if descriptors:
-            break
-        if time.monotonic() > deadline:
-            raise SystemExit(f"no client descriptor in {runtime}; start the client with --runtime-dir {runtime}")
-        time.sleep(0.5)
+    """The newest instance descriptor in RUNTIME_DIR: the client prints
+    `automation descriptor: PATH` once it is written; start the pilot after that line."""
+    descriptors = sorted(runtime.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    if not descriptors:
+        raise SystemExit(f"no client descriptor in {runtime}: start the client with --runtime-dir {runtime} "
+                         "and run the pilot after it prints 'automation descriptor:'")
     client = Client(descriptors[-1], evidence)
     if not transcript:
         client.trace.close()
@@ -58,7 +55,28 @@ def connect(runtime: pathlib.Path, evidence: pathlib.Path, transcript: bool) -> 
     return client
 
 
-RECOVERABLE = ("window_not_focused", "controller_busy", "not in play", "client_not_in_play", "dialog_screen",
+def next_state_event(client: Client):
+    """Block until the client's next applied state event (packets, lifecycle, focus)."""
+    version = client.tool("minecraft_observe")["state_version"]
+    try:
+        client.tool("minecraft_wait_for_state_change", {"observed_version": version, "timeout_seconds": 120})
+    except RuntimeError:
+        pass  # no event within 120 s: the caller re-checks
+
+
+def wait_until_writable(client: Client):
+    """Unfocused window: re-try a no-op input (release sprint) on each state event."""
+    while True:
+        next_state_event(client)
+        try:
+            client.tool("minecraft_press_inputs", {"keys": ["sprint"], "ticks": 1, "hold": False})
+            return
+        except RuntimeError as error:
+            if "window_not_focused" not in str(error):
+                raise
+
+
+RECOVERABLE = ("window_not_focused", "not in play", "client_not_in_play", "dialog_screen",
                "player died", "client player is not dead")
 MOVE_KEYS = ("forward", "back", "left", "right", "sprint", "jump", "use")
 
@@ -344,14 +362,22 @@ def main():
             try:
                 rank(args, client)
             except RuntimeError as error:
-                # Recoverable: the window lost focus, a previous pilot's writer lease is
-                # still idle-expiring (up to 120 s), or play is between screens. The
+                # Recoverable: the window lost focus, or play is between screens. The
                 # walk restarts from the current position with a fresh rank offset.
+                # Waits are client events (state changes, play), never wall-clock sleeps.
                 text = str(error)
-                if not any(code in text for code in RECOVERABLE):
+                if "controller_busy" in text:
+                    raise SystemExit("another MCP writer holds this client (a pilot killed with SIGKILL?); "
+                                     "its lease frees after 120 idle seconds, then start the pilot again")
+                code = next((code for code in RECOVERABLE if code in text), None)
+                if code is None:
                     raise
-                log("paused:", next(code for code in RECOVERABLE if code in text), "- retrying in 2 s")
-                time.sleep(2)
+                log("paused:", code, "- resuming on the next client event")
+                if code == "window_not_focused":
+                    wait_until_writable(client)
+                else:
+                    client.tool("minecraft_wait_for_play", {"timeout_seconds": 3600})
+                    next_state_event(client)
     except KeyboardInterrupt:
         pass
     finally:
