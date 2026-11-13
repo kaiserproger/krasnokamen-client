@@ -216,7 +216,7 @@ def rank(args, client: Client):
             log("attack interval", round(interval, 2), "s")
         last = here
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
-        new = 0
+        new = pending = 0
         friends, enemies = [], []
         for entity in listed:
             if entity.get("local_player") or "horse" in entity["entity_type"] or entity.get("health", 1) <= 0:
@@ -224,6 +224,7 @@ def rank(args, client: Client):
             ident = entity["entity_id"]
             if ident not in sides:
                 if new >= args.classify_per_step:
+                    pending += 1
                     continue
                 sides[ident] = side_of(client, entity)
                 new += 1
@@ -237,11 +238,14 @@ def rank(args, client: Client):
             centroid = [sum(e[a] for e in near) / len(near) for a in ("x", "z")]
             velocity = [sum(e["velocity"][a] for e in near) / len(near) for a in ("x", "z")]
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
-            if offset is None:
+            # The join-time offset waits until every listed neighbour has a side, so
+            # late classification does not shift the centroid it is measured from.
+            if offset is None and pending == 0:
                 offset = [here[0] - centroid[0], here[2] - centroid[1]]
                 log("rank offset", [round(v, 2) for v in offset], "from", len(near), "same-side soldiers")
-            goal = [centroid[0] + offset[0], centroid[1] + offset[1]]
-            target = goal if target is None else [0.7 * target[i] + 0.3 * goal[i] for i in range(2)]
+            if offset is not None:
+                goal = [centroid[0] + offset[0], centroid[1] + offset[1]]
+                target = goal if target is None else [0.7 * target[i] + 0.3 * goal[i] for i in range(2)]
         enemy = min(enemies, key=lambda e: e["distance"]) if enemies else None
         # Facing: the nearest enemy, else the rank's own motion, else the join-time facing.
         if enemy is not None and enemy["distance"] <= args.face_enemy:
@@ -299,11 +303,11 @@ def main():
     parser.add_argument("--side", default="red", choices=("red", "blue"))
     parser.add_argument("--k", type=int, default=8, help="same-side soldiers whose centroid anchors the rank slot")
     parser.add_argument("--radius", type=float, default=24.0)
-    parser.add_argument("--reach", type=float, default=3.0)
+    parser.add_argument("--reach", type=float, default=2.8, help="feet distance; the client's own limit is 3 blocks eye to box")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
     parser.add_argument("--attack-interval", type=float, default=0.65)
-    parser.add_argument("--classify-per-step", type=int, default=24)
+    parser.add_argument("--classify-per-step", type=int, default=8)
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
     args = parser.parse_args()
