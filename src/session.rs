@@ -81,7 +81,8 @@ pub struct Session {
     recording: Option<crate::replay::format::RecordingOptions>,
     recording_tick: Option<u64>,
     cinematic_camera: Option<crate::capture::camera::Pose>,
-    /// Filming option: F1 hides the HUD but keeps the first-person hand and held items.
+    /// Filming (`--hide-hud-keep-hand`): the HUD stays hidden in play, as after F1,
+    /// but the first-person hand and held items are still drawn.
     pub(crate) hidden_hud_keeps_hand: bool,
     loading: Option<mpsc::Receiver<Result<Loaded>>>,
     wake: Arc<RwLock<Wake>>,

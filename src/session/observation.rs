@@ -636,6 +636,14 @@ impl Session {
 
     pub(super) fn refresh_scene_mode(&mut self, animation_only: bool) -> Result<bool> {
         self.camera();
+        // Filming mode keeps the HUD hidden in play (as F1 would), with no keyboard input.
+        if self.hidden_hud_keeps_hand
+            && self.phase == "play"
+            && let Some(ui) = &mut self.ui
+            && ui.setting("hide_hud").and_then(Value::as_bool) != Some(true)
+        {
+            ui.apply_setting("hide_hud", json!(true))?;
+        }
         let world_ready = self.play_world_presentation_ready();
         if !animation_only {
             self.sync_ui_state(world_ready)?;

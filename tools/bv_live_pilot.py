@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Live battle-video pilots: drive a real windowed client through its local MCP endpoint.
+"""Live battle-video rank pilot (PovRed): drive a real windowed client through its local MCP endpoint.
 
-  bv_live_pilot.py rank   RUNTIME_DIR [--side red] [--k 8]   PovRed: keep his place in rank, face the enemy, swing in reach
-  bv_live_pilot.py follow RUNTIME_DIR                        CamSpec: hide the HUD, F5 once (third person on the Set Camera target)
+  bv_live_pilot.py RUNTIME_DIR [--side red] [--k 8]
 
-RUNTIME_DIR is the client's --runtime-dir; the client must run with
-`--automation --mcp-http 127.0.0.1:0 --windowed`. Every action is an ordinary client
-input (held movement keys, absolute look, the attack key, F1/F5), never a packet bot.
-The loop is paced by client ticks (minecraft_wait_ticks), not by wall-clock sleeps.
+Keeps PovRed's join-time place relative to the centroid of the K nearest same-side
+soldiers (side read from their shield/surcoat ids or dyed kit), walks with held movement
+keys, turns smoothly toward the nearest enemy (else along the rank's motion), and
+presses attack when an enemy is in reach. RUNTIME_DIR is the client's --runtime-dir;
+the client runs with `--automation --mcp-http 127.0.0.1:0 --windowed` and
+`--hide-hud-keep-hand`. MCP input needs the client window focused. Every action is an
+ordinary client input, never a packet bot; the loop is paced by client ticks.
+CamSpec needs no pilot: `--third-person` plus the server's Set Camera.
 """
 from __future__ import annotations
 
@@ -23,10 +26,10 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from mcp_client import Client  # noqa: E402
 
-SIDE = re.compile(r"solaris_battle:(red|blue)_")
-MOVE_KEYS = ("forward", "back", "left", "right", "sprint")
-# Equipment slots read for side gear: off-hand shield, chest surcoat, main hand.
-SIDE_SLOTS = (1, 4, 0)
+# Equipment slots read for side gear: off-hand shield, chest (surcoat or dyed
+# padding), legs (dyed). Shields and surcoats carry solaris_battle:red_*/blue_*;
+# plain kit is told apart by its dye (red 0x6E1414-like, blue 0x243A7F-like).
+SIDE_SLOTS = (1, 4, 3)
 
 
 def log(*parts):
@@ -117,14 +120,22 @@ def side_of(client: Client, entity) -> str | None:
         found = SIDE.search(json.dumps(stack))
         if found:
             return found.group(1)
+        dye = (stack.get("components") or {}).get("minecraft:dyed_color")
+        if isinstance(dye, dict):
+            dye = dye.get("rgb")
+        if isinstance(dye, int):
+            red, blue = (dye >> 16) & 255, dye & 255
+            if red > 1.3 * blue + 8:
+                return "red"
+            if blue > 1.3 * red + 8:
+                return "blue"
     return None
 
 
 def rank(args, client: Client):
     pilot = Pilot(client)
     client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
-    log("in play; F1 hides the HUD (the hand stays with --hidden-hud-keeps-hand)")
-    pilot.tap("key.keyboard.f1")
+    log("in play; holding rank")
     me = pilot.player()
     yaw, pitch = float(me.get("yaw", 0.0)), float(me.get("pitch", 0.0))
     rest_yaw = yaw
@@ -215,18 +226,8 @@ def rank(args, client: Client):
         client.tool("minecraft_wait_ticks", {"ticks": 2})
 
 
-def follow(args, client: Client):
-    pilot = Pilot(client)
-    client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
-    log("in play; F1 hides the HUD, F5 once: third person behind the Set Camera target")
-    pilot.tap("key.keyboard.f1")
-    pilot.tap("key.keyboard.f5")
-    log("done; the camera now follows whatever entity the server's Set Camera names")
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=("rank", "follow"))
     parser.add_argument("runtime", type=pathlib.Path, help="the client's --runtime-dir")
     parser.add_argument("--evidence", type=pathlib.Path, default=pathlib.Path("pilot-evidence"))
     parser.add_argument("--transcript", action="store_true", help="keep the full MCP transcript (large)")
@@ -241,7 +242,7 @@ def main():
     args = parser.parse_args()
     client = connect(args.runtime, args.evidence, args.transcript)
     try:
-        (rank if args.mode == "rank" else follow)(args, client)
+        rank(args, client)
     except KeyboardInterrupt:
         pass
 

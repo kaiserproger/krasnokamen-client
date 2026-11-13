@@ -5,7 +5,8 @@ use winit::event_loop::EventLoop;
 const HELP: &str = "Usage:
   solaris-client                         Open the title screen
   solaris-client --server HOST[:PORT] [--username NAME]
-                 [--width W --height H] [--fullscreen] [--hidden-hud-keeps-hand] [--data-dir DIR]
+                 [--width W --height H] [--fullscreen] [--data-dir DIR]
+                 [--hide-hud-keep-hand] [--third-person]
   solaris-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
   solaris-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
@@ -48,8 +49,10 @@ struct Parsed {
     data_dir: Option<PathBuf>,
     explicit_profile: bool,
     help: bool,
-    /// Filming: F1 hides the HUD but keeps the first-person hand and held items.
+    /// Filming: the HUD stays hidden in play, the first-person hand and held items stay.
     hidden_hud_keeps_hand: bool,
+    /// Filming: start in the F5 third-person (behind) camera.
+    third_person: bool,
 }
 
 fn dimension(value: Option<String>, name: &str) -> Result<u32, String> {
@@ -81,6 +84,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
         explicit_profile: false,
         help: false,
         hidden_hud_keeps_hand: false,
+        third_person: false,
     };
     let options = &mut parsed.options;
     while let Some(arg) = args.next() {
@@ -124,7 +128,8 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Parsed, String> {
             "--width" => options.width = dimension(args.next(), "width")?,
             "--height" => options.height = dimension(args.next(), "height")?,
             "--fullscreen" => options.fullscreen = true,
-            "--hidden-hud-keeps-hand" => parsed.hidden_hud_keeps_hand = true,
+            "--hide-hud-keep-hand" => parsed.hidden_hud_keeps_hand = true,
+            "--third-person" => parsed.third_person = true,
             _ => return Err(format!("unknown_play_argument: {arg}")),
         }
     }
@@ -146,6 +151,7 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
         data_dir,
         explicit_profile,
         hidden_hud_keeps_hand,
+        third_person,
         ..
     } = parsed;
     let root = data_dir
@@ -195,6 +201,9 @@ pub(crate) fn play(args: impl Iterator<Item = String>) -> Result<(), String> {
         }),
     )?;
     app.session.hidden_hud_keeps_hand = hidden_hud_keeps_hand;
+    if third_person {
+        app.session.cycle_camera();
+    }
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     app.error.map_or(Ok(()), Err)
 }
