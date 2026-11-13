@@ -124,7 +124,10 @@ class Pilot:
         self.c.tool("minecraft_press_inputs", {"keys": [key], "ticks": 1})
 
     def player(self):
-        return self.c.tool("minecraft_observe")["player"]
+        observed = self.c.tool("minecraft_observe")
+        if "player" not in observed:
+            raise RuntimeError("not in play (respawning or loading)")
+        return observed["player"]
 
 
 def position(record) -> list[float]:
