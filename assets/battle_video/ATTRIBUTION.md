@@ -26,9 +26,10 @@ by adding eight transparent rows above it, and its model UVs shifted accordingly
 to retain a source cuboid with a negative V coordinate. Its red plume pixels were
 moved into a greyscale dyeable layer, `iron_plate_plume.png`, and replaced by grey
 in the base texture. Upstream animated decorations are represented at their rest pose.
-For mounted and close-up shots the front face of the Iron Plate and Holy helm cuboids
-was opened (texels in front of the wearer's eyes, nose and mouth made transparent,
-keeping a brow band and a nasal bar) so the wearer's face shows inside the helm.
+For mounted and close-up shots the front face of the Holy helm cuboid was opened
+(the cross visor's texels in front of the wearer's eyes, nose and mouth made
+transparent, keeping a brow band and a nasal bar) so the wearer's face shows inside
+the helm, as it already does through the Iron Plate helm.
 
 The red and blue surcoats, caparisons, heater shield sprites, and crested helm
 geometry and textures were created for Solaris (the crested helm's face is open in
