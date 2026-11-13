@@ -1502,6 +1502,30 @@ fn animation_offhand_use_and_attack_mirror_the_selected_main_arm() {
 }
 
 #[test]
+fn animation_zombie_arms_yield_the_shield_arm_to_block_use() {
+    let (models, mut e, content) = action_fixture("minecraft:husk");
+    let rig = rig();
+    // Main hand right (Arm 1): sword right, battle shield in the off (left) hand.
+    e.equipment[0] = Some(action_stack(2, json!({})));
+    e.equipment[1] = Some(action_stack(1, json!({"minecraft:blocks_attacks":{}})));
+    let zombie = |direction: Vec3| (0.15..=0.20).contains(&direction.y) && direction.x.abs() < 0.2;
+    let lowered = action_pose(&models, &e, &content, &rig);
+    for arm in [2, 3] {
+        assert!(zombie(lowered[arm].transform_vector3(Vec3::Y)), "idle husk arm {arm}");
+    }
+    e.metadata.insert(8, Metadata::Byte(3));
+    let raised = action_pose(&models, &e, &content, &rig);
+    let shield = raised[3].transform_vector3(Vec3::Y);
+    assert!(shield.z < -0.6 && shield.x.abs() > 0.2 && !zombie(shield), "shield across the chest: {shield:?}");
+    assert_eq!(raised[2], lowered[2], "the sword arm keeps the zombie pose");
+    // Main-hand use of a non-blocking item leaves both zombie arms alone.
+    e.metadata.insert(8, Metadata::Byte(1));
+    let item = action_pose(&models, &e, &content, &rig);
+    assert_eq!(item[2], lowered[2]);
+    assert_eq!(item[3], lowered[3]);
+}
+
+#[test]
 fn animation_crossbow_charge_hold_release_and_identity_reset() {
     let (models, mut e, mut content) = action_fixture("minecraft:player");
     content.item_names.insert(1, "minecraft:crossbow".into());
