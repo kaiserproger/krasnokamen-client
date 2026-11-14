@@ -47,6 +47,13 @@ pub(super) fn tools() -> &'static Vec<Value> {
     &TOOLS
 }
 
+pub(super) fn tools_for(presentation: bool) -> Vec<&'static Value> {
+    tools()
+        .iter()
+        .filter(|tool| presentation || state_supported(tool["name"].as_str().unwrap()))
+        .collect()
+}
+
 pub(super) fn state_supported(name: &str) -> bool {
     !matches!(
         name,

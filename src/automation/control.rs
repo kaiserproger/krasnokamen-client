@@ -78,12 +78,7 @@ impl Core {
             .data["presentation_available"]
             .as_bool()
             .unwrap_or(false);
-        super::catalog::tools()
-            .iter()
-            .filter(|tool| {
-                presentation || super::catalog::state_supported(tool["name"].as_str().unwrap())
-            })
-            .collect()
+        super::catalog::tools_for(presentation)
     }
     pub fn notify(&self) {
         let _guard = self

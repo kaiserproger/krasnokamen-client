@@ -130,6 +130,13 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
         return launch::play(args);
     }
     match args.next().as_deref() {
+        Some("mcp-schema") => {
+            if args.next().is_some() {
+                return Err("usage: solaris-client mcp-schema".into());
+            }
+            println!("{}", serde_json::to_string(&automation::schema()).map_err(|e| e.to_string())?);
+            Ok(())
+        }
         Some("profile-summary") => {
             let path = args.next().ok_or("usage: solaris-client profile-summary <file>")?;
             if args.next().is_some() {

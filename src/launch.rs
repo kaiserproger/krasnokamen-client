@@ -11,6 +11,7 @@ const HELP: &str = "Usage:
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
                  [--artifact-dir DIR] [--runtime-dir DIR]
   solaris-client doctor [--json]
+  solaris-client mcp-schema
   solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
 
 Default data: Linux `$XDG_DATA_HOME/solaris-client` (or `~/.local/share/solaris-client`),

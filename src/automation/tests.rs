@@ -43,6 +43,16 @@ fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
         receiver,
     )
 }
+
+#[test]
+fn offline_schema_matches_live_tools_in_both_presentation_modes() {
+    let (core, _) = client();
+    let exported = super::schema();
+    assert_eq!(exported["headless_tools"], json!(core.tools()));
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    assert_eq!(exported["tools"], json!(core.tools()));
+    assert!(exported["tools"].as_array().unwrap().iter().all(|tool| tool["inputSchema"].is_object()));
+}
 #[test]
 fn authenticated_transport_writer_is_exclusive_and_context_fenced() {
     let (core, _) = client();
