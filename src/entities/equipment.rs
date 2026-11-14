@@ -1096,6 +1096,30 @@ mod tests {
     }
 
     #[test]
+    fn holy_chest_omits_static_effect_planes_but_keeps_armor() {
+        let rig = super::super::krasnokamen_models::authored("minecraft:battle_holy_chest#main")
+            .expect("holy chest rig loads");
+        let expected = [
+            "body", "chestBack", "chestPecRight", "chestPecLeft", "chestCore", "abs",
+            "right_arm", "armRightShoulderA", "armRightShoulderB", "armRightElbow",
+            "armRightElbowDetail", "armRightWing", "armRightGlove", "left_arm",
+            "armLeftShoulderA", "armLeftShoulderB", "armLeftElbow", "armLeftElbowDetail",
+            "armLeftWing", "armLeftGlove",
+        ];
+        // The baked rig has a synthetic empty root and one six-face cube on
+        // each authored armor bone. An effect plane, even renamed or nested
+        // on an existing bone, changes this bone/geometry set.
+        assert_eq!(rig.bones.len(), expected.len() + 1);
+        let root = rig.bones.iter().find(|bone| bone.name == "root").unwrap();
+        assert!(root.quads.is_empty());
+        for name in expected {
+            let bone = rig.bones.iter().find(|bone| bone.name == name)
+                .unwrap_or_else(|| panic!("missing armor bone {name}"));
+            assert_eq!(bone.quads.len(), 6, "armor geometry on {name}");
+        }
+    }
+
+    #[test]
     fn battle_equipment_selects_each_embedded_slot_rig() {
         for (asset, slot, key) in [
             ("krasnokamen_battle:holy", 2, "minecraft:battle_holy_feet#main"),
