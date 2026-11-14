@@ -174,6 +174,9 @@ impl Session {
                         "drop" if self.phase == "play" => {
                             self.interact(InteractionIntent::Drop { whole_stack: false })?;
                         }
+                        // A press is one click at the next tick even when its
+                        // release arrives before that tick (KeyMapping.click).
+                        "attack" | "use" if self.phase == "play" => self.player.click(key),
                         "swap_offhand" if self.phase == "play" => {
                             self.interact(InteractionIntent::SwapHands)?;
                         }
@@ -2255,3 +2258,55 @@ mod book_edit_tests;
 #[cfg(test)]
 #[path = "hardware_defaults_tests.rs"]
 mod hardware_defaults_tests;
+
+/// QA5-FAST-CLICK: a fast physical click arrives as press+release before the
+/// next tick. Vanilla counts the press (`KeyMapping.click`) and starts the
+/// attack at the next tick, so the block under the crosshair is destroyed.
+#[cfg(test)]
+mod fast_click_tests {
+    use super::*;
+
+    #[test]
+    fn press_released_before_the_next_tick_still_starts_the_attack() {
+        let mut session = crate::session::mining_start_tests::session();
+        let _peer = crate::session::mining_start_tests::connect(&mut session);
+        let content = session.content.as_mut().unwrap();
+        content.states[1].hardness = 0.;
+        content.insert_test_block_sound(
+            1,
+            1.,
+            1.,
+            BTreeMap::from([
+                ("break".into(), "test:break".into()),
+                ("hit".into(), "test:hit".into()),
+            ]),
+        );
+        let target = [4, 5, 6];
+        session
+            .world
+            .set(target, 1, |state| Ok(state == 0))
+            .unwrap();
+        session
+            .input(InputIntent::Look { yaw: 0., pitch: 0. })
+            .unwrap();
+        assert_eq!(session.world.block(target), Some(1));
+        for pressed in [true, false] {
+            session
+                .input(InputIntent::Key {
+                    key: "attack".into(),
+                    pressed,
+                })
+                .unwrap();
+        }
+        assert!(
+            session.keys.is_empty(),
+            "the release arrived before the tick"
+        );
+        session.tick_after_events(true);
+        assert_eq!(
+            session.world.block(target),
+            Some(0),
+            "a released press still attacks at the next tick"
+        );
+    }
+}
