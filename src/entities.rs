@@ -12,6 +12,7 @@ mod display;
 mod dragon;
 mod drowned_outer;
 mod equipment;
+mod frame_entities;
 mod local;
 #[cfg(test)]
 mod animation_tests;
@@ -275,7 +276,8 @@ pub struct Store {
     pub(crate) profile_bytes: usize,
     pub(crate) local_entity_id: Option<i32>,
     pub(crate) local_uuid: Option<String>,
-    pub(crate) visible_ids: Vec<i32>,
+    /// The entities this frame draws, gathered once by the body pass (`frame_entities`).
+    pub(crate) frame_entities: frame_entities::FrameEntities,
     pub(crate) physical_active: BTreeSet<i32>,
     pub(crate) falling_colliders: Vec<crate::player::Bounds>,
     pub(crate) redirectable_projectiles: BTreeSet<u32>,
@@ -391,7 +393,7 @@ impl Store {
         self.presentation_tick = 0;
         self.leash_holders.clear();
         self.predicted_leash_holders.clear();
-        self.visible_ids.clear();
+        self.frame_entities = Default::default();
         self.passenger_vehicles.clear();
         self.fishing_hooks.clear();
         self.uuid_entities.clear();

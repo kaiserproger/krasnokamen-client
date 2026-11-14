@@ -879,6 +879,16 @@ pub fn transform(pivot: Vec3, rotation: Vec3, scale: Vec3) -> Mat4 {
         * Mat4::from_scale(scale)
 }
 
+/// Test content naming every embedded entity kind at its protocol id, and models loaded for it.
+#[cfg(test)]
+pub(super) fn every_kind() -> (Content, Models) {
+    let doc = Models::parse().unwrap();
+    let mut content = Content::test_cube();
+    content.entity_names = doc.entities.iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+    let models = Models::load(&content).unwrap();
+    (content, models)
+}
 /// Test-side selection inventory, not a second runtime catalog. Rows retain both the demanded
 /// key and the key actually selected by `material`, so a variant silently using its base rig
 /// cannot earn coverage merely because the base family exists.

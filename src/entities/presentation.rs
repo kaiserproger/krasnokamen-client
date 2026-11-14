@@ -618,37 +618,26 @@ pub fn append(
     store.frame_partial = partial.clamp(0., 1.);
     store.frame_tick = tick;
     store.crowd.begin_frame();
-    // Mounted bodies can occupy a different raw bucket from their seat.
-    let area = crate::player::Bounds {
-        min: camera.map(|value| value - f64::from(radius)),
-        max: camera.map(|value| value + f64::from(radius)),
-    };
-    let mut visible = std::mem::take(&mut store.visible_ids);
-    visible.clear();
-    visible.extend(store.candidates(area).map(|entity| entity.handle.network_id));
-    for index in 0..visible.len() + usize::from(store.local_render_slot.is_some()) {
-        let slot = if index == visible.len() {
-            store.local_render_slot.unwrap()
-        } else {
-            store.ids[&visible[index]]
-        };
+    // Gathered once for this pass and reused by the shadow and nameplate passes. Mounted
+    // bodies can occupy a different raw bucket from their seat (`Store::candidates`).
+    let range = f64::from(radius);
+    let mut frame = std::mem::take(&mut store.frame_entities);
+    frame.gather(store, &models, camera, range, tick, partial);
+    let local = store.local_render_slot.map(|slot| {
+        super::frame_entities::Entry::of(store, &models, slot, None, camera, range, tick, partial)
+    });
+    for entry in frame.entries.iter().chain(local.as_ref()) {
+        let slot = entry.slot;
         store.slots[slot].physical.shown_tick = tick;
         let entity = &store.slots[slot];
-        let transform = match store.presented_transform(entity, tick, partial) {
-            Ok(transform) => transform,
+        let transform = match &entry.transform {
+            Ok(transform) => *transform,
             Err(reason) => {
-                stats.unrendered.insert(entity.type_name.clone(), reason);
+                stats.unrendered.insert(entity.type_name.clone(), reason.clone());
                 continue;
             }
         };
-        let distance = transform.position
-            .iter()
-            .zip(camera)
-            .map(|(a, b)| (a - b) * (a - b))
-            .sum::<f64>();
-        if distance > f64::from(radius) * f64::from(radius)
-            || !super::view_range::within(&models, entity, transform.position, distance, store.view_scale.0)
-        {
+        if entry.distance_squared > range * range || !entry.within {
             continue;
         }
         stats.eligible += 1;
@@ -796,8 +785,7 @@ pub fn append(
             store.slots[slot].submitted_revision = Some(store.revision);
         }
     }
-    visible.clear();
-    store.visible_ids = visible;
+    store.frame_entities = frame;
     stats.vertices = out.vertices.len();
     Ok(stats)
 }

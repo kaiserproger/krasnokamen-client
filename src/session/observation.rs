@@ -959,6 +959,9 @@ impl Session {
                         .unrendered
                         .extend(nameplates.unrendered);
                 }
+                // The bodies' gathered entities served shadows and nameplates; a later pass
+                // gathers its own.
+                self.entities.end_entity_frame();
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
                     && (self.hidden_hud_keeps_hand

@@ -236,24 +236,38 @@ impl Store {
         Ok(())
     }
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
-        let padding = self.query_padding();
-        let low = super::cell([area.min[0] - padding, 0., area.min[2] - padding]);
-        let high = super::cell([area.max[0] + padding, 0., area.max[2] + padding]);
+        self.candidate_slots(area).map(|(_, slot)| &self.slots[slot])
+    }
+    /// `candidates` as slots, each with the spatial cell it was found in (`None`: a mounted
+    /// body, considered wherever it is).
+    pub(crate) fn candidate_slots(
+        &self,
+        area: Bounds,
+    ) -> impl Iterator<Item = (Option<[i32; 2]>, usize)> {
+        let (low, high) = self.query_cells(area);
         self.spatial
             .range([low[0], i32::MIN]..=[high[0], i32::MAX])
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
-            .flat_map(|(_, ids)| ids.iter())
-            .filter_map(|id| self.get(*id))
-            .filter(|entity| entity.vehicle.is_none())
+            .flat_map(|(cell, ids)| ids.iter().map(move |id| (*cell, *id)))
+            .filter_map(|(cell, id)| Some((Some(cell), *self.ids.get(&id)?)))
+            .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
-            .filter(|entity| {
-                !entity
+            .chain(self.passenger_vehicles.keys().filter_map(|id| Some((None, *self.ids.get(id)?))))
+            .filter(|(_, slot)| {
+                !self.slots[*slot]
                     .source
                     .as_ref()
                     .is_some_and(|s| s.discarded || s.special.discarded)
             })
+    }
+    /// The spatial cells `candidates(area)` visits: x and z each within `low..=high`.
+    pub(crate) fn query_cells(&self, area: Bounds) -> ([i32; 2], [i32; 2]) {
+        let padding = self.query_padding();
+        (
+            super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
+            super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
+        )
     }
     fn root_vehicle(&self, mut id: i32) -> Result<i32> {
         for _ in 0..self.ids.len().min(1024) + 1 {
