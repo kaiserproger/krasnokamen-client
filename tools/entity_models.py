@@ -326,6 +326,9 @@ def preview(path, out, texture_override=None):
         for c in b.get("cubes", []):
             k += 1
             for f, (a, bb, cc, dd) in face_rects(c).items():
+                # Flat planes have zero-width faces; there is no rectangle to outline.
+                if a == cc or bb == dd:
+                    continue
                 d.rectangle([min(a, cc) * ts, min(bb, dd) * ts, max(a, cc) * ts - 1, max(bb, dd) * ts - 1], outline=palette[k % 6] + (255,))
     pct = 100.0 * (opaque & mapped).sum() / max(opaque.sum(), 1)
     W = cell * len(tiles) + 0
