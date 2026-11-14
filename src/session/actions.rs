@@ -2310,3 +2310,204 @@ mod fast_click_tests {
         );
     }
 }
+
+/// Drop and pick are `KeyMapping.consumeClick` keys: vanilla
+/// `Minecraft.handleKeybinds` drains them with a `while (consumeClick())` loop
+/// (client jar, `net.minecraft.client.Minecraft#handleKeybinds`, offsets
+/// 568-615 for `keyDrop`, 759-819 for `keyAttack`/`keyUse`/`keyPickItem`), so
+/// one press is one action and a held key never repeats. These tests count the
+/// packets the real `InputIntent::Key` path puts on the wire.
+#[cfg(test)]
+mod item_key_tests {
+    use super::*;
+    use crate::protocol::{
+        Reader,
+        packet_ids::play::{clientbound as cb, serverbound as sb},
+    };
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    fn read_packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
+        let mut header = Vec::new();
+        loop {
+            let mut byte = [0];
+            socket.read_exact(&mut byte).unwrap();
+            header.push(byte[0]);
+            if byte[0] & 128 == 0 {
+                break;
+            }
+            assert!(header.len() < 5);
+        }
+        let mut body = vec![0; Reader::new(&header).count(32768).unwrap()];
+        socket.read_exact(&mut body).unwrap();
+        let mut reader = Reader::new(&body);
+        let id = reader.var().unwrap();
+        (id, body[reader.offset..].to_vec())
+    }
+
+    fn send_packet(socket: &mut TcpStream, id: i32, body: &[u8]) {
+        socket
+            .write_all(&crate::protocol::frame(id, body, None).unwrap())
+            .unwrap();
+    }
+
+    /// One client tick of outbound frames, ending at `CLIENT_TICK_END`.
+    fn tick_window(frames: &mpsc::Receiver<(i32, Vec<u8>)>) -> Vec<(i32, Vec<u8>)> {
+        let mut out = Vec::new();
+        loop {
+            let frame = frames
+                .recv_timeout(Duration::from_secs(10))
+                .expect("a live peer reads every outbound frame");
+            let end = frame.0 == sb::CLIENT_TICK_END;
+            out.push(frame);
+            if end {
+                return out;
+            }
+        }
+    }
+
+    /// Wire ordinals `write_action` emits: 4 drops the stack, 5 drops one item,
+    /// 7 swaps hands (`Player::write_action` sends `action + 1`).
+    fn drop_actions(window: &[(i32, Vec<u8>)]) -> usize {
+        window
+            .iter()
+            .filter(|(id, _)| *id == sb::PLAYER_ACTION)
+            .filter(|(_, body)| matches!(Reader::new(body).var().unwrap(), 4 | 5))
+            .count()
+    }
+
+    fn count_id(window: &[(i32, Vec<u8>)], id: i32) -> usize {
+        window.iter().filter(|(frame, _)| *frame == id).count()
+    }
+
+    /// All-air chunk with the eye at (4.5, 5.62, 4.5) and one cube at (4,5,6).
+    fn session_with_peer() -> (Session, mpsc::Receiver<(i32, Vec<u8>)>, mpsc::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (frame_tx, frame_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        thread::spawn(move || {
+            let (mut login, _) = listener.accept().unwrap();
+            let (mut status, _) = listener.accept().unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            login
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            read_packet(&mut status);
+            read_packet(&mut status);
+            let mut status_response = Writer::default();
+            status_response.string(r#"{"version":{"protocol":777}}"#);
+            send_packet(&mut status, 0, &status_response.0);
+            read_packet(&mut login);
+            read_packet(&mut login);
+            let mut success = Writer(vec![0; 16]);
+            success.string("ItemKeyTest");
+            success.var(0);
+            send_packet(&mut login, 2, &success.0);
+            assert_eq!(read_packet(&mut login).0, 3);
+            assert_eq!(read_packet(&mut login).0, 0);
+            send_packet(&mut login, 3, &[]);
+            assert_eq!(read_packet(&mut login).0, 3);
+            send_packet(&mut login, cb::KEEP_ALIVE, &456i64.to_be_bytes());
+            assert_eq!(
+                read_packet(&mut login),
+                (sb::KEEP_ALIVE, 456i64.to_be_bytes().to_vec())
+            );
+            ready_tx.send(()).unwrap();
+            while stop_rx.try_recv().is_err() {
+                match read_packet(&mut login) {
+                    // The client already answered the login keepalive.
+                    (id, body) if id == sb::KEEP_ALIVE && body == 456i64.to_be_bytes() => continue,
+                    frame => {
+                        if frame_tx.send(frame).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        let network = Network::connect(
+            address.to_string(),
+            "ItemKeyTest".into(),
+            8,
+            true,
+            "en_us",
+            Arc::new(|| {}),
+            None,
+        )
+        .unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut session = crate::session::mining_start_tests::session();
+        session.network = Some(network);
+        let content = session.content.as_mut().unwrap();
+        content.states[1].hardness = 1.;
+        content.insert_test_block_sound(1, 1., 1., BTreeMap::new());
+        session
+            .world
+            .set([4, 5, 6], 1, |state| Ok(state == 0))
+            .unwrap();
+        session
+            .input(InputIntent::Look { yaw: 0., pitch: 0. })
+            .unwrap();
+        // Drain what the handshake and the look already queued.
+        session.tick_after_events(true);
+        let _ = tick_window(&frame_rx);
+        (session, frame_rx, stop_tx)
+    }
+
+    fn press(session: &mut Session, key: &str, pressed: bool) {
+        session
+            .input(InputIntent::Key {
+                key: key.into(),
+                pressed,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn one_drop_press_sends_one_drop_and_a_held_key_does_not_repeat() {
+        let (mut session, frames, _stop) = session_with_peer();
+        press(&mut session, "drop", true);
+        press(&mut session, "drop", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            drop_actions(&window),
+            1,
+            "one press is one drop: {window:?}"
+        );
+        press(&mut session, "drop", true);
+        session.tick_after_events(true);
+        let first = tick_window(&frames);
+        session.tick_after_events(true);
+        let second = tick_window(&frames);
+        press(&mut session, "drop", false);
+        assert_eq!(
+            drop_actions(&first) + drop_actions(&second),
+            1,
+            "a held drop key does not repeat: {first:?} {second:?}"
+        );
+    }
+
+    #[test]
+    fn one_pick_press_sends_one_pick_item() {
+        let (mut session, frames, _stop) = session_with_peer();
+        press(&mut session, "pick", true);
+        press(&mut session, "pick", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            count_id(&window, sb::PICK_ITEM_FROM_BLOCK),
+            1,
+            "one press is one pick: {window:?}"
+        );
+    }
+}

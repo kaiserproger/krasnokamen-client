@@ -131,10 +131,7 @@ pub struct HeldInput {
     pub flags: u8,
     pub attack: bool,
     pub use_item: bool,
-    pub pick: bool,
     pub offhand: bool,
-    pub drop: bool,
-    pub swap_hands: bool,
     /// Presses since the previous tick (vanilla `KeyMapping.consumeClick`):
     /// each one starts an attack or use even when released before the tick.
     pub attack_clicks: u8,
@@ -160,10 +157,7 @@ impl HeldInput {
             flags,
             attack: keys.contains("attack"),
             use_item: keys.contains("use"),
-            pick: keys.contains("pick"),
             offhand: keys.contains("offhand"),
-            drop: keys.contains("drop"),
-            swap_hands: keys.contains("swap_hands"),
             attack_clicks: 0,
             use_clicks: 0,
         }
@@ -183,10 +177,7 @@ impl HeldInput {
         let actions = [
             ("attack", self.attack),
             ("use", self.use_item),
-            ("pick", self.pick),
             ("offhand", self.offhand),
-            ("drop", self.drop),
-            ("swap_hands", self.swap_hands),
         ]
         .into_iter()
         .filter(|(_, set)| *set)

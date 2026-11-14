@@ -406,39 +406,10 @@ impl Player {
         if inventory.screen_open || !self.pose_known || self.health.is_some_and(|h| h <= 0.) {
             return Ok(());
         }
-        if input.swap_hands && !self.last_input.swap_hands {
-            self.perform(
-                InteractionIntent::SwapHands,
-                None,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
-        if input.drop && !self.last_input.drop {
-            self.perform(
-                InteractionIntent::Drop { whole_stack: false },
-                None,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
-        if input.pick && !self.last_input.pick {
-            let target = self.raycast(world, content, entities, world_tick)?;
-            self.perform(
-                InteractionIntent::Pick {
-                    include_data: false,
-                },
-                target,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
+        // Swap hands, drop and pick are `consumeClick` keys: the press edge in
+        // `Session::input` dispatches them once (vanilla `Minecraft.handleKeybinds`
+        // drains them with `while (consumeClick())`), so the tick must not repeat
+        // a key that is still held.
         // Minecraft.handleKeybinds: each press since the last tick starts one
         // attack (`startAttack`), then a still-held button continues mining.
         if (input.attack || input.attack_clicks > 0) && self.miss_delay == 0 {
