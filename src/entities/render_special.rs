@@ -145,7 +145,9 @@ pub(crate) fn append(
     tick: u64,
     partial: f32,
     clock_context: Option<&ItemContext>,
+    maps: crate::ui::MapRenderView<'_>,
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    tint_source: &dyn Fn(crate::protocol::models::TintKind, [i32; 3]) -> Result<[f32; 3]>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let entity = &store.slots[slot];
@@ -179,11 +181,11 @@ pub(crate) fn append(
             return Ok(Handled::PendingLighting);
         };
         if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_block(store, slot, content,
-                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, out);
+            return world_fx::append_block(store, slot, models, content,
+                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, tint_source, out);
         }
         item_frame::append(entity, models, item_frame::ItemFrameResources {
-            cache: &mut store.special_render_cache, items: &mut store.items,
+            cache: &mut store.special_render_cache, items: &mut store.items, maps,
         }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
     })();
     if result.is_err() {
