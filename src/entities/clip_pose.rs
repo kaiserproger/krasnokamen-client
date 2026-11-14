@@ -40,8 +40,8 @@ use super::resources::{Bone, BoneRole, Rig};
 use crate::protocol::Result;
 use glam::{Mat4, Vec3};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, LazyLock, OnceLock,
+    atomic::{AtomicU64, Ordering},
 };
 
 /// Baked samples per second of clip time.
@@ -87,7 +87,11 @@ impl Channel {
     }
     /// Item channel of an anatomical hand (0 right, 1 left).
     pub(crate) fn item(arm: usize) -> Self {
-        if arm == 0 { Self::RightItem } else { Self::LeftItem }
+        if arm == 0 {
+            Self::RightItem
+        } else {
+            Self::LeftItem
+        }
     }
 }
 
@@ -106,8 +110,12 @@ pub(crate) fn channel_of(bone: &Bone) -> Option<Channel> {
 /// Whether the torso carry re-parents this bone: an upper-body bone directly below the
 /// rig root (authored rigs bake a synthetic `root` bone at index 0).
 pub(crate) fn carried(rig: &Rig, bone: &Bone) -> bool {
-    bone.parent.is_none_or(|parent| rig.bones[parent].parent.is_none())
-        && matches!(channel_of(bone), Some(Channel::Head | Channel::Body | Channel::RightArm | Channel::LeftArm))
+    bone.parent
+        .is_none_or(|parent| rig.bones[parent].parent.is_none())
+        && matches!(
+            channel_of(bone),
+            Some(Channel::Head | Channel::Body | Channel::RightArm | Channel::LeftArm)
+        )
 }
 
 /// Waist pivot of a main rig: centre of its first leg bone's pivot, else the model origin.
@@ -126,7 +134,11 @@ pub(crate) fn grip_point(arm: usize) -> Vec3 {
 /// Scale of leg-channel layer weights: legs keep their gait while walking and stay
 /// seated while riding.
 pub(crate) fn leg_factor(amplitude: f32, riding: bool) -> f32 {
-    if riding { 0. } else { 1. - (2. * amplitude).clamp(0., 1.) }
+    if riding {
+        0.
+    } else {
+        1. - (2. * amplitude).clamp(0., 1.)
+    }
 }
 
 /// One channel at one sample time. Layout is shared with the GPU table (32 bytes).
@@ -155,7 +167,11 @@ impl ChannelSample {
     fn mirror(self) -> Self {
         let [x, y, z] = self.rotation;
         let [ox, oy, oz] = self.offset;
-        Self { rotation: [x, -y, -z], offset: [-ox, oy, oz], ..self }
+        Self {
+            rotation: [x, -y, -z],
+            offset: [-ox, oy, oz],
+            ..self
+        }
     }
 }
 
@@ -197,7 +213,13 @@ pub struct ClipLayer {
 
 impl Default for ClipLayer {
     fn default() -> Self {
-        Self { clip: 0, start_tick: 0, rate: 1., weight: 1., mirror: false }
+        Self {
+            clip: 0,
+            start_tick: 0,
+            rate: 1.,
+            weight: 1.,
+            mirror: false,
+        }
     }
 }
 
@@ -223,11 +245,13 @@ impl ClipState {
     /// Layers playing at `tick + partial` (before the start or without a clip: `None`).
     pub(crate) fn active(&self, tick: u64, partial: f32) -> Active {
         self.layers.map(|layer| {
-            (layer.clip != 0 && tick >= layer.start_tick && layer.weight > 0.).then(|| ActiveLayer {
-                clip: layer.clip,
-                seconds: ((tick - layer.start_tick) as f32 + partial) / 20. * layer.rate,
-                weight: layer.weight.min(1.),
-                mirror: layer.mirror,
+            (layer.clip != 0 && tick >= layer.start_tick && layer.weight > 0.).then(|| {
+                ActiveLayer {
+                    clip: layer.clip,
+                    seconds: ((tick - layer.start_tick) as f32 + partial) / 20. * layer.rate,
+                    weight: layer.weight.min(1.),
+                    mirror: layer.mirror,
+                }
             })
         })
     }
@@ -263,33 +287,59 @@ static REVISIONS: AtomicU64 = AtomicU64::new(1);
 
 impl Default for ClipLibrary {
     fn default() -> Self {
-        Self { clips: Vec::new(), revision: REVISIONS.fetch_add(1, Ordering::Relaxed), max_offset: 0. }
+        Self {
+            clips: Vec::new(),
+            revision: REVISIONS.fetch_add(1, Ordering::Relaxed),
+            max_offset: 0.,
+        }
     }
 }
 
 impl ClipLibrary {
     pub fn new(clips: Vec<BakedClip>) -> Result<Self> {
         if clips.len() > MAX_CLIPS {
-            return Err(format!("clip library holds {} clips, bound {MAX_CLIPS}", clips.len()));
+            return Err(format!(
+                "clip library holds {} clips, bound {MAX_CLIPS}",
+                clips.len()
+            ));
         }
         let mut max_offset = 0_f32;
         for clip in &clips {
             if clip.frames.is_empty() || clip.frames.len() > MAX_FRAMES {
-                return Err(format!("clip {} has {} frames", clip.name, clip.frames.len()));
+                return Err(format!(
+                    "clip {} has {} frames",
+                    clip.name,
+                    clip.frames.len()
+                ));
             }
             for sample in clip.frames.iter().flatten() {
-                let finite = sample.rotation.iter().chain(&sample.offset).chain([&sample.weight]).all(|v| v.is_finite());
+                let finite = sample
+                    .rotation
+                    .iter()
+                    .chain(&sample.offset)
+                    .chain([&sample.weight])
+                    .all(|v| v.is_finite());
                 if !finite || !(0. ..=1.).contains(&sample.weight) {
-                    return Err(format!("clip {} has a non-finite sample or weight outside 0..=1", clip.name));
+                    return Err(format!(
+                        "clip {} has a non-finite sample or weight outside 0..=1",
+                        clip.name
+                    ));
                 }
                 max_offset = max_offset.max(Vec3::from_array(sample.offset).length());
             }
         }
-        Ok(Self { clips, revision: REVISIONS.fetch_add(1, Ordering::Relaxed), max_offset })
+        Ok(Self {
+            clips,
+            revision: REVISIONS.fetch_add(1, Ordering::Relaxed),
+            max_offset,
+        })
     }
     /// 1-based id of the clip named `name`.
     pub fn id(&self, name: &str) -> Option<u16> {
-        self.clips.iter().position(|clip| clip.name == name).map(|index| index as u16 + 1)
+        self.clips
+            .iter()
+            .position(|clip| clip.name == name)
+            .map(|index| index as u16 + 1)
     }
     pub(crate) fn revision(&self) -> u64 {
         self.revision
@@ -317,9 +367,18 @@ impl ClipLibrary {
             Playback::Loop => (first + 1) % (last + 1),
             Playback::Once | Playback::Hold => (first + 1).min(last),
         };
-        let source = if layer.mirror { channel.mirrored() } else { channel } as usize;
-        let sample = clip.frames[first][source].lerp(clip.frames[second][source], frame - first as f32);
-        Some(if layer.mirror { sample.mirror() } else { sample })
+        let source = if layer.mirror {
+            channel.mirrored()
+        } else {
+            channel
+        } as usize;
+        let sample =
+            clip.frames[first][source].lerp(clip.frames[second][source], frame - first as f32);
+        Some(if layer.mirror {
+            sample.mirror()
+        } else {
+            sample
+        })
     }
     /// Applies every active layer to a bone of `channel` already posed by the vanilla
     /// rules (`legs`: [`leg_factor`] of the entity).
@@ -332,7 +391,11 @@ impl ClipLibrary {
         rotation: &mut Vec3,
         pivot: &mut Vec3,
     ) {
-        let scale = if matches!(channel, Channel::RightLeg | Channel::LeftLeg) { legs } else { 1. };
+        let scale = if matches!(channel, Channel::RightLeg | Channel::LeftLeg) {
+            legs
+        } else {
+            1.
+        };
         for layer in layers.iter().flatten() {
             if let Some(s) = self.sample(*layer, channel) {
                 let w = layer.weight * scale;
@@ -349,7 +412,11 @@ impl ClipLibrary {
         let mut found: Option<Delta> = None;
         for layer in layers.iter().flatten() {
             if let Some(s) = self.sample(*layer, channel) {
-                let delta = found.get_or_insert(Delta { rotation: Vec3::ZERO, offset: Vec3::ZERO, replace: 0. });
+                let delta = found.get_or_insert(Delta {
+                    rotation: Vec3::ZERO,
+                    offset: Vec3::ZERO,
+                    replace: 0.,
+                });
                 delta.rotation += Vec3::from_array(s.rotation) * layer.weight;
                 delta.offset += Vec3::from_array(s.offset) * layer.weight;
                 delta.replace = (delta.replace + s.weight * layer.weight).min(1.);
@@ -363,7 +430,10 @@ impl ClipLibrary {
     }
     /// Grip of the item held by anatomical hand `arm`, between the arm bone and the item.
     pub(crate) fn grip(&self, layers: &Active, arm: usize) -> Option<Mat4> {
-        Some(self.delta(layers, Channel::item(arm))?.about(grip_point(arm)))
+        Some(
+            self.delta(layers, Channel::item(arm))?
+                .about(grip_point(arm)),
+        )
     }
     /// GPU tables: per clip `[first frame, frame count, playback, 0]`, then all frames
     /// flattened as `(first + frame) * CHANNELS + channel`.
@@ -388,7 +458,9 @@ static EMPTY: LazyLock<Arc<ClipLibrary>> = LazyLock::new(|| Arc::new(ClipLibrary
 
 /// Makes `library` the table every renderer path samples, once per process.
 pub fn install(library: ClipLibrary) -> Result<()> {
-    INSTALLED.set(Arc::new(library)).map_err(|_| "clip library already installed".into())
+    INSTALLED
+        .set(Arc::new(library))
+        .map_err(|_| "clip library already installed".into())
 }
 
 /// The installed clip table; empty before [`install`].
@@ -401,7 +473,12 @@ mod tests {
     use super::*;
 
     fn sample(x: f32) -> ChannelSample {
-        ChannelSample { rotation: [x, x, 0.], weight: 0., offset: [x, 0., 0.], _pad: 0. }
+        ChannelSample {
+            rotation: [x, x, 0.],
+            weight: 0.,
+            offset: [x, 0., 0.],
+            _pad: 0.,
+        }
     }
     fn clip(playback: Playback) -> BakedClip {
         BakedClip {
@@ -411,22 +488,52 @@ mod tests {
         }
     }
     fn layer(clip: u16, seconds: f32) -> ActiveLayer {
-        ActiveLayer { clip, seconds, weight: 1., mirror: false }
+        ActiveLayer {
+            clip,
+            seconds,
+            weight: 1.,
+            mirror: false,
+        }
     }
     fn library_of(frames: [ChannelSample; CHANNELS]) -> ClipLibrary {
-        ClipLibrary::new(vec![BakedClip { name: "a".into(), playback: Playback::Once, frames: vec![frames; 2] }]).unwrap()
+        ClipLibrary::new(vec![BakedClip {
+            name: "a".into(),
+            playback: Playback::Once,
+            frames: vec![frames; 2],
+        }])
+        .unwrap()
     }
 
     #[test]
     fn samples_interpolate_wrap_hold_and_expire() {
-        let library = ClipLibrary::new(vec![clip(Playback::Once), clip(Playback::Loop), clip(Playback::Hold)]).unwrap();
+        let library = ClipLibrary::new(vec![
+            clip(Playback::Once),
+            clip(Playback::Loop),
+            clip(Playback::Hold),
+        ])
+        .unwrap();
         assert_eq!(library.id("Loop"), Some(2));
-        let at = |id, seconds| library.sample(layer(id, seconds), Channel::RightArm).map(|s| s.rotation[0]);
+        let at = |id, seconds| {
+            library
+                .sample(layer(id, seconds), Channel::RightArm)
+                .map(|s| s.rotation[0])
+        };
         assert_eq!(at(1, 0.), Some(0.));
         assert!((at(1, 1.5 / BAKE_HZ).unwrap() - 1.5).abs() < 1e-5);
-        assert_eq!(at(1, 3. / BAKE_HZ), Some(3.), "the last frame is still shown");
-        assert_eq!(at(1, 3.5 / BAKE_HZ), None, "a finished one-shot clip is inactive");
-        assert!((at(2, 3.5 / BAKE_HZ).unwrap() - 1.5).abs() < 1e-5, "looped clips blend last into first");
+        assert_eq!(
+            at(1, 3. / BAKE_HZ),
+            Some(3.),
+            "the last frame is still shown"
+        );
+        assert_eq!(
+            at(1, 3.5 / BAKE_HZ),
+            None,
+            "a finished one-shot clip is inactive"
+        );
+        assert!(
+            (at(2, 3.5 / BAKE_HZ).unwrap() - 1.5).abs() < 1e-5,
+            "looped clips blend last into first"
+        );
         assert!((at(2, 5. / BAKE_HZ).unwrap() - 1.).abs() < 1e-5);
         assert_eq!(at(3, 100.), Some(3.), "a held clip keeps its last frame");
         assert_eq!(at(0, 0.), None);
@@ -438,39 +545,75 @@ mod tests {
     #[test]
     fn mirrored_layers_swap_sides_and_reflect() {
         let mut frames = [ChannelSample::default(); CHANNELS];
-        frames[Channel::LeftArm as usize] = ChannelSample { rotation: [1., 2., 3.], weight: 0.5, offset: [4., 5., 6.], _pad: 0. };
+        frames[Channel::LeftArm as usize] = ChannelSample {
+            rotation: [1., 2., 3.],
+            weight: 0.5,
+            offset: [4., 5., 6.],
+            _pad: 0.,
+        };
         let library = library_of(frames);
-        let mirrored = ActiveLayer { mirror: true, ..layer(1, 0.) };
+        let mirrored = ActiveLayer {
+            mirror: true,
+            ..layer(1, 0.)
+        };
         let right = library.sample(mirrored, Channel::RightArm).unwrap();
         assert_eq!(right.rotation, [1., -2., -3.]);
         assert_eq!(right.offset, [-4., 5., 6.]);
         assert_eq!(right.weight, 0.5);
-        assert_eq!(library.sample(mirrored, Channel::LeftArm).unwrap().rotation, [0.; 3]);
+        assert_eq!(
+            library.sample(mirrored, Channel::LeftArm).unwrap().rotation,
+            [0.; 3]
+        );
     }
 
     #[test]
     fn clip_time_follows_world_ticks_rate_and_weight() {
         let state = ClipState {
             layers: [
-                ClipLayer { clip: 1, start_tick: 100, rate: 2., weight: 1., mirror: false },
-                ClipLayer { clip: 2, weight: 0., ..ClipLayer::default() },
+                ClipLayer {
+                    clip: 1,
+                    start_tick: 100,
+                    rate: 2.,
+                    weight: 1.,
+                    mirror: false,
+                },
+                ClipLayer {
+                    clip: 2,
+                    weight: 0.,
+                    ..ClipLayer::default()
+                },
             ],
         };
         assert_eq!(state.active(99, 0.9), [None, None]);
         assert_eq!(state.active(110, 0.5)[0].unwrap().seconds, 1.05);
-        assert_eq!(state.active(110, 0.)[1], None, "a zero-weight layer is inactive");
+        assert_eq!(
+            state.active(110, 0.)[1],
+            None,
+            "a zero-weight layer is inactive"
+        );
         assert_eq!(ClipState::default().active(5, 0.), [None, None]);
     }
 
     #[test]
     fn bones_blend_towards_rest_and_legs_keep_their_gait() {
         let mut frames = [ChannelSample::default(); CHANNELS];
-        let swing = ChannelSample { rotation: [0.5, 0., 0.], weight: 0.5, offset: [0., 0.25, 0.], _pad: 0. };
+        let swing = ChannelSample {
+            rotation: [0.5, 0., 0.],
+            weight: 0.5,
+            offset: [0., 0.25, 0.],
+            _pad: 0.,
+        };
         frames[Channel::RightArm as usize] = swing;
         frames[Channel::RightLeg as usize] = swing;
         frames[Channel::Body as usize] = swing;
         let library = library_of(frames);
-        let layers = [Some(ActiveLayer { weight: 0.5, ..layer(1, 0.) }), None];
+        let layers = [
+            Some(ActiveLayer {
+                weight: 0.5,
+                ..layer(1, 0.)
+            }),
+            None,
+        ];
         let rest = Vec3::new(0.1, 0., 0.);
         let posed = Vec3::new(1.1, 0.4, 0.);
         let run = |channel, legs| {
@@ -480,11 +623,21 @@ mod tests {
         };
         // mix(posed, rest, 0.25) + 0.5 * 0.5
         let (rotation, pivot) = run(Channel::RightArm, 1.);
-        assert!((rotation - Vec3::new(0.85 + 0.25, 0.3, 0.)).length() < 1e-6, "{rotation:?}");
+        assert!(
+            (rotation - Vec3::new(0.85 + 0.25, 0.3, 0.)).length() < 1e-6,
+            "{rotation:?}"
+        );
         assert_eq!(pivot, Vec3::new(0., 0.125, 0.));
-        assert_eq!(run(Channel::RightLeg, 0.), (posed, Vec3::ZERO), "walking legs ignore the clip");
+        assert_eq!(
+            run(Channel::RightLeg, 0.),
+            (posed, Vec3::ZERO),
+            "walking legs ignore the clip"
+        );
         let (rotation, pivot) = run(Channel::Body, 1.);
-        assert!((rotation - Vec3::new(0.85, 0.3, 0.)).length() < 1e-6, "body bone takes only the replace part");
+        assert!(
+            (rotation - Vec3::new(0.85, 0.3, 0.)).length() < 1e-6,
+            "body bone takes only the replace part"
+        );
         assert_eq!(pivot, Vec3::ZERO);
         assert_eq!(leg_factor(0.25, false), 0.5);
         assert_eq!(leg_factor(0., true), 0.);
@@ -493,26 +646,62 @@ mod tests {
     #[test]
     fn carry_grip_and_root_turn_about_their_pivots() {
         let mut frames = [ChannelSample::default(); CHANNELS];
-        frames[Channel::Body as usize] = ChannelSample { rotation: [0., 0.5, 0.], weight: 0.4, offset: [0., 0., 0.1], _pad: 0. };
-        frames[Channel::RightItem as usize] = ChannelSample { rotation: [0.2, 0., 0.], weight: 0., offset: [0., 0.1, 0.], _pad: 0. };
+        frames[Channel::Body as usize] = ChannelSample {
+            rotation: [0., 0.5, 0.],
+            weight: 0.4,
+            offset: [0., 0., 0.1],
+            _pad: 0.,
+        };
+        frames[Channel::RightItem as usize] = ChannelSample {
+            rotation: [0.2, 0., 0.],
+            weight: 0.,
+            offset: [0., 0.1, 0.],
+            _pad: 0.,
+        };
         let library = library_of(frames);
-        let layers = [Some(ActiveLayer { weight: 0.5, ..layer(1, 0.) }), None];
+        let layers = [
+            Some(ActiveLayer {
+                weight: 0.5,
+                ..layer(1, 0.)
+            }),
+            None,
+        ];
         let hip = Vec3::new(0., 0.75, 0.);
         let carry = library.carry(&layers, hip).unwrap();
         assert!((carry.transform_point3(hip) - (hip + Vec3::new(0., 0., 0.05))).length() < 1e-6);
         let turned = carry.transform_vector3(Vec3::X);
-        assert!((turned - Vec3::new(0.25_f32.cos(), 0., -0.25_f32.sin())).length() < 1e-6, "{turned:?}");
+        assert!(
+            (turned - Vec3::new(0.25_f32.cos(), 0., -0.25_f32.sin())).length() < 1e-6,
+            "{turned:?}"
+        );
         let grip = library.grip(&layers, 0).unwrap();
-        assert!((grip.transform_point3(grip_point(0)) - (grip_point(0) + Vec3::new(0., 0.05, 0.))).length() < 1e-6);
+        assert!(
+            (grip.transform_point3(grip_point(0)) - (grip_point(0) + Vec3::new(0., 0.05, 0.)))
+                .length()
+                < 1e-6
+        );
         assert_eq!(library.delta(&layers, Channel::Body).unwrap().replace, 0.2);
         assert!(library.grip(&[None, None], 0).is_none());
         assert!(library.carry(&[None, None], hip).is_none());
-        assert!(library.delta(&layers, Channel::Root).unwrap().about(FEET).abs_diff_eq(Mat4::IDENTITY, 1e-6));
+        assert!(
+            library
+                .delta(&layers, Channel::Root)
+                .unwrap()
+                .about(FEET)
+                .abs_diff_eq(Mat4::IDENTITY, 1e-6)
+        );
     }
 
     #[test]
     fn invalid_libraries_are_refused_and_tables_flatten_by_channel() {
-        assert!(ClipLibrary::new(vec![BakedClip { name: "empty".into(), playback: Playback::Once, frames: Vec::new() }]).is_err());
+        assert!(
+            ClipLibrary::new(vec![BakedClip {
+                name: "empty".into(),
+                playback: Playback::Once,
+                frames: Vec::new()
+            }])
+            .is_err()
+        );
         let mut bad = clip(Playback::Once);
         bad.frames[1][0].weight = 2.;
         assert!(ClipLibrary::new(vec![bad]).is_err());
@@ -520,7 +709,10 @@ mod tests {
         let (headers, frames) = library.gpu_tables();
         assert_eq!(headers, vec![[0, 4, 0, 0], [4, 4, 2, 0]]);
         assert_eq!(frames.len(), 8 * CHANNELS);
-        assert_eq!(frames[(4 + 2) * CHANNELS + Channel::LeftLeg as usize], sample(2.));
+        assert_eq!(
+            frames[(4 + 2) * CHANNELS + Channel::LeftLeg as usize],
+            sample(2.)
+        );
         assert_ne!(library.revision(), ClipLibrary::default().revision());
     }
 }

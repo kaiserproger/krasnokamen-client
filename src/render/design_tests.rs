@@ -2,7 +2,7 @@
 //! cascaded shadows, High water, TAA and preset switching. Every test renders
 //! on a real device (no mocks); frames are 64x64.
 
-use super::graphics::{jitter_pixels, Features};
+use super::graphics::{Features, jitter_pixels};
 use super::shader_tests::pixels;
 use super::*;
 use bytemuck::Zeroable;
@@ -15,10 +15,14 @@ struct LockedRenderer {
 }
 impl std::ops::Deref for LockedRenderer {
     type Target = Renderer;
-    fn deref(&self) -> &Renderer { &self.renderer }
+    fn deref(&self) -> &Renderer {
+        &self.renderer
+    }
 }
 impl std::ops::DerefMut for LockedRenderer {
-    fn deref_mut(&mut self) -> &mut Renderer { &mut self.renderer }
+    fn deref_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
 }
 fn offscreen(label: &str) -> LockedRenderer {
     let guard = gpu_test_lock();
@@ -28,7 +32,10 @@ fn offscreen(label: &str) -> LockedRenderer {
         PathBuf::from(format!(".analysis/design-regression-{label}")),
     ))
     .unwrap();
-    LockedRenderer { renderer, _guard: guard }
+    LockedRenderer {
+        renderer,
+        _guard: guard,
+    }
 }
 
 fn overworld(sun_angle: f32, moon_angle: f32) -> crate::api::WorldEnvironment {
@@ -331,7 +338,9 @@ fn far_terrain_takes_the_loaded_terrain_fog() {
             "{preset:?}: unfogged far ground must differ from the sky"
         );
         // Ground 12 blocks below the camera, past both fog ends.
-        for (start, end, render_start, render_end) in [(0., 10., 5000., 6000.), (5000., 6000., 4., 10.)] {
+        for (start, end, render_start, render_end) in
+            [(0., 10., 5000., 6000.), (5000., 6000., 4., 10.)]
+        {
             scene.environment.fog_start = start;
             scene.environment.fog_end = end;
             scene.environment.render_fog_start = render_start;
@@ -341,9 +350,8 @@ fn far_terrain_takes_the_loaded_terrain_fog() {
                 // Non-Fancy fog targets the fog colour (display encoded).
                 let mut fog = sky.clone();
                 for pixel in fog.chunks_exact_mut(4) {
-                    for (channel, fog_channel) in pixel[..3]
-                        .iter_mut()
-                        .zip(scene.environment.fog_color)
+                    for (channel, fog_channel) in
+                        pixel[..3].iter_mut().zip(scene.environment.fog_color)
                     {
                         *channel = (fog_channel * 255.).round() as u8;
                     }
@@ -695,16 +703,30 @@ fn water_obeys_received_lightmap_in_every_preset() {
     scene.environment = overworld(180., 0.);
     scene.environment.sky_color = [0.; 3];
     scene.environment.fog_color = [0.; 3];
-    let geometry = Arc::make_mut(scene.chunks.get_mut(&[0; 3]).unwrap().geometry.as_mut().unwrap());
+    let geometry = Arc::make_mut(
+        scene
+            .chunks
+            .get_mut(&[0; 3])
+            .unwrap()
+            .geometry
+            .as_mut()
+            .unwrap(),
+    );
     for vertex in &mut geometry.vertices {
         vertex.light = [0., 0.];
     }
     let lightmap = |value, revision| crate::api::LightmapTexture {
         revision,
-        rgba: Arc::new(std::array::from_fn(|i| if i % 4 == 3 { 255 } else { value })),
+        rgba: Arc::new(std::array::from_fn(
+            |i| if i % 4 == 3 { 255 } else { value },
+        )),
     };
     let mut low_dark = [0.; 3];
-    for preset in [GraphicsPreset::Low, GraphicsPreset::Medium, GraphicsPreset::High] {
+    for preset in [
+        GraphicsPreset::Low,
+        GraphicsPreset::Medium,
+        GraphicsPreset::High,
+    ] {
         renderer.set_graphics_preset(preset);
         scene.lightmap = Some(lightmap(0, 1));
         let dark = pixels(&mut renderer, &scene);
@@ -717,11 +739,15 @@ fn water_obeys_received_lightmap_in_every_preset() {
         if preset == GraphicsPreset::Low {
             low_dark = dark;
         } else {
-            assert!(dark[2] <= low_dark[2] + 15.,
-                "{preset:?} unlit water glows: {dark:?}, Low={low_dark:?}");
+            assert!(
+                dark[2] <= low_dark[2] + 15.,
+                "{preset:?} unlit water glows: {dark:?}, Low={low_dark:?}"
+            );
         }
-        assert!(lit.iter().sum::<f32>() > dark.iter().sum::<f32>() + 20.,
-            "{preset:?} water ignores light: dark={dark:?}, lit={lit:?}");
+        assert!(
+            lit.iter().sum::<f32>() > dark.iter().sum::<f32>() + 20.,
+            "{preset:?} water ignores light: dark={dark:?}, lit={lit:?}"
+        );
     }
 }
 
@@ -733,7 +759,15 @@ fn high_night_water_has_a_visible_tinted_surface_above_the_bed() {
     scene.environment = overworld(180., 0.);
     scene.environment.sky_color = [0.; 3];
     scene.environment.fog_color = [0.; 3];
-    let geometry = Arc::make_mut(scene.chunks.get_mut(&[0; 3]).unwrap().geometry.as_mut().unwrap());
+    let geometry = Arc::make_mut(
+        scene
+            .chunks
+            .get_mut(&[0; 3])
+            .unwrap()
+            .geometry
+            .as_mut()
+            .unwrap(),
+    );
     for vertex in &mut geometry.vertices {
         vertex.light = [15., 0.];
     }
@@ -752,8 +786,10 @@ fn high_night_water_has_a_visible_tinted_surface_above_the_bed() {
     let offset = (26 * 64 + 32) * 4;
     let water = rgb(&water, offset);
     let bed = rgb(&bed, offset);
-    assert!(water[2] >= bed[2] + 12.,
-        "High night water must visibly tint its bed: water={water:?}, bed={bed:?}");
+    assert!(
+        water[2] >= bed[2] + 12.,
+        "High night water must visibly tint its bed: water={water:?}, bed={bed:?}"
+    );
 }
 
 #[test]

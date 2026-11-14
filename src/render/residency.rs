@@ -192,11 +192,17 @@ impl Renderer {
         {
             return Err("missing_required_end_sky_texture".into());
         }
-        let directional = [&scene.dynamic, &scene.first_person].iter().any(|geometry| {
-            geometry.indices.iter().enumerate().any(|(family, indices)| {
-                !indices.is_empty() && material::MATERIALS[family].shader.cardinal
-            })
-        });
+        let directional = [&scene.dynamic, &scene.first_person]
+            .iter()
+            .any(|geometry| {
+                geometry
+                    .indices
+                    .iter()
+                    .enumerate()
+                    .any(|(family, indices)| {
+                        !indices.is_empty() && material::MATERIALS[family].shader.cardinal
+                    })
+            });
         if directional && env.light_directions.is_none() {
             return Err("missing_required_source_cardinal_light_directions".into());
         }
@@ -206,11 +212,17 @@ impl Renderer {
         {
             return Err("non_finite_source_cardinal_light_directions".into());
         }
-        let portal = [&scene.dynamic, &scene.first_person].iter().any(|geometry| {
-            geometry.indices.iter().enumerate().any(|(family, indices)| {
-                !indices.is_empty() && material::MATERIALS[family].shader.kind == 12
-            })
-        });
+        let portal = [&scene.dynamic, &scene.first_person]
+            .iter()
+            .any(|geometry| {
+                geometry
+                    .indices
+                    .iter()
+                    .enumerate()
+                    .any(|(family, indices)| {
+                        !indices.is_empty() && material::MATERIALS[family].shader.kind == 12
+                    })
+            });
         if portal && (scene.portal_sprites.is_none() || scene.shader_game_time.is_none()) {
             return Err("missing_required_source_portal_sprites_or_game_time".into());
         }
@@ -285,7 +297,10 @@ impl Renderer {
                 if !chunk.origin.iter().all(|v| v.is_finite()) {
                     return Err("non_finite_chunk_origin".into());
                 }
-                while residents.next_if(|(resident, _)| **resident < key).is_some() {}
+                while residents
+                    .next_if(|(resident, _)| **resident < key)
+                    .is_some()
+                {}
                 let resident = residents
                     .next_if(|(resident, _)| **resident == key)
                     .map(|(_, chunk)| chunk);
@@ -301,7 +316,8 @@ impl Renderer {
                     return Err(format!(
                         "terrain_cpu_payload_missing key={key:?} revision={} resident={} same_world={same_world}",
                         chunk.revision,
-                        resident.map_or_else(|| "absent".to_string(), |old| old.revision.to_string()),
+                        resident
+                            .map_or_else(|| "absent".to_string(), |old| old.revision.to_string()),
                     ));
                 };
                 mesh::validate(
@@ -461,7 +477,9 @@ impl Renderer {
                 self.stats.terrain_upload_bytes += old.mesh.bytes();
                 self.stats.terrain_uploaded_chunks += 1;
             }
-            if self.mesh_revision == Some(scene.revision) && let Some(mesh) = &self.fixture {
+            if self.mesh_revision == Some(scene.revision)
+                && let Some(mesh) = &self.fixture
+            {
                 let packed = packed::pack_vertices(&scene.vertices, &mut self.tiles)?;
                 mesh.upload_geometry(
                     &self.queue,
@@ -645,7 +663,8 @@ impl Renderer {
         }
         self.mesh_revision = Some(scene.revision);
         self.staged_chunks = staged;
-        if scene.vertices.is_empty() && scene.indices.is_empty()
+        if scene.vertices.is_empty()
+            && scene.indices.is_empty()
             && let Some(mesh) = self.fixture.take()
         {
             mesh.retire(&mut self.vertex_arena, &mut self.index_arena, self.frame_id);

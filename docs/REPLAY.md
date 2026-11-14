@@ -5,7 +5,7 @@ owner logs each incoming Login/Configuration/Play packet before handing it to
 the session. It does not simulate the battle or invent entity positions. The
 separate Status connection and outbound client traffic are not replay packets.
 Official online-mode authentication remains unsupported by this client's network
-adapter; use the Solaris offline recorder account. No GPU or audio is opened.
+adapter; use the Krasnokamen offline recorder account. No GPU or audio is opened.
 
 ## Record a take
 
@@ -28,12 +28,12 @@ Prepare a header JSON with the actual server build, staging seed and start tick:
 ```
 
 `wall_time` is replaced with actual UNIX-epoch milliseconds when the file opens.
-`start_tick` is replaced by the first received `solaris:tick`; a reserved-width
+`start_tick` is replaced by the first received `krasnokamen:tick`; a reserved-width
 JSON header line is rewritten without moving packet records. The other metadata
 is supplied by the operator, not inferred from a status MOTD.
 
 ```sh
-"$SOLARIS_CLIENT_BINARY" record --server 127.0.0.1:25565 \
+"$KRASNOKAMEN_CLIENT_BINARY" record --server 127.0.0.1:25565 \
   --username BattleRecorder --output /work/takes/battle.solrec \
   --header /work/takes/header.json --duration 180 \
   --ready-file /work/takes/battle.ready --data-dir /work/client-data
@@ -49,7 +49,7 @@ losing packets or blocking the IO thread. Choose fresh output/ready filenames.
 For BattleVideo, **join before setup** using the two-stage barrier:
 
 ```sh
-"$SOLARIS_CLIENT_BINARY" record --server 127.0.0.1:25565 \
+"$KRASNOKAMEN_CLIENT_BINARY" record --server 127.0.0.1:25565 \
   --username BattleRecorder --output /work/takes/battle.solrec \
   --header /work/takes/header.json --duration 180 --data-dir /work/client-data \
   --ready-file /work/takes/take.ready \
@@ -110,7 +110,7 @@ Use B4's authoritative battle-start tick and the receipt's `last_tick` to
 measure recorded battle duration; `last_tick - first_tick` includes setup and
 must not be mistaken for battle ticks. These facts describe the actual packet
 file, not how long the server happened to run after its last recorded marker.
-The `solaris:tick` markers in the recording, not telemetry's `recorders` key,
+The `krasnokamen:tick` markers in the recording, not telemetry's `recorders` key,
 are authoritative for which ticks reached this recorder. Do not infer delivery
 or fill marker gaps from that telemetry key's presence or absence.
 
@@ -125,14 +125,14 @@ LoginFinished/FinishConfiguration/StartConfiguration transitions. Lengths are
 bounded by the existing protocol `MAX_FRAME`; timestamps must not decrease.
 Truncated records are errors; EOF is legal only at a record boundary.
 
-The Play `solaris:tick` custom payload has exactly two big-endian u64 values:
+The Play `krasnokamen:tick` custom payload has exactly two big-endian u64 values:
 `tick`, then `wall_ns`. The latter is the core tick's `wall_start_unix_ns`,
 identical to the dashboard and host sampler value, not the later edge
 publish/receive/encoding time. These are server-owned telemetry labels. A
 pump-skipped tick or recorder world queue with no free frame slot produces no
 marker; a byte-full queue with a free slot may send only its marker. Gaps remain
 jumps in tick number. The marker precedes that tick's world FIFO packets, except
-asynchronous `solaris:lod/tile` payloads (only when LOD tiles were requested),
+asynchronous `krasnokamen:lod/tile` payloads (only when LOD tiles were requested),
 which may arrive between any markers and do not belong to tick T. Reliable-queue
 packets use the latest observed marker. Receive milliseconds define replay time;
 markers join frames to server metrics without estimating a tick from frame count
@@ -172,7 +172,7 @@ floating-point drift.
 Install normal client content with `setup` (see the main README); reuse the same
 content metadata/assets as the recorder. Use an immutable release client from
 Main's `tools/dev/pin-release --client --tree <client-tree>`. The binary path
-below is the emitted `SOLARIS_CLIENT_BINARY`, not a guessed target artifact.
+below is the emitted `KRASNOKAMEN_CLIENT_BINARY`, not a guessed target artifact.
 
 First record at least 12 seconds with the command above (`--duration 12`) and
 save the shot JSON as `/work/takes/smoke.json`. The selected 6..7-second range
@@ -182,7 +182,7 @@ Host software Vulkan (lavapipe; no display server is required):
 
 ```sh
 WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-  "$SOLARIS_CLIENT_BINARY" render-replay \
+  "$KRASNOKAMEN_CLIENT_BINARY" render-replay \
   --recording /work/takes/battle.solrec --camera /work/takes/smoke.json \
   --output /work/takes/smoke-lvp.mp4 --size 320x180 \
   --start 6 --end 7 --data-dir /work/client-data
@@ -196,7 +196,7 @@ under `xvfb-run -a`; the renderer still creates **no** window or surface. On the
 owner's GPU, omit the lavapipe override (and any inherited software ICD selector):
 
 ```sh
-WGPU_BACKEND=vulkan "$SOLARIS_CLIENT_BINARY" render-replay \
+WGPU_BACKEND=vulkan "$KRASNOKAMEN_CLIENT_BINARY" render-replay \
   --recording /work/takes/battle.solrec --camera /work/takes/smoke.json \
   --output /work/takes/smoke-gpu.mp4 --size 1920x1080 \
   --start 6 --end 7 --motion-samples 4 --data-dir /work/client-data
@@ -242,8 +242,8 @@ complete shot. Outputs are never intentionally overwritten.
 
 ## Focused checks and provenance
 
-`cargo test -p solaris-client --lib replay`,
-`cargo test -p solaris-client --lib capture::`, and the live-no-block session test
+`cargo test -p krasnokamen-client --lib replay`,
+`cargo test -p krasnokamen-client --lib capture::`, and the live-no-block session test
 cover original packet bytes (including noncanonical IDs and compression),
 record reader/writer round trip and truncation, same-stream CPU frame hashes,
 fixed-frame versus forward seek, authoritative tick gaps/received health,
@@ -254,8 +254,8 @@ The explicit authored-fixture GPU/ffmpeg check (not a battle capture) is:
 
 ```sh
 WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-SOLARIS_CAPTURE_TEST_ARTIFACTS=/work/takes \
-cargo test -p solaris-client --lib capture::gpu_tests -- --ignored --nocapture
+KRASNOKAMEN_CAPTURE_TEST_ARTIFACTS=/work/takes \
+cargo test -p krasnokamen-client --lib capture::gpu_tests -- --ignored --nocapture
 ```
 
 It renders a one-second spline-camera clip of authored cubes and 16 armoured

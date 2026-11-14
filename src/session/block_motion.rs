@@ -5,7 +5,7 @@
 use crate::{
     api::DynamicGeometry,
     motion,
-    protocol::{content::Content, world::World, Result},
+    protocol::{Result, content::Content, world::World},
     terrain::Terrain,
 };
 use glam::{Mat4, Vec3};
