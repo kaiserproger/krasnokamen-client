@@ -226,8 +226,13 @@ impl Cache {
             }
             .or_else(|| {
                 if stand {
-                    // Small stands scale the whole adult rig about their feet, including equipment.
-                    armor_rig(slot)
+                    // Vanilla: an ordinary stand wears `armor_stand#*`, a small stand
+                    // wears its own `armor_stand_small#*` layer; nothing is scaled.
+                    if small_stand(models, e) {
+                        small_stand_rig(slot)
+                    } else {
+                        armor_rig(slot)
+                    }
                 } else {
                     humanoid_rig(models, e, slot, baby)
                 }
@@ -550,6 +555,23 @@ fn armor_rig(slot: usize) -> Option<&'static str> {
         3 => "minecraft:armor_stand#leggings",
         4 => "minecraft:armor_stand#chestplate",
         5 => "minecraft:armor_stand#helmet",
+        _ => return None,
+    })
+}
+
+/// Whether the armour stand is the small variant (vanilla `DATA_CLIENT_FLAGS` bit 0),
+/// the same bit the renderer scales about the feet.
+fn small_stand(models: &Models, e: &Entity) -> bool {
+    let ids = models.ids(e);
+    p::int_at(e, ids.client_flags).unwrap_or(0) & 1 != 0
+}
+
+fn small_stand_rig(slot: usize) -> Option<&'static str> {
+    Some(match slot {
+        2 => "minecraft:armor_stand_small#boots",
+        3 => "minecraft:armor_stand_small#leggings",
+        4 => "minecraft:armor_stand_small#chestplate",
+        5 => "minecraft:armor_stand_small#helmet",
         _ => return None,
     })
 }

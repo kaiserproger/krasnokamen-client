@@ -1774,3 +1774,38 @@ fn warm_nautilus_shell_and_face_follow_both_matched_views() {
     }
     assert_eq!(shell.bones[2].cubes[0].size, [0., 8., 6.]);
 }
+
+/// Vanilla wears `armor_stand_small#*` on a small armour stand and `armor_stand#*` on a
+/// normal one; the small stand keys must resolve to their own rigs, not the adult shells.
+#[test]
+fn small_armor_stands_resolve_to_their_own_layers() {
+    for (qualifier, slot) in [
+        ("helmet", "head"),
+        ("chestplate", "chest"),
+        ("leggings", "legs"),
+        ("boots", "feet"),
+    ] {
+        let small = format!("minecraft:armor_stand_small#{qualifier}");
+        assert_eq!(
+            model_id(&small),
+            format!("armor_stand_small_{slot}"),
+            "{small}"
+        );
+        let adult = format!("minecraft:armor_stand#{qualifier}");
+        assert_eq!(
+            model_id(&adult),
+            format!("armor_{slot}"),
+            "{adult} wears the shared shell"
+        );
+    }
+    for family in [
+        "drowned",
+        "piglin",
+        "zombie",
+        "zombie_villager",
+        "zombified_piglin",
+    ] {
+        let key = format!("minecraft:{family}#layer3/babyModelSet/head");
+        assert_eq!(model_id(&key), format!("armor_baby_{family}_head"), "{key}");
+    }
+}
