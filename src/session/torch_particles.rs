@@ -37,8 +37,12 @@ pub(super) struct TorchParticles {
 fn emitter(name: &str, facing: Option<&str>) -> Option<(&'static str, [f64; 3])> {
     let flame = match name {
         "minecraft:torch" | "minecraft:wall_torch" => "minecraft:particle/flame",
-        "minecraft:soul_torch" | "minecraft:soul_wall_torch" => "minecraft:particle/soul_fire_flame",
-        "minecraft:copper_torch" | "minecraft:copper_wall_torch" => "minecraft:particle/copper_fire_flame",
+        "minecraft:soul_torch" | "minecraft:soul_wall_torch" => {
+            "minecraft:particle/soul_fire_flame"
+        }
+        "minecraft:copper_torch" | "minecraft:copper_wall_torch" => {
+            "minecraft:particle/copper_fire_flame"
+        }
         _ => return None,
     };
     if name.contains("wall_torch") {
@@ -76,11 +80,19 @@ impl TorchParticles {
         for kind in [Kind::Smoke, Kind::Flame(flame)] {
             let lifetime = 10 + (self.random() * 10.) as u16;
             let jitter = |me: &mut Self| (me.random() - 0.5) * 0.04;
-            let position = [at[0] + jitter(self), at[1] + jitter(self), at[2] + jitter(self)];
+            let position = [
+                at[0] + jitter(self),
+                at[1] + jitter(self),
+                at[2] + jitter(self),
+            ];
             let rise = if kind == Kind::Smoke { 0.006 } else { 0.002 };
-            let velocity = [jitter(self) * 0.1, rise + self.random() * 0.003, jitter(self) * 0.1];
-            let size = (0.075 + self.random() * 0.03) as f32
-                * if kind == Kind::Smoke { 0.7 } else { 1. };
+            let velocity = [
+                jitter(self) * 0.1,
+                rise + self.random() * 0.003,
+                jitter(self) * 0.1,
+            ];
+            let size =
+                (0.075 + self.random() * 0.03) as f32 * if kind == Kind::Smoke { 0.7 } else { 1. };
             let gray = (0.15 + self.random() * 0.2) as f32;
             self.particles.push(Particle {
                 kind,
@@ -115,8 +127,12 @@ impl TorchParticles {
         let center = player.map(|v| v.floor() as i32);
         for _ in 0..SAMPLES {
             let position = center.map(|c| c + self.below(12) - self.below(12));
-            let Some(state) = world.block(position) else { continue };
-            let Some(name) = content.name(state) else { continue };
+            let Some(state) = world.block(position) else {
+                continue;
+            };
+            let Some(name) = content.name(state) else {
+                continue;
+            };
             if !name.ends_with("torch") {
                 continue;
             }
@@ -125,7 +141,10 @@ impl TorchParticles {
                 .and_then(|p| p.get("facing"))
                 .map(String::as_str);
             if let Some((flame, offset)) = emitter(name, facing) {
-                self.spawn(flame, std::array::from_fn(|i| f64::from(position[i]) + offset[i]));
+                self.spawn(
+                    flame,
+                    std::array::from_fn(|i| f64::from(position[i]) + offset[i]),
+                );
             }
         }
     }
@@ -148,12 +167,20 @@ impl TorchParticles {
             });
             let progress = ((f32::from(p.age) + partial) / f32::from(p.lifetime)).clamp(0., 1.);
             let [sky, block] = world.light_levels(at.map(|v| v.floor() as i32));
-            let Some((sky, block)) = sky.zip(block) else { continue };
+            let Some((sky, block)) = sky.zip(block) else {
+                continue;
+            };
             let (texture, color, material, light, size) = match p.kind {
                 Kind::Flame(name) => {
                     // Flames glow: lit by their own fire regardless of the cell.
                     let size = p.size * (1. - progress * 0.3);
-                    (name.to_owned(), [1.; 3], EntityMaterial::EntityCutout, [f32::from(sky), f32::from(block).max(14.)], size)
+                    (
+                        name.to_owned(),
+                        [1.; 3],
+                        EntityMaterial::EntityCutout,
+                        [f32::from(sky), f32::from(block).max(14.)],
+                        size,
+                    )
                 }
                 Kind::Smoke => {
                     let frame = ((progress * f32::from(SMOKE_FRAMES)) as u8).min(SMOKE_FRAMES - 1);
@@ -211,7 +238,10 @@ mod tests {
 
     #[test]
     fn spawning_is_bounded_and_particles_expire() {
-        let mut torches = TorchParticles { state: 1, ..Default::default() };
+        let mut torches = TorchParticles {
+            state: 1,
+            ..Default::default()
+        };
         for _ in 0..MAX_PARTICLES {
             torches.spawn("minecraft:particle/flame", [0.5; 3]);
         }

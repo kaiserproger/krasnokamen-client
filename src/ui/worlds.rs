@@ -2,8 +2,8 @@
 //! and the "starting world" progress screen. World files are managed by
 //! `crate::singleplayer`; starting the server is a `UiCommand` for the session.
 use super::{
-    state::{NodeAction, Paint, UiCommand, UiEffects},
     Screen, UiState,
+    state::{NodeAction, Paint, UiCommand, UiEffects},
 };
 use crate::{
     protocol::Result,
@@ -415,10 +415,11 @@ mod tests {
 
     #[test]
     fn world_screens_create_play_cancel_and_delete() {
-        let root = std::env::temp_dir().join(format!("solaris-ui-worlds-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("krasnokamen-ui-worlds-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        // SAFETY: only this test reads SOLARIS_CLIENT_ROOT in the test binary.
-        unsafe { std::env::set_var("SOLARIS_CLIENT_ROOT", &root) };
+        // SAFETY: only this test reads KRASNOKAMEN_CLIENT_ROOT in the test binary.
+        unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_ROOT", &root) };
         let mut content = Content::test_cube();
         content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
         let mut ui = UiState::new_state(&content).unwrap();
