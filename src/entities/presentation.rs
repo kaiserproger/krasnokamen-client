@@ -49,13 +49,16 @@ pub struct PresentationStats {
     pub profile_textures_pending: usize,
     /// Entities drawn by the GPU crowd renderer instead of dynamic geometry.
     pub crowd: usize,
+    /// Crowd entities whose appearance was resolved again this frame (new stacks, changed
+    /// facts or held item shapes); the rest reused their kept composite.
+    pub crowd_resolved: usize,
     /// Entities of crowd kinds left on the CPU path, per kind and reason.
     pub crowd_fallback: BTreeMap<&'static str, BTreeMap<&'static str, usize>>,
     pub unrendered: BTreeMap<String, String>,
 }
 pub(super) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
     models
-        .accessor(&e.type_name, name)
+        .entity_accessor(e, name)
         .and_then(|i| e.metadata_value(i))
 }
 pub(super) fn number(models: &Models, e: &Entity, name: &str) -> Option<i32> {
@@ -63,6 +66,17 @@ pub(super) fn number(models: &Models, e: &Entity, name: &str) -> Option<i32> {
 }
 pub(super) fn boolean(models: &Models, e: &Entity, name: &str) -> bool {
     value(models, e, name)
+        .and_then(Metadata::boolean)
+        .unwrap_or(false)
+}
+/// `e`'s integer metadata at an accessor index resolved for its kind (`Models::ids`).
+pub(super) fn int_at(e: &Entity, id: Option<u8>) -> Option<i32> {
+    id.and_then(|id| e.metadata_value(id))
+        .and_then(Metadata::int)
+}
+/// `e`'s boolean metadata at an accessor index resolved for its kind (`Models::ids`).
+pub(super) fn flag_at(e: &Entity, id: Option<u8>) -> bool {
+    id.and_then(|id| e.metadata_value(id))
         .and_then(Metadata::boolean)
         .unwrap_or(false)
 }
@@ -88,6 +102,9 @@ pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool
 fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
     match e.type_name.as_str() {
         "minecraft:giant" => 6.,
+        // 26.3 `LayerDefinitions`: the adult HORSE, HORSE_ARMOR and HORSE_SADDLE layers apply
+        // `MeshTransformer.scaling(1.1F)` (about the feet) to `createBodyMesh`; HORSE_BABY does not.
+        "minecraft:horse" if !flag_at(e, models.ids(e).baby) => 1.1,
         "minecraft:wither" => {
             let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
             2. - if remaining > 0 {
@@ -281,7 +298,7 @@ pub(super) fn material(
         .families
         .get(&e.type_name)
         .ok_or_else(|| format!("no activated rig family for {}", e.type_name))?;
-    let baby = boolean(models, e, "DATA_BABY_ID");
+    let baby = flag_at(e, models.ids(e).baby);
     let mut rig = if baby {
         family.baby_rig.as_ref().unwrap_or(&family.rig)
     } else {
@@ -317,7 +334,11 @@ pub(super) fn material(
         } else {
             "WITHER_LOCATION"
         };
-        family.materials.get(key).and_then(Value::as_str).map(str::to_owned)
+        family
+            .materials
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
     } else {
         family.texture.clone()
     };
@@ -619,7 +640,7 @@ fn append_entity_fire(
     transform: super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let flags = number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
+    let flags = int_at(entity, models.ids(entity).shared_flags).unwrap_or(0);
     if flags & 1 == 0 || flags & 32 != 0 || entity.type_name == "minecraft:falling_block" {
         return Ok(());
     }
@@ -718,10 +739,12 @@ pub fn append(
             store.ids[&visible[index]]
         };
         let entity = &store.slots[slot];
-        let transform = match store.presented_transform(entity, tick, partial) {
-            Ok(transform) => transform,
+        let transform = match &entry.transform {
+            Ok(transform) => *transform,
             Err(reason) => {
-                stats.unrendered.insert(entity.type_name.clone(), reason);
+                stats
+                    .unrendered
+                    .insert(entity.type_name.clone(), reason.clone());
                 continue;
             }
         };
@@ -934,6 +957,7 @@ pub fn append(
                         out,
                     )?;
                     stats.crowd += 1;
+                    stats.crowd_resolved += usize::from(resolved);
                     stats.animated += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
                     continue;
@@ -991,8 +1015,7 @@ pub fn append(
             store.slots[slot].submitted_revision = Some(store.revision);
         }
     }
-    visible.clear();
-    store.visible_ids = visible;
+    store.frame_entities = frame;
     stats.vertices = out.vertices.len();
     Ok(stats)
 }
@@ -1050,10 +1073,11 @@ pub(super) fn root_matrix(
             Mat4::from_translation(relative) * Mat4::from_rotation_y(t.yaw.to_radians())
         }
     };
-    let pose = number(models, entity, "DATA_POSE").unwrap_or(0);
+    let ids = models.ids(entity);
+    let pose = int_at(entity, ids.pose).unwrap_or(0);
     if pose == 2 && matches!(binding.style, RootStyle::Living) {
         // Lay the rig along the bed axis, with its head at the received bed head.
-        let direction = match value(models, entity, "SLEEPING_POS_ID") {
+        let direction = match ids.sleeping_pos.and_then(|id| entity.metadata_value(id)) {
             Some(Metadata::OptionalBlockPosition(Some(position))) => bed_direction(*position),
             _ => None,
         };
@@ -1105,7 +1129,7 @@ pub(super) fn root_matrix(
         matrix = scale_cube_model(matrix, relative, number(models, entity, "ID_SIZE"));
     }
     if entity.type_name == "minecraft:armor_stand"
-        && number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0
+        && int_at(entity, ids.client_flags).unwrap_or(0) & 1 != 0
     {
         matrix = Mat4::from_translation(relative)
             * Mat4::from_scale(Vec3::splat(0.5))
@@ -1155,9 +1179,17 @@ pub(super) fn root_matrix(
         .any(Option::is_some)
         .then(|| super::clip_pose::library().delta(&layers, super::clip_pose::Channel::Root))
         .flatten();
-    if let Some(death) = entity.death_tick.filter(|_| matches!(binding.style, RootStyle::Living)) {
+    if let Some(death) = entity
+        .death_tick
+        .filter(|_| matches!(binding.style, RootStyle::Living))
+    {
         let vanilla = 1. - clip.map_or(0., |clip| clip.replace);
-        matrix *= death_tilt(&entity.type_name, tick.saturating_sub(death), partial, vanilla);
+        matrix *= death_tilt(
+            &entity.type_name,
+            tick.saturating_sub(death),
+            partial,
+            vanilla,
+        );
     }
     if let Some(clip) = clip {
         matrix *= clip.about(super::clip_pose::FEET);
@@ -1189,7 +1221,10 @@ pub(super) fn death_tilt(type_name: &str, elapsed: u64, partial: f32, strength: 
     let death_time = elapsed as f32 + partial;
     let progress = ((death_time - 1.) / 20. * 1.6).sqrt().min(1.);
     let flip: f32 = match type_name {
-        "minecraft:spider" | "minecraft:cave_spider" | "minecraft:silverfish" | "minecraft:endermite" => 180.,
+        "minecraft:spider"
+        | "minecraft:cave_spider"
+        | "minecraft:silverfish"
+        | "minecraft:endermite" => 180.,
         _ => 90.,
     };
     Mat4::from_translation(LIVING_FEET)
@@ -1529,6 +1564,28 @@ pub(super) fn draw_entity(
                     .unrendered
                     .insert(format!("{}:charge", entity.type_name), reason);
             }
+            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+            if entity.type_name == "minecraft:creeper"
+                && let Err(reason) = super::creeper::append_charge(
+                    entity,
+                    models,
+                    content,
+                    (tick, partial, matrix),
+                    store.transforms,
+                    out,
+                )
+            {
+                stats
+                    .unrendered
+                    .insert(format!("{}:charge", entity.type_name), reason);
+            }
+        }
+        Err(reason) => {
+            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
+                stats
+                    .unrendered
+                    .insert(entity.type_name.clone(), reason.clone());
+            }
         }
         Err(reason) => {
             if !append_item_entity(entity, models, store, content, frame, out, stats)? {
@@ -1565,8 +1622,9 @@ pub(super) fn draw_entity(
 
 /// Equipment slots are logical hands; rigs and display transforms are anatomical sides.
 pub(super) fn left_main_arm(models: &Models, e: &Entity) -> bool {
-    number(models, e, "DATA_PLAYER_MAIN_HAND").map_or_else(
-        || number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 2 != 0,
+    let ids = models.ids(e);
+    int_at(e, ids.main_hand).map_or_else(
+        || int_at(e, ids.mob_flags).unwrap_or(0) & 2 != 0,
         |arm| arm == 0,
     )
 }
@@ -1587,7 +1645,23 @@ pub(super) fn held_item_context(
     } else {
         "head"
     };
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
+    let (using_item, use_ticks, crossbow_pull) = held_item_use(e, flags, slot, partial);
+    (
+        context,
+        crate::ui::items::ItemContext {
+            display: context.into(),
+            using_item,
+            use_ticks,
+            crossbow_pull,
+            ..item_context.cloned().unwrap_or_default()
+        },
+    )
+}
+
+/// The frame-varying item state `held_item_context` gives the item in `slot`: whether it is
+/// in use (living `flags`), its use ticks and crossbow pull.
+pub(super) fn held_item_use(e: &Entity, flags: i32, slot: usize, partial: f32) -> (bool, f32, f32) {
     let living = e.source.as_ref().and_then(|s| s.living.as_ref());
     (
         context,
@@ -1649,6 +1723,19 @@ fn use_action(content: &Content, stack: &Stack) -> ArmAction {
     ArmAction::Item
 }
 
+/// Anatomical arm (0 right, 1 left) holding the item in vanilla BLOCK use:
+/// living flags say an item is in use and its hand's stack blocks attacks.
+fn blocking_arm(e: &Entity, models: &Models, content: &Content) -> Option<usize> {
+    let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
+    if flags & 1 == 0 {
+        return None;
+    }
+    let hand = usize::from(flags & 2 != 0);
+    e.equipment_value(hand)
+        .filter(|stack| !stack.empty() && use_action(content, stack) == ArmAction::Block)
+        .map(|_| usize::from(left_main_arm(models, e)) ^ hand)
+}
+
 /// Independent angular fits to local HumanoidModel/AnimationUtils observations.
 /// Eating/drinking retains ITEM, as AvatarRenderer does; aimed actions use both arms.
 fn equipped_arm_rotations(
@@ -1662,9 +1749,9 @@ fn equipped_arm_rotations(
 ) -> [Vec3; 2] {
     let mut arms = gait.map(|x| Vec3::new(x, 0., 0.));
     let main = usize::from(left_main_arm(models, e));
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
-    let charging = boolean(models, e, "IS_CHARGING_CROSSBOW")
-        || boolean(models, e, "DATA_IS_CHARGING_CROSSBOW");
+    let ids = models.ids(e);
+    let flags = int_at(e, ids.living_flags).unwrap_or(0);
+    let charging = flag_at(e, ids.charging[0]) || flag_at(e, ids.charging[1]);
     let using = flags & 1 != 0 || charging;
     let active = usize::from(flags & 2 != 0);
     let mut two_handed = None;
@@ -1781,7 +1868,7 @@ fn equipped_arm_rotations(
             _ => {}
         }
     }
-    if number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0) {
+    if int_at(e, ids.spell).is_some_and(|spell| spell != 0) {
         let wave = (age * 0.65).cos() * 14_f32.to_radians();
         arms = [
             Vec3::new(wave, 0., 135_f32.to_radians()),
@@ -1934,8 +2021,13 @@ impl AxisMap {
     }
 }
 
-/// Leg pitch of seated passengers.
+/// Seated passenger pose, 26.3 `HumanoidModel.setupAnim` (javap) while `isPassenger`: both
+/// arms pitch by `-PI/5` before the item pose; the right leg (model -X) takes
+/// `(-1.4137167, PI/10, 0.07853982)` and the left leg the mirrored yaw and roll.
 pub(super) const RIDING_LEG_PITCH: f32 = -1.4137167;
+pub(super) const RIDING_LEG_YAW: f32 = 0.31415927;
+pub(super) const RIDING_LEG_ROLL: f32 = 0.07853982;
+const RIDING_ARM_PITCH: f32 = -0.62831855;
 
 /// Source `ZombieModel.setupAttackAnimation` -> `AnimationUtils.animateZombieArms` (26.3, javap), then
 /// the `bobModelPart` pair of `HumanoidModel.setupAnim`: both arms are assigned, never walk-swung.
@@ -2106,6 +2198,20 @@ pub(super) fn role_pose(
         pitch = crate::motion::lerp(pitch, look_pitch, weight);
     }
     let swing = 1.4 * amplitude * leg_swing;
+    let mut legs = [
+        phase.cos() * swing,
+        (phase + std::f32::consts::PI).cos() * swing,
+    ];
+    if super::animation::select::horse_like(&e.type_name) {
+        // 26.3 `AbstractEquineModel.setupAnim` (javap): with c = cos(walkPos * 0.6662 + PI) the
+        // right hind and left front legs swing +0.5c and +0.8c times the walk speed, the other
+        // diagonal pair the negatives, and the head parts turn at most 20 degrees. The role
+        // gait carries one amplitude per diagonal pair: their mean, 0.65 (not the humanoid 1.4,
+        // which threw the legs out nearly flat at a gallop).
+        let pair = (phase + std::f32::consts::PI).cos() * amplitude * 0.65;
+        legs = [pair, -pair];
+        yaw_rel = yaw_rel.clamp(-20., 20.);
+    }
     RolePose {
         head: [pitch.to_radians(), yaw_rel.to_radians()],
         arms,
@@ -2115,7 +2221,7 @@ pub(super) fn role_pose(
             (phase + std::f32::consts::PI).cos() * swing,
         ],
         riding: e.vehicle.is_some(),
-        crouch: number(models, e, "DATA_POSE") == Some(5),
+        crouch: int_at(e, models.ids(e).pose) == Some(5),
         phase,
         amplitude,
         age,
@@ -2170,7 +2276,7 @@ pub(super) fn evaluate_posed_rig(
     } = *pose;
     let pet_sitting = matches!(e.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
         && number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 1 != 0;
-    let pet_baby = pet_sitting && boolean(models, e, "DATA_BABY_ID");
+    let pet_baby = pet_sitting && flag_at(e, models.ids(e).baby);
     let wing_beat = if super::render_living::folds_wings(&e.type_name) {
         living.map_or(0., |state| state.wings(partial))
     } else {
@@ -2258,7 +2364,16 @@ pub(super) fn evaluate_posed_rig(
             pivot.y += 0.2;
         }
         if pose.riding && matches!(bone.role, BoneRole::RightLeg | BoneRole::LeftLeg) {
-            rotation.x = RIDING_LEG_PITCH;
+            let side = if bone.role == BoneRole::RightLeg {
+                1.
+            } else {
+                -1.
+            };
+            rotation = Vec3::new(
+                RIDING_LEG_PITCH,
+                side * RIDING_LEG_YAW,
+                side * RIDING_LEG_ROLL,
+            );
         }
         if e.type_name == "minecraft:armor_stand" {
             let field = match bone.name.as_str() {
@@ -3030,8 +3145,16 @@ pub fn special_item(
                 _ => return Err(format!("unknown special head family {kind}")),
             }
         }
+        // Source CopperGolemStatueSpecialRenderer.Unbaked: `pose` is a required field
+        // that selects one of the four golem layers, as the placed statue does.
         "copper_golem_statue" => (
-            "minecraft:copper_golem#main",
+            match special["pose"].as_str() {
+                Some("standing") => "minecraft:copper_golem#main",
+                Some("running") => "minecraft:copper_golem_running#main",
+                Some("sitting") => "minecraft:copper_golem_sitting#main",
+                Some("star") => "minecraft:copper_golem_star#main",
+                _ => return Err("copper golem statue item pose missing or invalid".into()),
+            },
             special["texture"]
                 .as_str()
                 .ok_or("copper golem statue item texture missing")?
@@ -3113,6 +3236,11 @@ pub fn special_item(
         // The rig is centered in X/Z and uses +Y down; item coordinates use +Y up.
         Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
             * Mat4::from_scale(Vec3::new(1., -1., 1.))
+    } else if kind == "copper_golem_statue" {
+        // Source CopperGolemStatueModel.setupAnim: the root sits at the feet (y = 0)
+        // and turns half about Z. Authored rigs keep the feet at y = 24 px, so the
+        // turned feet are lifted back to 0, like the placed statue's root.
+        Mat4::from_translation(Vec3::new(0., 1.5, 0.)) * Mat4::from_rotation_z(std::f32::consts::PI)
     } else {
         Mat4::IDENTITY
     };
@@ -3251,6 +3379,23 @@ pub fn special_item(
         }
     }
     Ok(model)
+}
+
+/// Texture of one decorated-pot side. 26.3 `PotDecorations` (local javap) is a record of optional
+/// `back`/`left`/`right`/`front` ItemStackTemplates, and `ItemStackTemplate.CODEC` takes either
+/// the `{id, ...}` record or, as its alternative, a bare item id. Absent sides are brick.
+pub(super) fn pot_side_texture(decorations: Option<&Value>, side: &str) -> String {
+    let item = decorations
+        .and_then(|sides| sides.get(side))
+        .and_then(|template| template.as_str().or_else(|| template["id"].as_str()))
+        .unwrap_or("minecraft:brick");
+    match item
+        .strip_prefix("minecraft:")
+        .and_then(|name| name.strip_suffix("_pottery_sherd"))
+    {
+        Some(pattern) => format!("entity/decorated_pot/{pattern}_pottery_pattern"),
+        None => "entity/decorated_pot/decorated_pot_side".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -3761,9 +3906,27 @@ mod tests {
         assert!(pole.cubes[0].faces.is_empty());
         let expected = [
             ("base", [-1.5, 0., -0.5], [3., 2., 1.], [4., 0.], false),
-            ("left_spike", [-2.5, -3., -0.5], [1., 4., 1.], [4., 3.], false),
-            ("middle_spike", [-0.5, -4., -0.5], [1., 4., 1.], [0., 0.], false),
-            ("right_spike", [1.5, -3., -0.5], [1., 4., 1.], [4., 3.], true),
+            (
+                "left_spike",
+                [-2.5, -3., -0.5],
+                [1., 4., 1.],
+                [4., 3.],
+                false,
+            ),
+            (
+                "middle_spike",
+                [-0.5, -4., -0.5],
+                [1., 4., 1.],
+                [0., 0.],
+                false,
+            ),
+            (
+                "right_spike",
+                [1.5, -3., -0.5],
+                [1., 4., 1.],
+                [4., 3.],
+                true,
+            ),
         ];
         assert_eq!(pole.bones.len(), expected.len());
         for (part, (name, origin, size, uv, mirror)) in pole.bones.iter().zip(expected) {
@@ -3771,15 +3934,201 @@ mod tests {
             assert_eq!(part.pivot, [0.; 3]);
             assert_eq!(part.cubes.len(), 1);
             let cube = &part.cubes[0];
-            assert_eq!((cube.origin, cube.size, cube.uv, cube.mirror), (origin, size, uv, mirror), "{name}");
+            assert_eq!(
+                (cube.origin, cube.size, cube.uv, cube.mirror),
+                (origin, size, uv, mirror),
+                "{name}"
+            );
             assert!(cube.faces.is_empty(), "{name} uses the source box unwrap");
         }
+    }
+
+    /// Faces of a vanilla 26.3 `ModelPart.Cube` (texOffs 0,0) in model pixels with their UVs, transcribed
+    /// from local javap of `ModelPart$Cube.<init>` and `ModelPart$Polygon.<init>`: the constructor's
+    /// corners v0..v7, each face's corner order and UV rectangle; a polygon maps its corners to
+    /// (u1,v0), (u0,v0), (u0,v1), (u1,v1) over `texture`, the layer size times `CubeDefinition.texScale`.
+    fn vanilla_cube_faces(
+        origin: Vec3,
+        size: Vec3,
+        texture: glam::Vec2,
+    ) -> [[(Vec3, glam::Vec2); 4]; 6] {
+        let corner = |x: bool, y: bool, z: bool| {
+            origin
+                + size
+                    * Vec3::new(
+                        f32::from(u8::from(x)),
+                        f32::from(u8::from(y)),
+                        f32::from(u8::from(z)),
+                    )
+        };
+        let v = [
+            corner(false, false, false),
+            corner(true, false, false),
+            corner(true, true, false),
+            corner(false, true, false),
+            corner(false, false, true),
+            corner(true, false, true),
+            corner(true, true, true),
+            corner(false, true, true),
+        ];
+        let Vec3 { x: w, y: h, z: d } = size;
+        let (u1, u2, u22, u3, u4) = (d, d + w, d + w + w, d + w + d, d + w + d + w);
+        let (v1, v2) = (d, d + h);
+        [
+            ([5, 4, 0, 1], [u1, 0., u2, v1]),  // DOWN
+            ([2, 3, 7, 6], [u2, v1, u22, 0.]), // UP
+            ([0, 4, 7, 3], [0., v1, u1, v2]),  // WEST
+            ([1, 0, 3, 2], [u1, v1, u2, v2]),  // NORTH
+            ([5, 1, 2, 6], [u2, v1, u3, v2]),  // EAST
+            ([4, 5, 6, 7], [u3, v1, u4, v2]),  // SOUTH
+        ]
+        .map(|(corners, [a0, b0, a1, b1])| {
+            let uv = [(a1, b0), (a0, b0), (a0, b1), (a1, b1)];
+            [0, 1, 2, 3].map(|i| (v[corners[i]], glam::Vec2::new(uv[i].0, uv[i].1) / texture))
+        })
+    }
+
+    #[test]
+    fn arrow_vertices_follow_vanilla_26_3_world_transform() {
+        // Local 26.3 javap (receipts/ArrowParity/REPORT.md): ArrowRenderer.submit rotates Y by yRot-90
+        // and Z by xRot; createBodyLayer scales the mesh root by 0.9; ModelPart.translateAndRotate
+        // applies the part offset, ZYX rotation and part scale. The shaft box has texScale (1, 0.8).
+        let position = Vec3::new(3., 5., -7.);
+        let vanilla_root = Mat4::from_translation(position)
+            * Mat4::from_rotation_y((-53_f32).to_radians())
+            * Mat4::from_rotation_z(21_f32.to_radians())
+            * Mat4::from_scale(Vec3::splat(0.9));
+        let shaft = (
+            Vec3::new(-12., -2., 0.),
+            Vec3::new(16., 4., 0.),
+            glam::Vec2::new(32., 25.6),
+        );
+        let parts = [
+            (
+                "back",
+                Vec3::new(-11., 0., 0.),
+                45_f32,
+                0.8,
+                (
+                    Vec3::new(0., -2.5, -2.5),
+                    Vec3::new(0., 5., 5.),
+                    glam::Vec2::new(32., 32.),
+                ),
+            ),
+            ("cross_1", Vec3::ZERO, 45., 1., shaft),
+            ("cross_2", Vec3::ZERO, 135., 1., shaft),
+        ];
+        let area = |face: &[(Vec3, glam::Vec2); 4]| {
+            (face[1].0 - face[0].0)
+                .cross(face[3].0 - face[0].0)
+                .length()
+        };
+        for key in [
+            "minecraft:arrow#renderer/model",
+            "minecraft:spectral_arrow#renderer/model",
+        ] {
+            let rig = super::super::krasnokamen_models::authored(key).unwrap();
+            let mut matrices = Vec::new();
+            let root = projectile_root(position, 37., 21., false);
+            for bone in &rig.bones {
+                let parent = bone.parent.map(|i| matrices[i]).unwrap_or(root);
+                matrices.push(parent * resources::transform(bone.pivot, bone.rotation, bone.scale));
+            }
+            for (name, offset, angle, scale, (origin, size, texture)) in parts {
+                let pose = vanilla_root
+                    * Mat4::from_translation(offset / 16.)
+                    * Mat4::from_rotation_x(angle.to_radians())
+                    * Mat4::from_scale(Vec3::splat(scale));
+                let expected: Vec<_> = vanilla_cube_faces(origin, size, texture)
+                    .into_iter()
+                    .map(|face| face.map(|(p, uv)| (pose.transform_point3(p / 16.), uv)))
+                    .filter(|face| area(face) > 1e-9)
+                    .collect();
+                let index = rig.part_by_name[name];
+                let actual: Vec<_> = rig.bones[index]
+                    .quads
+                    .iter()
+                    .map(|quad| {
+                        quad.map(|v| {
+                            (
+                                matrices[index].transform_point3(Vec3::new(v[0], v[1], v[2])),
+                                glam::Vec2::new(v[3], v[4]),
+                            )
+                        })
+                    })
+                    .filter(|face| area(face) > 1e-9)
+                    .collect();
+                assert_eq!(actual.len(), expected.len(), "{key} {name}: visible faces");
+                // Same corners, UVs and winding: equal up to a cyclic shift of the corner order.
+                let same = |a: &[(Vec3, glam::Vec2); 4], b: &[(Vec3, glam::Vec2); 4]| {
+                    (0..4).any(|shift| {
+                        (0..4).all(|i| {
+                            a[(i + shift) % 4].0.distance(b[i].0) < 1e-4
+                                && a[(i + shift) % 4].1.distance(b[i].1) < 1e-4
+                        })
+                    })
+                };
+                for face in &expected {
+                    assert!(
+                        actual.iter().any(|quad| same(quad, face)),
+                        "{key} {name}: missing face {face:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn authored_arrow_matches_vanilla_26_3_arrow_model_layer() {
+        // The root's 0.9 scale is distributed over the child pivots and scales.
+        // Shaft V coordinates account for CubeDefinition's 0.8 texture-height scale.
+        let model = super::super::krasnokamen_models::ModelFile::parse(include_str!(
+            "../../assets/krasnokamen/models/entity/arrow.json"
+        ))
+        .unwrap();
+        assert_eq!(model.texture.path, "entity/projectiles/arrow.png");
+        assert_eq!(model.texture.size, [32, 32]);
+        assert_eq!(model.bone_names(), ["back", "cross_1", "cross_2"]);
+        let back = &model.bones[0];
+        assert!(
+            (back.pivot[0] - -9.9).abs() < 1e-6,
+            "mesh pose scale 0.9 on -11"
+        );
+        assert_eq!(back.rotation, [45., 0., 0.]);
+        assert_eq!(back.scale, [0.72, 0.72, 0.72]);
+        assert_eq!(back.cubes.len(), 1);
+        assert_eq!(back.cubes[0].origin, [0., -2.5, -2.5]);
+        assert_eq!(back.cubes[0].size, [0., 5., 5.]);
+        assert_eq!(back.cubes[0].uv, [0., 0.]);
+        assert!(back.cubes[0].faces.is_empty(), "default box unwrap");
+        for (index, (name, rotation)) in [("cross_1", 45.), ("cross_2", 135.)].iter().enumerate() {
+            let bone = &model.bones[index + 1];
+            assert_eq!(bone.name, *name);
+            assert_eq!(bone.rotation, [*rotation, 0., 0.]);
+            assert_eq!(bone.scale, [0.9, 0.9, 0.9]);
+            assert_eq!(bone.cubes.len(), 1);
+            let cube = &bone.cubes[0];
+            assert_eq!(cube.origin, [-12., -2., 0.]);
+            assert_eq!(cube.size, [16., 4., 0.]);
+            assert_eq!(cube.uv, [0., 0.]);
+            assert_eq!(cube.faces.len(), 2, "{name} texture-height scaling");
+        }
+        let rects = model.uv_rects();
+        assert!(
+            rects
+                .iter()
+                .any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 5.])
+        );
+        assert!(
+            !rects.iter().any(|(_, rect)| *rect == [0., 2., 16., 3.]),
+            "old hand-authored brown row"
+        );
     }
 
     #[test]
     fn trident_and_arrow_authored_axes_follow_same_projectile_orientation() {
         for (key, bone_name, axis, other) in [
-            ("minecraft:arrow#renderer/model", "shaft", 0, 1),
+            ("minecraft:arrow#renderer/model", "cross_1", 0, 2),
             ("minecraft:trident#renderer/model", "pole", 1, 0),
         ] {
             let rig = super::super::krasnokamen_models::authored(key).unwrap();
@@ -3797,16 +4146,39 @@ mod tests {
             };
             assert!(span(axis) > span(other) * 4., "{key}");
             if bone_name == "pole" {
-                let (lo, hi) = bone.quads.iter().flatten().map(|vertex| vertex[1])
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
-                assert_eq!((lo, hi), (2. / 16., 27. / 16.), "thrown shaft uses the source grip frame");
-                let tip = rig.bones.iter().find(|bone| bone.name == "middle_spike").unwrap();
-                let tip_y = tip.quads.iter().flatten().map(|vertex| vertex[1]).fold(f32::INFINITY, f32::min);
+                let (lo, hi) = bone
+                    .quads
+                    .iter()
+                    .flatten()
+                    .map(|vertex| vertex[1])
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                        (lo.min(v), hi.max(v))
+                    });
+                assert_eq!(
+                    (lo, hi),
+                    (2. / 16., 27. / 16.),
+                    "thrown shaft uses the source grip frame"
+                );
+                let tip = rig
+                    .bones
+                    .iter()
+                    .find(|bone| bone.name == "middle_spike")
+                    .unwrap();
+                let tip_y = tip
+                    .quads
+                    .iter()
+                    .flatten()
+                    .map(|vertex| vertex[1])
+                    .fold(f32::INFINITY, f32::min);
                 assert_eq!(tip_y, -4. / 16.);
                 for yaw in [0., 90., 180., 270.] {
                     let root = projectile_root(Vec3::ZERO, yaw, 0., true);
-                    let forward = projectile_root(Vec3::ZERO, yaw, 0., false).transform_vector3(Vec3::X);
-                    assert!((root.transform_point3(Vec3::new(0., tip_y, 0.)) - forward * 0.25).length() < 1e-5);
+                    let forward =
+                        projectile_root(Vec3::ZERO, yaw, 0., false).transform_vector3(Vec3::X);
+                    assert!(
+                        (root.transform_point3(Vec3::new(0., tip_y, 0.)) - forward * 0.25).length()
+                            < 1e-5
+                    );
                 }
             }
         }
@@ -4320,6 +4692,70 @@ mod tests {
         }
     }
 
+    /// BV-HORSE: 26.3 `LayerDefinitions` bakes the adult HORSE layer (and its armour and
+    /// saddle layers) through `MeshTransformer.scaling(1.1F)`, about the feet.
+    #[test]
+    fn adult_horse_renders_at_the_vanilla_layer_scale() {
+        let (models, mut entity) = fixture();
+        entity.type_name = "minecraft:horse".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.1);
+        entity.type_name = "minecraft:pig".into();
+        assert_eq!(renderer_scale(&entity, &models, 0.), 1.);
+    }
+
+    /// BV-HORSE ("splayed legs"): equines take the 26.3 `AbstractEquineModel` gait (diagonal
+    /// pairs, 0.65 x walk speed), not the humanoid 1.4 that threw a galloping horse's legs out
+    /// nearly flat; a zombie at the same walk keeps 1.4.
+    #[test]
+    fn walking_horse_legs_take_the_equine_gait() {
+        use super::super::{animation_tests, render_living};
+        let pose_of = |type_name: &str| {
+            let (models, mut entity) = animation_tests::fixture();
+            entity.type_name = type_name.into();
+            let mut source = entity.source.take().unwrap();
+            for x in [0.2, 0.5, 0.8] {
+                source.living.as_mut().unwrap().tick(
+                    &models,
+                    &entity,
+                    &render_living::TickInput {
+                        age: 1,
+                        position: [x, 0., 0.],
+                        yaw: 0.,
+                        alive: true,
+                        passenger: false,
+                        baby: false,
+                        visually_swimming: false,
+                        in_water: false,
+                        uses_y_for_walk: false,
+                        rotation_changed_before_base_tick: false,
+                        is_mob: true,
+                        first_passenger_is_mob: false,
+                        max_head_yaw: 75.,
+                        max_body_head_yaw: 75.,
+                        attack_active: false,
+                        camel_sitting: false,
+                        camel_visually_sitting: false,
+                        camel_sitting_down: false,
+                        camel_pose_transition: false,
+                        camel_pose_time: 0,
+                    },
+                );
+            }
+            entity.source = Some(source);
+            role_pose(&entity, &models, &Content::test_cube(), 2, 0.5)
+        };
+        let horse = pose_of("minecraft:horse");
+        assert!(horse.amplitude > 0.1, "walking: {}", horse.amplitude);
+        let pair = (horse.phase + std::f32::consts::PI).cos() * horse.amplitude * 0.65;
+        assert!(
+            (horse.legs[0] - pair).abs() < 1e-6 && (horse.legs[1] + pair).abs() < 1e-6,
+            "{:?}",
+            horse.legs
+        );
+        let zombie = pose_of("minecraft:zombie");
+        assert!((zombie.legs[0] - zombie.phase.cos() * 1.4 * zombie.amplitude).abs() < 1e-6);
+    }
+
     #[test]
     fn slime_shell_is_translucent_and_hidden_with_the_entity() {
         for kind in ["minecraft:slime", "minecraft:magma_cube"] {
@@ -4543,7 +4979,6 @@ mod tests {
         assert!(lid_top > body_top && lid_top <= 1.);
     }
 
-
     #[test]
     fn breeze_wind_emits_wrapped_animated_texture_layer() {
         let rig = super::super::krasnokamen_models::authored("minecraft:breeze_wind#main").unwrap();
@@ -4690,16 +5125,37 @@ mod tests {
     fn held_trident_preserves_coordinates_for_the_resource_item_graph() {
         let (models, _) = fixture();
         let mut content = Content::test_cube();
-        content.insert_test_texture("minecraft:entity/trident/trident", TextureRegion {
-            layer: 42, uv: [0., 0., 1., 1.], width: 32, height: 32,
-        });
-        let item = special_item(&models, &content, &Stack::default(),
-            &serde_json::json!({"type":"minecraft:trident"})).unwrap();
+        content.insert_test_texture(
+            "minecraft:entity/trident/trident",
+            TextureRegion {
+                layer: 42,
+                uv: [0., 0., 1., 1.],
+                width: 32,
+                height: 32,
+            },
+        );
+        let item = special_item(
+            &models,
+            &content,
+            &Stack::default(),
+            &serde_json::json!({"type":"minecraft:trident"}),
+        )
+        .unwrap();
         let rig = models.rig("minecraft:trident#main");
         let pole = rig.bones.iter().find(|bone| bone.name == "pole").unwrap();
-        let (lo, hi) = pole.quads.iter().flatten().map(|vertex| vertex[1])
-            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
-        assert_eq!((lo, hi), (2. / 16., 27. / 16.), "held shaft keeps the local layer's grip frame");
+        let (lo, hi) = pole
+            .quads
+            .iter()
+            .flatten()
+            .map(|vertex| vertex[1])
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                (lo.min(v), hi.max(v))
+            });
+        assert_eq!(
+            (lo, hi),
+            (2. / 16., 27. / 16.),
+            "held shaft keeps the local layer's grip frame"
+        );
         // The resource item graph owns its Y/Z conversion. A second half-turn
         // here reverses the prongs against the actual matched Java control.
         let conversion = Mat4::IDENTITY;
@@ -4712,7 +5168,8 @@ mod tests {
             for source in &bone.quads {
                 let actual = emitted.next().unwrap();
                 for (vertex, point) in source.iter().zip(actual.positions) {
-                    let expected = matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
+                    let expected =
+                        matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
                     assert!((Vec3::from_array(point) - expected).abs().max_element() < 1e-6);
                 }
             }

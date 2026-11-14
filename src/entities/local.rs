@@ -81,6 +81,8 @@ impl Store {
                 submitted_revision: None,
                 clip: Default::default(),
                 crowd: None,
+                clock: None,
+                kind_slot: Default::default(),
             };
             entity.physical.lerp_duration = 1;
             entity.source = Some(source_state::SourceState::new(&entity, &models)?);
@@ -110,7 +112,10 @@ impl Store {
         e.damage_tick = player.hurt_tick;
         e.animation = player.visual_swing(tick);
         // The first dead tick, kept while dead, so the death tilt advances (vanilla deathTime).
-        e.death_tick = player.health.filter(|h| *h <= 0.).map(|_| e.death_tick.unwrap_or(tick));
+        e.death_tick = player
+            .health
+            .filter(|h| *h <= 0.)
+            .map(|_| e.death_tick.unwrap_or(tick));
         let pose = match player.pose {
             Pose::Standing => 0,
             Pose::FallFlying => 1,
@@ -161,15 +166,7 @@ impl Store {
         // the same previous/current tick pair as the first-person camera.
         e.physical.lerp_progress = 1;
         source_state::tick(
-            e,
-            &models,
-            world,
-            content,
-            game_time,
-            tick,
-            false,
-            false,
-            player.bounds(),
+            e, &models, world, content, game_time, tick, false, false, None,
         )?;
         e.physical.lerp_progress = 0;
         self.local_avatar_tick = Some(tick);

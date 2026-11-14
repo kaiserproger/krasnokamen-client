@@ -106,11 +106,20 @@ pub(crate) struct ScreenAudioOwner {
 pub struct Session {
     instance_id: String,
     presentation: bool,
+    /// `prepare_frame` rebuilds the animated geometry (entities, weather, clouds, effects)
+    /// before every draw, so a state refresh of the scene leaves that part to it.
+    frame_driven: bool,
     network: Option<Network>,
     replaying: bool,
+    replay_seek: Option<replay::SeekState>,
     recording: Option<crate::replay::format::RecordingOptions>,
     recording_tick: Option<u64>,
     cinematic_camera: Option<crate::capture::camera::Pose>,
+    /// Filming (`--hide-hud-keep-hand`): the HUD stays hidden in play, as after F1,
+    /// but the first-person hand and held items are still drawn.
+    pub(crate) hidden_hud_keeps_hand: bool,
+    /// Filming (`--follow-player NAME`): over-the-shoulder spectator camera.
+    follow: Option<follow::Follow>,
     loading: Option<mpsc::Receiver<Result<Loaded>>>,
     wake: Arc<RwLock<Wake>>,
     pub(crate) phase: String,
@@ -188,6 +197,8 @@ pub struct Session {
     commands: Vec<PacketCommand>,
     events: VecDeque<Value>,
     packet_counts: BTreeMap<i32, u64>,
+    interest_measurement: Option<(Instant, Instant)>,
+    interest_packet_bytes: BTreeMap<i32, u64>,
     ignored_presentation: BTreeMap<i32, u64>,
     status: Option<Value>,
     server_frozen: bool,
@@ -196,6 +207,8 @@ pub struct Session {
     /// distance is in chunks, FOV in degrees, sensitivity multiplies the 0.12
     /// base look scale, volume is the Master gain. All defaults live on UiState.
     render_distance: u32,
+    /// Vanilla «Entity Distance» (`Options.entityDistanceScaling`, 0.5..=5).
+    entity_distance_scaling: f64,
     main_arm_right: bool,
     /// Options language (`en_us` style): ClientInformation locale and client text translation.
     language: String,
@@ -239,11 +252,15 @@ impl Session {
         let mut out = Self {
             instance_id,
             presentation,
+            frame_driven: false,
             network: None,
             replaying: false,
+            replay_seek: None,
             recording: None,
             recording_tick: None,
             cinematic_camera: None,
+            hidden_hud_keeps_hand: false,
+            follow: None,
             loading: None,
             wake: Arc::new(RwLock::new(Arc::new(|| {}))),
             phase: "fixture".into(),
@@ -308,6 +325,12 @@ impl Session {
             commands: Vec::with_capacity(32),
             events: VecDeque::with_capacity(64),
             packet_counts: BTreeMap::new(),
+            interest_measurement: (std::env::var_os("KRASNOKAMEN_INTEREST_MEASURE").is_some())
+                .then(|| {
+                    let now = Instant::now();
+                    (now, now)
+                }),
+            interest_packet_bytes: BTreeMap::new(),
             ignored_presentation: BTreeMap::new(),
             status: None,
             server_frozen: false,
@@ -316,6 +339,7 @@ impl Session {
             shutdown_requested: false,
             debug_overlay_pending: false,
             render_distance: UiState::DEFAULT_RENDER_DISTANCE,
+            entity_distance_scaling: crate::entities::view_range::DEFAULT_SCALING,
             main_arm_right: true,
             language: crate::ui::text::DEFAULT_LANGUAGE.into(),
             server_view_distance: None,
@@ -513,6 +537,11 @@ impl Session {
     /// by the server's chunk radius once one arrived, as in vanilla. Fog and
     /// sky colour follow it, so a server with a short radius fogs closer.
     pub(super) fn effective_render_distance(&self) -> u32 {
+        // A cinematic override expands fog together with entity/terrain range;
+        // the default replay option already follows the recorded server radius.
+        if self.replaying {
+            return self.render_distance;
+        }
         self.server_view_distance
             .filter(|radius| *radius > 0)
             .map_or(self.render_distance, |radius| {
@@ -1189,6 +1218,11 @@ impl Session {
             }
             self.tick_detail_ms[4] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
+            // Cut-in seeks retain packet/world clocks, not speculative local
+            // movement or per-tick scene extraction. Live play stays below.
+            if self.replaying && self.replay_seek.is_some() {
+                return self.tick_replay_seek(world_advances);
+            }
             self.player.tick(
                 crate::player::InteractionWorld {
                     world: &self.world,
@@ -1201,6 +1235,9 @@ impl Session {
                 self.world_tick,
                 &mut self.commands,
             )?;
+            if let Some(follow) = &self.follow {
+                follow.trail(&self.entities, &mut self.player);
+            }
             self.environment
                 .tick_vignette(&self.world, self.player.eye_position())?;
             self.tick_detail_ms[5] += start.elapsed().as_secs_f64() * 1000.;
@@ -1282,24 +1319,37 @@ impl Session {
             self.scene.hurt_tilt_deg = 0.;
             return;
         }
+        if let Some((position, yaw, pitch)) = self.follow_camera() {
+            self.scene.camera_position = position;
+            self.scene.yaw = yaw;
+            self.scene.pitch = pitch;
+            self.scene.fov_deg = self.fov_deg;
+            self.scene.roll_deg = 0.;
+            self.scene.hurt_tilt_deg = 0.;
+            return;
+        }
         let view = self.player.visual_view(self.local_partial);
-        let yaw = self.player.yaw;
-        self.scene.camera_position = view.eye;
+        // Server Set Camera: another received entity lends its eye and head look
+        // (vanilla cameraEntity); F5 then orbits that entity, not the local body.
+        let spectated = self.spectated_view();
+        let (eye, yaw, pitch) = spectated.unwrap_or((view.eye, self.player.yaw, self.player.pitch));
+        self.scene.camera_position = eye;
         self.scene.yaw = yaw;
-        self.scene.pitch = self.player.pitch;
+        self.scene.pitch = pitch;
         if self.camera_mode == 0 {
-            self.scene.camera_position[0] += f64::from(yaw.to_radians().cos() * view.bob[0]);
-            self.scene.camera_position[2] += f64::from(yaw.to_radians().sin() * view.bob[0]);
-            self.scene.camera_position[1] += f64::from(view.bob[1]) - f64::from(view.dip);
-            self.scene.pitch += view.pitch_bob;
+            if spectated.is_none() {
+                self.scene.camera_position[0] += f64::from(yaw.to_radians().cos() * view.bob[0]);
+                self.scene.camera_position[2] += f64::from(yaw.to_radians().sin() * view.bob[0]);
+                self.scene.camera_position[1] += f64::from(view.bob[1]) - f64::from(view.dip);
+                self.scene.pitch += view.pitch_bob;
+            }
         } else {
             let sign = if self.camera_mode == 1 { -1. } else { 1. };
-            let direction = self.player.look_direction().map(|v| v * sign);
+            let direction = crate::player::math::view(pitch, yaw).map(|v| v * sign);
             let distance = self.content.as_ref().map_or(4., |content| {
-                crate::player::camera_distance(&self.world, content, view.eye, direction)
+                crate::player::camera_distance(&self.world, content, eye, direction)
             });
-            self.scene.camera_position =
-                std::array::from_fn(|i| view.eye[i] + direction[i] * distance);
+            self.scene.camera_position = std::array::from_fn(|i| eye[i] + direction[i] * distance);
             if self.camera_mode == 2 {
                 self.scene.yaw += 180.;
                 self.scene.pitch = -self.scene.pitch;
@@ -1318,6 +1368,19 @@ impl Session {
             self.damage_tilt_strength,
         );
         self.scene.hurt_direction = self.player.hurt_direction;
+    }
+
+    /// The Set Camera entity's interpolated eye view, while it is another received
+    /// entity. Absent or not yet received: the local player's own view, as vanilla.
+    fn spectated_view(&self) -> Option<([f64; 3], f32, f32)> {
+        let id = self
+            .player
+            .camera_entity
+            .filter(|id| *id != self.player.entity_id)?;
+        let entity = self.entities.get(id)?;
+        self.entities
+            .eye_view(entity, self.world_tick, self.presentation_partial)
+            .ok()
     }
 
     pub(crate) fn cycle_camera(&mut self) {
@@ -1345,7 +1408,7 @@ impl Session {
         if ui.synchronize(&self.inventory, content).is_err() {
             return;
         }
-        let result = if ui.advance_animations(now) {
+        let mut result = if ui.advance_animations(now) {
             self.scene.overlay.vertices.clear();
             for indices in &mut self.scene.overlay.indices {
                 indices.clear();
@@ -1357,6 +1420,20 @@ impl Session {
         } else {
             Ok(())
         };
+        // ToastManager plays its sounds as SimpleSoundInstance.forUI(event, 1, 1).
+        for event in ui.take_toast_sounds() {
+            if let (Ok(()), Some(audio)) = (&result, &self.audio) {
+                result = audio
+                    .play(crate::audio::SoundRequest::relative(
+                        event,
+                        crate::audio::SoundCategory::Ui,
+                        1.,
+                        1.,
+                        0,
+                    ))
+                    .map(|_| ());
+            }
+        }
         if self.dimension.is_none() && ui.shell_screen_active() {
             // Slow +-12 degree pan (about 40 s period) over the dimmed scene.
             self.scene.yaw = self.player.yaw + 12. * (now * 0.157).sin() as f32;
@@ -1387,11 +1464,12 @@ impl Session {
                 self.block_motion.step(terrain, &self.world, now)?;
             }
             // Animated geometry samples the same tick pair as the camera.
+            self.frame_driven = true;
             self.refresh_scene_mode(true)?;
         }
         Ok(())
     }
-    /// Living animation inputs sampled after this capture's scene extraction.
+    /// Animation and falling-block positions sampled after this capture's scene extraction.
     pub(crate) fn capture_gait_frame(&self) -> Value {
         Value::Array(
             self.entities

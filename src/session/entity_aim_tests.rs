@@ -11,8 +11,8 @@ use crate::{
     },
 };
 
-const VILLAGER: u32 = 1;
-const ENTITY_ID: i32 = 42;
+pub(crate) const VILLAGER: u32 = 1;
+pub(crate) const ENTITY_ID: i32 = 42;
 
 fn models() -> Models {
     let schema = serde_json::from_value(json!({
@@ -28,7 +28,7 @@ fn models() -> Models {
     .unwrap();
     Models {
         rigs: BTreeMap::new(),
-        schemas: BTreeMap::from([("test:villager".into(), schema)]),
+        schemas: [("test:villager".into(), schema)].into_iter().collect(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),
@@ -43,7 +43,7 @@ fn models() -> Models {
 }
 
 /// Player eye at (4.5, 5.62, 4.5); a villager standing at `villager`.
-fn session(villager: [f64; 3]) -> (Session, Handle) {
+pub(crate) fn session(villager: [f64; 3]) -> (Session, Handle) {
     let mut session = Session::new_mode("entity-aim-test".into(), false);
     let mut content = Content::test_cube();
     content
@@ -150,6 +150,36 @@ fn probe_without_apply_restores_the_look() {
     let (yaw, pitch) = (session.player.yaw, session.player.pitch);
     assert_eq!(session.aim_at_entity(handle, false).unwrap(), None);
     assert_eq!((session.player.yaw, session.player.pitch), (yaw, pitch));
+}
+
+#[test]
+fn set_camera_entity_lends_its_eye_and_f5_orbits_it() {
+    let (mut session, _) = session([10.5, 4., 7.5]);
+    session.camera();
+    let own = session.scene.camera_position;
+    session.player.camera_entity = Some(ENTITY_ID);
+    session.camera();
+    let eye = session.scene.camera_position;
+    assert!(
+        (eye[0] - 10.5).abs() < 1e-9 && (eye[2] - 7.5).abs() < 1e-9,
+        "camera stayed on the local player: {eye:?}"
+    );
+    assert!(
+        (eye[1] - (4. + 1.62)).abs() < 1e-5,
+        "camera is not at the target's eye height: {eye:?}"
+    );
+    // F5: the boom runs four blocks behind the target's received look (yaw 0 faces +Z).
+    session.cycle_camera();
+    let rear = session.scene.camera_position;
+    assert!(
+        (rear[0] - 10.5).abs() < 1e-6 && (rear[2] - 3.5).abs() < 1e-6,
+        "F5 did not orbit the target: {rear:?}"
+    );
+    // Set Camera back to the local player restores its own first-person eye.
+    session.player.camera_entity = Some(session.player.entity_id);
+    session.cycle_camera();
+    session.cycle_camera();
+    assert_eq!(session.scene.camera_position, own);
 }
 
 #[test]

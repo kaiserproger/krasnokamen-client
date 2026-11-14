@@ -267,13 +267,26 @@ impl<'a> Baker<'a> {
         };
         for (key, value) in own.as_object().ok_or("model must be an object")? {
             if key == "textures" || key == "display" {
+                let mut own_entries = value
+                    .as_object()
+                    .ok_or("model textures/display must be object")?
+                    .clone();
+                if key == "display" {
+                    // Source ItemTransforms deserializer: a file without a left-hand
+                    // transform reuses its own right-hand one, before parents are consulted.
+                    for (left, right) in [
+                        ("thirdperson_lefthand", "thirdperson_righthand"),
+                        ("firstperson_lefthand", "firstperson_righthand"),
+                    ] {
+                        if !own_entries.contains_key(left)
+                            && let Some(transform) = own_entries.get(right).cloned()
+                        {
+                            own_entries.insert(left.into(), transform);
+                        }
+                    }
+                }
                 let mut merged = inherited[key].as_object().cloned().unwrap_or_default();
-                merged.extend(
-                    value
-                        .as_object()
-                        .ok_or("model textures/display must be object")?
-                        .clone(),
-                );
+                merged.extend(own_entries);
                 inherited[key] = Value::Object(merged);
             } else if key != "parent" {
                 inherited[key] = value.clone();

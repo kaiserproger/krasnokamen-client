@@ -809,9 +809,19 @@ impl UiState {
             }
             progress.push((id, criteria));
         }
-        let _show = r.bool()?;
+        let show = r.bool()?;
         r.done()?;
+        // ClientAdvancements.update raises toasts only for non-reset updates.
+        let progressed: Vec<String> = if show && !reset {
+            progress.iter().map(|(id, _)| id.clone()).collect()
+        } else {
+            Vec::new()
+        };
         self.apply_advancement_update(reset, added, removed, progress)?;
+        if !progressed.is_empty() {
+            let ids: Vec<&str> = progressed.iter().map(String::as_str).collect();
+            self.raise_advancement_toasts(&ids);
+        }
         Ok(())
     }
     pub fn append_map(

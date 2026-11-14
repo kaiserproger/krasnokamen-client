@@ -6,7 +6,7 @@ use resources::{Bone, BoneRole, Rig};
 pub(super) fn fixture() -> (Models, Entity) {
     let mut models = Models {
         rigs: BTreeMap::new(),
-        schemas: BTreeMap::new(),
+        schemas: Default::default(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: vec![],
@@ -65,6 +65,8 @@ pub(super) fn fixture() -> (Models, Entity) {
         submitted_revision: None,
         clip: Default::default(),
         crowd: None,
+        clock: None,
+        kind_slot: Default::default(),
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},
@@ -99,7 +101,9 @@ pub(super) fn fixture() -> (Models, Entity) {
                 resources::DefaultAttribute { id: 1, value: 1. },
             )]),
             height: 1.,
-            accessors: BTreeMap::new(),
+            accessors: Default::default(),
+            sizing: Default::default(),
+            ids: Default::default(),
         },
     );
     entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());
@@ -1663,11 +1667,22 @@ fn local_avatar_death_tick_holds_the_first_dead_tick_until_alive() {
     store.models = Some(Arc::new(models));
     let world = crate::protocol::world::World::default();
     for (tick, health, expected) in [
-        (1, 20., None), (2, 0., Some(2)), (3, 0., Some(2)), (9, 0., Some(2)), (10, 20., None), (12, 0., Some(12)),
+        (1, 20., None),
+        (2, 0., Some(2)),
+        (3, 0., Some(2)),
+        (9, 0., Some(2)),
+        (10, 20., None),
+        (12, 0., Some(12)),
     ] {
         player.health = Some(health);
-        store.sync_local_avatar(&player, &inventory, &world, &content, (tick, tick as i64)).unwrap();
-        assert_eq!(store.local_avatar.as_ref().unwrap().death_tick, expected, "tick {tick}");
+        store
+            .sync_local_avatar(&player, &inventory, &world, &content, (tick, tick as i64))
+            .unwrap();
+        assert_eq!(
+            store.local_avatar.as_ref().unwrap().death_tick,
+            expected,
+            "tick {tick}"
+        );
     }
 }
 
@@ -2209,6 +2224,36 @@ fn animation_offhand_use_and_attack_mirror_the_selected_main_arm() {
     );
     assert!(attack[3].transform_vector3(Vec3::Y).z < -0.8);
     assert_eq!(attack[2], Mat4::IDENTITY);
+}
+
+#[test]
+fn animation_zombie_arms_yield_the_shield_arm_to_block_use() {
+    let (models, mut e, content) = action_fixture("minecraft:husk");
+    let rig = rig();
+    // Main hand right (Arm 1): sword right, battle shield in the off (left) hand.
+    e.equipment[0] = Some(action_stack(2, json!({})));
+    e.equipment[1] = Some(action_stack(1, json!({"minecraft:blocks_attacks":{}})));
+    let zombie = |direction: Vec3| (0.15..=0.20).contains(&direction.y) && direction.x.abs() < 0.2;
+    let lowered = action_pose(&models, &e, &content, &rig);
+    for arm in [2, 3] {
+        assert!(
+            zombie(lowered[arm].transform_vector3(Vec3::Y)),
+            "idle husk arm {arm}"
+        );
+    }
+    e.metadata.insert(8, Metadata::Byte(3));
+    let raised = action_pose(&models, &e, &content, &rig);
+    let shield = raised[3].transform_vector3(Vec3::Y);
+    assert!(
+        shield.z < -0.6 && shield.x.abs() > 0.2 && !zombie(shield),
+        "shield across the chest: {shield:?}"
+    );
+    assert_eq!(raised[2], lowered[2], "the sword arm keeps the zombie pose");
+    // Main-hand use of a non-blocking item leaves both zombie arms alone.
+    e.metadata.insert(8, Metadata::Byte(1));
+    let item = action_pose(&models, &e, &content, &rig);
+    assert_eq!(item[2], lowered[2]);
+    assert_eq!(item[3], lowered[3]);
 }
 
 #[test]
@@ -3100,23 +3145,42 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
     let (models, mut entity) = fixture();
     entity.binding = Some(Ok(presentation::Binding {
         rig: "authored:rig".into(),
-        texture: crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1 },
+        texture: crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 1,
+            height: 1,
+        },
         style: presentation::RootStyle::Living,
         layers: None,
         anger: None,
     }));
     entity.transform.position = [10.5, 64., -3.5];
     entity.death_tick = Some(100);
-    let Some(Ok(binding)) = entity.binding.as_ref() else { unreachable!() };
+    let Some(Ok(binding)) = entity.binding.as_ref() else {
+        unreachable!()
+    };
     let relative = Vec3::new(2.5, 4., -3.5);
     // (ticks since the death event, partial, vanilla degrees): the render deathTime is 0
     // until the first dead tick, then ticks + partial.
     for (elapsed, partial, degrees) in [
-        (0, 0.5, 0.), (1, 0., 0.), (1, 0.5, 18.), (2, 0., 25.455_845), (5, 0.5, 54.),
-        (10, 0., 76.367_53), (13, 0.5, 90.), (14, 0., 90.), (19, 0.75, 90.),
+        (0, 0.5, 0.),
+        (1, 0., 0.),
+        (1, 0.5, 18.),
+        (2, 0., 25.455_845),
+        (5, 0.5, 54.),
+        (10, 0., 76.367_53),
+        (13, 0.5, 90.),
+        (14, 0., 90.),
+        (19, 0.75, 90.),
     ] {
         let frame = presentation::EntityDrawFrame {
-            origin: [8., 60., 0.], transform: entity.transform, tick: 100 + elapsed, partial, light: [15., 0.], parent: None,
+            origin: [8., 60., 0.],
+            transform: entity.transform,
+            tick: 100 + elapsed,
+            partial,
+            light: [15., 0.],
+            parent: None,
         };
         let root = presentation::root_matrix(&entity, &models, binding, frame, &|_| None);
         let vanilla = Mat4::from_translation(relative)
@@ -3124,22 +3188,44 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
             * Mat4::from_rotation_z(f32::to_radians(degrees))
             * Mat4::from_scale(Vec3::new(-1., -1., 1.))
             * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
-        assert!(root.abs_diff_eq(vanilla, 1e-4), "deathTime {elapsed}+{partial}: {root:?} != {vanilla:?}");
+        assert!(
+            root.abs_diff_eq(vanilla, 1e-4),
+            "deathTime {elapsed}+{partial}: {root:?} != {vanilla:?}"
+        );
         // The feet stay on the received position; a point 1.8 blocks up sinks to the ground.
         let feet = root.transform_point3(Vec3::new(0., 1.501, 0.));
-        assert!(feet.abs_diff_eq(relative, 1e-4), "deathTime {elapsed}+{partial}: feet {feet:?}");
+        assert!(
+            feet.abs_diff_eq(relative, 1e-4),
+            "deathTime {elapsed}+{partial}: feet {feet:?}"
+        );
         let head = root.transform_point3(Vec3::new(0., 1.501 - 1.8, 0.)) - relative;
-        assert!((head.y - 1.8 * f32::to_radians(degrees).cos()).abs() < 1e-4, "deathTime {elapsed}+{partial}: head {head:?}");
+        assert!(
+            (head.y - 1.8 * f32::to_radians(degrees).cos()).abs() < 1e-4,
+            "deathTime {elapsed}+{partial}: head {head:?}"
+        );
     }
     // getFlipDegrees: 180 for spiders, cave spiders, silverfish and endermites; a death clip
     // that replaces the root scales the vanilla turn down.
-    let about_feet = |degrees: f32| Mat4::from_translation(Vec3::new(0., 1.501, 0.))
-        * Mat4::from_rotation_z(degrees.to_radians())
-        * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
-    for (name, flip) in [("minecraft:spider", 180.), ("minecraft:cave_spider", 180.), ("minecraft:silverfish", 180.),
-        ("minecraft:endermite", 180.), ("minecraft:zombie", 90.)] {
-        assert!(presentation::death_tilt(name, 14, 0., 1.).abs_diff_eq(about_feet(flip), 1e-5), "{name}");
-        assert!(presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5), "{name}");
+    let about_feet = |degrees: f32| {
+        Mat4::from_translation(Vec3::new(0., 1.501, 0.))
+            * Mat4::from_rotation_z(degrees.to_radians())
+            * Mat4::from_translation(Vec3::new(0., -1.501, 0.))
+    };
+    for (name, flip) in [
+        ("minecraft:spider", 180.),
+        ("minecraft:cave_spider", 180.),
+        ("minecraft:silverfish", 180.),
+        ("minecraft:endermite", 180.),
+        ("minecraft:zombie", 90.),
+    ] {
+        assert!(
+            presentation::death_tilt(name, 14, 0., 1.).abs_diff_eq(about_feet(flip), 1e-5),
+            "{name}"
+        );
+        assert!(
+            presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5),
+            "{name}"
+        );
     }
 }
 

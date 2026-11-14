@@ -71,8 +71,13 @@ impl InventoryStore {
             cb::RECIPE_BOOK_ADD => {
                 let count = r.count(65536)?;
                 let mut entries = BTreeMap::new();
+                let mut notifications = Vec::new();
                 for _ in 0..count {
                     let recipe = menu_data::recipe(r, content)?;
+                    // ClientboundRecipeBookAddPacket.Entry.FLAG_NOTIFICATION.
+                    if recipe.flags & 1 != 0 {
+                        notifications.push(recipe.id);
+                    }
                     if entries.insert(recipe.id, recipe).is_some() {
                         return Err("duplicate recipe display ID".into());
                     }
@@ -84,6 +89,7 @@ impl InventoryStore {
                 } else {
                     self.recipes.extend(entries);
                 }
+                self.recipe_notifications.extend(notifications);
             }
             cb::RECIPE_BOOK_REMOVE => {
                 let count = r.count(65536)?;

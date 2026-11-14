@@ -1,0 +1,233 @@
+{
+  "seed": 100,
+  "server_view_distance": 4,
+  "client_settings": {
+    "render_distance": 8
+  },
+  "steps": [
+    {
+      "wait_play": true
+    },
+    {
+      "cmd": "gamemode creative"
+    },
+    {
+      "cmd": "time set 6000"
+    },
+    {
+      "cmd": "weather clear"
+    },
+    {
+      "tp": [
+        1000.5,
+        175,
+        1000.5,
+        0,
+        0
+      ]
+    },
+    {
+      "wait_ticks": 200
+    },
+    {
+      "cmd": "fill 985 159 985 1015 159 1015 minecraft:light_gray_concrete"
+    },
+    {
+      "cmd": "fill 985 160 985 1015 175 1015 minecraft:air"
+    },
+    {
+      "tp": [
+        1000.5,
+        160,
+        1000.5,
+        0,
+        0
+      ]
+    },
+    {
+      "wait_ticks": 100
+    },
+    {
+      "look": {
+        "yaw_deg": 0,
+        "pitch_deg": 40
+      }
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:copper_golem_statue[block_state={copper_golem_pose:sitting}]"
+    },
+    {
+      "wait_ticks": 220
+    },
+    {
+      "shot": "statue-sitting"
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:copper_golem_statue[block_state={copper_golem_pose:standing}]"
+    },
+    {
+      "wait_ticks": 220
+    },
+    {
+      "shot": "statue-standing"
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:player_head"
+    },
+    {
+      "wait_ticks": 220
+    },
+    {
+      "shot": "head"
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:map"
+    },
+    {
+      "wait_ticks": 20
+    },
+    {
+      "key": {
+        "keys": [
+          "use"
+        ],
+        "ticks": 2
+      }
+    },
+    {
+      "wait_ticks": 20
+    },
+    {
+      "cmd": "clear @s minecraft:filled_map"
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:filled_map[map_id=0]"
+    },
+    {
+      "wait_ticks": 300
+    },
+    {
+      "look": {
+        "yaw_deg": 0,
+        "pitch_deg": 60
+      }
+    },
+    {
+      "wait_ticks": 40
+    },
+    {
+      "observe": "map-state"
+    },
+    {
+      "shot": "held-map"
+    },
+    {
+      "cmd": "item replace entity @s weapon.offhand with minecraft:item_frame"
+    },
+    {
+      "wait_ticks": 220
+    },
+    {
+      "shot": "held-map-offhand"
+    },
+    {
+      "use_item_on": {
+        "x": 1000,
+        "y": 159,
+        "z": 1002,
+        "face": "up",
+        "hand": "off_hand"
+      }
+    },
+    {
+      "wait_ticks": 30
+    },
+    {
+      "look": {
+        "yaw_deg": 0,
+        "pitch_deg": 38
+      }
+    },
+    {
+      "wait_ticks": 10
+    },
+    {
+      "key": {
+        "keys": [
+          "use"
+        ],
+        "ticks": 2
+      }
+    },
+    {
+      "wait_ticks": 20
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:air"
+    },
+    {
+      "cmd": "item replace entity @s weapon.offhand with minecraft:air"
+    },
+    {
+      "wait_ticks": 220
+    },
+    {
+      "observe": "frame-state"
+    },
+    {
+      "shot": "framed-map"
+    },
+    {
+      "look": {
+        "yaw_deg": 0,
+        "pitch_deg": 65
+      }
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:splash_potion[potion_contents={potion:\"minecraft:water\"}]"
+    },
+    {
+      "wait_ticks": 30
+    },
+    {
+      "key": {
+        "keys": [
+          "use"
+        ],
+        "ticks": 2
+      }
+    },
+    {
+      "wait_ticks": 12
+    },
+    {
+      "shot": "potion-effect"
+    },
+    {
+      "wait_ticks": 80
+    },
+    {
+      "cmd": "item replace entity @s weapon.mainhand with minecraft:splash_potion[potion_contents={potion:\"minecraft:healing\"}]"
+    },
+    {
+      "wait_ticks": 30
+    },
+    {
+      "key": {
+        "keys": [
+          "use"
+        ],
+        "ticks": 2
+      }
+    },
+    {
+      "wait_ticks": 12
+    },
+    {
+      "shot": "potion-instant"
+    },
+    {
+      "observe": "final"
+    }
+  ]
+}

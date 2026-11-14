@@ -47,3 +47,4 @@
 # Local bundle with derived Mojang content and per-agent build dirs.
 /dist/
 /target-*/
+__pycache__/

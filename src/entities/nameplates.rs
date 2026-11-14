@@ -148,11 +148,9 @@ pub(crate) fn nameplate<'a>(
         return Ok(None);
     }
     let schema = models
-        .schemas
-        .get(&entity.type_name)
+        .schema_of(entity)
         .ok_or("entity nameplate source not activated")?;
     let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
-    let flags = shared_flags(models, entity);
     let custom = custom_name(models, entity);
     let always = presentation::boolean(models, entity, "DATA_CUSTOM_NAME_VISIBLE");
     let targeted = view.crosshair == Some(entity.handle);
@@ -161,6 +159,19 @@ pub(crate) fn nameplate<'a>(
         entity.type_name.as_str(),
         "minecraft:item_frame" | "minecraft:glow_item_frame"
     );
+    let requested = player || always || custom.is_some() && targeted;
+    // Every renderer below but the armor stand's, the item frame's and a non-Mob living
+    // entity's shows only a requested name: an unnamed soldier ends here, before any team.
+    if !requested
+        && !frame
+        && entity.type_name != "minecraft:armor_stand"
+        && (!inherits("net.minecraft.world.entity.LivingEntity")
+            || inherits("net.minecraft.world.entity.Mob")
+            || inherits("net.minecraft.world.entity.Avatar"))
+    {
+        return Ok(None);
+    }
+    let flags = shared_flags(models, entity);
     let profile_name = if player {
         Some(
             store
@@ -176,7 +187,6 @@ pub(crate) fn nameplate<'a>(
     // Entity.getScoreboardName uses UUID; Player overrides it with profile.name.
     let team = view.scoreboard.team(profile_name.unwrap_or(&entity.uuid));
     let viewer_team = view.viewer_name.and_then(|name| view.scoreboard.team(name));
-    let requested = player || always || custom.is_some() && targeted;
     let frame_name = if frame {
         frame_name(models, entity)
     } else {
@@ -316,7 +326,7 @@ mod tests {
                 resources::DefaultAttribute { id: 7, value: 1. },
             )]),
             height: 2.,
-            accessors: BTreeMap::from([
+            accessors: [
                 ("DATA_SHARED_FLAGS_ID".into(), [0, 0]),
                 ("DATA_CUSTOM_NAME".into(), [2, 6]),
                 ("DATA_CUSTOM_NAME_VISIBLE".into(), [3, 8]),
@@ -324,11 +334,15 @@ mod tests {
                 ("DATA_CLIENT_FLAGS".into(), [15, 0]),
                 ("DATA_DIRECTION".into(), [8, 12]),
                 ("DATA_ITEM".into(), [9, 7]),
-            ]),
+            ]
+            .into_iter()
+            .collect(),
+            sizing: Default::default(),
+            ids: Default::default(),
         };
         let models = Models {
             rigs: BTreeMap::new(),
-            schemas: BTreeMap::from([(kind.into(), schema)]),
+            schemas: [(kind.into(), schema)].into_iter().collect(),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: Vec::new(),
@@ -387,6 +401,8 @@ mod tests {
             submitted_revision: None,
             clip: Default::default(),
             crowd: None,
+            clock: None,
+            kind_slot: Default::default(),
         };
         (Store::default(), models, entity)
     }

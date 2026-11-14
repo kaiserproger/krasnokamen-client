@@ -174,12 +174,19 @@ pub struct Entity {
     pub clip: clip_pose::ClipState,
     /// Cached crowd composite of this entity's appearance (`crowd`).
     pub(crate) crowd: Option<crowd::Binding>,
+    /// Whether this entity's item stacks need the clock context (`render_special`).
+    pub(crate) clock: Option<render_special::ClockMemo>,
+    /// This entity's kind slot in the active schema table (`Models::schema_of`).
+    pub(crate) kind_slot: std::cell::Cell<resources::KindSlot>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
     /// passenger attachments through `Store::presented_transform`.
     pub fn presented_transform(&self, _tick: u64, partial: f32) -> Transform {
+        // Ticks a mob waited outside the camera's box count as elapsed (`tick_presentation`),
+        // so it is drawn and new motion starts where a mob ticked all along would be.
         let elapsed = (f64::from(self.physical.lerp_progress)
+            + f64::from(self.physical.waited)
             + if self.physical.frozen {
                 0.
             } else {
@@ -231,10 +238,12 @@ impl Entity {
         self.position = target.position;
         if let Some(v) = velocity {
             self.velocity = v;
+            self.physical.falling_velocity = None;
         }
         self.on_ground = ground;
         self.observed_tick = tick;
         self.physical.lerp_progress = if snap { self.physical.lerp_duration } else { 0 };
+        self.physical.waited = 0;
         self.physical.lerp_phase = if snap { 0. } else { phase.clamp(0., 0.999) };
     }
 }
@@ -267,20 +276,26 @@ pub struct Store {
     pub(crate) profile_bytes: usize,
     pub(crate) local_entity_id: Option<i32>,
     pub(crate) local_uuid: Option<String>,
-    pub(crate) visible_ids: Vec<i32>,
+    /// The entities this frame draws, gathered once by the body pass (`frame_entities`).
+    pub(crate) frame_entities: frame_entities::FrameEntities,
     pub(crate) physical_active: BTreeSet<i32>,
+    pub(crate) falling_colliders: Vec<crate::player::Bounds>,
     pub(crate) redirectable_projectiles: BTreeSet<u32>,
     pub(crate) spatial_padding: f64,
     /// Login entity id of the local player and the metadata rows the server sent for it.
     pub(crate) own_id: Option<i32>,
     pub(crate) own_metadata: BTreeMap<u8, Metadata>,
     pub(crate) presentation_tick: u64,
+    /// Measurement-only cumulative calls that actually advance an entity presentation.
+    pub(crate) measured_entity_ticks: u64,
     /// Partial tick of the last rendered frame; lets a mid-tick packet start its
     /// interpolation from the pose already on screen instead of snapping.
     pub(crate) frame_partial: f32,
     pub(crate) frame_tick: u64,
     /// Local player eye for idle head look-at; `None` disables it.
     pub(crate) look_target: Option<[f32; 3]>,
+    /// Vanilla `Entity.viewScale` of the frames being drawn (`view_range::view_scale`).
+    pub(crate) view_scale: ViewScale,
     pub block_entities: BTreeMap<[i32; 3], BlockEntity>,
     predicted_block_data: BTreeMap<[i32; 3], Arc<Value>>,
     pub(crate) block_active: BTreeSet<[i32; 3]>,
@@ -308,12 +323,24 @@ pub struct Store {
     /// GPU crowd composites and this frame's instances (off until a renderer enables it).
     pub(crate) crowd: crowd::Registry,
 }
+/// `Entity.viewScale`, 1 until the session sets it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ViewScale(pub f64);
+impl Default for ViewScale {
+    fn default() -> Self {
+        Self(1.)
+    }
+}
 impl Store {
     pub fn new() -> Self {
         Self {
             items: crate::ui::items::ItemModels::new(),
             ..Self::default()
         }
+    }
+    /// Vanilla `Entity.setViewScale` for the frames that follow (`view_range::view_scale`).
+    pub fn set_view_scale(&mut self, scale: f64) {
+        self.view_scale = ViewScale(scale);
     }
     pub fn set_text_renderer(&mut self, text: Rc<crate::ui::render::TextRenderer>) {
         self.nameplate_cache = render_nameplates::Cache::default();
@@ -335,13 +362,18 @@ impl Store {
             entity.binding = None;
         }
         self.revision += 1;
+        // Spatial queries pad by the widest present entity at its actual size, not by every
+        // kind the registry knows at the largest scale (the ender dragon's 256 blocks made every
+        // query, raycasts and the frame's candidates included, visit every received entity).
+        let models = self.models.clone().unwrap();
         self.spatial_padding = self
-            .models_ref()
-            .unwrap()
-            .schemas
-            .values()
-            .map(|schema| f64::from(schema.width) * 16.)
-            .fold(32., f64::max);
+            .slots
+            .iter()
+            .map(|entity| {
+                let size = physical::bounds(&models, entity, 0, 0.).map_or(0., extent);
+                kind_padding(&models, &entity.type_name).max(size)
+            })
+            .fold(MIN_SPATIAL_PADDING, f64::max);
     }
     pub fn models(&self) -> Option<Arc<Models>> {
         self.models.clone()
@@ -363,7 +395,7 @@ impl Store {
         self.presentation_tick = 0;
         self.leash_holders.clear();
         self.predicted_leash_holders.clear();
-        self.visible_ids.clear();
+        self.frame_entities = Default::default();
         self.passenger_vehicles.clear();
         self.fishing_hooks.clear();
         self.uuid_entities.clear();
@@ -535,6 +567,21 @@ impl Store {
     ) -> Result<Transform> {
         self.attached_transform(entity, tick, partial, 0)
     }
+    /// Interpolated eye point, head yaw and pitch of a received entity: the view a
+    /// server Set Camera target lends the client camera (vanilla `Minecraft.cameraEntity`).
+    pub(crate) fn eye_view(
+        &self,
+        entity: &Entity,
+        tick: u64,
+        partial: f32,
+    ) -> Result<([f64; 3], f32, f32)> {
+        let transform = self.presented_transform(entity, tick, partial)?;
+        let models = self.models_ref().ok_or("entity models not activated")?;
+        let (dimensions, scale) = models.dimensions(entity)?;
+        let mut eye = transform.position;
+        eye[1] += f64::from(dimensions.eye_height * scale);
+        Ok((eye, transform.head_yaw, transform.pitch))
+    }
     fn attached_transform(
         &self,
         entity: &Entity,
@@ -595,6 +642,18 @@ impl Store {
             entity,
             self.presented_transform(entity, tick, partial)?.position,
         )
+    }
+    /// Widens `spatial_padding` to entity `id`'s horizontal extent (received data resized it).
+    /// Without models it waits for `activate_models`, which pads by every present entity.
+    fn widen_padding(&mut self, id: i32, tick: u64) -> Result<()> {
+        if self.models.is_none() {
+            return Ok(());
+        }
+        if let Some(e) = self.get(id) {
+            let extent = extent(self.bounds(e.handle, tick, 0.)?);
+            self.spatial_padding = self.spatial_padding.max(extent);
+        }
+        Ok(())
     }
     fn get_mut(&mut self, id: i32) -> Option<&mut Entity> {
         self.ids.get(&id).copied().map(|i| &mut self.slots[i])
@@ -873,6 +932,8 @@ impl Store {
                     submitted_revision: None,
                     clip: Default::default(),
                     crowd: None,
+                    clock: None,
+                    kind_slot: Default::default(),
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"
@@ -886,6 +947,7 @@ impl Store {
                 if let Some(models) = self.models.as_ref() {
                     let source =
                         source_state::SourceState::new(self.get(entity_id).unwrap(), models)?;
+                    self.spatial_padding = self.spatial_padding.max(kind_padding(models, &name));
                     self.get_mut(entity_id).unwrap().source = Some(source);
                     self.physical_active.insert(entity_id);
                 }
@@ -1021,8 +1083,12 @@ impl Store {
                 };
                 r.done()?;
                 if let Some(e) = self.get(target) {
+                    let received_position = e.position;
                     let mut transform = e.transform;
                     if let Some(d) = delta {
+                        // Position deltas use the last received position, not
+                        // a falling block's locally simulated transform.
+                        transform.position = e.position;
                         for i in 0..3 {
                             transform.position[i] += d[i];
                         }
@@ -1033,6 +1099,9 @@ impl Store {
                     }
                     self.revision += 1;
                     self.move_entity(target, transform, None, ground, tick, false);
+                    if delta.is_none() {
+                        self.get_mut(target).unwrap().position = received_position;
+                    }
                 }
             }
             cb::ENTITY_POSITION_SYNC => {
@@ -1148,11 +1217,7 @@ impl Store {
                 }) {
                     self.physical_active.insert(target);
                 }
-                if let Some(e) = self.get(target) {
-                    let b = self.bounds(e.handle, tick, 0.)?;
-                    let extent = (b.max[0] - b.min[0]).max(b.max[2] - b.min[2]);
-                    self.spatial_padding = self.spatial_padding.max(extent);
-                }
+                self.widen_padding(target, tick)?;
             }
             cb::SET_ENTITY_LINK => {
                 let target = r.i32()?;
@@ -1188,6 +1253,7 @@ impl Store {
                 let revision = self.revision;
                 if let Some(e) = self.get_mut(target) {
                     e.velocity = velocity;
+                    e.physical.falling_velocity = None;
                     e.revision = revision;
                 }
             }
@@ -1215,13 +1281,22 @@ impl Store {
                 self.revision += 1;
                 let revision = self.revision;
                 if let Some(e) = self.get_mut(target) {
+                    // A battle re-sends unchanged equipment: an identical stack keeps the
+                    // received one, so the entity's appearance and its held item's per-tick
+                    // comparisons (`Stack::same_item`) stay.
+                    let mut changed = false;
                     for (slot, stack) in updates {
-                        e.equipment[slot] = stack;
-                        e.predicted_equipment[slot] = None;
+                        changed |= e.predicted_equipment[slot].take().is_some();
+                        if e.equipment[slot] != stack {
+                            e.equipment[slot] = stack;
+                            changed = true;
+                        }
                     }
                     e.revision = revision;
-                    e.appearance_revision = e.appearance_revision.wrapping_add(1);
-                    e.binding = None;
+                    if changed {
+                        e.appearance_revision = e.appearance_revision.wrapping_add(1);
+                        e.binding = None;
+                    }
                 }
             }
             cb::SET_PASSENGERS => {
@@ -1363,6 +1438,8 @@ impl Store {
                 if let Some(e) = self.get_mut(target) {
                     e.attributes.extend(attrs);
                 }
+                // `minecraft:scale` resizes the entity.
+                self.widen_padding(target, tick)?;
             }
             cb::DAMAGE_EVENT => {
                 let target = r.var()?;
@@ -1677,6 +1754,27 @@ impl Store {
 }
 fn cell(p: [f64; 3]) -> [i32; 2] {
     [(p[0] / 16.).floor() as i32, (p[2] / 16.).floor() as i32]
+}
+/// Floor of `Store::spatial_padding`: the farthest a default-size box reaches past its schema
+/// width (a shulker peeking a block, a four-block painting).
+const MIN_SPATIAL_PADDING: f64 = 4.;
+/// Spatial query padding a received entity of `type_name` needs at its default size: its
+/// source width; the ender dragon's at the largest `minecraft:scale` (16), since a ray reaches
+/// its parts through it. Metadata and attributes that resize an entity widen the padding from
+/// its actual bounds (`Store::widen_padding`).
+fn kind_padding(models: &Models, type_name: &str) -> f64 {
+    models.schemas.get(type_name).map_or(0., |schema| {
+        f64::from(schema.width)
+            * if type_name == "minecraft:ender_dragon" {
+                16.
+            } else {
+                1.
+            }
+    })
+}
+/// Horizontal extent of `bounds`.
+fn extent(bounds: crate::player::Bounds) -> f64 {
+    (bounds.max[0] - bounds.min[0]).max(bounds.max[2] - bounds.min[2])
 }
 fn degrees(v: u8) -> f32 {
     f32::from(v) * 360. / 256.

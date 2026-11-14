@@ -219,8 +219,28 @@ impl BlockEffects {
             f64::from(position[2]) + 0.5,
         ];
         let color = [16, 8, 0].map(|shift| ((data >> shift) & 255) as f32 / 255.);
-        // Bottle shards use the real item sprite, not a block-state substitute.
+        // Source LevelEventHandler.potionSplashParticles: eight ITEM particles of the
+        // splash potion (BreakingItemParticle: a quarter of the item sprite, half the
+        // default quad, gravity 1, a tenth of the base motion plus a gaussian kick).
         for _ in 0..8 {
+            let kick = [
+                gaussian(&mut next) * 0.15,
+                f64::from(next()) * 0.2,
+                gaussian(&mut next) * 0.15,
+            ];
+            let base = spread(&mut next, [0.; 3]);
+            let size = 0.1 * (next() * 0.5 + 0.5);
+            let lifetime = (4. / (next() * 0.9 + 0.1)) as u8;
+            let (uo, vo) = (next() * 3., next() * 3.);
+            let [su0, sv0, su1, sv1] = bottle.uv;
+            let (u0, u1) = (
+                su0 + (su1 - su0) * (uo + 1.) / 4.,
+                su0 + (su1 - su0) * uo / 4.,
+            );
+            let (v0, v1) = (
+                sv0 + (sv1 - sv0) * vo / 4.,
+                sv0 + (sv1 - sv0) * (vo + 1.) / 4.,
+            );
             self.fragments.push(Fragment {
                 position: center,
                 previous: center,
@@ -237,8 +257,7 @@ impl BlockEffects {
                 spell: None,
             });
         }
-        // Authored deterministic motion with the observed radial spawn, tint
-        // brightness, rising spell gravity and finite vanilla lifetime range.
+        // Then 100 SpellParticles (EFFECT or INSTANT_EFFECT) tinted by the event RGB.
         for _ in 0..100 {
             let radius = next() * 4.;
             let angle = next() * std::f32::consts::TAU;
@@ -249,6 +268,31 @@ impl BlockEffects {
                 center[2] + f64::from(sin * radius * 0.1),
             ];
             let brightness = 0.75 + next() * 0.25;
+            let at = [
+                center[0] + requested[0] * 0.1,
+                center[1] + 0.3,
+                center[2] + requested[2] * 0.1,
+            ];
+            // SpellParticle ignores the requested horizontal motion: it seeds the base
+            // particle with (0.5 - r, ya, 0.5 - r), damps the vertical part to a fifth
+            // and a motionless request to a tenth; the level event then scales the
+            // motion by its power (Particle.setPower).
+            let base_request = [
+                0.5 - f64::from(next()),
+                requested[1],
+                0.5 - f64::from(next()),
+            ];
+            let mut velocity = spread(&mut next, base_request);
+            velocity[1] *= 0.2;
+            if requested[0] == 0. && requested[2] == 0. {
+                velocity[0] *= 0.1;
+                velocity[2] *= 0.1;
+            }
+            velocity[0] *= power;
+            velocity[1] = (velocity[1] - 0.1) * power + 0.1;
+            velocity[2] *= power;
+            // SingleQuadParticle half size 0.1..0.2, three quarters for a spell.
+            let size = 0.2 * (next() * 0.5 + 0.5) * 0.75;
             let lifetime = (8. / (next() * 0.8 + 0.2)) as u8;
             self.fragments.push(Fragment {
                 position: at,
@@ -324,8 +368,9 @@ impl BlockEffects {
         let right = [cy, 0., sy];
         let up = [-sy * sp, cp, cy * sp];
         for fragment in &self.fragments {
-            // Sample between the last two ticks so fragments glide, and shrink
-            // them out over the final eight ticks instead of vanishing.
+            // Sample between the last two ticks so fragments glide. Terrain fragments
+            // shrink out over their final eight ticks instead of vanishing; a spell
+            // particle keeps its size and alpha until it expires (SpellParticle).
             let at = std::array::from_fn::<_, 3, _>(|i| {
                 fragment.previous[i]
                     + (fragment.position[i] - fragment.previous[i]) * f64::from(partial)
@@ -345,6 +390,7 @@ impl BlockEffects {
                 })
             });
             let (uv, layer, material) = if let Some((family, lifetime)) = fragment.spell {
+                // Source SpriteSet.get(age, lifetime): age * (frames - 1) / lifetime.
                 let age = lifetime - fragment.remaining;
                 let index = (usize::from(age) * 8 / usize::from(lifetime)).min(7);
                 let sprite = self.spell_sprites[family]
@@ -419,5 +465,73 @@ mod tests {
         );
         effects.clear();
         assert!(effects.fragments.is_empty());
+    }
+    #[test]
+    fn potion_impact_spell_particles_spread_size_and_expire_like_the_source() {
+        // Source LevelEventHandler.potionSplashParticles + SpellParticle + Particle:
+        // power 0..4 scales a 0.06..0.18 base motion, half size 0.075..0.15, 8..40 ticks.
+        let mut content = Content::test_cube();
+        let region = TextureRegion {
+            layer: 3,
+            uv: [0.25, 0.5, 0.5, 0.75],
+            width: 16,
+            height: 16,
+        };
+        for prefix in ["effect", "spell"] {
+            for frame in 0..8 {
+                content
+                    .insert_test_texture(&format!("minecraft:particle/{prefix}_{frame}"), region);
+            }
+        }
+        content.insert_test_texture("minecraft:item/splash_potion", region);
+        let world = World::new(0, 16);
+        let mut effects = BlockEffects::default();
+        assert!(
+            effects
+                .potion(&content, [0, 3, 0], 0x385dc6, false, 7)
+                .unwrap()
+        );
+        let spells: Vec<_> = effects
+            .fragments
+            .iter()
+            .filter(|f| f.spell.is_some())
+            .copied()
+            .collect();
+        let shards: Vec<_> = effects
+            .fragments
+            .iter()
+            .filter(|f| f.spell.is_none())
+            .copied()
+            .collect();
+        assert_eq!((spells.len(), shards.len()), (100, 8));
+        assert!(spells.iter().all(|f| (0.075..=0.15).contains(&f.size)));
+        assert!(spells.iter().any(|f| f.size > 0.13) && spells.iter().any(|f| f.size < 0.09));
+        assert!(spells.iter().all(|f| (8..=40).contains(&f.remaining)));
+        assert!(spells.iter().all(|f| (f.position[1] - 3.3).abs() < 1e-9));
+        let horizontal = |f: &Fragment| f.velocity[0].hypot(f.velocity[2]);
+        let fastest = spells.iter().map(horizontal).fold(0., f64::max);
+        assert!(fastest > 0.3 && fastest < 0.75, "{fastest}");
+        // Bottle shards: a quarter of the item sprite, half a default quad.
+        assert!(shards.iter().all(|f| (0.05..=0.1).contains(&f.size)));
+        for shard in &shards {
+            let us = shard.uv.map(|p| p[0]);
+            assert!(
+                ((us[1] - us[0]).abs() - 0.0625).abs() < 1e-6
+                    && us.iter().all(|u| (0.25..=0.5).contains(u))
+            );
+        }
+        for _ in 0..12 {
+            effects.tick(&world, &content);
+        }
+        let reach = effects
+            .fragments
+            .iter()
+            .filter(|f| f.spell.is_some())
+            .map(|f| (f.position[0] - 0.5).hypot(f.position[2] - 0.5))
+            .fold(0., f64::max);
+        assert!(
+            reach > 2.,
+            "the cloud spreads blocks wide within twelve ticks: {reach}"
+        );
     }
 }

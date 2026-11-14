@@ -140,8 +140,8 @@ or wall-clock drift.
 
 ## Camera JSON
 
-Times are seconds on the recording timeline. The selected render range is
-half-open. Paths need 2..4096 strictly increasing keys, finite values, and a FOV
+Times are seconds on the selected `--timebase` (`wall` by default, or `tick`).
+The selected render range is half-open. Paths need 2..4096 strictly increasing keys, finite values, and a FOV
 between 1 and 179 degrees. Each path uses either `look_target` on every key or
 `yaw` and `pitch` on every key, never both. Uniform Catmull–Rom interpolation
 uses duplicated endpoint keys; optional `ease: true` on a key smoothsteps its
@@ -162,10 +162,50 @@ An optional top-level `"attach_entity":123` makes positions and look targets
 world-axis offsets from that received entity's interpolated position, including
 mount attachment. Missing/despawned entities fail the shot; there is no fallback
 camera. The JSON does not alter gameplay or the recorded viewer's position.
-`replay::Player::seek` replays from the initial stream on backwards seeks and
-applies every intervening packet/tick on forward seeks. There are no lossy
-snapshots. `step(frame)` samples rational `frame/60` time without accumulated
-floating-point drift.
+`replay::Player::open(path, presentation, timebase)` selects the same timeline as
+the exporter. `seek` is a **shot/cut boundary**, never an operation within a shot.
+Backwards seeks rebuild the initial packet stream, retaining the explicit radius
+and crowd capability. Every received packet and world/client clock tick is still
+applied; the uncaptured prefix skips local player prediction, entity presentation
+and scene extraction. The final 80 client ticks (four seconds at 20 Hz, or all
+available history for an earlier cut) warm the normal entity presentation owner
+before one target scene refresh. Frozen world ticks do not advance that owner.
+The actual warmed world-tick count is `seek_warmup_ticks` in the frame sidecar.
+80 is provisional: on the authored moving-entity fixture an 80-tick warm-up
+matches a 400-tick uncut run (interpolated position within 1e-12 blocks, body
+yaw within 1e-4 degrees, walk speed within 1e-6). It has not been measured on a
+real take; `replay::seek_tests::captured_take_warmup_convergence` (ignored,
+see Focused checks) does that against a cut-free presentation reference.
+Received positions/state remain authoritative; cumulative presentation age/gait
+phase may restart at a cut and are not promised identical to playing from login.
+Use `advance_to`/`step(frame)` inside the shot, preserving that warmed history.
+`step` uses rational `frame/60` time without accumulated floating-point drift;
+it rejects backwards time (use an explicit cut-boundary `seek`).
+
+### Timebase and coverage
+
+`--timebase wall` preserves packet receive times and the existing client tick
+cadence. A server running below 20 TPS therefore plays in slow motion.
+`--timebase tick` maps each `krasnokamen:tick` group to
+`(tick - first_actual_marker_tick) * 0.05` seconds. Packets before the first
+marker are configuration at zero; a marker itself starts its new group, and
+all subsequent packets keep that group's time until the next marker. Missing
+ticks remain gaps; duplicate/decreasing markers and timeline overflow fail.
+The raw recorded bytes/timestamps and `last_applied_tick`/`wall_ns` labels are
+never rewritten. Client ticks run every 50 ms in this mode. Camera keys and
+`--start`/`--end` must use **tick seconds**, not receipt-wall seconds. For a slow
+server, label the final video “20 ticks/s playback; actual server TPS on graph”;
+the telemetry overlay must still join on the original `last_applied_tick`.
+
+`--render-distance N` sets both entity and terrain radius to `N * 16` blocks,
+including cinematic fog, within the normal client bounds 2..32 chunks. Without
+the flag, replay follows the server radius received in the recording, falling
+back to the deterministic client default 8 until one is announced. It never
+reads or writes the render host's persisted options. An override can reveal
+received corner entities beyond the recorder's spherical fog radius; it cannot
+recover chunks/entities that the recorder never received. Inspect `known`,
+`eligible` and the frame itself, rather than treating prepared instances as
+proof of visible GPU pixels.
 
 ## Export a one-second smoke shot
 
@@ -199,8 +239,14 @@ owner's GPU, omit the lavapipe override (and any inherited software ICD selector
 WGPU_BACKEND=vulkan "$KRASNOKAMEN_CLIENT_BINARY" render-replay \
   --recording /work/takes/battle.solrec --camera /work/takes/smoke.json \
   --output /work/takes/smoke-gpu.mp4 --size 1920x1080 \
-  --start 6 --end 7 --motion-samples 4 --data-dir /work/client-data
+  --start 6 --end 7 --motion-samples 1 --data-dir /work/client-data
 ```
+
+Before the first frame the exporter prints the GPU it renders with to stderr,
+`render-replay adapter: {"name":…,"vendor":…,"device_type":…,"backend":…,"driver":…,"driver_info":…}`.
+On a hybrid laptop check it: the client asks for the high-performance adapter,
+but the Vulkan loader decides what is listed (`VK_DRIVER_FILES` restricts it to
+one driver manifest, for example `/usr/share/vulkan/icd.d/nvidia_icd.json`).
 
 Expect 60 frames, the chosen output dimensions and 60/1 fps. Inspect decoded
 frames for actual terrain, armour, animation and camera movement; ffprobe alone
@@ -209,15 +255,27 @@ and compare `cpu_state_sha256` in the sidecars. GPU RGBA hashes are recorded but
 are not promised identical across devices/drivers. Repeat on lavapipe under
 Xvfb when collecting that platform's acceptance receipt.
 
+For a sub-20-TPS battle take, author tick-second camera keys and export with
+`--timebase tick --render-distance 20 --motion-samples 1`. Run the two identical
+exports sequentially through the current graphical admission wrapper. Compare
+both `cpu_state_sha256` and `rgba_sha256` on the **same pin/device/driver**;
+cross-driver pixel equality remains outside the contract.
+
 Rendering is fixed-step, not real time: output dimensions are rendered at twice
 each axis and box-downsampled (four samples per output pixel). The Medium
 HDR/shadow preset has TAA and projection jitter/history off. Optional 1..16
 subframes sample the first half-frame (180-degree shutter) and average the
 **display-encoded RGBA**, not linear HDR; this is intentionally documented, not
 claimed physically exact blur. CPU mesh jobs finish through an event-driven
-completion barrier before capture; mesh residency exhaustion/timeout is an
-error. Replay terrain has no upload-dependent fade-in. Raw padded GPU rows are
-stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
+completion barrier before capture; a timeout is an error. The barrier meshes
+sections before their first upload, so a wide `--render-distance` can exceed the
+terrain's 512 MiB CPU mesh budget: a result that does not fit then waits, still
+in flight, while the exporter renders an **uncaptured upload frame** and
+releases the uploaded CPU payloads, and settling continues. Live play reaches
+the same backpressure only when its per-frame uploads fall behind. Replay
+terrain uses explicit zero-duration upload admission, so it has no
+upload-dependent fade-in; an unknown fade policy is not drawable. Raw padded GPU
+rows are stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
 
 The exporter negotiates the C1 crowd-instancing path from the offscreen
 renderer and retains that choice across backward seeks. Recording itself
@@ -240,15 +298,171 @@ retains all sample labels. Join telemetry by tick, not encoding time. A failed
 export can leave a partial MP4/sidecar: only a successful process exit makes a
 complete shot. Outputs are never intentionally overwritten.
 
+Each frame also contains `presentation`:
+
+- `crowd_instances`: prepared instances supplied to the crowd renderer, **not**
+  a GPU-visible count or proof that every recorded soldier is in camera range.
+- `crowd_fallback`: the existing CPU-path counts by crowd kind and reason.
+- `entity_extraction`: the session's existing presentation statistics, including
+  known/eligible/submitted entities and unrendered reasons.
+- `cpu_entity_extract_ms`: measured CPU extraction time accumulated across that
+  frame's shutter samples and replay advancement. The first frame includes the
+  single target refresh that ends its cut-boundary seek; this is not GPU time.
+
+Counts/reasons describe the final shutter sample, like the camera pose. Camera
+range and received tracking data still bound extraction; these counters do not
+expand the view or recover unrecorded entities.
+
+`terrain.upload_frames` counts that frame's uncaptured upload frames and
+`terrain.cpu_mesh_resident_peak_bytes` is the largest CPU mesh payload held so
+far in the process (never above the budget).
+
+## Find the action: scan a take and plan shots
+
+`scan-replay` reads a take once with the replay decoder (no session, GPU or
+terrain meshing; a 20k take of 20 million packets scans in about 10 s) and
+writes a JSONL timeline for camera planning:
+
+```sh
+"$KRASNOKAMEN_CLIENT_BINARY" scan-replay --recording take.solrec --output timeline.jsonl \
+  --data-dir /work/client-data [--interval-ticks 10] [--min-y -64 --height 384]
+```
+
+- `sample` rows, one per interval of tick time (`t` in the tick seconds of
+  `--timebase tick`): live fighters per side; melee contact clusters (fighters
+  with an opposite-side fighter within 2.5 blocks, linked within 4 blocks:
+  count, centroid, extent, red-to-blue `normal`, contact `line`, length, swings
+  and fighter ids near the centroid); swing, hurt and death events; arrows per
+  side (in flight, launched, impacts, with flight/launch/impact areas; flight
+  follows the vanilla arrow ballistics from the last server position and
+  velocity, since the server rarely sends arrow movement); cavalry groups
+  (horses linked within 6 blocks: count, centroid, extent, velocity, ids).
+- `entity` rows for every fighter that reached contact and every horse: side,
+  weapon, rider, spawn, first contact, death and removal times (for
+  `attach_entity`).
+- `chunk` rows: per column the first free y above the top block (`surface`:
+  trees, leaves, grass) and above the top solid non-leaf block (`ground`),
+  computed from the chunk sections and later block updates.
+- a final `summary` row. Sides come from the staging loadout's
+  `krasnokamen_battle:red_*`/`blue_*` item models and equippable assets
+  (`side_source: components`); takes from older pins fall back to the widest
+  gap between the two armies' spawn positions (`spawn_split`, lower half red).
+
+`tools/battle_shots.py plan timeline.jsonl --out DIR --name NAME` turns the
+timeline into kit cameras and a `bv-render.sh batch` shot list: dollies
+along contact lines, over-the-shoulder `attach_entity` shots on fighters
+reaching contact, volleys followed from behind the archers to the impact,
+cavalry tracking, push-ins into the densest melee and at most one high oblique
+establishing shot. Cameras sit at a height above their own column's ground. Every
+pose of a shot (every 0.25 s on the client's Catmull-Rom/smoothstep path) must keep
+3 blocks between the lens and every fighter the timeline places (contact cluster
+box and contact-line rectangle, cavalry box) with none across the first 4 blocks of
+the view; inside an army's box, where rear ranks are not placed, the lens rides 5.5
+above the ground. It must see its target over the recorded terrain and trees, sit
+1 block over the ground within 3 blocks, not look up at fighters, keep nearby
+ground out of the lower and side frame quarters, and a cavalry shot keeps the
+group's centroid in the central half. A failing placement moves to the next one of
+its kind or is rejected (`plan.json` `rejected_placements` counts them by check).
+`battle_shots.py preview DIR --kit KIT --take TAKE` renders one frame
+per preview time through the kit's `bv-render.sh` (`BV_SIZE`, default 640x360).
+
+Shot order. Shots follow battle time: between two adjacent shots that are not a
+sharp angle change, the next must not start before the previous one ends
+(`next.START >= prev.END`), or the soldiers jump at the hard cut (the montage
+gives every cut a 12-frame transition, which does not hide a time step back).
+Forward jumps are always allowed. The cut compares the previous shot's pose at
+its END with the next shot's pose at its START and is a sharp angle change when
+the camera positions are more than 40 blocks apart, or the look targets are more
+than 40 blocks apart, or the horizontal view headings (camera to look target)
+differ by more than 60 degrees (`SHARP_POSITION`, `SHARP_LOOK`, `SHARP_YAW`). An
+`attach_entity` camera is an offset from its fighter, so its world position is
+the plan's `where` (the fighter's contact cluster) plus the offset; `plan.json`
+records `where` per shot, and for a plan without it `check` compares the heading
+only. `plan` keeps a backtrack across a sharp angle change; any other backtrack
+it trims forward (the next shot's START moves to the previous END) when at least
+`MIN_SHOT` = 2.5 s of the shot remain, else it drops the shot. Every keep, trim
+and drop is a line in `DIR/plan.log` and in `plan.json` `order_decisions`.
+
+`battle_shots.py check SHOTS_FILE CAMERA_DIR` applies the same rule to a final
+`shots.txt` (CAMERA_DIR is the root its camera paths are relative to; a
+`plan.json` there supplies `where`). It prints every adjacent pair with its time
+delta and whether the cut is a sharp angle change, and exits 1 on a forbidden
+backtrack; run it on the shot list before the montage step.
+
+## Live filming clients (no replay)
+
+Real clients can also film a live battle from inside it. They join with the
+ordinary direct-join launch (`--server HOST:PORT --username NAME`) plus:
+
+- `--hide-hud-keep-hand`: in play the HUD (hotbar, crosshair, chat, names) stays
+  hidden as after F1, but the first-person hand and held items are still drawn, so
+  a soldier's weapon and shield are in frame. No keyboard input is needed.
+- `--third-person`: start in the F5 behind-the-back camera.
+- `--follow-player NAME`: spectator camera over that player's right shoulder
+  (3.5 blocks behind, 1.8 up, 0.7 right of his eye, 14° down, yaw eased over
+  0.5 s, pulled in before terrain). It samples the player's received interpolated
+  pose every frame and re-resolves him by player-list name and UUID, so respawns
+  and new entity ids need nothing. In spectator mode the client also moves its own
+  body to that point every tick (ordinary movement), so the server keeps streaming
+  the chunks and entities around him.
+- A server **Set Camera** (`minecraft:set_camera`) entity now drives the view as in
+  vanilla: first person at its eye with its head look, F5 orbits it.
+
+`tools/bv_live_pilot.py RUNTIME_DIR` drives one such client (started with
+`--automation --mcp-http 127.0.0.1:0 --windowed --runtime-dir RUNTIME_DIR`) through
+its MCP endpoint as a rank soldier. When the server places it (join, respawn
+re-slot, any teleport) it lists its neighbours once and, after reading their sides
+(`krasnokamen_battle:red_*`/`blue_*` shields and surcoats, else red/blue dye), keeps
+the offset it had at that instant to the centroid of the 8 nearest same-side
+soldiers, following those same soldiers by id (a late measurement is capped at 3
+blocks); when fewer than 3 of them remain in its nearest 64 entities the place is
+handed, unchanged, to the 8 soldiers nearest it. Its place is eased over 0.3 s of
+client time and led by its measured drift over one step. It walks with held
+movement keys, or a bounded pulse of ticks when the last step was so slow that
+held keys would carry it past its place; eases its look toward the nearest enemy
+(at most 6° per step); attacks enemies in reach with `minecraft_attack_entity_once`
+once per full weapon cooldown (from the held weapon's `attack_speed` modifier) and
+logs each confirmed health drop; raises the off-hand shield (use input) while an
+enemy is within 6 blocks and lowers it for each swing; presses Respawn on death.
+It never sleeps: each step waits on the reply to its MCP calls and two client
+ticks. MCP input needs the window focused; on `window_not_focused` or a respawn
+the pilot waits for the next client state event and resumes, a writer lease held
+by another MCP session fails closed, and on exit it releases its keys and session.
+
 ## Focused checks and provenance
 
 `cargo test -p krasnokamen-client --lib replay`,
 `cargo test -p krasnokamen-client --lib capture::`, and the live-no-block session test
 cover original packet bytes (including noncanonical IDs and compression),
 record reader/writer round trip and truncation, same-stream CPU frame hashes,
-fixed-frame versus forward seek, authoritative tick gaps/received health,
-camera endpoints/yaw wrap/attachment/easing, and SSAA/shutter arithmetic.
-These do not replace the captured real-world smoke shot or a full 20k battle.
+fixed-frame versus forward seek, cut-boundary seek versus uncut playback and the
+unchanged live tick, tick timebase gaps/monotonic markers, replay radius,
+authoritative tick gaps/received health, camera endpoints/yaw wrap/attachment/
+easing, and SSAA/shutter arithmetic. `cargo test -p krasnokamen-client --lib terrain::`
+includes the replay settle beyond the CPU mesh budget (several upload rounds equal
+one round). `cargo test -p krasnokamen-client --lib replay::scan` covers side
+classification, contact clustering, terrain columns and arrow flight;
+`python3 -m unittest tools.test_battle_shots` the planner's terrain, standoff, framing and shot-order rules;
+`python3 -m unittest tools.test_bv_live_pilot` the live pilot against a simulated marching rank
+with slow (0.4 s) and fast MCP calls. These
+do not replace the captured real-world smoke shot or a full 20k battle.
+
+The warm-up measurement on a real take (offscreen Vulkan; slow on lavapipe):
+
+```sh
+KRASNOKAMEN_CINEMA_RECORDING=/work/takes/battle.solrec KRASNOKAMEN_CINEMA_RECEIPTS=/work/warmup \
+KRASNOKAMEN_CINEMA_DATA=/work/client-data KRASNOKAMEN_CINEMA_RENDER_DISTANCE=20 \
+KRASNOKAMEN_CINEMA_TICK_CAMERA=/work/takes/tick-shot.json \
+KRASNOKAMEN_CINEMA_WALL_CAMERA=/work/takes/wall-shot.json WGPU_BACKEND=vulkan \
+cargo test --release -p krasnokamen-client --lib \
+  replay::seek_tests::captured_take_warmup_convergence -- --exact --ignored --nocapture
+```
+
+Each camera's first key is the cut target. For each timebase it plays a
+cut-free presentation reference to that target, then cuts with 0..160 warm-up
+ticks; received state, packet and clock state must be exact, and
+`<receipts>/{tick,wall}/convergence.json` records position/seat/body-yaw/walk
+differences and the 480x270 image difference against the reference.
 
 The explicit authored-fixture GPU/ffmpeg check (not a battle capture) is:
 

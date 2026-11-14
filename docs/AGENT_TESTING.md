@@ -75,6 +75,32 @@ Run isolated negative controls for map winding, framed-map drawing and potion
 event admission; retain exact binary/tree/packet/frame identities. Source-phase
 authored cases are unexecuted until Main records focused runs and real frames.
 
+### Held items, held and framed maps, potion impacts (Java oracle gate)
+
+`tools/held_items_scene.json` is one scene-shot scenario for both clients: a
+light-gray concrete floor, the copper golem statue in its sitting and standing
+poses, a default player head, a filled map with a real `map_id` (created by using
+an empty map) held two-handed and then one-handed beside an off-hand item frame,
+that map in a floor item frame, and water (2002) and healing (2007) splash
+potions thrown at the floor. Shoot it once with `--client java` and once with
+`--client native` against the same release server, then run
+`tools/held_items_oracle.py <java-receipt> <native-receipt> --panels <dir>`. It
+compares item and map silhouettes (intersection over union and area ratio) and
+the count and spread of potion-coloured particle pixels, and exits non-zero on
+any failed shot.
+
+The Java oracle runs NeoForge, whose first-person renderer treats any
+`MapItem` as a map; vanilla 26.3 tests `DataComponents.MAP_ID`. An id-less
+`filled_map` is therefore an ordinary sprite in vanilla and on the native
+client but a blank two-handed map on the oracle, so map scenes must hold a map
+with a real ID.
+
+The floor frame sits two blocks ahead of the player: the oracle reported its
+crosshair hit three blocks away as out of entity reach (`target.type = miss`)
+and never inserted the map. Each item shot waits 220 ticks after its
+`item replace` so the chat lines and the selected-item name have faded on both
+clients before the silhouettes are compared.
+
 ### Mount inventory quick-move
 
 The session associates an opened mount screen with the already received entity
@@ -293,12 +319,29 @@ The pure frame/painting orientation tests are under `entities::render_special`.
 Nonempty CPU geometry is not graphical acceptance: windowed evidence must
 separately check both placed and summoned entities against a visible control.
 
+Falling blocks retain their last received position for protocol deltas while
+their presented position advances under local gravity and collision between
+updates. `falling_block_moves_between_received_updates_and_lands` checks the
+trajectory, landing and received-position delta base. Capture metadata also
+includes the falling entity UUID, received position and movement-packet tick,
+and the presented position and sample tick from that frame; those observations
+are not themselves a pixel or real-client acceptance.
+
 Sign bodies in 26.3 are terrain block models; their block-entity pass emits only
 front/back text and needs no removed `entity/signs` texture or body rig.
 `cargo test --lib sign_text_mesh_needs_no_legacy_entity_texture_or_body_rig`
 checks that dependency boundary with received NBT and actual text material indices,
 including non-glowing text. A real window must additionally show edited text on
 both faces and after reconnect; a visible wooden board alone proves nothing.
+
+The placed shulker-box rig uses the full lid depth of the authored shulker
+shell. `shulker_box_closed_shell_matches_the_authored_shulker_shell` checks
+both shell parts in rest space; graphical parity of opening and all faces
+still needs matched native and Java captures.
+
+The standing banner flag and crossbar placement is a provisional visual fit;
+`standing_banner_flag_covers_the_crossbar_from_the_front` guards the layout.
+Fresh isolated graphical comparison, patterned and wall-banner views remain required.
 
 Creative tab buttons retain their full semantic label while painting a fitted
 single-line name. Hover uses the existing rich tooltip overlay to expose the full

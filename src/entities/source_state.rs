@@ -301,7 +301,8 @@ pub(crate) fn tick(
     tick: u64,
     first_passenger_is_mob: bool,
     controlling_passenger: bool,
-    before_bounds: Bounds,
+    // A boat's bounds before this tick moved it; `None` for every other entity.
+    boat_bounds: Option<Bounds>,
 ) -> Result<render_special::TickEffects> {
     let Some(mut source) = entity.source.take() else {
         return Ok(render_special::TickEffects::default());
@@ -327,20 +328,15 @@ pub(crate) fn tick(
         } else {
             Some(false)
         };
-        let boat = models.schemas[&entity.type_name]
-            .hierarchy
-            .iter()
-            .any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat");
-        let under_water = if boat {
-            water_contact(world, content, before_bounds, true)?
-        } else {
-            Some(false)
+        let under_water = match boat_bounds {
+            Some(bounds) => water_contact(world, content, bounds, true)?,
+            None => Some(false),
         };
         source.pending_world = in_water.is_none() || under_water.is_none();
         if source.pending_world {
             return Ok(render_special::TickEffects::default());
         }
-        if boat {
+        if boat_bounds.is_some() {
             source.boat_out_of_control = if under_water == Some(true) {
                 source.boat_out_of_control + 1.
             } else {
@@ -375,7 +371,11 @@ pub(crate) fn tick(
                 .get(&entity.type_name)
                 .ok_or("entity Source motion missing")?;
             let transform = entity.presented_transform(0, 0.);
-            let last_pose = match p::value(models, entity, "LAST_POSE_CHANGE_TICK") {
+            let ids = models.ids(entity);
+            let last_pose = match ids
+                .last_pose_change
+                .and_then(|id| entity.metadata_value(id))
+            {
                 Some(Metadata::Long(value)) => value
                     .parse::<i64>()
                     .map_err(|_| "camel pose clock invalid")?,
@@ -383,7 +383,7 @@ pub(crate) fn tick(
             };
             let sitting = last_pose < 0;
             let pose_time = game_time.wrapping_sub(last_pose.wrapping_abs());
-            let flags = p::number(models, entity, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+            let flags = p::int_at(entity, ids.living_flags).unwrap_or(0);
             let using = flags & 1 != 0;
             let blocking = using
                 && entity
@@ -398,13 +398,13 @@ pub(crate) fn tick(
                     position: transform.position,
                     yaw: transform.yaw,
                     alive: entity.death_tick.is_none()
-                        && match p::value(models, entity, "DATA_HEALTH_ID") {
+                        && match ids.health.and_then(|id| entity.metadata_value(id)) {
                             Some(Metadata::Float(health)) => *health > 0.,
                             _ => true,
                         },
                     passenger: entity.vehicle.is_some(),
-                    baby: p::boolean(models, entity, "DATA_BABY_ID"),
-                    visually_swimming: p::number(models, entity, "DATA_POSE") == Some(3),
+                    baby: p::flag_at(entity, ids.baby),
+                    visually_swimming: p::int_at(entity, ids.pose) == Some(3),
                     in_water: in_water == Some(true),
                     uses_y_for_walk: facts.walk_uses_y(entity),
                     rotation_changed_before_base_tick: transform.yaw != source.previous_yaw,

@@ -882,39 +882,72 @@ fn selection_contract() -> Vec<serde_json::Value> {
     fn visit(dir: &std::path::Path, rows: &mut Vec<serde_json::Value>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.is_dir() { visit(&path, rows); continue; }
+            if path.is_dir() {
+                visit(&path, rows);
+                continue;
+            }
             let name = path.file_name().unwrap().to_str().unwrap();
             if path.extension().is_none_or(|ext| ext != "rs")
-                || name == "tests.rs" || name.ends_with("_tests.rs") { continue; }
+                || name == "tests.rs"
+                || name.ends_with("_tests.rs")
+            {
+                continue;
+            }
             let source = std::fs::read_to_string(&path).unwrap();
-            let relative = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap().display().to_string();
+            let relative = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .unwrap()
+                .display()
+                .to_string();
             let mut function = "";
             let mut test_item = false;
             for (line, text) in source.lines().enumerate() {
                 let trimmed = text.trim_start();
-                if trimmed == "#[cfg(test)]" { test_item = true; continue; }
+                if trimmed == "#[cfg(test)]" {
+                    test_item = true;
+                    continue;
+                }
                 if test_item {
-                    if trimmed.starts_with("#[") { continue; }
+                    if trimmed.starts_with("#[") {
+                        continue;
+                    }
                     test_item = false;
                     // External test modules can precede production code. Inline test bodies
                     // and test-only helpers end production in these entity modules.
-                    if trimmed.ends_with(';') { continue; }
+                    if trimmed.ends_with(';') {
+                        continue;
+                    }
                     break;
                 }
-                if text.trim_start().starts_with("//") { continue; }
+                if text.trim_start().starts_with("//") {
+                    continue;
+                }
                 if let Some((_, tail)) = text.split_once("fn ") {
                     function = tail.split('(').next().unwrap();
                 }
-                for key in text.split('"').skip(1).step_by(2).filter(|key|
-                    key.starts_with("minecraft:") && !key.contains('{')
-                        && (key.contains('#') || matches!(*key,
-                            "minecraft:wall_banner" | "minecraft:standing_banner")))
-                {
-                    let key = if key.contains('#') { key.to_owned() } else { format!("{key}#main") };
-                    let class = if relative.contains("render_blocks") { "block-special" }
-                        else if relative.ends_with("equipment.rs") { "equipment" }
-                        else if function == "special_item" { "item-special" }
-                        else { "literal" };
+                for key in text.split('"').skip(1).step_by(2).filter(|key| {
+                    key.starts_with("minecraft:")
+                        && !key.contains('{')
+                        && (key.contains('#')
+                            || matches!(
+                                *key,
+                                "minecraft:wall_banner" | "minecraft:standing_banner"
+                            ))
+                }) {
+                    let key = if key.contains('#') {
+                        key.to_owned()
+                    } else {
+                        format!("{key}#main")
+                    };
+                    let class = if relative.contains("render_blocks") {
+                        "block-special"
+                    } else if relative.ends_with("equipment.rs") {
+                        "equipment"
+                    } else if function == "special_item" {
+                        "item-special"
+                    } else {
+                        "literal"
+                    };
                     rows.push(serde_json::json!({
                         "id":format!("literal/{relative}/{}/{key}",line + 1),
                         "class":class,"source":format!("{relative}:{}",line + 1),
@@ -926,8 +959,16 @@ fn selection_contract() -> Vec<serde_json::Value> {
         }
     }
     let mut rows = super::super::resources::rig_selection_contract();
-    visit(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/entities"), &mut rows);
-    rows.sort_by(|left, right| left["id"].as_str().unwrap().cmp(right["id"].as_str().unwrap()));
+    visit(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/entities"),
+        &mut rows,
+    );
+    rows.sort_by(|left, right| {
+        left["id"]
+            .as_str()
+            .unwrap()
+            .cmp(right["id"].as_str().unwrap())
+    });
     rows
 }
 
@@ -936,13 +977,50 @@ fn resolve_contract(
     sources: &[(&str, &str)],
 ) -> Vec<serde_json::Value> {
     fn normalize_texture(name: &str) -> &str {
-        name.trim_end_matches(".png").trim_start_matches("minecraft:").trim_start_matches("textures/")
+        name.trim_end_matches(".png")
+            .trim_start_matches("minecraft:")
+            .trim_start_matches("textures/")
     }
     let catalog = Catalog::from_sources(sources);
-    rows.iter().cloned().map(|mut row| {
-        let Some(key) = row["required_rig"].as_str() else {
-            row["classification"] = "non-rig-unverified".into();
-            row["coverage_pass"] = false.into();
+    rows.iter()
+        .cloned()
+        .map(|mut row| {
+            let Some(key) = row["required_rig"].as_str() else {
+                row["classification"] = "non-rig-unverified".into();
+                row["coverage_pass"] = false.into();
+                row["accepted"] = false.into();
+                return row;
+            };
+            let id = model_id(key).into_owned();
+            let rig = catalog.rigs.get(&id);
+            let classification = if rig.is_some() {
+                "simplified"
+            } else if sources
+                .iter()
+                .any(|(file, _)| *file == format!("{id}.json"))
+            {
+                "rejected"
+            } else {
+                "missing"
+            };
+            let selection_matches = row["selected_rig"]
+                .as_str()
+                .is_none_or(|selected| selected == key);
+            let selected = row["class"] == "selection";
+            let texture_matches = row["required_texture"].as_str().is_none_or(|expected| {
+                row["selected_texture"]
+                    .as_str()
+                    .is_some_and(|actual| normalize_texture(actual) == normalize_texture(expected))
+            });
+            let passed = rig.is_some_and(|rig| !rig.is_placeholder())
+                && selection_matches
+                && texture_matches
+                && (!selected || row["selection_error"].is_null());
+            row["model_id"] = id.clone().into();
+            row["model_file"] = format!("assets/krasnokamen/models/entity/{id}.json").into();
+            row["classification"] = classification.into();
+            row["coverage_pass"] = passed.into();
+            // Presence and UV coverage cannot prove a native or oracle frame.
             row["accepted"] = false.into();
             return row;
         };
@@ -977,11 +1055,32 @@ fn resolve_contract(
 #[test]
 fn entity_selection_coverage_report() {
     let rows = resolve_contract(&selection_contract(), EMBEDDED);
-    let ids: std::collections::BTreeSet<_> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
-    assert_eq!(ids.len(), rows.len(), "coverage rows must have stable unique identities");
-    for class in ["family", "selection", "pose", "enum", "texture", "armor", "skin",
-        "painting-variant", "literal", "block-special", "item-special", "equipment", "non-family"] {
-        assert!(rows.iter().any(|row| row["class"] == class), "missing contract class {class}");
+    let ids: std::collections::BTreeSet<_> =
+        rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids.len(),
+        rows.len(),
+        "coverage rows must have stable unique identities"
+    );
+    for class in [
+        "family",
+        "selection",
+        "pose",
+        "enum",
+        "texture",
+        "armor",
+        "skin",
+        "painting-variant",
+        "literal",
+        "block-special",
+        "item-special",
+        "equipment",
+        "non-family",
+    ] {
+        assert!(
+            rows.iter().any(|row| row["class"] == class),
+            "missing contract class {class}"
+        );
     }
     if let Some(path) = std::env::var_os("KRASNOKAMEN_ENTITY_COVERAGE_REPORT") {
         let report = serde_json::json!({
@@ -997,18 +1096,34 @@ fn entity_selection_coverage_report() {
 fn entity_selection_coverage_detects_removed_and_rejected_required_entry() {
     let contract = selection_contract();
     let row_id = "selection/minecraft:cow/adult/received/minecraft:cold";
-    let find = |rows: Vec<serde_json::Value>| rows.into_iter().find(|row| row["id"] == row_id).unwrap();
+    let find =
+        |rows: Vec<serde_json::Value>| rows.into_iter().find(|row| row["id"] == row_id).unwrap();
     let good = find(resolve_contract(&contract, EMBEDDED));
     assert_eq!(good["required_rig"], "minecraft:cold_cow#main");
     assert_eq!(good["selected_rig"], good["required_rig"], "{good}");
     assert_eq!(good["coverage_pass"], true, "{good}");
-    let removed: Vec<_> = EMBEDDED.iter().copied().filter(|(name, _)| *name != "cold_cow.json").collect();
+    let removed: Vec<_> = EMBEDDED
+        .iter()
+        .copied()
+        .filter(|(name, _)| *name != "cold_cow.json")
+        .collect();
     let missing = find(resolve_contract(&contract, &removed));
     assert_eq!(missing["classification"], "missing", "{missing}");
     assert_eq!(missing["coverage_pass"], false, "{missing}");
     eprintln!("negative control removed required entry: {missing}");
-    let rejected: Vec<_> = EMBEDDED.iter().map(|(name, source)|
-        (*name, if *name == "cold_cow.json" { "{invalid" } else { *source })).collect();
+    let rejected: Vec<_> = EMBEDDED
+        .iter()
+        .map(|(name, source)| {
+            (
+                *name,
+                if *name == "cold_cow.json" {
+                    "{invalid"
+                } else {
+                    *source
+                },
+            )
+        })
+        .collect();
     let bad = find(resolve_contract(&contract, &rejected));
     assert_eq!(bad["classification"], "rejected", "{bad}");
     assert_eq!(bad["coverage_pass"], false, "{bad}");
@@ -1019,7 +1134,9 @@ fn entity_selection_coverage_detects_removed_and_rejected_required_entry() {
 fn received_visual_variants_resolve_their_required_authored_entry() {
     for row in resolve_contract(&selection_contract(), EMBEDDED) {
         if row["class"] == "selection"
-            && row["case"].as_str().is_some_and(|case| case.starts_with("received/"))
+            && row["case"]
+                .as_str()
+                .is_some_and(|case| case.starts_with("received/"))
         {
             assert_eq!(row["coverage_pass"], true, "{row}");
         }
@@ -1035,34 +1152,57 @@ fn entity_selection_coverage_cold_cow_fringe_samples_the_fur_net() {
         let quads = cube_quads(cube, 64., 64.);
         let mut sides = 0;
         for (quad, normal) in quads {
-            if normal[1].abs() < 0.9 { continue; }
+            if normal[1].abs() < 0.9 {
+                continue;
+            }
             sides += 1;
             if quad.iter().any(|vertex| {
                 !(30. ..=42.).contains(&(vertex[3] * 64.))
                     || !(32. ..=42.).contains(&(vertex[4] * 64.))
-            }) { return false; }
+            }) {
+                return false;
+            }
         }
         sides == 2
     };
     assert_eq!(fringe.size[1], 0., "the coat front is a local-Y plane");
-    assert!(samples_fur(fringe), "both emitted faces must sample the fur, not the head net");
+    assert!(
+        samples_fur(fringe),
+        "both emitted faces must sample the fur, not the head net"
+    );
     // A Front/Back override on this plane affects only its degenerate faces. Without the
     // Up/Down fix the actual emitted faces fall back to the unrelated default UV net.
-    let mut wrong_faces = cube(fringe.origin, fringe.size, fringe.uv, fringe.mirror, fringe.inflate);
+    let mut wrong_faces = cube(
+        fringe.origin,
+        fringe.size,
+        fringe.uv,
+        fringe.mirror,
+        fringe.inflate,
+    );
     wrong_faces.faces.insert(Face::Front, [30., 32., 42., 42.]);
     wrong_faces.faces.insert(Face::Back, [30., 32., 42., 42.]);
-    assert!(!samples_fur(&wrong_faces), "the original face-selection mutant must be detected");
+    assert!(
+        !samples_fur(&wrong_faces),
+        "the original face-selection mutant must be detected"
+    );
 }
 
 #[test]
 fn entity_selection_coverage_excludes_proven_unreachable_nautilus_babies() {
     let rows = resolve_contract(&selection_contract(), EMBEDDED);
-    assert!(!rows.iter().any(|row| row["entity"] == "minecraft:zombie_nautilus" && row["age"] == "baby"),
-        "26.3 ZombieNautilus.canBeABaby is false; do not demand invented baby assets");
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row["entity"] == "minecraft:zombie_nautilus" && row["age"] == "baby"),
+        "26.3 ZombieNautilus.canBeABaby is false; do not demand invented baby assets"
+    );
     let row = |id| rows.iter().find(|row| row["id"] == id).unwrap();
     let calf = row("selection/minecraft:cow/baby/received/minecraft:cold");
     assert_eq!(calf["vanilla_reachability"], "declared_family");
-    assert_eq!(calf["accepted"], false, "a declared baby rig still needs actual frame proof");
+    assert_eq!(
+        calf["accepted"], false,
+        "a declared baby rig still needs actual frame proof"
+    );
 }
 
 #[test]
@@ -1070,7 +1210,10 @@ fn entity_selection_coverage_wither_skull_material_tracks_received_dangerous_fla
     let rows = resolve_contract(&selection_contract(), EMBEDDED);
     for (case, texture) in [
         ("default", "minecraft:entity/wither/wither"),
-        ("DATA_DANGEROUS/true", "minecraft:entity/wither/wither_invulnerable"),
+        (
+            "DATA_DANGEROUS/true",
+            "minecraft:entity/wither/wither_invulnerable",
+        ),
     ] {
         let id = format!("selection/minecraft:wither_skull/adult/{case}");
         let row = rows.iter().find(|row| row["id"] == id).unwrap();
@@ -1115,7 +1258,10 @@ fn baby_zombie_and_shared_husk_armor_keep_child_body_proportions() {
     }
     let chest = embedded("armor_baby_zombie_chest");
     for bone in &chest.bones {
-        assert_eq!(bone.cubes[0].inflate, 0.5, "outer shell follows the child scale");
+        assert_eq!(
+            bone.cubes[0].inflate, 0.5,
+            "outer shell follows the child scale"
+        );
         if bone.name.ends_with("_arm") {
             // The supplied child equipment atlas has three opaque shoulder rows
             // followed by transparent forearm rows, not a solid leg-texture strip.
@@ -1133,7 +1279,10 @@ fn decorated_pot_body_supports_its_neck_at_the_matched_control_height() {
     let bottom = &base.bones[0].cubes[0];
     assert_eq!((bottom.origin, bottom.size), ([1., 0., 1.], [14., 0., 14.]));
     let shoulder = &base.bones[0].cubes[1];
-    assert_eq!((shoulder.origin, shoulder.size), ([1., 16., 1.], [14., 0., 14.]));
+    assert_eq!(
+        (shoulder.origin, shoulder.size),
+        ([1., 16., 1.], [14., 0., 14.])
+    );
     assert_eq!(base.bones[0].cubes.len(), 3);
     let neck = &base.bones[0].cubes[2];
     assert_eq!((neck.origin, neck.size), ([4., 16., 4.], [8., 4., 8.]));
@@ -1141,7 +1290,10 @@ fn decorated_pot_body_supports_its_neck_at_the_matched_control_height() {
     assert_eq!(extent(&base, "base", 1), (0., 20.));
     for wall in &walls.bones {
         assert_eq!(wall.cubes[0].origin[1], 0., "wall reaches the bottom cap");
-        assert_eq!(wall.cubes[0].origin[1] + wall.cubes[0].size[1], shoulder.origin[1]);
+        assert_eq!(
+            wall.cubes[0].origin[1] + wall.cubes[0].size[1],
+            shoulder.origin[1]
+        );
     }
     assert_eq!(extent(&walls, "front", 0), (1., 15.));
 }
@@ -1152,11 +1304,17 @@ fn bell_wall_texels_follow_the_clean_control_orientation() {
     for (cube, (low_v, high_v)) in bell.bones[0].cubes.iter().zip([(13., 6.), (23., 21.)]) {
         let mut sides = 0;
         for (quad, normal) in cube_quads(cube, 32., 32.) {
-            if normal[1].abs() > 0.9 { continue; }
+            if normal[1].abs() > 0.9 {
+                continue;
+            }
             sides += 1;
             for vertex in quad {
                 let y = vertex[1] * 16.;
-                let expected = if (y - cube.origin[1]).abs() < 0.001 { low_v } else { high_v };
+                let expected = if (y - cube.origin[1]).abs() < 0.001 {
+                    low_v
+                } else {
+                    high_v
+                };
                 assert_eq!(vertex[4] * 32., expected, "emitted wall vertex {vertex:?}");
             }
         }
@@ -1166,7 +1324,11 @@ fn bell_wall_texels_follow_the_clean_control_orientation() {
 
 #[test]
 fn obsolete_bed_entity_texture_rigs_are_not_shipped_in_26_3() {
-    assert!(EMBEDDED.iter().all(|(name, _)| !matches!(*name, "bed_head.json" | "bed_foot.json")));
+    assert!(
+        EMBEDDED
+            .iter()
+            .all(|(name, _)| !matches!(*name, "bed_head.json" | "bed_foot.json"))
+    );
 }
 
 #[test]
@@ -1182,7 +1344,11 @@ fn baby_chicken_body_and_planar_feet_follow_the_26_3_texture_net() {
         let body = model.bones.iter().find(|bone| bone.name == "body").unwrap();
         assert_eq!(body.cubes.len(), 2);
         assert_eq!(body.cubes[0].size, [4., 4., 4.]);
-        assert_eq!(body.cubes[1].uv, [10., 8.], "beak uses its own two-pixel island");
+        assert_eq!(
+            body.cubes[1].uv,
+            [10., 8.],
+            "beak uses its own two-pixel island"
+        );
         assert_eq!(extent(&model, "body", 1), (18., 22.));
         for name in ["right_leg", "left_leg"] {
             let leg = model.bones.iter().find(|bone| bone.name == name).unwrap();
@@ -1203,22 +1369,35 @@ fn baby_chicken_body_and_planar_feet_follow_the_26_3_texture_net() {
         for climate in ["temperate", "warm", "cold"] {
             let path = root.join(format!("entity/chicken/chicken_{climate}_baby.png"));
             let (width, height, opaque) = png_opaque(&path);
-            for bone in model.bones.iter().filter(|bone| bone.name.ends_with("_leg")) {
+            for bone in model
+                .bones
+                .iter()
+                .filter(|bone| bone.name.ends_with("_leg"))
+            {
                 for cube in &bone.cubes {
                     for (quad, _) in cube_quads(cube, width as f32, height as f32) {
                         let point = |v: [f32; 5]| Vec3::new(v[0], v[1], v[2]);
-                        if (point(quad[1]) - point(quad[0])).cross(point(quad[2]) - point(quad[0])).length_squared() < 1e-12 {
+                        if (point(quad[1]) - point(quad[0]))
+                            .cross(point(quad[2]) - point(quad[0]))
+                            .length_squared()
+                            < 1e-12
+                        {
                             continue;
                         }
                         let span = |axis: usize, size: usize| {
                             let values = quad.map(|v| v[axis] * size as f32);
                             let low = values.iter().copied().fold(f32::INFINITY, f32::min) as usize;
-                            let high = values.iter().copied().fold(f32::NEG_INFINITY, f32::max) as usize;
+                            let high =
+                                values.iter().copied().fold(f32::NEG_INFINITY, f32::max) as usize;
                             low..high
                         };
                         for y in span(4, height) {
                             for x in span(3, width) {
-                                assert!(opaque[y * width + x], "{climate} {} foot texel ({x}, {y})", bone.name);
+                                assert!(
+                                    opaque[y * width + x],
+                                    "{climate} {} foot texel ({x}, {y})",
+                                    bone.name
+                                );
                             }
                         }
                     }
@@ -1234,8 +1413,15 @@ fn climate_cow_horns_and_cold_muzzle_follow_the_clean_controls() {
     let muzzle = &cold.bones[0].cubes[1];
     assert_eq!(muzzle.uv, [8., 32.]);
     assert_eq!(muzzle.size, [6., 3., 2.]);
-    assert_eq!(face_rects(muzzle).into_iter().find(|(face, _)| *face == Face::Front).unwrap().1,
-        [10., 34., 16., 37.], "pink muzzle, not the gray horn net");
+    assert_eq!(
+        face_rects(muzzle)
+            .into_iter()
+            .find(|(face, _)| *face == Face::Front)
+            .unwrap()
+            .1,
+        [10., 34., 16., 37.],
+        "pink muzzle, not the gray horn net"
+    );
     for (id, outer, top) in [("cold_cow", 6., 0.), ("warm_cow", 8., -2.)] {
         let bounds = rest_bounds(&format!("minecraft:{id}#main"));
         for (part, sign) in [("right_horn", -1.), ("left_horn", 1.)] {
@@ -1259,12 +1445,25 @@ fn climate_cow_horns_and_cold_muzzle_follow_the_clean_controls() {
 #[test]
 fn warm_nautilus_shell_and_face_follow_both_matched_views() {
     let model = embedded("warm_zombie_nautilus");
-    assert_eq!(model.bones[0].rotation, [0., 180., 0.], "head is on the far side in the front control");
+    assert_eq!(
+        model.bones[0].rotation,
+        [0., 180., 0.],
+        "head is on the far side in the front control"
+    );
     let bounds = rest_bounds("minecraft:warm_zombie_nautilus#main");
-    assert!((bounds["shell"].1.y * 16. - 24.).abs() < 0.001, "shell reaches the feet");
-    assert!(bounds["head"].0.z > 0., "head is in front of the source-facing shell");
+    assert!(
+        (bounds["shell"].1.y * 16. - 24.).abs() < 0.001,
+        "shell reaches the feet"
+    );
+    assert!(
+        bounds["head"].0.z > 0.,
+        "head is in front of the source-facing shell"
+    );
     for i in 0..8 {
-        assert!(bounds[&format!("arm{i}")].1.z * 16. > 18., "tentacle {i} reaches beyond the face");
+        assert!(
+            bounds[&format!("arm{i}")].1.z * 16. > 18.,
+            "tentacle {i} reaches beyond the face"
+        );
     }
     let shell = &model.bones[0].bones[0];
     // The PNG contains two shell nets, not one ten-pixel band stretched over
@@ -1273,8 +1472,14 @@ fn warm_nautilus_shell_and_face_follow_both_matched_views() {
     assert_eq!(shell.cubes.len(), 2);
     let upper = &shell.cubes[0];
     let lower = &shell.cubes[1];
-    assert_eq!((upper.origin, upper.size), ([-7., 0., -8.], [14., 10., 16.]));
-    assert_eq!((lower.origin, lower.size), ([-7., 10., -12.], [14., 8., 20.]));
+    assert_eq!(
+        (upper.origin, upper.size),
+        ([-7., 0., -8.], [14., 10., 16.])
+    );
+    assert_eq!(
+        (lower.origin, lower.size),
+        ([-7., 10., -12.], [14., 8., 20.])
+    );
     assert_eq!(upper.faces[&Face::Back], [16., 16., 30., 26.]);
     assert_eq!(upper.faces[&Face::Left], [0., 16., 16., 26.]);
     assert_eq!(upper.faces[&Face::Up], [30., 16., 16., 0.]);
@@ -1288,13 +1493,37 @@ fn warm_nautilus_shell_and_face_follow_both_matched_views() {
         ([5., 5.5, -6.], 6., 93., 102., 1),
         ([-8.5, 18., -5.], 4., 112., 122., 2),
     ]) {
-        assert_eq!(fan.pivot, pivot, "{} attaches to its observed shell side", fan.name);
-        assert_eq!(fan.cubes.len(), planes, "{} preserves the observed plane count", fan.name);
+        assert_eq!(
+            fan.pivot, pivot,
+            "{} attaches to its observed shell side",
+            fan.name
+        );
+        assert_eq!(
+            fan.cubes.len(),
+            planes,
+            "{} preserves the observed plane count",
+            fan.name
+        );
         for cube in &fan.cubes {
-            assert_eq!(cube.size[0].max(cube.size[2]), width, "{} uses its actual PNG island width", fan.name);
-            assert_eq!(cube.faces.len(), 2, "{} paints both sides of its plane", fan.name);
+            assert_eq!(
+                cube.size[0].max(cube.size[2]),
+                width,
+                "{} uses its actual PNG island width",
+                fan.name
+            );
+            assert_eq!(
+                cube.faces.len(),
+                2,
+                "{} paints both sides of its plane",
+                fan.name
+            );
             for rect in cube.faces.values() {
-                assert_eq!(*rect, [0., v0, width, v1], "{} excludes adjacent color islands", fan.name);
+                assert_eq!(
+                    *rect,
+                    [0., v0, width, v1],
+                    "{} excludes adjacent color islands",
+                    fan.name
+                );
             }
         }
     }

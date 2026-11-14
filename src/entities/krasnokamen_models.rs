@@ -388,7 +388,7 @@ fn cube_quads(cube: &CubeSpec, tw: f32, th: f32) -> Vec<([[f32; 5]; 4], [f32; 3]
 /// `minecraft:oak_chest_boat#renderer/model` or
 /// `minecraft:zombie#layer3/babyModelSet/head`; the qualifier after `#` never selects
 /// geometry except for the armor layer slots.
-pub(crate) fn model_id(key: &str) -> String {
+pub(crate) fn model_id(key: &str) -> std::borrow::Cow<'_, str> {
     let key = key.strip_prefix("minecraft:").unwrap_or(key);
     let (name, qualifier) = key.split_once('#').unwrap_or((key, ""));
     let slot = |q: &str| -> Option<&'static str> {
@@ -416,20 +416,24 @@ pub(crate) fn model_id(key: &str) -> String {
                 _ => None,
             };
             if let Some(family) = family {
-                return format!("armor_baby_{family}_{slot}");
+                return format!("armor_baby_{family}_{slot}").into();
             }
         }
-        return format!("armor_{}{slot}", if baby_set { "baby_" } else { "" });
+        return format!("armor_{}{slot}", if baby_set { "baby_" } else { "" }).into();
     }
     // The conduit block entity is drawn from several sub-models selected by the qualifier.
     if name == "conduit" && !qualifier.is_empty() {
-        return format!("conduit_{qualifier}");
+        return format!("conduit_{qualifier}").into();
     }
     if qualifier.contains("waterPatch") {
         return "boat_water_patch".into();
     }
     for suffix in ["chest_boat", "chest_raft", "boat", "raft", "minecart"] {
-        if name.ends_with(&format!("_{suffix}")) || name == suffix {
+        if name == suffix
+            || name
+                .strip_suffix(suffix)
+                .is_some_and(|rest| rest.ends_with('_'))
+        {
             return suffix.into();
         }
     }
@@ -437,7 +441,12 @@ pub(crate) fn model_id(key: &str) -> String {
     if name == "breeze_wind_charge" {
         return "wind_charge".into();
     }
-    name.replace('/', "_")
+    // Per-frame rig lookups pass here: a plain name is returned without allocating.
+    if name.contains('/') {
+        name.replace('/', "_").into()
+    } else {
+        name.into()
+    }
 }
 
 pub(crate) struct Catalog {
@@ -484,11 +493,14 @@ fn catalog() -> &'static Catalog {
 }
 /// Authored rig for a renderer key, if Krasnokamen ships one.
 pub(crate) fn authored(key: &str) -> Option<&'static Rig> {
-    catalog().rigs.get(&model_id(key))
+    catalog().rigs.get(model_id(key).as_ref())
 }
 /// Default vanilla texture (below `textures/`) of the authored model for `key`.
 pub(crate) fn default_texture(key: &str) -> Option<&'static str> {
-    catalog().textures.get(&model_id(key)).map(String::as_str)
+    catalog()
+        .textures
+        .get(model_id(key).as_ref())
+        .map(String::as_str)
 }
 /// Digest input proving which authored files this binary carries.
 pub(crate) fn embedded_digest() -> String {

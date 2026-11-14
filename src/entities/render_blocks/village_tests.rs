@@ -37,7 +37,7 @@ fn bone(name: &str, pivot: [f32; 3], quads: Vec<[[f32; 5]; 4]>) -> Bone {
 fn models_with(rigs: Vec<(String, Rig)>) -> Models {
     Models {
         rigs: rigs.into_iter().collect(),
-        schemas: BTreeMap::new(),
+        schemas: Default::default(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),
@@ -359,7 +359,6 @@ fn village_chest_lid_opens_around_hinge_while_body_stays_put() {
     assert!(moved, "open lid must move lid/lock vertices");
 }
 
-
 #[test]
 fn village_bell_body_renders_and_swing_moves_it() {
     let content = village_content(
@@ -511,6 +510,7 @@ fn copper_statue_item_uses_complete_texture_resource_location() {
     for (name, layer) in [("copper_golem", 5), ("copper_golem_oxidized", 6)] {
         let special = serde_json::json!({
             "type": "minecraft:copper_golem_statue",
+            "pose": "standing",
             "texture": format!("minecraft:textures/entity/copper_golem/{name}.png"),
         });
         let model = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
@@ -519,6 +519,90 @@ fn copper_statue_item_uses_complete_texture_resource_location() {
     }
 }
 
+#[test]
+fn copper_statue_item_selects_its_pose_and_stands_on_its_feet() {
+    // Source CopperGolemStatueSpecialRenderer: `pose` picks the golem layer and
+    // CopperGolemStatueModel.setupAnim puts the root at the feet, turned half about Z,
+    // so the item model stands upright from y = 0 before the item graph transform.
+    let models = models_with(Vec::new());
+    let stack = crate::inventory::Stack::default();
+    let mut content = Content::test_cube();
+    content.insert_test_texture("minecraft:entity/copper_golem/copper_golem", test_region(5));
+    let mut shapes = Vec::new();
+    for pose in ["standing", "sitting", "running", "star"] {
+        let special = serde_json::json!({
+            "type": "minecraft:copper_golem_statue",
+            "pose": pose,
+            "texture": "minecraft:textures/entity/copper_golem/copper_golem.png",
+        });
+        let model = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+        let rig = models.rig(&format!(
+            "minecraft:copper_golem{}#main",
+            if pose == "standing" {
+                String::new()
+            } else {
+                format!("_{pose}")
+            }
+        ));
+        assert_eq!(
+            model.quads.len(),
+            rig.bones.iter().map(|b| b.quads.len()).sum::<usize>(),
+            "{pose}"
+        );
+        let mut offset = 0;
+        let (mut legs, mut head, mut all) = (
+            f32::INFINITY,
+            [f32::INFINITY, f32::NEG_INFINITY],
+            f32::NEG_INFINITY,
+        );
+        for bone in &rig.bones {
+            for quad in &model.quads[offset..offset + bone.quads.len()] {
+                for y in quad.positions.map(|p| p[1]) {
+                    all = all.max(y);
+                    match bone.name.as_str() {
+                        "left_leg" | "right_leg" => legs = legs.min(y),
+                        "head" => head = [head[0].min(y), head[1].max(y)],
+                        _ => {}
+                    }
+                }
+            }
+            offset += bone.quads.len();
+        }
+        // Authored poses: the lowest leg point is the feet plane (a striding or splayed leg
+        // dips under a pixel and a half) and the head is the top of the upright figure.
+        assert!(
+            legs > -1.5 / 16. && legs < 1e-4,
+            "{pose} legs must stand on y = 0: {legs}"
+        );
+        assert!(
+            head[0] > 0.45 && head[1] == all,
+            "{pose} head must be on top: {head:?} of {all}"
+        );
+        shapes.push(model.quads.iter().map(|q| q.positions).collect::<Vec<_>>());
+    }
+    // Authored standing golem: feet at 24 px and head top at 6 px.
+    let standing = shapes[0].iter().flatten().map(|p| p[1]);
+    let (low, high) = standing.fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), y| {
+        (l.min(y), h.max(y))
+    });
+    assert!(
+        low.abs() < 1e-4 && (high - 18. / 16.).abs() < 1e-4,
+        "{low}..{high}"
+    );
+    for i in 0..shapes.len() {
+        for j in i + 1..shapes.len() {
+            assert_ne!(
+                shapes[i], shapes[j],
+                "statue item poses {i} and {j} must differ"
+            );
+        }
+    }
+    let missing = serde_json::json!({
+        "type": "minecraft:copper_golem_statue",
+        "texture": "minecraft:textures/entity/copper_golem/copper_golem.png",
+    });
+    assert!(crate::entities::special_item(&models, &content, &stack, &missing).is_err());
+}
 
 #[test]
 fn trident_special_item_uses_entity_texture() {

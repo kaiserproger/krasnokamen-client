@@ -50,6 +50,17 @@ pub(crate) fn section_limit(radius: u32) -> usize {
 const CPU_MESH_BUDGET: usize = 512 * 1024 * 1024;
 const RESULT_BYTE_LIMIT: usize = 8 * 1024 * 1024;
 
+/// Outcome of one blocking replay wait.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ReplayWait {
+    /// A completion is ready for the next `update`.
+    Completion,
+    /// CPU mesh residency is full: upload and release the drawn payloads.
+    Upload,
+    /// Every selected section is meshed.
+    Settled,
+}
+
 type Wake = Arc<dyn Fn() + Send + Sync>;
 struct Job {
     key: [i32; 3],
@@ -145,6 +156,7 @@ struct Counters {
     queue_peak: usize,
     cpu_ms: f64,
     last_cpu_ms: f64,
+    resident_peak: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -165,6 +177,11 @@ pub struct Terrain {
     threads: Vec<thread::JoinHandle<()>>,
     receive: mpsc::Receiver<Completion>,
     replay_completion: Option<Completion>,
+    /// A valid result that does not fit `cpu_mesh_budget`: still in flight
+    /// until uploads release resident payloads (each live frame, or a replay
+    /// upload round), never integrated past the budget.
+    over_budget: Option<Completion>,
+    cpu_mesh_budget: usize,
     /// Dispatched jobs whose completion has not been received yet.
     in_flight: usize,
     max_in_flight: usize,
@@ -254,6 +271,8 @@ impl Terrain {
             threads,
             receive,
             replay_completion: None,
+            over_budget: None,
+            cpu_mesh_budget: CPU_MESH_BUDGET,
             in_flight: 0,
             max_in_flight,
             candidates: [Vec::new(), Vec::new()],
@@ -660,15 +679,6 @@ impl Terrain {
             self.counters.completed += 1;
             self.counters.cpu_ms += completion.elapsed_ms;
             self.counters.last_cpu_ms = completion.elapsed_ms;
-            let valid = completion.generation == self.generation
-                && completion.epochs == self.epochs
-                && self
-                    .sections
-                    .get(&completion.key)
-                    .is_some_and(|s| s.revision == completion.revision)
-                && world
-                    .chunk([completion.key[0], completion.key[2]])
-                    .is_some();
             if !valid {
                 self.counters.stale += 1;
                 continue;
@@ -680,15 +690,13 @@ impl Terrain {
             let section = self.sections.get_mut(&completion.key).unwrap();
             let bytes = mesher::geometry_bytes(&built.geometry);
             let next_bytes = self.resident_bytes - section.bytes + bytes;
-            if next_bytes > CPU_MESH_BUDGET {
-                return Err("terrain_cpu_mesh_residency_byte_bound_reached".into());
-            }
             section.bytes = bytes;
             section.unknown_light_samples = built.unknown_light_samples;
             section.unknown_biome_samples = built.unknown_biome_samples;
             self.pending.remove(&completion.key);
             section.created_by_edit = false;
             self.resident_bytes = next_bytes;
+            self.counters.resident_peak = self.counters.resident_peak.max(next_bytes);
             let replaced = draws.insert(
                 completion.key,
                 ChunkDraw {
@@ -729,9 +737,11 @@ impl Terrain {
         }
         if self.in_flight == 0 {
             if !self.pending.is_empty() {
-                return Err("replay terrain cannot finish within CPU mesh residency budget".into());
+                return Err(
+                    "replay terrain has pending sections but no dispatched mesh job".into(),
+                );
             }
-            return Ok(false);
+            return Ok(ReplayWait::Settled);
         }
         self.replay_completion = Some(
             self.receive
@@ -932,7 +942,9 @@ impl Terrain {
             "cancelled_jobs":self.counters.cancelled,"deduplicated_invalidations":self.counters.coalesced,
             "unloaded_sections":self.counters.removed,"mesh_cpu_total_ms":self.counters.cpu_ms,
             "last_mesh_cpu_ms":self.counters.last_cpu_ms,"cpu_mesh_resident_bytes":self.resident_bytes,
-            "cpu_mesh_budget_bytes":CPU_MESH_BUDGET,"single_result_byte_bound":RESULT_BYTE_LIMIT,
+            "cpu_mesh_resident_peak_bytes":self.counters.resident_peak,
+            "cpu_mesh_result_awaiting_upload":self.over_budget.is_some(),
+            "cpu_mesh_budget_bytes":self.cpu_mesh_budget,"single_result_byte_bound":RESULT_BYTE_LIMIT,
             "unknown_light_samples":unknown_light,"unknown_biome_samples":unknown_biome,
             "geometry_ready":self.catalog.is_some() && self.rules.is_some() && pending == 0 && running == 0,
             "source_sampling_complete":unknown_light == 0 && unknown_biome == 0,

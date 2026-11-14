@@ -62,7 +62,10 @@ const ROLE_ITEM: u32 = 6u;
 const BONE_CARRIED: u32 = 1u;
 const PIVOT_Z_ZERO: u32 = 0x1000u;
 const RIDING: u32 = 0x2000u;
+// `presentation::RIDING_LEG_*`: seated legs pitch forward and splay over the mount.
 const RIDING_LEG_PITCH: f32 = -1.4137167;
+const RIDING_LEG_YAW: f32 = 0.31415927;
+const RIDING_LEG_ROLL: f32 = 0.07853982;
 
 struct Affine {
     r0: vec4<f32>,
@@ -228,7 +231,8 @@ fn evaluate(instance: CrowdInstance, group: CrowdGroup) {
         }
         let leg = bone.role == ROLE_RIGHT_LEG || bone.role == ROLE_LEFT_LEG;
         if (flags & RIDING) != 0u && leg {
-            rotation.x = RIDING_LEG_PITCH;
+            let side = select(-1.0, 1.0, bone.role == ROLE_RIGHT_LEG);
+            rotation = vec3<f32>(RIDING_LEG_PITCH, side * RIDING_LEG_YAW, side * RIDING_LEG_ROLL);
         }
         if bone.channel != NO_CHANNEL {
             // `ClipLibrary::apply`.

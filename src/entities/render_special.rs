@@ -58,16 +58,40 @@ pub(crate) struct Cache {
         BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
     dynamic_models: BTreeMap<String, Result<bool>>,
     tnt_state: Option<u32>,
+    generation: Generation,
 }
+
+/// Process-unique identity of one `Cache`: a replaced cache never matches an old memo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Generation(u64);
+impl Default for Generation {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Whether an entity's item stacks have a clock/compass graph, kept on the entity for the
+/// stacks it was resolved from (their retained component handles and items), so a frame
+/// repeats no item definition lookup by name.
+#[derive(Debug)]
+pub(crate) struct ClockMemo {
+    generation: Generation,
+    stacks: [Option<(std::sync::Arc<BTreeMap<String, Value>>, u32)>; 3],
+    needs_world: bool,
+}
+
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
         self.text.remove(&handle);
         self.clock_needles.remove(&handle);
     }
+    /// The clock context of `entity`'s `stacks`; `memo` is the entity's [`ClockMemo`].
     pub(super) fn item_context(
         &mut self,
         entity: &Entity,
         stacks: [Option<&Stack>; 3],
+        memo: &mut Option<ClockMemo>,
         content: &Content,
         position: [f64; 3],
         environment: Option<super::ClockEnvironment<'_>>,
@@ -115,9 +139,15 @@ impl Cache {
                     .map(|graph| dynamic(&graph));
                 self.dynamic_models.insert(id.into(), result);
             }
-            needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
+            *memo = Some(ClockMemo {
+                generation: self.generation,
+                stacks: stacks.map(|stack| {
+                    stack.map(|stack| (std::sync::Arc::clone(&stack.components), stack.id))
+                }),
+                needs_world,
+            });
         }
-        if !needs_world {
+        if !memo.as_ref().is_some_and(|memo| memo.needs_world) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
         }

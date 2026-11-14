@@ -377,10 +377,6 @@ impl Store {
                 .as_deref()
                 .ok_or("entity model cache not activated")?;
             let range = f64::from(radius.min(64.));
-            let area = crate::player::Bounds {
-                min: camera.map(|value| value - range),
-                max: camera.map(|value| value + range),
-            };
             // Same received candidates as bodies, including attached riders.
             for entity in self.candidates(area) {
                 let transform = self.presented_transform(entity, tick, partial)?;
@@ -565,10 +561,12 @@ mod tests {
         store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
         store.activate_models(Arc::new(Models {
             rigs: BTreeMap::new(),
-            schemas: BTreeMap::from([
+            schemas: [
                 ("minecraft:marker".into(), schema),
                 ("minecraft:text_display".into(), text_display_schema()),
-            ]),
+            ]
+            .into_iter()
+            .collect(),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: Vec::new(),
@@ -588,7 +586,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "protocol_id":1, "width":0., "height":0., "eye_height":0.,
             "fire_immune":false, "class":"net.minecraft.world.entity.Display$TextDisplay",
-            "hierarchy":["net.minecraft.world.entity.Entity"],
+            "hierarchy":["net.minecraft.world.entity.Display$TextDisplay", "net.minecraft.world.entity.Display", "net.minecraft.world.entity.Entity"],
             "dimension_constants":{}, "enum_ids":{}, "enum_numbers":{},
             "method_owners":{}, "default_attributes":{},
             "accessors":{
@@ -677,6 +675,8 @@ mod tests {
             submitted_revision: None,
             clip: Default::default(),
             crowd: None,
+            clock: None,
+            kind_slot: Default::default(),
         });
         handle
     }
@@ -1233,6 +1233,8 @@ mod tests {
             submitted_revision: None,
             clip: Default::default(),
             crowd: None,
+            clock: None,
+            kind_slot: Default::default(),
         };
         let received = entity.metadata.clone();
         super::super::display::on_metadata(&models, &mut entity, &received);

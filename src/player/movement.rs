@@ -91,6 +91,14 @@ impl Player {
         self.vehicle_prediction = None;
         let env = self.environment(world, content)?;
         let underwater = self.update_eye_environment(world, content)?;
+        // Overlapping living entities push the local player away (vanilla client
+        // `LivingEntity.pushEntities` -> `Entity.push`), while he is pushable: alive, not a
+        // spectator, not on a climbable (`env.climbable` is `Player.onClimbable`).
+        if self.game_mode != 3 && !env.climbable && self.health.is_none_or(|health| health > 0.) {
+            let push = entities.local_player_push(self.bounds(), self.entity_id, world_tick)?;
+            self.velocity[0] += push[0];
+            self.velocity[2] += push[1];
+        }
         if !self.abilities.flying {
             apply_flow(
                 &mut self.velocity,

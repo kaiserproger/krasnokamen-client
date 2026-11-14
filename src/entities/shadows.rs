@@ -86,10 +86,6 @@ impl Store {
             return Ok(0);
         };
         let darken = world.source_sky_darken().unwrap_or(0);
-        let area = crate::player::Bounds {
-            min: camera.map(|value| value - SHADOW_RANGE),
-            max: camera.map(|value| value + SHADOW_RANGE),
-        };
         let mut casters = 0;
         for entity in self.candidates(area) {
             let position = self.presented_transform(entity, tick, partial)?.position;

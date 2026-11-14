@@ -723,6 +723,14 @@ impl Session {
 
     pub(super) fn refresh_scene_mode(&mut self, animation_only: bool) -> Result<bool> {
         self.camera();
+        // Filming mode keeps the HUD hidden in play (as F1 would), with no keyboard input.
+        if self.hidden_hud_keeps_hand
+            && self.phase == "play"
+            && let Some(ui) = &mut self.ui
+            && ui.setting("hide_hud").and_then(Value::as_bool) != Some(true)
+        {
+            ui.apply_setting("hide_hud", json!(true))?;
+        }
         let world_ready = self.play_world_presentation_ready();
         if !animation_only {
             self.sync_ui_state(world_ready)?;
@@ -821,15 +829,22 @@ impl Session {
             0.,
             (self.player.position[2] / 256.).floor() * 256.,
         ];
-        self.scene.dynamic.vertices.clear();
-        for indices in &mut self.scene.dynamic.indices {
-            indices.clear();
+        // A frame-driven session rebuilds the animated geometry in `prepare_frame` before
+        // every draw (same predicate there); a state refresh leaves it to that frame rather
+        // than extracting every entity twice.
+        let dynamic = animation_only
+            || !(self.frame_driven && self.phase == "play" && self.player.pose_known);
+        if dynamic {
+            self.scene.dynamic.vertices.clear();
+            for indices in &mut self.scene.dynamic.indices {
+                indices.clear();
+            }
+            self.scene.first_person.vertices.clear();
+            for indices in &mut self.scene.first_person.indices {
+                indices.clear();
+            }
+            self.scene.entity_presentation = Default::default();
         }
-        self.scene.first_person.vertices.clear();
-        for indices in &mut self.scene.first_person.indices {
-            indices.clear();
-        }
-        self.scene.entity_presentation = Default::default();
         if !animation_only {
             self.scene.overlay.vertices.clear();
             for indices in &mut self.scene.overlay.indices {
@@ -897,6 +912,8 @@ impl Session {
             self.scene.shader_game_time =
                 Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
             }
+        }
+        if world_ready && dynamic {
             super::weather::append(
                 &self.world,
                 self.content.as_ref().ok_or("content unavailable")?,
@@ -1051,8 +1068,10 @@ impl Session {
                         self.presentation_partial,
                         &crate::entities::NameplateView {
                             crosshair,
-                            // Session::camera currently follows the local player.
-                            camera_entity: Some(self.player.entity_id),
+                            // The Set Camera entity's own name is hidden, as vanilla.
+                            camera_entity: Some(
+                                self.player.camera_entity.unwrap_or(self.player.entity_id),
+                            ),
                             viewer_name: self.username.as_deref(),
                             viewer_spectator: self.player.game_mode == 3,
                             render_names: !ui
@@ -1072,6 +1091,9 @@ impl Session {
                         .unrendered
                         .extend(nameplates.unrendered);
                 }
+                // The bodies' gathered entities served shadows and nameplates; a later pass
+                // gathers its own.
+                self.entities.end_entity_frame();
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
                     && !self
@@ -1861,8 +1883,7 @@ mod destruction_tests {
         assert!(session.far_column_ready([0, 0]));
     }
 
-    #[test]
-    fn far_offer_does_not_extend_environment_fog_range() {
+    fn ready_presentation_session() -> Session {
         let mut session = session_with_cube([0, 0, 0], true);
         session.entities = crate::session::mining_start_tests::session().entities;
         let chunk = session.world.chunk([0, 0]).unwrap().clone();
@@ -1939,6 +1960,44 @@ mod destruction_tests {
             .unwrap();
         session.terrain = Some(terrain);
         assert!(session.play_world_presentation_ready());
+        session
+    }
+
+    #[test]
+    fn replay_settling_admits_received_terrain_without_a_fade() {
+        let mut session = ready_presentation_session();
+        session.phase = "play".into();
+        session.replaying = true;
+        session
+            .terrain
+            .as_mut()
+            .unwrap()
+            .set_render_rules([1.; 6], false, 0, Some(750))
+            .unwrap();
+        assert!(
+            session.settle_replay_geometry().unwrap(),
+            "one cube fits the CPU mesh budget"
+        );
+        assert!(
+            session.scene.chunks.values().any(|chunk| {
+                chunk.geometry.as_ref().is_some_and(|geometry| {
+                    geometry.indices.iter().any(|indices| !indices.is_empty())
+                })
+            }),
+            "the received cube must produce drawable terrain",
+        );
+        for chunk in session.scene.chunks.values() {
+            assert_eq!(
+                chunk.fade_duration_ms,
+                Some(0),
+                "zero duration admits a replay mesh immediately; None is unknown, not no fade",
+            );
+        }
+    }
+
+    #[test]
+    fn far_offer_does_not_extend_environment_fog_range() {
+        let mut session = ready_presentation_session();
         session.refresh_scene().unwrap();
         let without_far = session.scene.environment.clone();
         let mut offer = vec![1, 0];
@@ -1960,6 +2019,46 @@ mod destruction_tests {
             (without_far.render_fog_start, without_far.render_fog_end),
             "a far-terrain offer must not push the environment-owned haze away",
         );
+    }
+
+    /// A state refresh (tick, packets) of a frame-driven session leaves the animated
+    /// geometry to `prepare_frame`, which rebuilds it before every draw; without frames the
+    /// state refresh still builds it.
+    #[test]
+    fn state_refresh_leaves_animated_geometry_to_the_frame() {
+        let mut session = ready_presentation_session();
+        session.phase = "play".into();
+        let mark = |session: &mut Session| {
+            session.scene.dynamic.vertices.push(crate::api::Vertex {
+                position: [1e9; 3],
+                ..bytemuck::Zeroable::zeroed()
+            });
+        };
+        let marked = |session: &Session| {
+            session
+                .scene
+                .dynamic
+                .vertices
+                .iter()
+                .any(|v| v.position[0] == 1e9)
+        };
+        mark(&mut session);
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert!(
+            !marked(&session),
+            "without frames the state refresh builds the animated geometry"
+        );
+        session.prepare_frame(0.5).unwrap();
+        mark(&mut session);
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert!(
+            marked(&session),
+            "a frame-driven state refresh leaves the animated geometry to the frame"
+        );
+        session.prepare_frame(0.5).unwrap();
+        assert!(!marked(&session), "the frame rebuilds it");
     }
 
     fn with_stage_texture(session: &mut Session, stage: u8) {

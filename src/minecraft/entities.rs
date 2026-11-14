@@ -337,15 +337,35 @@ fn attack(session: &mut Session, handle: Handle) -> Result<bool> {
     if aim_entity(session, handle)?.is_some() {
         return Ok(false);
     }
-    dispatch_attack(session, handle)
+    Ok(dispatch_attack(session, handle)?.is_ok())
 }
-fn dispatch_attack(session: &mut Session, handle: Handle) -> Result<bool> {
-    let Some(result) = session.interact_entity(handle, InteractionIntent::Attack)? else {
-        return Ok(false);
+/// `Err(reason)` is the precise, non-dispatch cause; both causes keep the
+/// `ordinary entity attack was not dispatched` prefix that log greps match.
+fn dispatch_attack(
+    session: &mut Session,
+    handle: Handle,
+) -> Result<std::result::Result<(), String>> {
+    const PREFIX: &str = "ordinary entity attack was not dispatched";
+    let result = match session.interact_entity(handle, InteractionIntent::Attack)? {
+        EntityInteraction::Dispatched(result) => result,
+        EntityInteraction::CrosshairMismatch(under) => {
+            let requested = session.entities.resolve(handle)?;
+            return Ok(Err(format!(
+                "{PREFIX}: crosshair target at the swing is not the requested entity {} ({}); under crosshair: {under}",
+                handle.network_id, requested.type_name
+            )));
+        }
     };
-    result["started"]
+    if result["started"]
         .as_bool()
-        .ok_or_else(|| "ordinary entity attack omitted started fact".into())
+        .ok_or("ordinary entity attack omitted started fact")?
+    {
+        return Ok(Ok(()));
+    }
+    let refusal = result["refusal"]
+        .as_str()
+        .ok_or("ordinary entity attack not started without a refusal reason")?;
+    Ok(Err(format!("{PREFIX}: {refusal}")))
 }
 fn inventory_count(session: &Session, item: &str) -> Result<i64> {
     let content = content(session)?;
@@ -594,9 +614,12 @@ pub(super) fn start(
             if let Some(reason) = aim_entity(session, handle)? {
                 return Err(reason);
             }
-            let observed = session
-                .interact_entity(handle, InteractionIntent::Use { hand })?
-                .ok_or("ordinary raycast does not target requested entity")?;
+            let observed = match session.interact_entity(handle, InteractionIntent::Use { hand })? {
+                EntityInteraction::Dispatched(observed) => observed,
+                EntityInteraction::CrosshairMismatch(_) => {
+                    return Err("ordinary raycast does not target requested entity".into());
+                }
+            };
             // The executor owns the local interaction result. Dispatch is not server success.
             let mut result = identity.value();
             let object = result.as_object_mut().unwrap();
@@ -621,8 +644,8 @@ pub(super) fn start(
             if let Some(reason) = aim_entity(session, handle)? {
                 return Err(reason);
             }
-            if !dispatch_attack(session, handle)? {
-                return Err("ordinary entity attack was not dispatched".into());
+            if let Err(reason) = dispatch_attack(session, handle)? {
+                return Err(reason);
             }
             Wait::Attack {
                 identity,
@@ -1078,5 +1101,189 @@ mod observation_tests {
             ("received", Some(true))
         );
         assert!(received_baby(Some(true), Some(&Metadata::Float(1.0))).is_err());
+    }
+}
+
+#[cfg(test)]
+mod attack_diag_tests {
+    use super::*;
+    use crate::{
+        player::Hit,
+        protocol::{Reader, Writer},
+        session::{
+            entity_aim_tests::{VILLAGER, session},
+            mining_start_tests::connect,
+        },
+    };
+    use std::{collections::BTreeMap, sync::Arc};
+
+    const PREFIX: &str = "ordinary entity attack was not dispatched";
+
+    fn refusal(session: &mut Session, handle: Handle) -> String {
+        dispatch_attack(session, handle).unwrap().unwrap_err()
+    }
+
+    fn spawn(session: &mut Session, id: i32, at: [f64; 3]) {
+        let mut packet = Writer::default();
+        packet.var(id);
+        packet.0.extend([0u8; 16]);
+        packet.var(VILLAGER as i32);
+        for coordinate in at {
+            packet.f64(coordinate);
+        }
+        packet.0.extend([0u8; 5]);
+        // Spawning needs the motion table that the fixture activates only after its own spawn.
+        let models = session.entities.models.take();
+        let content = session.content.as_ref().unwrap();
+        session
+            .entities
+            .apply(1, &mut Reader::new(&packet.0), content, 1)
+            .unwrap();
+        session.entities.models = models;
+    }
+
+    #[test]
+    fn attack_dispatches_when_aimed_and_free() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
+        assert!(dispatch_attack(&mut session, handle).unwrap().is_ok());
+    }
+
+    #[test]
+    fn wrong_target_reports_nothing_under_crosshair() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        session.player.look(0., -90.).unwrap();
+        let message = refusal(&mut session, handle);
+        assert!(message.starts_with(PREFIX), "{message}");
+        assert!(
+            message.contains(
+                "crosshair target at the swing is not the requested entity 42 (test:villager)"
+            ),
+            "{message}"
+        );
+        assert!(message.contains("under crosshair: none"), "{message}");
+        assert!(!message.contains("attack not started"), "{message}");
+    }
+
+    #[test]
+    fn wrong_target_reports_block_under_crosshair() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        session
+            .world
+            .set([4, 5, 3], 1, |state| Ok(state == 0))
+            .unwrap();
+        session.player.look(180., 0.).unwrap();
+        let message = refusal(&mut session, handle);
+        assert!(message.starts_with(PREFIX), "{message}");
+        assert!(message.contains("under crosshair: block "), "{message}");
+        assert!(message.contains(" at 4,5,3 face "), "{message}");
+    }
+
+    #[test]
+    fn wrong_target_reports_other_entity_under_crosshair() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        spawn(&mut session, 43, [4.5, 4., 6.]);
+        session.player.look(0., 0.).unwrap();
+        let target = session
+            .player
+            .raycast(
+                &session.world,
+                session.content.as_ref().unwrap(),
+                &session.entities,
+                session.client_tick,
+            )
+            .unwrap();
+        assert!(matches!(target, Some(Hit::Entity { handle, .. }) if handle.network_id == 43));
+        let message = refusal(&mut session, handle);
+        assert!(
+            message.contains("under crosshair: entity 43 (test:villager)"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn spectator_mode_reports_the_early_exit_and_player_state() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
+        session.player.game_mode = 3;
+        session
+            .input(InputIntent::Key {
+                key: "forward".into(),
+                pressed: true,
+            })
+            .unwrap();
+        let message = refusal(&mut session, handle);
+        assert!(message.starts_with(PREFIX), "{message}");
+        assert!(message.contains("attack not started"), "{message}");
+        assert!(message.contains("early_exit=spectator_mode"), "{message}");
+        assert!(message.contains("using=none"), "{message}");
+        assert!(message.contains("held_keys=[forward]"), "{message}");
+        assert!(
+            message.contains("main_hand=empty (piercing_weapon=false)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("queued_commands=[spectator_action#"),
+            "{message}"
+        );
+        assert!(message.contains("game_mode=3 (spectator)"), "{message}");
+        assert!(!message.contains("crosshair target"), "{message}");
+    }
+
+    #[test]
+    fn piercing_weapon_reports_the_queued_stab_that_started_does_not_count() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
+        let mut spear = crate::inventory::Stack::default();
+        spear.id = 1;
+        spear.count = 1;
+        spear.components = Arc::new(BTreeMap::from([(
+            "minecraft:piercing_weapon".into(),
+            json!({}),
+        )]));
+        let slot = 36 + session.inventory.selected_slot as usize;
+        session.inventory.player.slots[slot] = Some(spear);
+        let message = refusal(&mut session, handle);
+        assert!(message.starts_with(PREFIX), "{message}");
+        assert!(message.contains("early_exit=none"), "{message}");
+        assert!(message.contains("(piercing_weapon=true)"), "{message}");
+        // Internal stab action 7 goes out as ordinal 8, which `started` does not recognise.
+        assert!(
+            message.contains("queued_commands=[player_action#"),
+            "{message}"
+        );
+        assert!(message.contains(" action=8, swing#"), "{message}");
+    }
+
+    #[test]
+    fn using_item_reports_the_early_exit_item_and_hand() {
+        let (mut session, handle) = session([4.5, 4., 7.5]);
+        let _peer = connect(&mut session);
+        assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
+        session.player.set_using_for_test(1, 7);
+        session
+            .input(InputIntent::Key {
+                key: "use".into(),
+                pressed: true,
+            })
+            .unwrap();
+        let message = refusal(&mut session, handle);
+        assert!(message.starts_with(PREFIX), "{message}");
+        assert!(message.contains("attack not started"), "{message}");
+        assert!(message.contains("early_exit=using_item"), "{message}");
+        assert!(
+            message.contains("using=item_id 7 hand=off_hand remaining_ticks=4"),
+            "{message}"
+        );
+        assert!(message.contains("held_keys=[use]"), "{message}");
+        assert!(message.contains("queued_commands=[]"), "{message}");
+        assert!(message.contains("game_mode=0 (survival)"), "{message}");
+        assert!(!message.contains("crosshair target"), "{message}");
     }
 }

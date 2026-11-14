@@ -125,26 +125,35 @@ fn bed_item_uses_resource_model_halves_without_a_legacy_entity_texture() {
     use crate::protocol::content::{Content, TextureRegion};
     let mut content = Content::test_cube();
     content.item_names.insert(1, "minecraft:red_bed".into());
-    content.insert_test_resource("assets/minecraft/items/red_bed.json", br#"{
+    content.insert_test_resource(
+        "assets/minecraft/items/red_bed.json",
+        br#"{
         "model":{"type":"minecraft:composite","models":[
             {"type":"minecraft:model","model":"minecraft:block/red_bed_head"},
             {"type":"minecraft:model","model":"minecraft:block/red_bed_foot",
              "transformation":{"translation":[0,0,1]}}
         ]}
-    }"#);
+    }"#,
+    );
     // Independent cube fixtures exercise the supplied 26.3 resource graph's
     // normal-model path, not the deleted 26.1.2 special/entity-texture path.
     for (part, layer) in [("head", 5), ("foot", 6)] {
         let texture = format!("minecraft:block/red_bed_{part}_up");
-        content.insert_test_texture(&texture, TextureRegion {
-            layer, uv: [0., 0., 1., 1.], width: 16, height: 16,
-        });
+        content.insert_test_texture(
+            &texture,
+            TextureRegion {
+                layer,
+                uv: [0., 0., 1., 1.],
+                width: 16,
+                height: 16,
+            },
+        );
         let model = serde_json::json!({"textures":{"bed":texture},"elements":[{
-            "from":[0,0,0],"to":[16,9,16],"faces":{
-                "up":{"texture":"#bed"},"down":{"texture":"#bed"},
-                "north":{"texture":"#bed"},"south":{"texture":"#bed"},
-                "east":{"texture":"#bed"},"west":{"texture":"#bed"}
-            }}]});
+        "from":[0,0,0],"to":[16,9,16],"faces":{
+            "up":{"texture":"#bed"},"down":{"texture":"#bed"},
+            "north":{"texture":"#bed"},"south":{"texture":"#bed"},
+            "east":{"texture":"#bed"},"west":{"texture":"#bed"}
+        }}]});
         content.insert_test_resource(
             &format!("assets/minecraft/models/block/red_bed_{part}.json"),
             &serde_json::to_vec(&model).unwrap(),
@@ -157,10 +166,23 @@ fn bed_item_uses_resource_model_halves_without_a_legacy_entity_texture() {
     let model = items.model(&content, &stack, "gui").unwrap();
     assert_eq!(model.quads.len(), 12);
     for layer in [5, 6] {
-        assert_eq!(model.quads.iter().filter(|q| q.texture_layer == layer).count(), 6);
+        assert_eq!(
+            model
+                .quads
+                .iter()
+                .filter(|q| q.texture_layer == layer)
+                .count(),
+            6
+        );
     }
-    let (low, high) = model.quads.iter().flat_map(|q| q.positions).map(|p| p[2])
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+    let (low, high) = model
+        .quads
+        .iter()
+        .flat_map(|q| q.positions)
+        .map(|p| p[2])
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), z| {
+            (lo.min(z), hi.max(z))
+        });
     assert_eq!((low, high), (0., 2.));
 }
 
@@ -209,6 +231,21 @@ fn shulker_base_uses_lower_shell_and_spiral_floor_not_lid_texels() {
             "{id}: bottom spiral island"
         );
         assert!(floor[2] > floor[0] && floor[3] > floor[1]);
+    }
+}
+
+#[test]
+fn shulker_box_closed_shell_matches_the_authored_shulker_shell() {
+    let entity = rig("shulker");
+    let box_rig = rig("shulker_box");
+    let entity_pose = rest(entity);
+    let box_pose = rest(box_rig);
+    for part in ["base", "lid"] {
+        assert_eq!(
+            bounds(box_rig, &box_pose, part),
+            bounds(entity, &entity_pose, part),
+            "{part}: the placed box must use the complete shell"
+        );
     }
 }
 
@@ -556,4 +593,48 @@ fn polar_bear_has_a_long_two_section_torso_and_grounded_paws() {
             );
         }
     }
+}
+
+/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos"): the adult horse rig follows
+/// the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a 10 x 10 x 22 body
+/// (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs, and the head carried
+/// forward of the chest on a neck raised 30 degrees. The pre-fix rig had a 10 x 10 x 10 body.
+#[test]
+fn adult_horse_rig_has_vanilla_equine_proportions() {
+    let horse = rig("horse");
+    let transforms = rest(horse);
+    let (low, high) = bounds(horse, &transforms, "body");
+    let size = (high - low) * 16.;
+    assert!(
+        (size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3,
+        "body {size}"
+    );
+    assert!(
+        (low.y * 16. - 2.95).abs() < 1e-3,
+        "back height {}",
+        low.y * 16.
+    );
+    for leg in [
+        "left_front_leg",
+        "right_front_leg",
+        "left_hind_leg",
+        "right_hind_leg",
+    ] {
+        let (leg_low, leg_high) = bounds(horse, &transforms, leg);
+        assert!(
+            (leg_high.y * 16. - 23.99).abs() < 1e-3,
+            "{leg} reaches the ground"
+        );
+        assert!(
+            ((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3,
+            "{leg} length"
+        );
+    }
+    let (head_low, _) = bounds(horse, &transforms, "head");
+    assert!(
+        head_low.z < low.z - 6. / 16.,
+        "head forward of the chest: {} vs {}",
+        head_low.z,
+        low.z
+    );
 }

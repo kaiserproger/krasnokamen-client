@@ -54,6 +54,12 @@ const VIDEO: [Row; 7] = [
         "Chunks drawn around you. Lower runs faster.",
     ),
     row(
+        "entity_distance_scaling",
+        "Entity distance",
+        Kind::Slider,
+        "How far away entities are drawn. Lower is faster.",
+    ),
+    row(
         "max_fps",
         "Max FPS",
         Kind::Slider,
@@ -219,6 +225,8 @@ fn spec(key: &str) -> Option<Spec> {
     let (min, step, positions) = match key {
         "fov" => (30., 1., 81),
         "render_distance" => (2., 1., 31),
+        // Vanilla Options.entityDistanceScaling: stops 2..=20 as i / 4 (0.5..=5).
+        "entity_distance_scaling" => (0.5, 0.25, 19),
         "mouse_sensitivity" => (0.1, 0.05, 59),
         // 30..=260 in tens, then one extra stop for Unlimited (value 0).
         "max_fps" => (30., 10., 25),

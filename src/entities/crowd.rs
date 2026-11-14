@@ -28,11 +28,12 @@ use crate::{
         content::{Content, TextureRegion},
         models::{BakedModel, BakedQuad, TintKind},
     },
-    ui::items::{ItemContext, ItemModels},
+    ui::items::{ItemContext, ItemModels, Reads},
 };
 use glam::{Mat4, Vec3};
+use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -155,14 +156,28 @@ pub struct CrowdGroup {
     pub radius: f32,
 }
 
-/// Every composite, shared across frames; `revision` changes with the contents.
-#[derive(Clone, Debug, Default)]
-pub struct CrowdMeshes {
-    pub revision: u64,
+/// One composite's mesh: its vertices, its indices (vertex numbers from its group's
+/// `base_vertex`) and its bones, at the pool offsets `first` (vertices, indices, bones).
+#[derive(Debug, Default)]
+pub struct CrowdChunk {
+    pub first: [u32; 3],
     pub vertices: Vec<CrowdVertex>,
     pub indices: Vec<u32>,
     pub bones: Vec<CrowdBone>,
+}
+
+/// Every composite, shared across frames; `revision` changes with the contents. A pool only
+/// grows until `Registry::clear_composites` starts another (`pool`), and each composite's
+/// mesh is its own shared chunk (`chunks[i]` belongs to `groups[i]`): appending to a pool
+/// that a frame or the renderer still holds copies the composite table, never every mesh.
+#[derive(Clone, Debug, Default)]
+pub struct CrowdMeshes {
+    pub revision: u64,
+    pub pool: u64,
+    pub chunks: Vec<Arc<CrowdChunk>>,
     pub groups: Vec<CrowdGroup>,
+    /// Vertices, indices and bones of every chunk.
+    pub lens: [u32; 3],
 }
 
 /// This frame's crowd: meshes, instances and the clip table they sample.
@@ -200,17 +215,81 @@ fn texture_key(texture: TextureRegion) -> [u32; 5] {
     ]
 }
 
-/// An entity's last composite, valid while nothing it was resolved from changed.
+/// An entity's last composite, valid while nothing it was resolved from changed: the crowd
+/// and item generations, the texture, every slot's stack, the metadata it read ([`Facts`]),
+/// and per held/head slot the frame-varying item state its selection read. An unchanged
+/// appearance revision proves the facts unchanged, so a frame costs no lookup by name and no
+/// allocation; a changed revision (any metadata, health included) re-reads only the facts.
 #[derive(Debug)]
 pub(crate) struct Binding {
     generation: u64,
+    items: u64,
     appearance: u64,
-    rig: usize,
     texture: [u32; 5],
-    left_main: bool,
-    /// Shapes of the items in slots 0, 1 and 5 (item selection depends on the frame).
-    shapes: [Option<u64>; 3],
+    rig: usize,
+    facts: Facts,
+    /// Metadata index of the kind's living flags (item use), resolved once.
+    flags: Option<u8>,
+    /// Every slot's stack: its component handle (retained, so the address cannot be reused)
+    /// and item.
+    stacks: [Option<(Arc<BTreeMap<String, Value>>, u32)>; 8],
+    /// Slots 0, 1 and 5 ([`HELD_SLOTS`]): the held item's shape, the context inputs its
+    /// selection read and their values; `None` when the slot holds nothing drawn as an item.
+    held: [Option<(u64, Reads, ItemUse)>; 3],
     composite: u32,
+}
+
+/// Held (0, 1) and head (5) slots: their item model is selected per frame.
+const HELD_SLOTS: [usize; 3] = [0, 1, 5];
+
+/// The metadata a composite and its crowd routing read: main arm (held item sides), baby
+/// (armour rigs), invisible/glowing flags and pose (routing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Facts {
+    left_main: bool,
+    baby: bool,
+    hidden: bool,
+    pose: i32,
+}
+
+impl Facts {
+    fn of(models: &Models, entity: &Entity) -> Self {
+        Self {
+            left_main: p::left_main_arm(models, entity),
+            baby: p::boolean(models, entity, "DATA_BABY_ID"),
+            // Invisible bodies still draw equipment; glowing adds an outline.
+            hidden: p::number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & (32 | 64) != 0,
+            pose: p::number(models, entity, "DATA_POSE").unwrap_or(0),
+        }
+    }
+}
+
+/// Frame-varying item state of a held slot (`presentation::held_item_use`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ItemUse {
+    using: bool,
+    ticks: f32,
+    pull: f32,
+}
+
+impl ItemUse {
+    /// Whether every input in `reads` is equal (bitwise for the floats).
+    fn same(self, other: Self, reads: Reads) -> bool {
+        (!reads.contains(Reads::USING_ITEM) || self.using == other.using)
+            && (!reads.contains(Reads::USE_TICKS) || self.ticks.to_bits() == other.ticks.to_bits())
+            && (!reads.contains(Reads::CROSSBOW_PULL)
+                || self.pull.to_bits() == other.pull.to_bits())
+    }
+}
+
+fn same_stack(kept: &Option<(Arc<BTreeMap<String, Value>>, u32)>, stack: Option<&Stack>) -> bool {
+    match (kept, stack) {
+        (None, None) => true,
+        (Some((components, id)), Some(stack)) => {
+            *id == stack.id && Arc::ptr_eq(components, &stack.components)
+        }
+        _ => false,
+    }
 }
 
 /// Composites and this frame's instances.
@@ -287,7 +366,8 @@ pub(super) struct Inputs<'a> {
 pub(super) type Fallback = &'static str;
 
 /// Routes `entity` (of a crowd [`kind`]) to the crowd renderer and pushes its instance,
-/// or names why the CPU path must draw it (nothing pushed).
+/// or names why the CPU path must draw it (nothing pushed). `Ok(true)`: its appearance was
+/// resolved again this frame (`PresentationStats::crowd_resolved`).
 pub(super) fn try_instance(
     registry: &mut Registry,
     items: &mut ItemModels,
@@ -311,19 +391,30 @@ pub(super) fn try_instance(
     {
         return Err("special layers");
     }
-    let rig = models.rig(&bound.rig);
-    // Invisible bodies still draw equipment; glowing adds an outline: both stay on the CPU path.
-    let flags = p::number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
-    if rig.is_placeholder() {
-        return Err("placeholder rig");
-    }
-    if flags & (32 | 64) != 0 {
-        return Err("invisible or glowing");
-    }
-    if p::number(models, entity, "DATA_POSE").unwrap_or(0) != 0 {
-        return Err("pose");
-    }
-    let composite = composite(registry, items, equipment, entity, &inputs)?;
+    // A kept binding passed the checks below for the same rig and facts.
+    let (composite, resolved) = match kept(registry, items, entity, &inputs)? {
+        Some(composite) => (composite, false),
+        None => {
+            let Some(Ok(bound)) = entity.binding.as_ref() else {
+                return Err("unbound");
+            };
+            let rig = models.rig(&bound.rig);
+            let facts = Facts::of(models, entity);
+            if rig.is_placeholder() {
+                return Err("placeholder rig");
+            }
+            if facts.hidden {
+                return Err("invisible or glowing");
+            }
+            if facts.pose != 0 {
+                return Err("pose");
+            }
+            (
+                composite(registry, items, equipment, entity, rig, facts, &inputs)?,
+                true,
+            )
+        }
+    };
     let bone_count = registry.meshes.groups[composite as usize].bone_count;
     if registry.bones + bone_count > MAX_BONES {
         return Err("bone budget");
@@ -341,7 +432,7 @@ pub(super) fn try_instance(
     }
     registry.counts[composite as usize] += 1;
     registry.instances.push(instance);
-    Ok(())
+    Ok(resolved)
 }
 
 /// The per-frame instance of a bound entity; `None` when its pose has no instance form.
@@ -431,14 +522,111 @@ struct Held {
     context: &'static str,
     state: ItemContext,
     shape: u64,
+    reads: Reads,
 }
 
-/// The composite of `entity`'s appearance, resolving and building it when needed.
+impl Held {
+    fn item_use(&self) -> ItemUse {
+        ItemUse {
+            using: self.state.using_item,
+            ticks: self.state.use_ticks,
+            pull: self.state.crossbow_pull,
+        }
+    }
+}
+
+/// The composite of `entity`'s kept [`Binding`] when nothing it was resolved from changed and
+/// every held item still selects the same shape (re-selecting those whose read inputs
+/// changed); `None` when the appearance must be resolved again.
+fn kept(
+    registry: &Registry,
+    items: &mut ItemModels,
+    entity: &mut Entity,
+    inputs: &Inputs<'_>,
+) -> Result<Option<u32>, Fallback> {
+    let Inputs {
+        models,
+        content,
+        frame,
+        item_context,
+        ..
+    } = *inputs;
+    let Some(mut binding) = entity.crowd.take() else {
+        return Ok(None);
+    };
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        return Err("unbound");
+    };
+    let texture = texture_key(bound.texture);
+    if binding.generation != registry.generation
+        || binding.items != items.generation()
+        || binding.texture != texture
+        || !binding
+            .stacks
+            .iter()
+            .enumerate()
+            .all(|(slot, kept)| same_stack(kept, entity.equipment_value(slot)))
+    {
+        return Ok(None);
+    }
+    if binding.appearance != entity.appearance_revision {
+        // New metadata (most often health): only the facts it could change are compared.
+        if std::ptr::from_ref(models.rig(&bound.rig)) as usize != binding.rig
+            || Facts::of(models, entity) != binding.facts
+        {
+            return Ok(None);
+        }
+        binding.appearance = entity.appearance_revision;
+    }
+    let mut flags = None;
+    for (memo, slot) in binding.held.iter_mut().zip(HELD_SLOTS) {
+        let (Some((shape, reads, used)), Some(stack)) = (*memo, entity.equipment_value(slot))
+        else {
+            continue;
+        };
+        let flags = *flags.get_or_insert_with(|| {
+            binding
+                .flags
+                .and_then(|index| entity.metadata_value(index))
+                .and_then(Metadata::int)
+                .unwrap_or(0)
+        });
+        let (using, ticks, pull) = p::held_item_use(entity, flags, slot, frame.partial);
+        if !reads.contains(Reads::VOLATILE) && used.same(ItemUse { using, ticks, pull }, reads) {
+            continue;
+        }
+        let rig = models.rig(&bound.rig);
+        let held = held_item(
+            entity,
+            models,
+            content,
+            items,
+            rig,
+            slot,
+            stack,
+            binding.facts.left_main,
+            frame.partial,
+            item_context,
+        )?;
+        if held.shape != shape {
+            return Ok(None);
+        }
+        *memo = Some((held.shape, held.reads, held.item_use()));
+    }
+    let composite = binding.composite;
+    entity.crowd = Some(binding);
+    Ok(Some(composite))
+}
+
+/// The composite of `entity`'s appearance (`rig` is its bound rig, `facts` its metadata),
+/// resolving and building it when needed, and its new [`Binding`].
 fn composite(
     registry: &mut Registry,
     items: &mut ItemModels,
     equipment: &mut equipment::Cache,
     entity: &mut Entity,
+    rig: &Rig,
+    facts: Facts,
     inputs: &Inputs<'_>,
 ) -> Result<u32, Fallback> {
     let Inputs {
@@ -454,8 +642,8 @@ fn composite(
     let rig = models.rig(&bound.rig);
     let rig_key = std::ptr::from_ref(rig) as usize;
     let texture = texture_key(bound.texture);
-    let left_main = p::left_main_arm(models, entity);
-    // Items select their model per frame (use state, crossbow pull): re-check their shapes.
+    let bound_texture = bound.texture;
+    let left_main = facts.left_main;
     let mut held = Vec::new();
     for slot in [0, 1, 5] {
         let Some(stack) = entity.equipment_value(slot) else {
@@ -583,13 +771,25 @@ fn composite(
             composite
         }
     };
+    let held = HELD_SLOTS.map(|slot| {
+        held.iter()
+            .find(|h| h.slot == slot)
+            .map(|h| (h.shape, h.reads, h.item_use()))
+    });
     entity.crowd = Some(Binding {
         generation: registry.generation,
+        items: items.generation(),
         appearance: entity.appearance_revision,
-        rig: rig_key,
         texture,
-        left_main,
-        shapes,
+        rig: rig_key,
+        facts,
+        flags: models.accessor(&entity.type_name, "DATA_LIVING_ENTITY_FLAGS"),
+        stacks: std::array::from_fn(|slot| {
+            entity
+                .equipment_value(slot)
+                .map(|stack| (Arc::clone(&stack.components), stack.id))
+        }),
+        held,
         composite,
     });
     Ok(composite)
@@ -694,18 +894,18 @@ pub(crate) struct Built {
 
 impl CrowdMeshes {
     fn append(&mut self, built: Built) {
+        let [vertex, index, bone] = self.lens;
         let mut group = CrowdGroup {
-            base_vertex: self.vertices.len() as i32,
-            bone_first: self.bones.len() as u32,
+            base_vertex: vertex as i32,
+            bone_first: bone,
             bone_count: built.bones.len() as u32,
             hip: built.hip.to_array(),
             radius: built.radius,
             ..Default::default()
         };
-        self.vertices.extend(built.vertices);
-        self.bones.extend(built.bones);
+        let mut indices = Vec::new();
         for (material, mut quads) in built.quads.into_iter().enumerate() {
-            group.first_index[material] = self.indices.len() as u32;
+            group.first_index[material] = index + indices.len() as u32;
             // Each LOD draws a prefix: parts kept at coarser levels come first.
             quads.sort_by_key(|(lod, _)| std::cmp::Reverse(*lod));
             for lod in 0..LODS {
@@ -715,6 +915,18 @@ impl CrowdMeshes {
             self.indices
                 .extend(quads.iter().flat_map(|(_, indices)| *indices));
         }
+        let chunk = CrowdChunk {
+            first: self.lens,
+            vertices: built.vertices,
+            indices,
+            bones: built.bones,
+        };
+        self.lens = [
+            vertex + chunk.vertices.len() as u32,
+            index + chunk.indices.len() as u32,
+            bone + chunk.bones.len() as u32,
+        ];
+        self.chunks.push(Arc::new(chunk));
         self.groups.push(group);
     }
 }
@@ -996,7 +1208,12 @@ pub(crate) fn evaluate(
             _ => {}
         }
         if flags & INSTANCE_RIDING != 0 && matches!(bone.role, ROLE_RIGHT_LEG | ROLE_LEFT_LEG) {
-            rotation.x = p::RIDING_LEG_PITCH;
+            let side = if bone.role == ROLE_RIGHT_LEG { 1. } else { -1. };
+            rotation = Vec3::new(
+                p::RIDING_LEG_PITCH,
+                side * p::RIDING_LEG_YAW,
+                side * p::RIDING_LEG_ROLL,
+            );
         }
         if bone.channel != NO_CHANNEL {
             let channel = [

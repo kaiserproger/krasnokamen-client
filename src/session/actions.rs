@@ -5,6 +5,33 @@ use crate::{
     player::{BlockHit, Hit, InteractionIntent, UiTrigger, UsePrediction},
     ui::{EditorState, UiCommand, UiIntent},
 };
+/// Outcome of an entity-targeted ordinary interaction.
+pub enum EntityInteraction {
+    Dispatched(Value),
+    /// The crosshair at the action was not the requested entity; carries what it was.
+    CrosshairMismatch(String),
+}
+/// Wire ids of the commands one interaction queued, with the PLAYER_ACTION ordinal as sent.
+/// `started` only counts ATTACK and PLAYER_ACTION 0|2|7, so this is the ground truth.
+fn describe_queued_commands(commands: &[crate::inventory::PacketCommand]) -> String {
+    let rows: Vec<String> = commands
+        .iter()
+        .map(|command| match command.id {
+            id if id == sb::PLAYER_ACTION => {
+                let ordinal = crate::protocol::Reader::new(&command.payload.0).var();
+                match ordinal {
+                    Ok(ordinal) => format!("player_action#{id} action={ordinal}"),
+                    Err(error) => format!("player_action#{id} action=unreadable({error})"),
+                }
+            }
+            id if id == sb::ATTACK => format!("attack#{id}"),
+            id if id == sb::PUNCH => format!("swing#{id}"),
+            id if id == sb::SPECTATOR_ACTION => format!("spectator_action#{id}"),
+            id => format!("packet#{id}"),
+        })
+        .collect();
+    format!("[{}]", rows.join(", "))
+}
 #[derive(Default)]
 pub(super) struct ClientDefaults {
     software_renderer: bool,
@@ -283,22 +310,44 @@ impl Session {
         }))
     }
     pub fn interact(&mut self, intent: InteractionIntent) -> Result<Value> {
-        self.interact_checked(None, intent)?
-            .ok_or_else(|| "ordinary interaction omitted its result".into())
+        match self.interact_checked(None, intent)? {
+            EntityInteraction::Dispatched(value) => Ok(value),
+            EntityInteraction::CrosshairMismatch(_) => {
+                Err("ordinary interaction omitted its result".into())
+            }
+        }
     }
-    /// occluded. None means no action was dispatched, not a stale identity.
+    /// occluded. `CrosshairMismatch` means no action was dispatched, not a stale identity.
     pub fn interact_entity(
         &mut self,
         handle: Handle,
         intent: InteractionIntent,
-    ) -> Result<Option<Value>> {
+    ) -> Result<EntityInteraction> {
         self.interact_checked(Some(handle), intent)
+    }
+    /// What the crosshair resolves to, for refusal diagnostics.
+    fn describe_crosshair(&self, target: Option<&Hit>, content: &Content) -> String {
+        match target {
+            Some(Hit::Entity { handle, .. }) => match self.entities.resolve(*handle) {
+                Ok(entity) => format!("entity {} ({})", handle.network_id, entity.type_name),
+                Err(error) => format!("entity {} (unresolved: {error})", handle.network_id),
+            },
+            Some(Hit::Block(hit)) => format!(
+                "block {} at {},{},{} face {}",
+                content.name(hit.state).unwrap_or("unknown block"),
+                hit.position[0],
+                hit.position[1],
+                hit.position[2],
+                hit.face
+            ),
+            None => "none (nothing within reach)".into(),
+        }
     }
     fn interact_checked(
         &mut self,
         handle: Option<Handle>,
         intent: InteractionIntent,
-    ) -> Result<Option<Value>> {
+    ) -> Result<EntityInteraction> {
         if self.phase != "play" {
             return Err("client is not in play".into());
         }
@@ -314,7 +363,9 @@ impl Session {
             self.entities.resolve(handle)?;
             if !matches!(context.target.as_ref(), Some(Hit::Entity { handle: target, .. }) if *target == handle)
             {
-                return Ok(None);
+                return Ok(EntityInteraction::CrosshairMismatch(
+                    self.describe_crosshair(context.target.as_ref(), content),
+                ));
             }
         }
         let attack = matches!(intent, InteractionIntent::Attack);
@@ -352,7 +403,16 @@ impl Session {
             Hit::Entity { point, .. } => *point,
         });
         let value = if attack {
-            json!({"started":started,"attack_strength_before":strength})
+            let mut value = json!({"started":started,"attack_strength_before":strength});
+            if !started {
+                value["refusal"] = json!(self.player.attack_refusal(
+                    &self.keys,
+                    content,
+                    &self.inventory,
+                    &queued
+                ));
+            }
+            value
         } else if use_item {
             let result =
                 result.ok_or("ordinary use executor did not produce an interaction result")?;
@@ -364,7 +424,7 @@ impl Session {
         self.consume_player_effects()?;
         self.flush_commands()?;
         self.revision += 1;
-        Ok(Some(value))
+        Ok(EntityInteraction::Dispatched(value))
     }
     pub fn use_item_on(&mut self, position: [i32; 3], face: i32, hand: u8) -> Result<Value> {
         if self.phase != "play" || !self.player.pose_known {
@@ -934,6 +994,11 @@ impl Session {
                         self.render_distance = n as u32;
                         self.world.set_view_distance(self.render_distance);
                         self.scene.render_distance = self.render_distance;
+                    }
+                }
+                "entity_distance_scaling" => {
+                    if let Some(scaling) = clean.as_f64() {
+                        self.entity_distance_scaling = scaling;
                     }
                 }
                 "main_arm_right" => {

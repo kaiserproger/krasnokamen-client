@@ -54,7 +54,7 @@ pub(super) fn session() -> Session {
         .unwrap();
     session.entities.models = Some(Arc::new(Models {
         rigs: BTreeMap::new(),
-        schemas: BTreeMap::new(),
+        schemas: Default::default(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),
@@ -153,7 +153,7 @@ fn spectator_and_adventure_name_the_game_mode() {
 }
 
 /// A loopback peer is enough: commands only need a live outbound queue.
-pub(super) fn connect(session: &mut Session) -> TcpListener {
+pub(crate) fn connect(session: &mut Session) -> TcpListener {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap().to_string();
     session.network = Some(Network::connect(address, "Miner".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap());

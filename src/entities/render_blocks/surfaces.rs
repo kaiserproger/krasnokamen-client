@@ -224,19 +224,10 @@ pub(super) fn pot(
     )?;
     let sides = rig(m, "minecraft:decorated_pot_sides#main")?;
     for side in ["back", "left", "right", "front"] {
-        let item = e.data_value()["sherds"]
-            .get(side)
-            .and_then(|template| template["id"].as_str())
-            .unwrap_or("minecraft:brick");
-        let material = if let Some(pattern) = item
-            .strip_prefix("minecraft:")
-            .and_then(|v| v.strip_suffix("_pottery_sherd"))
-        {
-            format!("entity/decorated_pot/{pattern}_pottery_pattern")
-        } else {
-            "entity/decorated_pot/decorated_pot_side".into()
-        };
-        let tex = texture(c, &material)?;
+        let tex = texture(
+            c,
+            &super::super::presentation::pot_side_texture(e.data_value().get("sherds"), side),
+        )?;
         t.clear();
         for bone in &sides.bones {
             let parent = bone.parent.map(|i| t[i]).unwrap_or(root);

@@ -58,6 +58,35 @@ fn map_pose(two_handed: bool, side: f32, pitch: f32, equip: f32, swing: f32) -> 
     }
 }
 
+/// Source `FirstPersonHandsAndItemsRenderer.renderPlayerArm` (26.3): the bare-arm pose
+/// for an arm side (`side` +1 right, -1 left), lowered by `inverse_height` and swung by
+/// `attack`, up to the arm part's own pose.
+fn player_arm(side: f32, inverse_height: f32, attack: f32) -> Mat4 {
+    use std::f32::consts::PI;
+    let attack = attack.clamp(0., 1.);
+    let root = attack.sqrt();
+    Mat4::from_translation(Vec3::new(
+        side * (-0.3 * (root * PI).sin() + 0.64),
+        0.4 * (root * 2. * PI).sin() - 0.6 - inverse_height * 0.6,
+        -0.4 * (attack * PI).sin() - 0.72,
+    )) * Mat4::from_rotation_y((side * 45.).to_radians())
+        * Mat4::from_rotation_y((side * (root * PI).sin() * 70.).to_radians())
+        * Mat4::from_rotation_z((side * (attack * attack * PI).sin() * -20.).to_radians())
+        * Mat4::from_translation(Vec3::new(-side, 3.6, 3.5))
+        * Mat4::from_rotation_z((side * 120.).to_radians())
+        * Mat4::from_rotation_x(200f32.to_radians())
+        * Mat4::from_rotation_y((side * -135.).to_radians())
+        * Mat4::from_translation(Vec3::new(side * 5.6, 0., 0.))
+}
+
+/// Source `AvatarRenderer.renderHand`: the arm part at its model pivot with the
+/// first-person zRot of +-0.1 rad (right arm +, left arm -).
+fn hand_part(pose: Mat4, right: bool) -> Mat4 {
+    let side = if right { 1. } else { -1. };
+    pose * Mat4::from_translation(Vec3::new(-5. / 16. * side, 2. / 16., 0.))
+        * Mat4::from_rotation_z(0.1 * side)
+}
+
 /// Map-pixel space (128x128, +y down, layers toward -z) placed on a held pose.
 fn map_surface_transform(pose: Mat4) -> Mat4 {
     pose * Mat4::from_rotation_y(std::f32::consts::PI)
@@ -395,6 +424,14 @@ impl Player {
             } else {
                 1.
             };
+            // Source FirstPersonHandsAndItemsRenderer.submitHandsWithItems: the hand
+            // lowers by inverseArmHeight = swapAnimationScale * (1 - height) of the
+            // item it shows (26.3 client item `swap_animation_scale`, default 1).
+            let swap_scale = match stack {
+                Some(stack) => self.visual.items.swap_animation_scale(content, stack)?,
+                None => 1.,
+            };
+            let lowered = (1. - equip) * swap_scale;
             let [hx, hy, hz] = view.hand.offset;
             // `base` is the rest placement of the hand space in front of the camera
             // (right, up, forward) and `drop` the lowered-hand travel while equipping.
@@ -403,7 +440,7 @@ impl Player {
                 camera_to_world
                     * Mat4::from_translation(Vec3::new(
                         side * (base.x - stroke * 0.16) * (1. - 0.65 * consume) + hx,
-                        base.y - (1. - equip) * drop
+                        base.y - lowered * drop
                             + stroke * 0.1
                             + view.bob[1]
                             + use_bob
@@ -415,7 +452,7 @@ impl Player {
                     * Mat4::from_rotation_y(side * (-stroke * 0.8))
                     * Mat4::from_rotation_x(
                         -stroke * 0.9
-                            - (1. - equip) * 0.45
+                            - lowered * 0.45
                             - consume * if self.visual.consume_drink { 0.7 } else { 0.35 },
                     )
             };

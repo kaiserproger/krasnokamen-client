@@ -165,6 +165,33 @@ impl HeldInput {
     pub fn has(self, bit: u8) -> bool {
         self.flags & (1 << bit) != 0
     }
+    /// Names of the set inputs, `none` when idle (refusal diagnostics).
+    pub fn describe(self) -> String {
+        let movement = [
+            "forward", "backward", "left", "right", "jump", "sneak", "sprint",
+        ]
+        .into_iter()
+        .enumerate()
+        .filter(|(bit, _)| self.has(*bit as u8))
+        .map(|(_, name)| name);
+        let actions = [
+            ("attack", self.attack),
+            ("use", self.use_item),
+            ("pick", self.pick),
+            ("offhand", self.offhand),
+            ("drop", self.drop),
+            ("swap_hands", self.swap_hands),
+        ]
+        .into_iter()
+        .filter(|(_, set)| *set)
+        .map(|(name, _)| name);
+        let names: Vec<_> = movement.chain(actions).collect();
+        if names.is_empty() {
+            "none".into()
+        } else {
+            names.join("+")
+        }
+    }
     pub fn forward(self) -> f32 {
         u8::from(self.has(0)) as f32 - u8::from(self.has(1)) as f32
     }

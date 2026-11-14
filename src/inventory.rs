@@ -93,13 +93,16 @@ impl Stack {
         self.count <= 0
     }
     pub fn same_item(&self, other: &Self) -> bool {
+        // A stack and its clone share their components and patch.
         self.id == other.id
-            && self.components == other.components
-            && self.patch.added.values().all(|value| {
-                other
-                    .typed_component(&value.name)
-                    .is_none_or(|other| other == &value.value)
-            })
+            && (Arc::ptr_eq(&self.components, &other.components)
+                || self.components == other.components)
+            && (Arc::ptr_eq(&self.patch, &other.patch)
+                || self.patch.added.values().all(|value| {
+                    other
+                        .typed_component(&value.name)
+                        .is_none_or(|other| other == &value.value)
+                }))
     }
     pub fn component(&self, name: &str) -> Option<&Value> {
         self.components.get(name)
@@ -439,6 +442,9 @@ pub struct InventoryStore {
     pub sign_editor: Option<([i32; 3], bool)>,
     pub recipes: BTreeMap<i32, Recipe>,
     pub recipe_book_settings: [(bool, bool); 4],
+    /// Entries of received `recipe_book_add` packets flagged as notifications,
+    /// in packet order, until the session raises their recipe toasts.
+    pub recipe_notifications: Vec<i32>,
     pub recipe_property_sets: BTreeMap<String, Vec<u32>>,
     pub stonecutter_recipes: Vec<StonecutterRecipe>,
     pub ghost_recipe: Option<(i32, Value)>,
@@ -474,6 +480,7 @@ impl Default for InventoryStore {
             sign_editor: None,
             recipes: BTreeMap::new(),
             recipe_book_settings: [(false, false); 4],
+            recipe_notifications: Vec::new(),
             recipe_property_sets: BTreeMap::new(),
             stonecutter_recipes: Vec::new(),
             ghost_recipe: None,

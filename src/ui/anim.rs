@@ -163,7 +163,7 @@ impl UiState {
         self.anim.now = now;
         self.anim_register_nodes();
         let profile = self.screen.profile();
-        let mut active = false;
+        let mut active = self.advance_toasts(now);
         if let Some(exit) = &self.anim.exit {
             if now - exit.started >= EXIT_SECS {
                 self.anim.exit = None;

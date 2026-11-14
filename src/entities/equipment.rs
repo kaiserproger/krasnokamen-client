@@ -699,11 +699,13 @@ mod tests {
                 attachments: BTreeMap::new(),
             },
             default_attributes: BTreeMap::new(),
-            accessors: BTreeMap::from([("DATA_BABY_ID".into(), [0, 8])]),
+            accessors: [("DATA_BABY_ID".into(), [0, 8])].into_iter().collect(),
+            sizing: Default::default(),
+            ids: Default::default(),
         };
         let models = Models {
             rigs,
-            schemas: BTreeMap::from([(kind.into(), schema)]),
+            schemas: [(kind.into(), schema)].into_iter().collect(),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: vec![],
@@ -1893,7 +1895,7 @@ mod tests {
         };
         let models = Models {
             rigs: BTreeMap::from([("minecraft:armor_stand#chestplate".into(), rig)]),
-            schemas: BTreeMap::new(),
+            schemas: Default::default(),
             families: BTreeMap::new(),
             builtin_variants: BTreeMap::new(),
             simple_particles: Vec::new(),

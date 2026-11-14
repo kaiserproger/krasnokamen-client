@@ -162,6 +162,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     match args.next().as_deref() {
         Some("render-replay") => capture::cli(args),
         Some("record") => replay::record::cli(args),
+        Some("scan-replay") => replay::scan::cli(args),
         Some("mcp-schema") => {
             if args.next().is_some() {
                 return Err("usage: krasnokamen-client mcp-schema".into());

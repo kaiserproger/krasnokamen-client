@@ -27,6 +27,10 @@ pub struct Player {
     next_tick: Duration,
     last_packet: Duration,
     pub last_tick: Option<u64>,
+    timebase: Timebase,
+    tick_origin: Option<u64>,
+    render_distance: Option<u32>,
+    pub(crate) seek_warmup_ticks: u32,
     pub last_wall_ns: Option<u64>,
     transcript: Sha256,
     crowd_instancing: bool,
@@ -35,7 +39,7 @@ pub struct Player {
     clock: VirtualClock,
 }
 impl Player {
-    pub fn open(path: &Path, presentation: bool) -> Result<Self, String> {
+    pub fn open(path: &Path, presentation: bool, timebase: Timebase) -> Result<Self, String> {
         let clock = VirtualClock::new();
         let mut input = RecordingReader::open(path)?;
         let next = input.next_packet()?;
@@ -65,12 +69,25 @@ impl Player {
         self.crowd_instancing = enabled;
         self.session.set_crowd_instancing(enabled);
     }
-    /// Seeking backwards rebuilds from the exact initial stream (no lossy world
-    /// snapshots). Forward seeking applies every intervening packet and tick.
+    pub(crate) fn set_render_distance(&mut self, distance: Option<u32>) -> Result<(), String> {
+        self.session.replay_render_distance(distance)?;
+        self.render_distance = distance;
+        Ok(())
+    }
+    /// Vanilla «Entity Distance» (0.5..=5) the replay draws entities with.
+    pub(crate) fn set_entity_distance(&mut self, scaling: f64) -> Result<(), String> {
+        self.session.replay_entity_distance(scaling)?;
+        Ok(())
+    }
+    /// Cut-boundary seek: preserve every packet/world tick, discard uncaptured
+    /// presentation history, then warm the normal entity owner before capture.
+    /// During a shot use advance_to/step instead, so animation history continues.
     pub fn seek(&mut self, time: Duration) -> Result<(), String> {
         if time < self.time {
             self.clock.set(Duration::ZERO);
+            let profiling = self.session.take_scene_profile().is_some();
             self.session = Session::from_recording(self.presentation)?;
+            self.session.enable_scene_profile(profiling);
             self.session.set_crowd_instancing(self.crowd_instancing);
             *self.crowd_mesh_fingerprint.borrow_mut() = None;
             self.input = RecordingReader::open(&self.path)?;
@@ -80,13 +97,27 @@ impl Player {
             self.next_tick = Duration::ZERO;
             self.last_packet = Duration::ZERO;
             self.last_tick = None;
+            self.tick_origin = None;
             self.last_wall_ns = None;
             self.transcript = Sha256::new();
         }
-        self.advance_to(time)
+        let warmup = self.tick_interval().saturating_mul(SEEK_WARMUP_TICKS);
+        let result = (|| {
+            if time.saturating_sub(self.time) > warmup {
+                self.session.replay_seek_phase(Some(SeekPhase::Skip))?;
+                self.advance_to(time - warmup)?;
+            }
+            self.session.replay_seek_phase(Some(SeekPhase::Warmup(0)))?;
+            self.advance_to(time)?;
+            self.seek_warmup_ticks = self.session.finish_replay_seek()?;
+            Ok(())
+        })();
+        // A failed range or packet must not leave subsequent playback in seek.
+        self.session.replay_seek_phase(None)?;
+        result
     }
     pub fn step(&mut self, frame: u64) -> Result<(), String> {
-        self.seek(clock::frame_time(frame, 60))
+        self.advance_to(clock::frame_time(frame, 60))
     }
     pub fn advance_to(&mut self, target: Duration) -> Result<(), String> {
         if target < self.time {
@@ -130,6 +161,41 @@ impl Player {
         self.time = target;
         Ok(())
     }
+    fn tick_interval(&self) -> Duration {
+        match self.timebase {
+            Timebase::Wall => self.session.tick_interval(),
+            Timebase::Tick => Duration::from_millis(50),
+        }
+    }
+    fn packet_time(&mut self) -> Result<Option<Duration>, String> {
+        let Some(packet) = self.next.as_ref() else {
+            return Ok(None);
+        };
+        if self.timebase == Timebase::Wall {
+            return Ok(Some(Duration::from_millis(u64::from(packet.ms))));
+        }
+        let (id, body) = packet.split()?;
+        let marker = format::tick_marker(self.phase, id, body)?.map(|(tick, _)| tick);
+        if let Some(tick) = marker {
+            if self.last_tick.is_some_and(|previous| tick <= previous) {
+                return Err("replay krasnokamen:tick markers are not strictly increasing".into());
+            }
+            self.tick_origin.get_or_insert(tick);
+        }
+        // Configuration before the first actual marker is time zero. The
+        // header's start_tick may be an unfinalized recorder estimate.
+        let elapsed = match (marker.or(self.last_tick), self.tick_origin) {
+            (Some(tick), Some(origin)) => tick
+                .checked_sub(origin)
+                .and_then(|ticks| ticks.checked_mul(50))
+                .ok_or("replay tick timeline overflow")?,
+            _ => 0,
+        };
+        if elapsed > u64::from(u32::MAX) {
+            return Err("replay time exceeds solrec u32 millisecond range".into());
+        }
+        Ok(Some(Duration::from_millis(elapsed)))
+    }
     fn apply_packet(&mut self, packet: &Packet) -> Result<(), String> {
         let (id, body) = packet.split()?;
         // Tick numbers are server-owned labels, never inferred by incrementing
@@ -142,6 +208,7 @@ impl Player {
             self.last_wall_ns = Some(wall);
         }
         self.session.receive_packet(self.phase, id, body)?;
+        self.session.replay_render_distance(self.render_distance)?;
         self.transcript.update(packet.ms.to_be_bytes());
         self.transcript
             .update((packet.bytes.len() as u32).to_be_bytes());

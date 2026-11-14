@@ -1,6 +1,6 @@
 //! Version-pinned entity shape and query rules. Predicates follow declaring Java owners,
 //! not an approximate species list; server tags remain authoritative.
-use super::{Entity, Handle, Metadata, Models, Store};
+use super::{Entity, Handle, Metadata, Models, Store, resources::Shape};
 use crate::{
     player::{Bounds, collision, math},
     protocol::{Result, content::Content, world::World},
@@ -18,6 +18,8 @@ pub(crate) struct AnimationState {
     pub lerp_duration: u8,
     pub lerp_span: i64,
     pub frozen: bool,
+    /// Local falling-block motion, separate from the last received velocity.
+    pub falling_velocity: Option<[f64; 3]>,
     pub peek: f32,
     pub peek_old: f32,
     pub bear_stand: f32,
@@ -32,6 +34,10 @@ pub(crate) struct AnimationState {
     pub seat_game_time: i64,
     /// Combat clip selection (swing counter, armed flag, vanilla swing duration).
     pub combat: super::animation::Selection,
+    /// Frame tick at which the entity was last inside the camera's presentation box.
+    pub shown_tick: u64,
+    /// Ticks this mob waited outside the box (see `tick_presentation`).
+    pub waited: u32,
 }
 impl Default for AnimationState {
     fn default() -> Self {
@@ -40,6 +46,7 @@ impl Default for AnimationState {
             lerp_duration: 3,
             lerp_span: 0,
             frozen: false,
+            falling_velocity: None,
             peek: 0.,
             peek_old: 0.,
             bear_stand: 0.,
@@ -51,12 +58,14 @@ impl Default for AnimationState {
             seat_motion: Some(crate::player::vehicle::SeatMotion::default()),
             seat_game_time: 0,
             combat: super::animation::Selection::default(),
+            shown_tick: 0,
+            waited: 0,
         }
     }
 }
 pub(crate) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
     models
-        .accessor(&e.type_name, name)
+        .entity_accessor(e, name)
         .and_then(|id| e.metadata_value(id))
 }
 pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i32 {
@@ -68,15 +77,29 @@ pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i
 /// entity. Vanilla clients never turn a NoAI mob's head (Mob flags bit 0): its
 /// look comes only from received rotation.
 pub(crate) fn may_glance(models: &Models, e: &Entity) -> bool {
+    let ids = models.ids(e);
     models.motion.get(&e.type_name).is_some_and(|f| f.is_mob)
         && e.source
             .as_ref()
             .is_some_and(|source| source.living.is_some())
         && e.vehicle.is_none()
         && e.death_tick.is_none()
-        && number(models, e, "DATA_POSE", 0) == 0
-        && number(models, e, "DATA_MOB_FLAGS_ID", 0) & 1 == 0
+        && super::presentation::int_at(e, ids.pose).unwrap_or(0) == 0
+        && super::presentation::int_at(e, ids.mob_flags).unwrap_or(0) & 1 == 0
         && e.type_name != "minecraft:armor_stand"
+}
+/// Whether `e`'s presentation still advances on its own after this tick.
+fn stays_active(e: &Entity) -> bool {
+    e.physical.lerp_progress < e.physical.lerp_duration
+        || e.source.is_some()
+        || super::display::is_display(e)
+        || matches!(
+            e.type_name.as_str(),
+            "minecraft:shulker"
+                | "minecraft:polar_bear"
+                | "minecraft:ender_dragon"
+                | "minecraft:falling_block"
+        )
 }
 pub(crate) fn boolean(models: &Models, e: &Entity, name: &str, default: bool) -> bool {
     value(models, e, name)
@@ -90,13 +113,17 @@ fn float(models: &Models, e: &Entity, name: &str, default: f32) -> f32 {
     }
 }
 fn hierarchy(models: &Models, e: &Entity, class: &str) -> bool {
-    models.schemas[&e.type_name]
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .hierarchy
         .iter()
         .any(|v| v == class)
 }
 fn owner<'a>(models: &'a Models, e: &Entity, method: &str) -> &'a str {
-    models.schemas[&e.type_name]
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .method_owners
         .get(method)
         .map(String::as_str)
@@ -152,17 +179,18 @@ pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Resu
     }
     let mut width = dimensions.width * scale;
     let mut height = dimensions.height * scale;
-    if e.type_name == "minecraft:interaction" {
-        width = float(models, e, "DATA_WIDTH_ID", 1.);
-        height = float(models, e, "DATA_HEIGHT_ID", 1.);
-    }
-    if e.type_name == "minecraft:polar_bear" {
+    match shape {
+        Shape::Interaction => {
+            width = float(models, e, "DATA_WIDTH_ID", 1.);
+            height = float(models, e, "DATA_HEIGHT_ID", 1.);
+        }
         // refreshDimensions precedes this tick's stand update in the source.
-        height *= 1. + e.physical.bear_stand_old / 6.;
-    }
-    if e.type_name == "minecraft:warden" && matches!(number(models, e, "DATA_POSE", 0), 13 | 14) {
-        width = dimensions.width;
-        height = 1.;
+        Shape::PolarBear => height *= 1. + e.physical.bear_stand_old / 6.,
+        Shape::Warden if matches!(number(models, e, "DATA_POSE", 0), 13 | 14) => {
+            width = dimensions.width;
+            height = 1.;
+        }
+        _ => {}
     }
     if width < 0. || height < 0. || !width.is_finite() || !height.is_finite() {
         return Err("invalid entity physical dimensions".into());
@@ -176,17 +204,13 @@ pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Resu
             position[2] + half,
         ],
     };
-    if e.type_name == "minecraft:shulker" {
+    if shape == Shape::Shulker {
         let face = direction(number(models, e, "DATA_ATTACH_FACE_ID", 0))?;
         b = b.expanded(
             face.map(|v| -v * f64::from(physical_peek(e.physical.peek)) * f64::from(scale)),
         );
     }
-    if hierarchy(
-        models,
-        e,
-        "net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge",
-    ) {
+    if shape == Shape::WindCharge {
         b = b.moved([0., -f64::from(0.15f32), 0.]);
     }
     Ok(b)
@@ -224,15 +248,22 @@ impl Store {
         Ok(())
     }
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
-        let padding = self.query_padding();
-        let low = super::cell([area.min[0] - padding, 0., area.min[2] - padding]);
-        let high = super::cell([area.max[0] + padding, 0., area.max[2] + padding]);
+        self.candidate_slots(area)
+            .map(|(_, slot)| &self.slots[slot])
+    }
+    /// `candidates` as slots, each with the spatial cell it was found in (`None`: a mounted
+    /// body, considered wherever it is).
+    pub(crate) fn candidate_slots(
+        &self,
+        area: Bounds,
+    ) -> impl Iterator<Item = (Option<[i32; 2]>, usize)> {
+        let (low, high) = self.query_cells(area);
         self.spatial
             .range([low[0], i32::MIN]..=[high[0], i32::MAX])
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
-            .flat_map(|(_, ids)| ids.iter())
-            .filter_map(|id| self.get(*id))
-            .filter(|entity| entity.vehicle.is_none())
+            .flat_map(|(cell, ids)| ids.iter().map(move |id| (*cell, *id)))
+            .filter_map(|(cell, id)| Some((Some(cell), *self.ids.get(&id)?)))
+            .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
             .chain(
@@ -246,6 +277,14 @@ impl Store {
                     .as_ref()
                     .is_some_and(|s| s.discarded || s.special.discarded)
             })
+    }
+    /// The spatial cells `candidates(area)` visits: x and z each within `low..=high`.
+    pub(crate) fn query_cells(&self, area: Bounds) -> ([i32; 2], [i32; 2]) {
+        let padding = self.query_padding();
+        (
+            super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
+            super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
+        )
     }
     fn root_vehicle(&self, mut id: i32) -> Result<i32> {
         for _ in 0..self.ids.len().min(1024) + 1 {
@@ -474,6 +513,60 @@ impl Store {
         }
         Ok(())
     }
+    /// Horizontal velocity the local player receives this tick from overlapping living
+    /// entities. Vanilla: every living entity's client `aiStep` runs
+    /// `LivingEntity.pushEntities`, whose client branch collects only the local player
+    /// (`EntitySelector.pushableBy`) among boxes intersecting its own, and `doPush` calls
+    /// `player.push(entity)` (`Entity.push(Entity)`), which moves the player away from it.
+    /// The caller applies it only while the player itself is pushable.
+    pub(crate) fn local_player_push(
+        &self,
+        player: Bounds,
+        player_id: i32,
+        tick: u64,
+    ) -> Result<[f64; 2]> {
+        let models = self.models_ref().ok_or("entity models not activated")?;
+        let root = self.root_vehicle(player_id)?;
+        let x = (player.min[0] + player.max[0]) / 2.;
+        let z = (player.min[2] + player.max[2]) / 2.;
+        let mut push = [0.; 2];
+        for e in self.candidates(player) {
+            if e.handle.network_id == player_id
+                || !hierarchy(models, e, "net.minecraft.world.entity.LivingEntity")
+                // No push on a player: ArmorStand.pushEntities pushes minecarts only, Bat's
+                // is empty, Parrot.doPush skips players, and EnderDragon.aiStep never
+                // reaches LivingEntity.aiStep. A spectator has noPhysics.
+                || [
+                    "net.minecraft.world.entity.decoration.ArmorStand",
+                    "net.minecraft.world.entity.ambient.Bat",
+                    "net.minecraft.world.entity.animal.parrot.Parrot",
+                    "net.minecraft.world.entity.boss.enderdragon.EnderDragon",
+                ]
+                .iter()
+                .any(|class| hierarchy(models, e, class))
+                || spectator(self, e)
+                || self.root_vehicle(e.handle.network_id)? == root
+            {
+                continue;
+            }
+            let b = self.bounds(e.handle, tick, 0.)?;
+            if !b.intersects(player) {
+                continue;
+            }
+            let mut dx = (b.min[0] + b.max[0]) / 2. - x;
+            let mut dz = (b.min[2] + b.max[2]) / 2. - z;
+            let mut distance = dx.abs().max(dz.abs());
+            if distance >= f64::from(0.01f32) {
+                distance = distance.sqrt();
+                dx /= distance;
+                dz /= distance;
+                let scale = (1. / distance).min(1.);
+                push[0] -= dx * scale * f64::from(0.05f32);
+                push[1] -= dz * scale * f64::from(0.05f32);
+            }
+        }
+        Ok(push)
+    }
     pub(crate) fn placement_unobstructed(
         &self,
         area: Bounds,
@@ -684,14 +777,47 @@ impl Store {
         };
         let mut active = std::mem::take(&mut self.physical_active);
         let look_target = self.look_target;
+        // While frames draw entities (one did since the last tick), a mob outside the camera's
+        // presentation box waits: its animation resumes where it stopped (no jump) and its
+        // interpolation catches up on entry. Without frames (headless, seek warm-up, several
+        // ticks in one frame) every entity ticks.
+        let presenting = !frozen && self.frame_tick + 1 >= tick;
+        // Entities whose presentation stops moving leave `physical_active` after the loop.
+        let mut idle = Vec::new();
         for id in &active {
-            let Some(e) = self.get(*id) else { continue };
+            // Slots do not move during the tick: resolve each entity's once.
+            let Some(&slot) = self.ids.get(id) else {
+                idle.push(*id);
+                continue;
+            };
+            let e = &self.slots[slot];
+            if presenting
+                && e.physical.shown_tick + 1 < tick
+                && self.local_entity_id != Some(*id)
+                && e.source
+                    .as_ref()
+                    .is_some_and(|source| source.living.is_some())
+                && e.passenger_ids.is_empty()
+                && e.vehicle.is_none()
+                && e.physical.dragon.is_none()
+            {
+                let e = &mut self.slots[slot];
+                e.physical.waited = e.physical.waited.saturating_add(1);
+                continue;
+            }
             let paused = frozen
                 && !hierarchy(&models, e, "net.minecraft.world.entity.player.Player")
                 && !self.root_has_player(self.root_vehicle(*id)?, &models, 0)?;
-            let peek = number(&models, e, "DATA_PEEK_ID", 0) as f32 * 0.01;
-            let standing = boolean(&models, e, "DATA_STANDING_ID", false);
-            let before_bounds = self.bounds(e.handle, tick, 0.)?;
+            let ids = models.ids(e);
+            let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
+            let standing = super::presentation::flag_at(e, ids.standing);
+            // Only a boat reads its bounds from before the tick (`source_state::tick`).
+            let boat_bounds = if ids.boat {
+                Some(self.bounds(e.handle, tick, 0.)?)
+            } else {
+                None
+            };
+            let seat_motion = ids.seat_motion;
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
             let controlling_passenger = e.passenger_ids.first().is_some_and(|passenger| {
@@ -700,15 +826,21 @@ impl Store {
                         hierarchy(&models, p, "net.minecraft.world.entity.player.Player")
                     })
             });
-            self.get_mut(*id).unwrap().physical.frozen = paused;
+            let e = &mut self.slots[slot];
+            e.physical.frozen = paused;
             if paused {
+                if !stays_active(e) {
+                    idle.push(*id);
+                }
                 continue;
             }
-            let e = self.get_mut(*id).unwrap();
+            self.measured_entity_ticks += 1;
+            let waited = u8::try_from(std::mem::take(&mut e.physical.waited)).unwrap_or(u8::MAX);
             e.physical.lerp_progress = e
                 .physical
                 .lerp_progress
                 .saturating_add(1)
+                .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
             if matches!(
@@ -717,7 +849,7 @@ impl Store {
                     | "net.minecraft.world.entity.monster.Strider"
             ) {
                 let position = e.presented_transform(tick, 0.).position;
-                let standing = number(&models, e, "DATA_ID_FLAGS", 0) & 32 != 0;
+                let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
                     &mut e.physical.seat_motion,
                     e.handle,
@@ -747,7 +879,7 @@ impl Store {
                 tick,
                 first_passenger_is_mob,
                 controlling_passenger,
-                before_bounds,
+                boat_bounds,
             )?;
             let (walk_speed, body_yaw) = e
                 .source
@@ -757,8 +889,8 @@ impl Store {
                     (living.walk.speed(1.), living.body(1.))
                 });
             let can_look = may_glance(&models, e);
-            let at = self.presented_transform(self.get(*id).unwrap(), tick, 0.)?;
-            let e = self.get_mut(*id).unwrap();
+            let at = self.presented_transform(&self.slots[slot], tick, 0.)?;
+            let e = &mut self.slots[slot];
             e.physical.motion.tick(&crate::motion::EntityTick {
                 tick,
                 on_ground: e.on_ground,
@@ -769,12 +901,20 @@ impl Store {
                 can_look,
                 target: look_target,
             });
-            let span = if e.physical.lerp_progress == e.physical.lerp_duration {
+            let span = if e.physical.lerp_progress >= e.physical.lerp_duration {
                 std::mem::take(&mut e.physical.lerp_span)
             } else {
                 0
             };
+            let falling = e.type_name == "minecraft:falling_block";
             self.remove_motion_span(span);
+            if falling {
+                let mut colliders = std::mem::take(&mut self.falling_colliders);
+                let result =
+                    self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
+                self.falling_colliders = colliders;
+                result?;
+            }
             if effects.sky_flash || effects.lightning_sound_pitches.is_some() {
                 self.event(serde_json::json!({
                     "type": "source_lightning", "entity": id,
@@ -782,20 +922,63 @@ impl Store {
                     "origin": "source_client_tick",
                 }));
             }
+            if !stays_active(&self.slots[slot]) {
+                idle.push(*id);
+            }
         }
-        active.retain(|id| {
-            self.get(*id).is_some_and(|e| {
-                e.physical.lerp_progress < e.physical.lerp_duration
-                    || e.source.is_some()
-                    || super::display::is_display(e)
-                    || matches!(
-                        e.type_name.as_str(),
-                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon"
-                    )
-            })
-        });
+        for id in idle {
+            active.remove(&id);
+        }
         self.physical_active = active;
         self.tick_blocks(frozen)?;
+        Ok(())
+    }
+    /// Vanilla 26.3 FallingBlockEntity ticks gravity, collision and air drag on
+    /// the client between the server's position updates.
+    fn tick_falling_block(
+        &mut self,
+        id: i32,
+        models: &Models,
+        world: &World,
+        content: &Content,
+        tick: u64,
+        colliders: &mut Vec<Bounds>,
+    ) -> Result<()> {
+        let Some(entity) = self.get(id) else {
+            return Ok(());
+        };
+        let mut velocity = entity.physical.falling_velocity.unwrap_or(entity.velocity);
+        if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
+            velocity[1] -= 0.04;
+        }
+        let position = entity.transform.position;
+        let body = Bounds {
+            min: [position[0] - 0.49, position[1], position[2] - 0.49],
+            max: [position[0] + 0.49, position[1] + 0.98, position[2] + 0.49],
+        };
+        let swept = Bounds {
+            min: std::array::from_fn(|i| body.min[i] + velocity[i].min(0.)),
+            max: std::array::from_fn(|i| body.max[i] + velocity[i].max(0.)),
+        };
+        // Collision cannot be predicted until the surrounding chunks arrive.
+        // Keep this entity active so the next tick can use the received terrain.
+        match collision::gather(world, content, self, tick, swept, colliders) {
+            Err(error) if error == "unloaded_collision_neighborhood" => return Ok(()),
+            result => result?,
+        }
+        let moved = collision::collide(body, colliders, velocity);
+        let entity = self.get_mut(id).unwrap();
+        entity.previous = entity.transform;
+        for i in 0..3 {
+            entity.transform.position[i] += moved[i];
+            if moved[i] != velocity[i] {
+                velocity[i] = 0.;
+            }
+        }
+        entity.physical.falling_velocity = Some(velocity.map(|v| v * f64::from(0.98f32)));
+        entity.physical.lerp_progress = 0;
+        entity.physical.lerp_duration = 1;
+        entity.physical.lerp_phase = 0.;
         Ok(())
     }
     fn root_has_player(&self, id: i32, models: &Models, depth: usize) -> Result<bool> {

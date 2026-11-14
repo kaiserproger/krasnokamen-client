@@ -208,6 +208,7 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
         artifacts.into(),
     ))?;
     replay.set_crowd_instancing(renderer.crowd_supported());
+    replay.session.enable_scene_profile(true);
     // Medium is the non-temporal HDR/shadows preset: TAA and its projection
     // jitter/history are off by construction, regardless of persisted settings.
     renderer.set_graphics_preset(GraphicsPreset::Medium);
@@ -264,8 +265,15 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
         }
         encoder.frame(&frame)?;
         writeln!(metadata,"{}",serde_json::json!({"frame":index,"replay_time":base.as_secs_f64(),
+            "timebase":timebase,"render_distance":replay.session.render_distance(),"entity_distance":entity_distance,
+            "seek_warmup_ticks":replay.seek_warmup_ticks,
             "last_applied_tick":replay.last_tick,"wall_ns":replay.last_wall_ns,"sample_ticks":&sample_ticks[..samples as usize],
             "camera":replay.session.replay_pose(),"cpu_state_sha256":replay.frame_hash(),
+            "presentation":presentation_metadata(replay.session.scene(),entity_extract_ms),
+            "cpu_main_ms":{"advance":main_ms[0],"prepare_frame":main_ms[1],"draw_readback":main_ms[2]},
+            "cpu_thread_ms":thread_ms.map(|ms|serde_json::json!({"advance":ms[0],"prepare_frame":ms[1],"draw_readback":ms[2]})),
+            "terrain":{"upload_frames":upload_frames,
+                "cpu_mesh_resident_peak_bytes":replay.session.replay_terrain_metrics()["cpu_mesh_resident_peak_bytes"]},
             "rgba_sha256":format!("{:x}",Sha256::digest(&frame)),"supersampling":2,"motion_samples":samples,"taa":false}))
             .map_err(|e|format!("write replay frame metadata: {e}"))?;
         index += 1;
@@ -280,6 +288,30 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
         metadata_path.display()
     );
     Ok(())
+}
+
+/// CPU time the calling thread has run, in seconds; `None` where the platform clock is
+/// unavailable.
+#[cfg(unix)]
+fn thread_cpu_s() -> Option<f64> {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime writes into this live, exclusive timespec.
+    let status = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+    (status == 0).then(|| time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
+}
+#[cfg(not(unix))]
+fn thread_cpu_s() -> Option<f64> {
+    None
+}
+
+/// Adds the thread CPU time since `start` to phase `index`.
+fn phase_cpu(phases: &mut Option<[f64; 3]>, index: usize, start: Option<f64>) {
+    if let (Some(phases), Some(start), Some(now)) = (phases.as_mut(), start, thread_cpu_s()) {
+        phases[index] += (now - start) * 1e3;
+    }
 }
 
 #[cfg(test)]
