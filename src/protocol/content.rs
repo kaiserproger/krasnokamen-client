@@ -617,6 +617,23 @@ impl ResourceSource {
     pub fn pack_roots(&self) -> &[PathBuf] {
         &self.roots[1..]
     }
+    /// Drops a pushed pack root and reindexes the palette sprites it contributed.
+    /// The verified original root (index 0) is never removable, and an unknown or
+    /// already-popped root is a no-op that reports `false`.
+    pub fn pop_pack_root(&mut self, root: &Path) -> Result<bool> {
+        let Ok(root) = fs::canonicalize(root) else {
+            return Ok(false);
+        };
+        let Some(index) = self.roots.iter().position(|existing| *existing == root) else {
+            return Ok(false);
+        };
+        if index == 0 {
+            return Ok(false);
+        }
+        self.roots.remove(index);
+        self.palette_sprites = palettes::index(self)?;
+        Ok(true)
+    }
     /// IDs of every `assets/minecraft/lang/<id>.json` in the pack roots, the verified
     /// asset index and loader resources, sorted. Only IDs `Language::load` accepts.
     pub fn language_ids(&self) -> Vec<String> {
@@ -1085,6 +1102,13 @@ impl Content {
     /// (state-only sessions; presentation sessions use `stage_with_pack` + install).
     pub fn apply_pack_root(&mut self, pack_root: &Path) -> Result<()> {
         self.source.push_pack_root(pack_root.to_path_buf())
+    }
+    /// Removes a server-pushed pack from the live stack and reindexes its sprites.
+    /// Returns whether the root was part of the stack; the verified original root
+    /// is never removable. Presentation sessions reload through
+    /// [`Content::stage_current_reload`] afterwards.
+    pub fn pop_pack_root(&mut self, pack_root: &Path) -> Result<bool> {
+        self.source.pop_pack_root(pack_root)
     }
     /// The active pack roots beyond the verified original resources.
     pub fn pack_roots(&self) -> Vec<PathBuf> {

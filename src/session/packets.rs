@@ -4,6 +4,10 @@ use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::protocol::packet_ids::{configuration, login};
 use crate::protocol::{self, Reader, world::Chunk};
 use sha1::Digest as _;
+/// Lowercase hex of a resource-pack id (the wire UUID doubles as the cache name).
+fn pack_id_hex(bytes: &[u8; 16]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
 impl Session {
     fn initialize_player_attributes(&mut self) -> Result<()> {
         let schema = self
@@ -129,8 +133,7 @@ impl Session {
                 configuration::clientbound::COOKIE_REQUEST
                 | configuration::clientbound::RESET_CHAT => {}
                 configuration::clientbound::CUSTOM_PAYLOAD => self.custom_payload(&mut r)?,
-                configuration::clientbound::RESOURCE_PACK_POP
-                | configuration::clientbound::STORE_COOKIE
+                configuration::clientbound::STORE_COOKIE
                 | configuration::clientbound::CUSTOM_REPORT_DETAILS
                 | configuration::clientbound::SERVER_LINKS
                 | configuration::clientbound::CLEAR_DIALOG => {
@@ -146,6 +149,7 @@ impl Session {
                 configuration::clientbound::RESOURCE_PACK_PUSH => {
                     self.resource_pack_push(&mut r, configuration::serverbound::RESOURCE_PACK)?
                 }
+                configuration::clientbound::RESOURCE_PACK_POP => self.resource_pack_pop(&mut r)?,
                 configuration::clientbound::TRANSFER => {
                     return Err("server transfer unsupported".into());
                 }
@@ -182,13 +186,12 @@ impl Session {
             r.nbt()?;
         }
         r.done()?;
-        let hex = |bytes: &[u8; 16]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
         let status = |this: &Session, action: i32| -> Result<()> {
             let mut w = Writer(id.to_vec());
             w.var(action);
             this.send(response_id, w)
         };
-        self.event(json!({"type":"resource_pack_push_received","id":hex(&id),"url":url,"required":required}));
+        self.event(json!({"type":"resource_pack_push_received","id":pack_id_hex(&id),"url":url,"required":required}));
         // Only a plain HTTP(S) download is accepted; never file or custom schemes.
         let parsed = reqwest::Url::parse(&url)
             .ok()
@@ -196,7 +199,7 @@ impl Session {
         let Some(parsed) = parsed else {
             status(self, INVALID_URL)?;
             self.event(
-                json!({"type":"resource_pack_push_rejected","id":hex(&id),"reason":"invalid_url"}),
+                json!({"type":"resource_pack_push_rejected","id":pack_id_hex(&id),"reason":"invalid_url"}),
             );
             if required {
                 return Err("required resource pack has an invalid URL".into());
@@ -228,7 +231,7 @@ impl Session {
             Ok(bytes) => bytes,
             Err(error) => {
                 status(self, FAILED_DOWNLOAD)?;
-                self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"download","error":error}));
+                self.event(json!({"type":"resource_pack_push_failed","id":pack_id_hex(&id),"stage":"download","error":error}));
                 if required {
                     return Err(format!("required resource pack download failed: {error}"));
                 }
@@ -239,14 +242,14 @@ impl Session {
         let digest = format!("{:x}", sha1::Sha1::digest(&bytes));
         if !hash.is_empty() && !hash.eq_ignore_ascii_case(&digest) {
             status(self, FAILED_DOWNLOAD)?;
-            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"hash","error":"sha1 mismatch"}));
+            self.event(json!({"type":"resource_pack_push_failed","id":pack_id_hex(&id),"stage":"hash","error":"sha1 mismatch"}));
             if required {
                 return Err("required resource pack hash mismatch".into());
             }
             return Ok(());
         }
         status(self, DOWNLOADED)?;
-        let dir = self.pack_cache_dir()?.join(hex(&id));
+        let dir = self.pack_cache_dir()?.join(pack_id_hex(&id));
         let extracted = (|| -> Result<()> {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -272,7 +275,7 @@ impl Session {
         })();
         if let Err(error) = extracted {
             status(self, FAILED_RELOAD)?;
-            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"extract","error":error}));
+            self.event(json!({"type":"resource_pack_push_failed","id":pack_id_hex(&id),"stage":"extract","error":error}));
             if required {
                 return Err(format!("required resource pack extraction failed: {error}"));
             }
@@ -294,16 +297,87 @@ impl Session {
         };
         if applied {
             status(self, SUCCESSFULLY_LOADED)?;
-            self.event(json!({"type":"resource_pack_applied","id":hex(&id),"root":dir}));
+            self.event(json!({"type":"resource_pack_applied","id":pack_id_hex(&id),"root":dir}));
             Ok(())
         } else {
             status(self, FAILED_RELOAD)?;
-            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"apply","error":"resource stack rejected the pack"}));
+            self.event(json!({"type":"resource_pack_push_failed","id":pack_id_hex(&id),"stage":"apply","error":"resource stack rejected the pack"}));
             if required {
                 return Err("required resource pack failed to apply".into());
             }
             Ok(())
         }
+    }
+    /// Vanilla `ClientCommonPacketListenerImpl.handleResourcePackPop`: pinned 26.3
+    /// `ClientboundResourcePackPopPacket` carries `Optional<UUID>` — a present id
+    /// pops that server pack, an absent one pops every server pack; then the
+    /// resource stack reloads. A POP carries no reply packet.
+    fn resource_pack_pop(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let id: Option<[u8; 16]> = if r.bool()? {
+            Some(r.take(16)?.try_into().map_err(|_| "resource pack pop id")?)
+        } else {
+            None
+        };
+        r.done()?;
+        let cache = self.pack_cache_dir()?;
+        let roots = match self.content.as_ref() {
+            Some(content) => content.pack_roots(),
+            None => Vec::new(),
+        };
+        let mut removed = Vec::new();
+        for root in roots {
+            let wanted = match &id {
+                // The cache dir per pushed id; compare canonical paths so a
+                // popped-then-recreated directory still matches.
+                Some(id) => {
+                    let target = cache.join(pack_id_hex(id));
+                    root == target || std::fs::canonicalize(&target).is_ok_and(|t| t == root)
+                }
+                // Only packs this client downloaded: never a local pack folder.
+                None => root.starts_with(&cache),
+            };
+            if !wanted {
+                continue;
+            }
+            let Some(content) = self.content.as_mut() else {
+                break;
+            };
+            if content.pop_pack_root(&root)? {
+                removed.push(root);
+            }
+        }
+        if removed.is_empty() {
+            self.event(json!({
+                "type":"resource_pack_pop_ignored",
+                "id":id.as_ref().map(pack_id_hex),
+            }));
+            return Ok(());
+        }
+        // Vanilla's DownloadedPackSource does not keep the bytes of a popped pack.
+        for root in &removed {
+            let _ = std::fs::remove_dir_all(root);
+        }
+        // A presentation session owns a staged resource generation: reload it so
+        // the popped sprites and models leave the live stack.
+        if self.presentation {
+            let staged = self
+                .content
+                .as_ref()
+                .ok_or("content unavailable")?
+                .stage_current_reload();
+            match staged {
+                Ok(staged) => self.install_reloaded(staged)?,
+                Err(error) => self.event(
+                    json!({"type":"resource_pack_pop_reload_failed","error":error.to_string()}),
+                ),
+            }
+        }
+        self.event(json!({
+            "type":"resource_pack_popped",
+            "id":id.as_ref().map(pack_id_hex),
+            "removed":removed.len().to_string(),
+        }));
+        Ok(())
     }
     /// Directory downloaded server packs are cached in.
     fn pack_cache_dir(&self) -> Result<std::path::PathBuf> {
@@ -892,6 +966,7 @@ impl Session {
                 }
             }
             cb::RESOURCE_PACK_PUSH => self.resource_pack_push(r, sb::RESOURCE_PACK)?,
+            cb::RESOURCE_PACK_POP => self.resource_pack_pop(r)?,
             cb::TRANSFER => return Err("server transfer unsupported".into()),
             cb::COOKIE_REQUEST => {
                 let key = r.string(32767)?;
@@ -992,7 +1067,6 @@ impl Session {
             | cb::PONG_RESPONSE
             | cb::PLAYER_COMBAT_END
             | cb::PLAYER_COMBAT_ENTER
-            | cb::RESOURCE_PACK_POP
             | cb::POST_EFFECTS => {
                 *self.ignored_presentation.entry(id).or_default() += 1;
             }
@@ -1372,14 +1446,175 @@ mod tests {
     }
 
     fn test_pack_zip() -> Vec<u8> {
+        test_pack_zip_with("battle armour")
+    }
+
+    fn test_pack_zip_with(marker: &str) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("pack.mcmeta", options).unwrap();
         std::io::Write::write_all(&mut zip, br#"{"pack":{"pack_format":84,"min_format":[84,0],"max_format":[84,0],"description":"pack-push test"}}"#).unwrap();
         zip.start_file("assets/test_pack/marker.txt", options)
             .unwrap();
-        std::io::Write::write_all(&mut zip, b"battle armour").unwrap();
+        std::io::Write::write_all(&mut zip, marker.as_bytes()).unwrap();
         zip.finish().unwrap().into_inner()
+    }
+
+    fn push_packet(id: u8, url: &str, hash: &str) -> Writer {
+        let mut push = Writer(vec![id; 16]);
+        push.string(url);
+        push.string(hash);
+        push.byte(0); // not required
+        push.byte(0); // no prompt
+        push
+    }
+
+    /// Pinned 26.3 `ClientboundResourcePackPopPacket`: `Optional<UUID>`.
+    fn pop_packet(id: Option<u8>) -> Writer {
+        let mut pop = Writer::default();
+        pop.byte(u8::from(id.is_some()));
+        if let Some(id) = id {
+            pop.0.extend([id; 16]);
+        }
+        pop
+    }
+
+    /// One loopback login+status server and one HTTP server that serves `packs`
+    /// by request path; the caller drives pushes and pops and expects exactly
+    /// `statuses` RESOURCE_PACK replies.
+    fn pack_wire_harness(
+        packs: Vec<(&'static str, Vec<u8>)>,
+        statuses: usize,
+    ) -> (
+        Session,
+        mpsc::Receiver<Vec<u8>>,
+        mpsc::Sender<()>,
+        thread::JoinHandle<()>,
+        String,
+    ) {
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            sync::mpsc,
+            thread,
+        };
+        fn packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
+            let mut header = Vec::new();
+            loop {
+                let mut byte = [0];
+                socket.read_exact(&mut byte).unwrap();
+                header.push(byte[0]);
+                if byte[0] & 128 == 0 {
+                    break;
+                }
+            }
+            let mut body = vec![0; Reader::new(&header).count(1024).unwrap()];
+            socket.read_exact(&mut body).unwrap();
+            let mut r = Reader::new(&body);
+            let id = r.var().unwrap();
+            (id, body[r.offset..].to_vec())
+        }
+        let http = TcpListener::bind("127.0.0.1:0").unwrap();
+        let http_address = http.local_addr().unwrap();
+        thread::spawn(move || {
+            while let Ok((mut socket, _)) = http.accept() {
+                let mut request = Vec::new();
+                let mut byte = [0];
+                loop {
+                    if socket.read_exact(&mut byte).is_err() {
+                        break;
+                    }
+                    request.push(byte[0]);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let path = std::str::from_utf8(&request)
+                    .ok()
+                    .and_then(|head| head.split_whitespace().nth(1))
+                    .unwrap_or("");
+                let body = packs
+                    .iter()
+                    .find(|(name, _)| *name == path)
+                    .map(|(_, bytes)| bytes.clone());
+                let (status, payload) = match body {
+                    Some(bytes) => ("200 OK", bytes),
+                    None => ("404 Not Found", Vec::new()),
+                };
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    payload.len()
+                );
+                let _ = socket.write_all(head.as_bytes());
+                let _ = socket.write_all(&payload);
+            }
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready, wait_ready) = mpsc::channel();
+        let (received, got) = mpsc::channel();
+        let (finish, wait_finish) = mpsc::channel();
+        let peer = thread::spawn(move || {
+            let (mut login, _) = listener.accept().unwrap();
+            let (mut status, _) = listener.accept().unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            packet(&mut status);
+            packet(&mut status);
+            let mut response = Writer::default();
+            response.string(r#"{"version":{"protocol":777}}"#);
+            status
+                .write_all(&protocol::frame(0, &response.0, None).unwrap())
+                .unwrap();
+            packet(&mut login);
+            packet(&mut login);
+            ready.send(()).unwrap();
+            for _ in 0..statuses {
+                loop {
+                    let (received_id, body) = packet(&mut login);
+                    if received_id == configuration::serverbound::RESOURCE_PACK
+                        || received_id == sb::RESOURCE_PACK
+                    {
+                        received.send(body).unwrap();
+                        break;
+                    }
+                }
+            }
+            wait_finish.recv().unwrap();
+        });
+        let mut session = Session::new_mode("pack-wire-test".into(), false);
+        session.content = Some(Content::test_cube());
+        let cache = std::env::temp_dir().join(format!(
+            "krasnokamen-pack-wire-{}-{}",
+            std::process::id(),
+            statuses
+        ));
+        let _ = std::fs::remove_dir_all(&cache);
+        session.pack_cache = Some(cache);
+        session.network = Some(
+            Network::connect(
+                address.to_string(),
+                "PackWire".into(),
+                8,
+                true,
+                "en_us",
+                Arc::new(|| {}),
+                None,
+            )
+            .unwrap(),
+        );
+        wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
+        (session, got, finish, peer, format!("http://{http_address}"))
+    }
+
+    fn drain_statuses(got: &mpsc::Receiver<Vec<u8>>, count: usize) -> Vec<i32> {
+        let mut actions = Vec::new();
+        for _ in 0..count {
+            let body = got.recv_timeout(Duration::from_secs(10)).unwrap();
+            actions.push(i32::from(body[16]));
+        }
+        actions
     }
 
     /// Drives one loopback Minecraft server (login+status handshake) plus one HTTP
@@ -1571,6 +1806,183 @@ mod tests {
         assert_eq!(actions, vec![3, 2, 3, 2], "{actions:?}");
         assert!(session.error.is_none());
         assert!(session.content.as_ref().unwrap().pack_roots().is_empty());
+        finish.send(()).unwrap();
+        peer.join().unwrap();
+    }
+
+    /// POP by id drops exactly that server pack in both phases and answers
+    /// nothing (vanilla `handleResourcePackPop` sends no reply), while the other
+    /// pushed pack keeps its verified root and its extracted bytes.
+    #[test]
+    fn resource_pack_pop_by_id_drops_only_that_pack_in_both_phases() {
+        let a = test_pack_zip_with("pack a");
+        let b = test_pack_zip_with("pack b");
+        let (a_hash, b_hash) = (
+            format!("{:x}", sha1::Sha1::digest(&a)),
+            format!("{:x}", sha1::Sha1::digest(&b)),
+        );
+        // Two pushes per phase plus one pre-play push: 3 status packets each.
+        let (mut session, got, finish, peer, base) =
+            pack_wire_harness(vec![("/a.zip", a), ("/b.zip", b)], 9);
+        let cache = session.pack_cache.clone().unwrap();
+        let config = configuration::clientbound::RESOURCE_PACK_PUSH;
+        let play = cb::RESOURCE_PACK_PUSH;
+        let push = |session: &mut Session, phase: Phase, id: u8, url: String, hash: &str| {
+            session
+                .apply(
+                    phase,
+                    if phase == Phase::Play { play } else { config },
+                    &push_packet(id, &url, hash).0,
+                )
+                .unwrap();
+        };
+        let pop = |session: &mut Session, phase: Phase, id: Option<u8>| {
+            session
+                .apply(
+                    phase,
+                    if phase == Phase::Play {
+                        cb::RESOURCE_PACK_POP
+                    } else {
+                        configuration::clientbound::RESOURCE_PACK_POP
+                    },
+                    &pop_packet(id).0,
+                )
+                .unwrap();
+        };
+        push(
+            &mut session,
+            Phase::Configuration,
+            0xaa,
+            format!("{base}/a.zip"),
+            &a_hash,
+        );
+        push(
+            &mut session,
+            Phase::Configuration,
+            0xbb,
+            format!("{base}/b.zip"),
+            &b_hash,
+        );
+        // POP A in Configuration: B stays, A's bytes go.
+        pop(&mut session, Phase::Configuration, Some(0xaa));
+        let root_b = std::fs::canonicalize(cache.join(pack_id_hex(&[0xbb; 16]))).unwrap();
+        assert_eq!(
+            session.content.as_ref().unwrap().pack_roots(),
+            vec![root_b.clone()],
+            "only B may stay after popping A"
+        );
+        assert!(
+            !cache.join(pack_id_hex(&[0xaa; 16])).exists(),
+            "A's bytes must go with the pop"
+        );
+        assert!(root_b.join("assets/test_pack/marker.txt").exists());
+
+        // The same in Play: push A again, then pop it by id.
+        push(
+            &mut session,
+            Phase::Play,
+            0xaa,
+            format!("{base}/a.zip"),
+            &a_hash,
+        );
+        assert_eq!(session.content.as_ref().unwrap().pack_roots().len(), 2);
+        pop(&mut session, Phase::Play, Some(0xaa));
+        assert_eq!(
+            session.content.as_ref().unwrap().pack_roots(),
+            vec![root_b],
+            "the Play pop drops only the named pack"
+        );
+        assert_eq!(
+            drain_statuses(&got, 9),
+            vec![3, 4, 0, 3, 4, 0, 3, 4, 0],
+            "pushes answer Accepted/Downloaded/Loaded; pops answer nothing"
+        );
+        assert!(session.error.is_none());
+        finish.send(()).unwrap();
+        peer.join().unwrap();
+    }
+
+    /// POP without an id drops every server pack and nothing else.
+    #[test]
+    fn resource_pack_pop_without_id_drops_every_server_pack() {
+        let a = test_pack_zip_with("pack a");
+        let b = test_pack_zip_with("pack b");
+        let (a_hash, b_hash) = (
+            format!("{:x}", sha1::Sha1::digest(&a)),
+            format!("{:x}", sha1::Sha1::digest(&b)),
+        );
+        let (mut session, got, finish, peer, base) =
+            pack_wire_harness(vec![("/a.zip", a), ("/b.zip", b)], 12);
+        let cache = session.pack_cache.clone().unwrap();
+        let config = configuration::clientbound::RESOURCE_PACK_PUSH;
+        let play = cb::RESOURCE_PACK_PUSH;
+        let push = |session: &mut Session, phase: Phase, id: u8, url: String, hash: &str| {
+            session
+                .apply(
+                    phase,
+                    if phase == Phase::Play { play } else { config },
+                    &push_packet(id, &url, hash).0,
+                )
+                .unwrap();
+        };
+        let pop = |session: &mut Session, phase: Phase, id: Option<u8>| {
+            session
+                .apply(
+                    phase,
+                    if phase == Phase::Play {
+                        cb::RESOURCE_PACK_POP
+                    } else {
+                        configuration::clientbound::RESOURCE_PACK_POP
+                    },
+                    &pop_packet(id).0,
+                )
+                .unwrap();
+        };
+        push(
+            &mut session,
+            Phase::Configuration,
+            0xaa,
+            format!("{base}/a.zip"),
+            &a_hash,
+        );
+        push(
+            &mut session,
+            Phase::Configuration,
+            0xbb,
+            format!("{base}/b.zip"),
+            &b_hash,
+        );
+        assert_eq!(session.content.as_ref().unwrap().pack_roots().len(), 2);
+        pop(&mut session, Phase::Configuration, None);
+        assert!(
+            session.content.as_ref().unwrap().pack_roots().is_empty(),
+            "an absent Optional<UUID> pops every server pack"
+        );
+        assert!(!cache.join(pack_id_hex(&[0xaa; 16])).exists());
+        assert!(!cache.join(pack_id_hex(&[0xbb; 16])).exists());
+
+        // And again in Play.
+        push(
+            &mut session,
+            Phase::Play,
+            0xaa,
+            format!("{base}/a.zip"),
+            &a_hash,
+        );
+        push(
+            &mut session,
+            Phase::Play,
+            0xbb,
+            format!("{base}/b.zip"),
+            &b_hash,
+        );
+        pop(&mut session, Phase::Play, None);
+        assert!(session.content.as_ref().unwrap().pack_roots().is_empty());
+        assert_eq!(
+            drain_statuses(&got, 12),
+            vec![3, 4, 0, 3, 4, 0, 3, 4, 0, 3, 4, 0]
+        );
+        assert!(session.error.is_none());
         finish.send(()).unwrap();
         peer.join().unwrap();
     }

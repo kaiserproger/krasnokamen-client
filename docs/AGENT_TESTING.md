@@ -183,14 +183,32 @@ source regression or successful travel alone does not establish seated appearanc
 
 ### Server resource-pack offers
 
-The client does not install server-provided packs. It declines each offer by
-UUID in Configuration or Play and leaves the server to enforce required packs;
-the server's disconnect reason is displayed normally. The focused
-`session::packets::tests::resource_pack_push_declined_in_both_phases` test checks
-both response packets and subsequent packet handling. The ignored
-`resource_pack_live_optional_join` test requires pinned local client content and
-`KRASNOKAMEN_PACK_SMOKE_SERVER` pointing to a loopback server configured with an
-optional pack; it waits for the real headless session to reach a ready world.
+The client installs server-provided packs, in Configuration and in Play. A
+`RESOURCE_PACK_PUSH` is answered `Accepted` only for an `http`/`https` URL, then
+downloaded with a 60 s request timeout and a 64 MiB bound, verified against the
+packet's hex SHA-1, extracted under the per-id pack cache, applied to the
+resource stack and answered `Downloaded` then `SuccessfullyLoaded`. A failed
+download or hash answers `FailedDownload`, a failed extract or apply answers
+`FailedReload`; a *required* pack that fails ends the session with that cause,
+as vanilla does. Both focused tests drive a real loopback login socket and a
+local HTTP server: `resource_pack_push_accepted_downloaded_applied_in_both_phases`
+asserts the `3,4,0` status sequence per phase and the extracted pack in the
+cache, and `resource_pack_push_hash_mismatch_reports_failed_download` asserts
+`3,2` and that no pack root is kept.
+
+A `RESOURCE_PACK_POP` follows pinned 26.3
+`ClientboundResourcePackPopPacket` (`Optional<UUID>`): a present id pops that
+server pack, an absent one pops every server pack this client downloaded, and
+the resource stack reloads; a POP carries no reply. Only roots under the pack
+cache are removable, so a pack installed from a local folder survives.
+`resource_pack_pop_by_id_drops_only_that_pack_in_both_phases` and
+`resource_pack_pop_without_id_drops_every_server_pack` cover both branches in
+both phases.
+
+The ignored `resource_pack_live_optional_join` test requires pinned local client
+content and `KRASNOKAMEN_PACK_SMOKE_SERVER` pointing to a loopback server
+configured with an optional pack; it waits for the real headless session to
+reach a ready world.
 
 ### Complete entity census
 
