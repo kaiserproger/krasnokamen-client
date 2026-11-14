@@ -1,0 +1,463 @@
+{
+  "schema": 1,
+  "id": "battle_iron_plate_head",
+  "texture": {
+    "path": "entity/equipment/humanoid/iron_plate.png",
+    "size": [
+      128,
+      72
+    ]
+  },
+  "roles": {
+    "head": [
+      "head"
+    ]
+  },
+  "bones": [
+    {
+      "name": "head",
+      "pivot": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            62,
+            19
+          ],
+          "mirror": false,
+          "origin": [
+            -4.5,
+            -8.2,
+            -4.5
+          ],
+          "size": [
+            9.0,
+            9.0,
+            9.0
+          ],
+          "inflate": 0.1
+        }
+      ],
+      "bones": [
+        {
+          "name": "earMiddle",
+          "pivot": [
+            0.0,
+            -4.0,
+            0.4
+          ],
+          "rotation": [
+            -18.260164930819336,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                57,
+                57
+              ],
+              "mirror": false,
+              "origin": [
+                -5.5,
+                -1.0,
+                -1.0
+              ],
+              "size": [
+                11.0,
+                2.0,
+                2.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": [
+            {
+              "name": "leftEarBottom",
+              "pivot": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    42
+                  ],
+                  "mirror": true,
+                  "origin": [
+                    4.0,
+                    -1.5,
+                    -7.5
+                  ],
+                  "size": [
+                    1.0,
+                    3.0,
+                    9.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            },
+            {
+              "name": "rightEarBottom",
+              "pivot": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    42
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -5.0,
+                    -1.5,
+                    -7.5
+                  ],
+                  "size": [
+                    1.0,
+                    3.0,
+                    9.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            },
+            {
+              "name": "middleBottom",
+              "pivot": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                90.0002104591497,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    0,
+                    38
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -4.0,
+                    -7.5,
+                    -1.5
+                  ],
+                  "size": [
+                    8.0,
+                    1.0,
+                    3.0
+                  ],
+                  "inflate": 0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "leftHead",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            15.647477385022782
+          ],
+          "cubes": [
+            {
+              "uv": [
+                52,
+                39
+              ],
+              "mirror": false,
+              "origin": [
+                -2.0,
+                -9.1,
+                -4.5
+              ],
+              "size": [
+                4.0,
+                1.0,
+                9.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "rightHead",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            -15.647477385022782
+          ],
+          "cubes": [
+            {
+              "uv": [
+                52,
+                39
+              ],
+              "mirror": true,
+              "origin": [
+                -2.0,
+                -9.1,
+                -4.5
+              ],
+              "size": [
+                4.0,
+                1.0,
+                9.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "middleCraneC",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -24.001202038030186,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                45,
+                36
+              ],
+              "mirror": false,
+              "origin": [
+                -1.0,
+                -10.6,
+                -2.0
+              ],
+              "size": [
+                2.0,
+                2.0,
+                4.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "middleHeadA",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            24.001202038030186,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                45,
+                36
+              ],
+              "mirror": false,
+              "origin": [
+                -1.0,
+                -10.6,
+                -2.0
+              ],
+              "size": [
+                2.0,
+                2.0,
+                4.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "middleHeadB",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                44,
+                27
+              ],
+              "mirror": false,
+              "origin": [
+                -1.0,
+                -10.5,
+                -2.5
+              ],
+              "size": [
+                2.0,
+                2.0,
+                5.0
+              ],
+              "inflate": 0
+            }
+          ],
+          "bones": []
+        },
+        {
+          "name": "middleFeatherA",
+          "pivot": [
+            0.0,
+            -8.0,
+            5.0
+          ],
+          "rotation": [
+            -10.914845997242182,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                89,
+                0
+              ],
+              "mirror": false,
+              "origin": [
+                -2.0,
+                -4.5,
+                -1.5
+              ],
+              "size": [
+                4.0,
+                9.0,
+                9.0
+              ],
+              "inflate": -2.0
+            }
+          ],
+          "bones": [
+            {
+              "name": "middleFeatherB",
+              "pivot": [
+                0.0,
+                0.0,
+                4.5
+              ],
+              "rotation": [
+                -6.80673860615418,
+                0.0,
+                0.0
+              ],
+              "cubes": [
+                {
+                  "uv": [
+                    89,
+                    10
+                  ],
+                  "mirror": false,
+                  "origin": [
+                    -2.0,
+                    -4.5,
+                    -2.0
+                  ],
+                  "size": [
+                    4.0,
+                    9.0,
+                    9.0
+                  ],
+                  "inflate": -2.0
+                }
+              ],
+              "bones": []
+            }
+          ]
+        },
+        {
+          "name": "topHead",
+          "pivot": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "cubes": [
+            {
+              "uv": [
+                28,
+                13
+              ],
+              "mirror": false,
+              "origin": [
+                -5.0,
+                -8.2,
+                -5.0
+              ],
+              "size": [
+                10.0,
+                3.0,
+                10.0
+              ],
+              "inflate": -0.3
+            }
+          ],
+          "bones": []
+        }
+      ]
+    }
+  ]
+}

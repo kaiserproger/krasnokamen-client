@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "id": "battle_iron_plate_feet",
+  "texture": {
+    "path": "entity/equipment/humanoid/iron_plate.png",
+    "size": [
+      128,
+      72
+    ]
+  },
+  "roles": {
+    "right_leg": [
+      "right_leg"
+    ],
+    "left_leg": [
+      "left_leg"
+    ]
+  },
+  "bones": [
+    {
+      "name": "right_leg",
+      "pivot": [
+        -1.9,
+        12.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            32,
+            56
+          ],
+          "mirror": false,
+          "origin": [
+            -2.0,
+            0.0,
+            -2.0
+          ],
+          "size": [
+            4.0,
+            12.0,
+            4.0
+          ],
+          "inflate": 0.3
+        }
+      ],
+      "bones": []
+    },
+    {
+      "name": "left_leg",
+      "pivot": [
+        1.9,
+        12.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cubes": [
+        {
+          "uv": [
+            32,
+            56
+          ],
+          "mirror": false,
+          "origin": [
+            -2.0,
+            0.0,
+            -2.0
+          ],
+          "size": [
+            4.0,
+            12.0,
+            4.0
+          ],
+          "inflate": 0.3
+        }
+      ],
+      "bones": []
+    }
+  ]
+}

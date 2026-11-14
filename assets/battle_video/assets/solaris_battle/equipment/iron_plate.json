@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "solaris_battle:iron_plate"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "solaris_battle:iron_plate"
+      }
+    ]
+  }
+}

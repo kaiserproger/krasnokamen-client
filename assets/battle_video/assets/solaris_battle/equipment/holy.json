@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "solaris_battle:holy"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "solaris_battle:holy"
+      }
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-//! Embeds the Solaris-authored entity models (`assets/solaris/models/entity/*.json`).
+//! Embeds entity models (`assets/solaris/models/entity/*.json`).
 use std::{env, fmt::Write as _, fs, path::PathBuf};
 
 fn main() {
