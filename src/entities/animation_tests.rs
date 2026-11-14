@@ -2623,13 +2623,11 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
         // Vanilla `camel#main` has one `hump` and no separate neck bone (the neck is
         // part of the body cube); the head hangs forward across the seat line by design,
         // so the hump is the part that must clear the rider's seat.
-        for bone in ["hump"] {
-            let (front, back) = extent(rig, &standing, bone, 2);
-            assert!(
-                !(front..=back).contains(&-0.5),
-                "{base}: {bone} occupies the rider's seat line"
-            );
-        }
+        let (front, back) = extent(rig, &standing, "hump", 2);
+        assert!(
+            !(front..=back).contains(&-0.5),
+            "{base}: hump occupies the rider's seat line"
+        );
     }
     for (sitting, seat) in [
         (false, 2.375f32 - 0.375),

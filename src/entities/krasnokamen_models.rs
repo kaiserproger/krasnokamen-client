@@ -403,10 +403,10 @@ pub(crate) fn model_id(key: &str) -> std::borrow::Cow<'_, str> {
     let baby_set = qualifier.contains("babyModelSet");
     // Vanilla wears `armor_stand_small#*` on a small armour stand, not the adult
     // `armor_stand#*` shell scaled down.
-    if name == "armor_stand_small" {
-        if let Some(slot) = slot(qualifier) {
-            return format!("armor_stand_small_{slot}").into();
-        }
+    if name == "armor_stand_small"
+        && let Some(slot) = slot(qualifier)
+    {
+        return format!("armor_stand_small_{slot}").into();
     }
     if let Some(slot) = slot(qualifier).filter(|_| {
         qualifier.contains("/modelSet/")

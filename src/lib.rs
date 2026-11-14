@@ -848,7 +848,7 @@ impl App {
                                     .lock()
                                     .unwrap_or_else(|e| e.into_inner())
                                     .data["render"]
-                                .clone();
+                                    .clone();
                                 if !render.is_null() {
                                     value["render"] = render;
                                 }
