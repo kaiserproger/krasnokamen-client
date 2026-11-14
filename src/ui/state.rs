@@ -20,6 +20,9 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+#[path = "item_bars.rs"]
+mod item_bars;
+
 const NODE_LIMIT: usize = 512;
 const TEXT_LIMIT: usize = 65536;
 #[derive(Clone, Debug)]
@@ -4144,7 +4147,7 @@ fn append_stack_item(
     if let Some(texture) = foil {
         super::items::mark_foil(&mut out.vertices[start..], texture);
     }
-    Ok(())
+    item_bars::append(content, stack, bounds, parent, out)
 }
 
 fn append_item(
@@ -4671,3 +4674,7 @@ mod banner_item_order_tests {
 #[cfg(test)]
 #[path = "drag_tests.rs"]
 mod drag_tests;
+
+#[cfg(test)]
+#[path = "item_bar_tests.rs"]
+mod item_bar_tests;
