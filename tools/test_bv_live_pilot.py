@@ -77,7 +77,7 @@ class MarchingRank:
         if name == "minecraft_read_item_components":
             if arguments["source"] == "selected":
                 raise RuntimeError("no held item data")
-            return {"components": {"minecraft:item_model": "solaris_battle:red_shield"}}
+            return {"components": {"minecraft:item_model": "krasnokamen_battle:red_shield"}}
         if name == "minecraft_look":
             self.yaw = float(arguments["yaw_deg"])
             return {}

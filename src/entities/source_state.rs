@@ -279,20 +279,33 @@ pub(crate) fn absorb_wait(
 fn clear_standing(models: &Models, entity: &mut Entity) {
     if let Some(index) = models.accessor(&entity.type_name, "DATA_ID_FLAGS") {
         let flags = p::number(models, entity, "DATA_ID_FLAGS").unwrap_or(0) & !32;
-        entity.predicted_metadata.insert(index, Metadata::Byte(flags as i8));
+        entity
+            .predicted_metadata
+            .insert(index, Metadata::Byte(flags as i8));
     }
 }
 /// The block cells `water_contact` reads for `bounds`: `x, y, z` from `low` up to, not
 /// including, `high`.
 fn water_cells(bounds: Bounds, top_only: bool) -> [[i32; 3]; 2] {
     let (min_y, max_y) = if top_only {
-        (bounds.max[1].floor() as i32, (bounds.max[1] + 0.001).ceil() as i32)
+        (
+            bounds.max[1].floor() as i32,
+            (bounds.max[1] + 0.001).ceil() as i32,
+        )
     } else {
         (bounds.min[1].floor() as i32, bounds.max[1].ceil() as i32)
     };
     [
-        [bounds.min[0].floor() as i32, min_y, bounds.min[2].floor() as i32],
-        [bounds.max[0].ceil() as i32, max_y, bounds.max[2].ceil() as i32],
+        [
+            bounds.min[0].floor() as i32,
+            min_y,
+            bounds.min[2].floor() as i32,
+        ],
+        [
+            bounds.max[0].ceil() as i32,
+            max_y,
+            bounds.max[2].ceil() as i32,
+        ],
     ]
 }
 /// Whether water touches `bounds` (its top only, for a boat); `None` while a read block is not
@@ -450,7 +463,10 @@ pub(crate) fn tick(
                 .ok_or("entity Source motion missing")?;
             let transform = entity.presented_transform(0, 0.);
             let ids = models.ids(entity);
-            let last_pose = match ids.last_pose_change.and_then(|id| entity.metadata_value(id)) {
+            let last_pose = match ids
+                .last_pose_change
+                .and_then(|id| entity.metadata_value(id))
+            {
                 Some(Metadata::Long(value)) => value
                     .parse::<i64>()
                     .map_err(|_| "camel pose clock invalid")?,
@@ -497,7 +513,8 @@ pub(crate) fn tick(
                         .ok_or("Source maximum body/head rotation missing")?,
                     attack_active: entity.animation.is_some_and(|(action, start)| {
                         matches!(action, 0 | 3)
-                            && tick.saturating_sub(start) < u64::from(entity.physical.combat.vanilla_ticks())
+                            && tick.saturating_sub(start)
+                                < u64::from(entity.physical.combat.vanilla_ticks())
                     }) || entity.physical.combat.swinging(tick),
                     camel_sitting: sitting,
                     camel_visually_sitting: (pose_time < 0) != sitting,

@@ -22,20 +22,35 @@ pub(super) struct Follow {
 impl Follow {
     /// The followed player's entity, resolved by name through the received player
     /// list and UUID on every call: a respawn or a new entity id is picked up at once.
-    fn entity<'a>(&self, entities: &'a crate::entities::Store) -> Option<&'a crate::entities::Entity> {
-        let profile = entities.profiles.values().find(|profile| profile.name == self.name)?;
-        entities.uuid_entities.get(&profile.uuid)?.iter()
+    fn entity<'a>(
+        &self,
+        entities: &'a crate::entities::Store,
+    ) -> Option<&'a crate::entities::Entity> {
+        let profile = entities
+            .profiles
+            .values()
+            .find(|profile| profile.name == self.name)?;
+        entities
+            .uuid_entities
+            .get(&profile.uuid)?
+            .iter()
             .filter_map(|id| entities.get(*id))
             .find(|entity| entity.type_name == "minecraft:player")
     }
 
     /// Each client tick the local spectator trails the camera, so the server streams
     /// the area around the target. Spectators only: they fly through blocks anyway.
-    pub(super) fn trail(&self, entities: &crate::entities::Store, player: &mut crate::player::Player) {
+    pub(super) fn trail(
+        &self,
+        entities: &crate::entities::Store,
+        player: &mut crate::player::Player,
+    ) {
         if player.game_mode != 3 {
             return;
         }
-        let Some(entity) = self.entity(entities) else { return };
+        let Some(entity) = self.entity(entities) else {
+            return;
+        };
         let yaw = self.yaw.map_or(entity.transform.head_yaw, |(_, yaw)| yaw);
         let offset = boom(yaw);
         player.position = std::array::from_fn(|i| entity.position[i] + offset[i]);
@@ -54,7 +69,10 @@ impl Session {
     /// while he is not received (the spectator's own view stays until he is).
     pub(super) fn follow_camera(&mut self) -> Option<([f64; 3], f32, f32)> {
         let entity = self.follow.as_ref()?.entity(&self.entities)?;
-        let (eye, head_yaw, _) = self.entities.eye_view(entity, self.world_tick, self.presentation_partial).ok()?;
+        let (eye, head_yaw, _) = self
+            .entities
+            .eye_view(entity, self.world_tick, self.presentation_partial)
+            .ok()?;
         let now = self.client_tick as f64 + f64::from(self.local_partial);
         let follow = self.follow.as_mut()?;
         let yaw = match follow.yaw {
@@ -72,7 +90,11 @@ impl Session {
         let distance = self.content.as_ref().map_or(length, |content| {
             crate::player::camera_distance(&self.world, content, eye, direction).min(length)
         });
-        Some((std::array::from_fn(|i| eye[i] + direction[i] * distance), wrap(yaw), PITCH))
+        Some((
+            std::array::from_fn(|i| eye[i] + direction[i] * distance),
+            wrap(yaw),
+            PITCH,
+        ))
     }
 }
 
@@ -96,7 +118,11 @@ mod tests {
     fn boom_is_behind_above_and_right_of_the_look() {
         // Yaw 0 faces +Z: behind is -Z, the right hand is -X.
         let offset = boom(0.);
-        assert!((offset[2] + BACK).abs() < 1e-9 && (offset[1] - UP).abs() < 1e-9 && (offset[0] + RIGHT).abs() < 1e-9);
+        assert!(
+            (offset[2] + BACK).abs() < 1e-9
+                && (offset[1] - UP).abs() < 1e-9
+                && (offset[0] + RIGHT).abs() < 1e-9
+        );
         // Yaw -90 faces +X: behind is -X.
         assert!((boom(-90.)[0] + BACK).abs() < 1e-9);
         assert_eq!(wrap(190.), -170.);

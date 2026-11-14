@@ -13,7 +13,7 @@ condition/special item definitions are NOT evaluated: pass the model id).
       `hand` rows, old pack on top, new pack below.
 
 DIR is a pack root (the directory holding assets/<namespace>/...). Vanilla models and
-textures (parents `minecraft:item/handheld`, sprites) are read from $SOLARIS_RESOURCES
+textures (parents `minecraft:item/handheld`, sprites) are read from $KRASNOKAMEN_RESOURCES
 (default <qa-armada template-data>/resources), never copied into Git.
 Matrices mirror the Rust client: ui/items.rs display_matrix, entities/presentation.rs
 held_item_attachment. The native client frame is the final judge; this is the quick check.
@@ -24,8 +24,8 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-VANILLA = os.environ.get("SOLARIS_RESOURCES") or "/run/media/kaiserroman/games/solaris-work/qa-armada/template-data/resources"
-ENTITY_MODELS = os.path.join(ROOT, "assets/solaris/models/entity")
+VANILLA = os.environ.get("KRASNOKAMEN_RESOURCES") or "/run/media/kaiserroman/games/solaris-work/qa-armada/template-data/resources"
+ENTITY_MODELS = os.path.join(ROOT, "assets/krasnokamen/models/entity")
 
 
 # ---------------------------------------------------------------- model loading
@@ -309,7 +309,7 @@ def husk_scene_parts(pack):
     parts.append((husk, t))
     for piece in ("head", "chest"):
         m = json.load(open(os.path.join(ENTITY_MODELS, f"battle_iron_plate_{piece}.json")))
-        p = _find(_roots(pack), "solaris_battle", "textures", m["texture"]["path"], "")
+        p = _find(_roots(pack), "krasnokamen_battle", "textures", m["texture"]["path"], "")
         if p:
             parts.append((m, np.array(Image.open(p).convert("RGBA"))))
     return parts

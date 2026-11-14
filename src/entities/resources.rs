@@ -1,6 +1,6 @@
+use super::krasnokamen_models;
 use super::render_living::MotionFacts;
-use super::solaris_models;
-use crate::protocol::{content::Content, Result};
+use crate::protocol::{Result, content::Content};
 use glam::{Mat4, Vec3};
 use serde::Deserialize;
 use serde_json::Value;
@@ -45,9 +45,9 @@ impl Hasher for NameHasher {
     }
 }
 
-/// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
+/// Krasnokamen-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
-const ENTITY_FACTS: &str = include_str!("../../assets/solaris/entities/entity-facts.json");
+const ENTITY_FACTS: &str = include_str!("../../assets/krasnokamen/entities/entity-facts.json");
 const FACTS_SCHEMA: u32 = 1;
 
 #[derive(Deserialize)]
@@ -174,7 +174,10 @@ pub struct Ids {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Seat {
     /// `AbstractBoat`; chest boats and rafts seat differently.
-    Boat { chest: bool, raft: bool },
+    Boat {
+        chest: bool,
+        raft: bool,
+    },
     /// `AbstractHorse` (`SeatMotion`).
     Horse,
     Camel,
@@ -219,7 +222,12 @@ impl Ids {
         view_rule: super::view_range::Rule::Entity,
     };
     fn of(schema: &EntitySchema) -> Self {
-        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
+        let id = |name: &str| {
+            schema
+                .accessors
+                .get(name)
+                .and_then(|v| u8::try_from(v[0]).ok())
+        };
         Self {
             baby: id("DATA_BABY_ID"),
             pose: id("DATA_POSE"),
@@ -239,15 +247,24 @@ impl Ids {
             health: id("DATA_HEALTH_ID"),
             charging: [id("IS_CHARGING_CROSSBOW"), id("DATA_IS_CHARGING_CROSSBOW")],
             last_pose_change: id("LAST_POSE_CHANGE_TICK"),
-            boat: schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
-            seat: match schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str) {
+            boat: schema
+                .hierarchy
+                .iter()
+                .any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
+            seat: match schema
+                .method_owners
+                .get("getPassengerAttachmentPoint")
+                .map(String::as_str)
+            {
                 Some("net.minecraft.world.entity.vehicle.boat.AbstractBoat") => Seat::Boat {
                     chest: schema.hierarchy.iter().any(|name| {
                         name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat"
                     }),
-                    raft: matches!(schema.class.as_str(),
+                    raft: matches!(
+                        schema.class.as_str(),
                         "net.minecraft.world.entity.vehicle.boat.Raft"
-                            | "net.minecraft.world.entity.vehicle.boat.ChestRaft"),
+                            | "net.minecraft.world.entity.vehicle.boat.ChestRaft"
+                    ),
                 },
                 Some("net.minecraft.world.entity.animal.equine.AbstractHorse") => Seat::Horse,
                 Some("net.minecraft.world.entity.animal.camel.Camel") => Seat::Camel,
@@ -260,7 +277,13 @@ impl Ids {
                 ) => Seat::Attachment,
                 _ => Seat::Unknown,
             },
-            view_rule: super::view_range::Rule::of(&schema.hierarchy, schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.player.Player")),
+            view_rule: super::view_range::Rule::of(
+                &schema.hierarchy,
+                schema
+                    .hierarchy
+                    .iter()
+                    .any(|class| class == "net.minecraft.world.entity.player.Player"),
+            ),
         }
     }
 }
@@ -356,7 +379,12 @@ enum SizeOwner {
 
 impl Sizing {
     fn of(schema: &EntitySchema, kind: &str, poses: &BTreeMap<u8, String>) -> Self {
-        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
+        let id = |name: &str| {
+            schema
+                .accessors
+                .get(name)
+                .and_then(|v| u8::try_from(v[0]).ok())
+        };
         let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
         let owner = |method: &str| schema.method_owners.get(method).map(String::as_str);
         let constant = |name: &str| match schema.dimension_constants.get(name) {
@@ -373,9 +401,14 @@ impl Sizing {
             size: id("ID_SIZE"),
             living: inherits("net.minecraft.world.entity.LivingEntity"),
             camel: inherits("net.minecraft.world.entity.animal.camel.Camel"),
-            scale: schema.default_attributes.get("minecraft:scale").map(|scale| (scale.id, scale.value)),
+            scale: schema
+                .default_attributes
+                .get("minecraft:scale")
+                .map(|scale| (scale.id, scale.value)),
             sanitize: match owner("sanitizeScale") {
-                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => Sanitize::AtMost(1.),
+                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => {
+                    Sanitize::AtMost(1.)
+                }
                 Some("net.minecraft.world.entity.monster.Shulker") => Sanitize::AtMost(3.),
                 Some("net.minecraft.world.entity.boss.enderdragon.EnderDragon") => Sanitize::One,
                 _ => Sanitize::Keep,
@@ -392,15 +425,22 @@ impl Sizing {
                 _ => 0.5,
             },
             owner: match owner("getDefaultDimensions") {
-                Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse") => SizeOwner::ChestedHorse,
-                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => SizeOwner::CubeMob,
+                Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse") => {
+                    SizeOwner::ChestedHorse
+                }
+                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => {
+                    SizeOwner::CubeMob
+                }
                 Some("net.minecraft.world.entity.animal.fish.Pufferfish") => SizeOwner::Pufferfish,
                 Some("net.minecraft.world.entity.animal.fish.Salmon") => SizeOwner::Salmon,
                 Some("net.minecraft.world.entity.monster.Phantom") => SizeOwner::Phantom,
                 _ => SizeOwner::Other,
             },
             armor_stand: kind == "minecraft:armor_stand",
-            avatar: matches!(schema.dimension_constants.get("POSES"), Some(DimensionConstant::Poses(_))),
+            avatar: matches!(
+                schema.dimension_constants.get("POSES"),
+                Some(DimensionConstant::Poses(_))
+            ),
             poses: {
                 let table = match schema.dimension_constants.get("POSES") {
                     Some(DimensionConstant::Poses(table)) => Some(table),
@@ -416,7 +456,9 @@ impl Sizing {
                         sleeping: name == "SLEEPING",
                         sitting: name == "SITTING",
                         long_jumping: name == "LONG_JUMPING",
-                        avatar: table.and_then(|table| table.get(name)).cloned()
+                        avatar: table
+                            .and_then(|table| table.get(name))
+                            .cloned()
                             .or_else(|| constant("STANDING_DIMENSIONS")),
                     });
                 }
@@ -425,7 +467,10 @@ impl Sizing {
             goat: schema.class == "net.minecraft.world.entity.animal.goat.Goat",
             digging_states: if schema.class == "net.minecraft.world.entity.animal.sniffer.Sniffer" {
                 schema.enum_ids.get("State").map_or_else(Vec::new, |ids| {
-                    ids.iter().filter(|(_, name)| *name == "DIGGING").map(|(id, _)| *id).collect()
+                    ids.iter()
+                        .filter(|(_, name)| *name == "DIGGING")
+                        .map(|(id, _)| *id)
+                        .collect()
                 })
             } else {
                 Vec::new()
@@ -442,7 +487,12 @@ impl Sizing {
                 "minecraft:polar_bear" => Shape::PolarBear,
                 "minecraft:warden" => Shape::Warden,
                 "minecraft:shulker" => Shape::Shulker,
-                _ if inherits("net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge") => Shape::WindCharge,
+                _ if inherits(
+                    "net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge",
+                ) =>
+                {
+                    Shape::WindCharge
+                }
                 _ => Shape::Box,
             },
         }
@@ -497,7 +547,9 @@ impl Schemas {
     pub fn insert(&mut self, kind: String, mut schema: EntitySchema) -> Option<EntitySchema> {
         schema.forget_resolved();
         if let Some(&slot) = self.slots.get(&kind) {
-            return self.schemas[slot as usize].replace((kind, schema)).map(|(_, old)| old);
+            return self.schemas[slot as usize]
+                .replace((kind, schema))
+                .map(|(_, old)| old);
         }
         let slot = u32::try_from(self.schemas.len()).expect("entity kinds fit u32");
         self.slots.insert(kind.clone(), slot);
@@ -510,10 +562,16 @@ impl Schemas {
         self.schemas[slot as usize].take().map(|(_, schema)| schema)
     }
     pub fn iter(&self) -> impl Iterator<Item = (&String, &EntitySchema)> {
-        self.schemas.iter().flatten().map(|(kind, schema)| (kind, schema))
+        self.schemas
+            .iter()
+            .flatten()
+            .map(|(kind, schema)| (kind, schema))
     }
     fn at(&self, slot: u32) -> Option<&EntitySchema> {
-        self.schemas.get(slot as usize)?.as_ref().map(|(_, schema)| schema)
+        self.schemas
+            .get(slot as usize)?
+            .as_ref()
+            .map(|(_, schema)| schema)
     }
 }
 
@@ -530,7 +588,8 @@ impl FromIterator<(String, EntitySchema)> for Schemas {
 impl<K: AsRef<str> + ?Sized> std::ops::Index<&K> for Schemas {
     type Output = EntitySchema;
     fn index(&self, kind: &K) -> &EntitySchema {
-        self.get(kind.as_ref()).expect("entity schema of a known kind")
+        self.get(kind.as_ref())
+            .expect("entity schema of a known kind")
     }
 }
 
@@ -605,12 +664,12 @@ pub(crate) struct ArmorModels {
 impl Models {
     fn parse() -> Result<Document> {
         let doc: Document = serde_json::from_str(ENTITY_FACTS)
-            .map_err(|e| format!("solaris entity facts schema: {e}"))?;
+            .map_err(|e| format!("krasnokamen entity facts schema: {e}"))?;
         if doc.schema != FACTS_SCHEMA || doc.game_version != "26.3" {
-            return Err("solaris entity facts source/target mismatch".into());
+            return Err("krasnokamen entity facts source/target mismatch".into());
         }
         if doc.entities.len() > 1024 || doc.poses.len() != 18 {
-            return Err("solaris entity facts catalog mismatch".into());
+            return Err("krasnokamen entity facts catalog mismatch".into());
         }
         for (name, schema) in &doc.entities {
             if !schema.width.is_finite()
@@ -644,7 +703,7 @@ impl Models {
     fn digest() -> String {
         let mut digest = Sha256::new();
         digest.update(ENTITY_FACTS.as_bytes());
-        digest.update(solaris_models::embedded_digest());
+        digest.update(krasnokamen_models::embedded_digest());
         format!("{:x}", digest.finalize())
     }
     fn attribute_ids(attributes: &BTreeMap<String, AttributeBounds>) -> BTreeMap<u32, String> {
@@ -678,7 +737,7 @@ impl Models {
             return Err("source skin catalog mismatch".into());
         }
         Self::check_registry(&doc, content)?;
-        // Geometry is Solaris-authored (`solaris_models`); the facts carry no meshes. A family
+        // Geometry is Krasnokamen-authored (`krasnokamen_models`); the facts carry no meshes. A family
         // whose rig has no authored model gets a visible entity-sized placeholder box.
         let mut rigs = BTreeMap::new();
         for (kind, family) in &doc.families {
@@ -687,9 +746,9 @@ impl Models {
                 .get(kind)
                 .map_or((0.6, 1.8), |schema| (schema.width, schema.height));
             for key in std::iter::once(&family.rig).chain(family.baby_rig.as_ref()) {
-                if solaris_models::authored(key).is_none() {
+                if krasnokamen_models::authored(key).is_none() {
                     rigs.entry(key.clone())
-                        .or_insert_with(|| solaris_models::placeholder(width, height));
+                        .or_insert_with(|| krasnokamen_models::placeholder(width, height));
                 }
             }
         }
@@ -714,20 +773,20 @@ impl Models {
         let set = if baby { &armor.baby } else { &armor.adult };
         set.get(part).map(String::as_str)
     }
-    /// Geometry for a renderer rig key: explicit entry, else Solaris-authored model, else a
+    /// Geometry for a renderer rig key: explicit entry, else Krasnokamen-authored model, else a
     /// placeholder box. Never fails; a missing model must not stop the frame.
     pub(crate) fn rig(&self, key: &str) -> &Rig {
         static FALLBACK: std::sync::LazyLock<Rig> =
-            std::sync::LazyLock::new(|| solaris_models::placeholder(0.75, 0.75));
+            std::sync::LazyLock::new(|| krasnokamen_models::placeholder(0.75, 0.75));
         self.rigs
             .get(key)
-            .or_else(|| solaris_models::authored(key))
+            .or_else(|| krasnokamen_models::authored(key))
             .unwrap_or(&FALLBACK)
     }
     /// Whether a real (non-placeholder) model exists for the key.
     pub(crate) fn has_authored_rig(&self, key: &str) -> bool {
         self.rigs.get(key).is_some_and(|rig| !rig.is_placeholder())
-            || (!self.rigs.contains_key(key) && solaris_models::authored(key).is_some())
+            || (!self.rigs.contains_key(key) && krasnokamen_models::authored(key).is_some())
     }
     pub fn accessor(&self, kind: &str, name: &str) -> Option<u8> {
         self.schemas
@@ -748,16 +807,25 @@ impl Models {
             return Some(schema);
         }
         let slot = *self.schemas.slots.get(e.type_name.as_str())?;
-        e.kind_slot.set(KindSlot { table: self.schemas.table, name, slot });
+        e.kind_slot.set(KindSlot {
+            table: self.schemas.table,
+            name,
+            slot,
+        });
         self.schemas.at(slot)
     }
     /// Metadata index of `e`'s accessor `name`.
     pub(crate) fn entity_accessor(&self, e: &super::Entity, name: &str) -> Option<u8> {
-        self.schema_of(e)?.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok())
+        self.schema_of(e)?
+            .accessors
+            .get(name)
+            .and_then(|v| u8::try_from(v[0]).ok())
     }
     /// `e`'s resolved per-frame accessor indices (all `None` for an unknown kind).
     pub(crate) fn ids(&self, e: &super::Entity) -> &Ids {
-        self.schema_of(e).map_or(&Ids::NONE, |schema| schema.ids.get_or_init(|| Ids::of(schema)))
+        self.schema_of(e).map_or(&Ids::NONE, |schema| {
+            schema.ids.get_or_init(|| Ids::of(schema))
+        })
     }
     pub fn default_skin(&self, uuid: Option<&str>) -> Result<&DefaultSkin> {
         let index = if let Some(uuid) = uuid {
@@ -775,7 +843,8 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32)> {
-        self.sized(entity).map(|(dimensions, scale, _)| (dimensions, scale))
+        self.sized(entity)
+            .map(|(dimensions, scale, _)| (dimensions, scale))
     }
     /// `dimensions` and the kind's box rule (`physical::bounds_at`). Inside a `SizedScope`
     /// (one frame's or tick's presentation, where metadata and attributes do not change) an
@@ -784,8 +853,12 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32, Shape)> {
-        let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
-        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name, &self.poses));
+        let schema = self
+            .schema_of(entity)
+            .ok_or("entity dimensions source not activated")?;
+        let sizing = schema
+            .sizing
+            .get_or_init(|| Sizing::of(schema, &entity.type_name, &self.poses));
         let scope = SIZED_SCOPE.with(std::cell::Cell::get);
         let memo = entity.sized_memo.get();
         let (choice, scale) = if scope != 0 && memo.scope == scope {
@@ -793,7 +866,11 @@ impl Models {
         } else {
             let (choice, scale) = Self::size_choice(entity, schema, sizing)?;
             if scope != 0 {
-                entity.sized_memo.set(SizedMemo { scope, choice, scale });
+                entity.sized_memo.set(SizedMemo {
+                    scope,
+                    choice,
+                    scale,
+                });
             }
             (choice, scale)
         };
@@ -805,7 +882,8 @@ impl Models {
         sizing: &Sizing,
     ) -> Result<(SizedChoice, f32)> {
         let number = |id: Option<u8>| {
-            id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
+            id.and_then(|id| entity.metadata_value(id))
+                .and_then(super::Metadata::int)
         };
         let boolean = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id))
@@ -834,7 +912,10 @@ impl Models {
             Sanitize::One => 1.,
         };
         let present = |dimensions: &Option<Dimensions>, missing: &str| {
-            dimensions.as_ref().map(|_| ()).ok_or_else(|| missing.to_string())
+            dimensions
+                .as_ref()
+                .map(|_| ())
+                .ok_or_else(|| missing.to_string())
         };
         if living && pose.sleeping {
             present(&sizing.sleeping, "source sleeping dimensions missing")?;
@@ -846,7 +927,10 @@ impl Models {
                 present(&sizing.marker, "source marker dimensions missing")?;
                 SizedChoice::Marker
             } else if flags & 1 != 0 {
-                present(&sizing.baby_dimensions, "source small armor stand dimensions missing")?;
+                present(
+                    &sizing.baby_dimensions,
+                    "source small armor stand dimensions missing",
+                )?;
                 SizedChoice::Baby
             } else {
                 SizedChoice::Schema
@@ -867,7 +951,9 @@ impl Models {
             present(&sizing.long_jumping, "source goat jump dimensions missing")?;
             Some(SizedChoice::LongJumping)
         } else if !sizing.digging_states.is_empty()
-            && sizing.digging_states.contains(&number(sizing.state).unwrap_or(0))
+            && sizing
+                .digging_states
+                .contains(&number(sizing.state).unwrap_or(0))
         {
             present(&sizing.digging, "source sniffer digging dimensions missing")?;
             Some(SizedChoice::Digging)
@@ -876,10 +962,24 @@ impl Models {
         };
         if let Some(choice) = special {
             let fixed = choice.of(schema, sizing).fixed;
-            return Ok((choice, if fixed { 1. } else { age_scale * attribute_scale }));
+            return Ok((
+                choice,
+                if fixed {
+                    1.
+                } else {
+                    age_scale * attribute_scale
+                },
+            ));
         }
         if sizing.baby_dimensions.is_some() {
-            return Ok((if baby { SizedChoice::Baby } else { SizedChoice::Schema }, attribute_scale));
+            return Ok((
+                if baby {
+                    SizedChoice::Baby
+                } else {
+                    SizedChoice::Schema
+                },
+                attribute_scale,
+            ));
         }
         let owner = &sizing.owner;
         if *owner == SizeOwner::ChestedHorse && !baby {
@@ -887,7 +987,11 @@ impl Models {
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
-        let age_scale = if *owner == SizeOwner::CubeMob { 1. } else { age_scale };
+        let age_scale = if *owner == SizeOwner::CubeMob {
+            1.
+        } else {
+            age_scale
+        };
         let family_scale = match owner {
             SizeOwner::Pufferfish => match number(sizing.puff).unwrap_or(0) {
                 0 => 0.5,
@@ -959,14 +1063,19 @@ enum SizedChoice {
 }
 impl SizedChoice {
     fn of<'a>(self, schema: &'a EntitySchema, sizing: &'a Sizing) -> &'a Dimensions {
-        let present = |dimensions: &'a Option<Dimensions>| dimensions.as_ref().expect("chosen dimensions are present");
+        let present = |dimensions: &'a Option<Dimensions>| {
+            dimensions.as_ref().expect("chosen dimensions are present")
+        };
         match self {
             Self::Schema => &schema.dimensions,
             Self::Sleeping => present(&sizing.sleeping),
             Self::Marker => present(&sizing.marker),
             Self::Baby => present(&sizing.baby_dimensions),
             Self::Avatar(pose) => present(
-                &sizing.poses[usize::from(pose)].as_ref().expect("chosen pose is known").avatar,
+                &sizing.poses[usize::from(pose)]
+                    .as_ref()
+                    .expect("chosen pose is known")
+                    .avatar,
             ),
             Self::Sitting => present(&sizing.sitting),
             Self::LongJumping => present(&sizing.long_jumping),
@@ -1021,8 +1130,11 @@ pub fn transform(pivot: Vec3, rotation: Vec3, scale: Vec3) -> Mat4 {
 pub(super) fn every_kind() -> (Content, Models) {
     let doc = Models::parse().unwrap();
     let mut content = Content::test_cube();
-    content.entity_names = doc.entities.iter()
-        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+    content.entity_names = doc
+        .entities
+        .iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone()))
+        .collect();
     let models = Models::load(&content).unwrap();
     (content, models)
 }
@@ -1036,23 +1148,32 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     use serde_json::json;
     let doc = Models::parse().unwrap();
     let mut content = Content::test_cube();
-    content.entity_names = doc.entities.iter()
-        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+    content.entity_names = doc
+        .entities
+        .iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone()))
+        .collect();
     let models = Models::load(&content).unwrap();
     let mut textures = std::collections::BTreeSet::new();
     fn collect(value: &Value, textures: &mut std::collections::BTreeSet<String>) {
         match value {
             Value::String(s) if s.contains("entity/") => {
                 let (namespace, path) = s.split_once(':').unwrap_or(("minecraft", s));
-                textures.insert(format!("{namespace}:{}",
-                    path.trim_start_matches("textures/").trim_end_matches(".png")));
+                textures.insert(format!(
+                    "{namespace}:{}",
+                    path.trim_start_matches("textures/")
+                        .trim_end_matches(".png")
+                ));
             }
             Value::Object(fields) => fields.values().for_each(|v| collect(v, textures)),
             Value::Array(values) => values.iter().for_each(|v| collect(v, textures)),
             _ => {}
         }
     }
-    collect(&serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(), &mut textures);
+    collect(
+        &serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(),
+        &mut textures,
+    );
     // VillagerProfessionLayer computes these constructor-default paths rather than storing
     // them in the facts. Keep fixture resource absence separate from selection coverage.
     for family in ["villager", "zombie_villager"] {
@@ -1062,15 +1183,26 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     }
     let textures: Vec<_> = textures.into_iter().collect();
     for (index, name) in textures.iter().enumerate() {
-        content.insert_test_texture(name.trim_end_matches(".png"), TextureRegion {
-            layer: index as u32 + 1, uv: [0., 0., 1., 1.], width: 64, height: 64,
-        });
+        content.insert_test_texture(
+            name.trim_end_matches(".png"),
+            TextureRegion {
+                layer: index as u32 + 1,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
     }
     let mut rows = Vec::new();
     let mut store = Store::default();
     for (registry, entries) in &models.builtin_variants {
-        store.registries.insert(registry.clone(), entries.iter()
-            .map(|(name, value)| (name.clone(), value.clone())).collect());
+        store.registries.insert(
+            registry.clone(),
+            entries
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        );
     }
     let mut kinds: Vec<_> = models.schemas.iter().collect();
     kinds.sort_unstable_by_key(|(kind, _)| *kind);
@@ -1082,7 +1214,14 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             spawn.0.extend_from_slice(&[0; 16]);
             spawn.var(schema.protocol_id as i32);
             spawn.0.extend_from_slice(&[0; 29]);
-            fixture.apply(clientbound::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            fixture
+                .apply(
+                    clientbound::ADD_ENTITY,
+                    &mut Reader::new(&spawn.0),
+                    &content,
+                    1,
+                )
+                .unwrap();
             fixture.slots.pop().unwrap()
         };
         let Some(family) = models.families.get(kind) else {
@@ -1102,38 +1241,67 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
         for baby in [false, true] {
             // Inherited age metadata is not sufficient: the local 26.3
             // ZombieNautilus.canBeABaby contract explicitly returns false.
-            if baby && (!schema.accessors.contains_key("DATA_BABY_ID")
-                || kind == "minecraft:zombie_nautilus") { continue; }
-            let base = if baby { family.baby_rig.as_ref().unwrap_or(&family.rig) } else { &family.rig };
+            if baby
+                && (!schema.accessors.contains_key("DATA_BABY_ID")
+                    || kind == "minecraft:zombie_nautilus")
+            {
+                continue;
+            }
+            let base = if baby {
+                family.baby_rig.as_ref().unwrap_or(&family.rig)
+            } else {
+                &family.rig
+            };
             let age = if baby { "baby" } else { "adult" };
             let default_entity = entity();
             let default_key = if kind == "minecraft:player"
-                && models.default_skin(Some(&default_entity.uuid)).unwrap().model == super::PlayerModel::Slim
+                && models
+                    .default_skin(Some(&default_entity.uuid))
+                    .unwrap()
+                    .model
+                    == super::PlayerModel::Slim
             {
                 "minecraft:player_slim#main".to_owned()
             } else if kind == "minecraft:pufferfish" {
                 "minecraft:pufferfish_small#main".to_owned()
-            } else { base.clone() };
+            } else {
+                base.clone()
+            };
             let mut cases = vec![("default".to_owned(), default_entity, default_key, None)];
             if kind == "minecraft:wither_skull" {
                 let mut dangerous = entity();
-                dangerous.metadata.insert(models.accessor(kind, "DATA_DANGEROUS").unwrap(), Metadata::Bool(true));
-                cases.push(("DATA_DANGEROUS/true".into(), dangerous, base.clone(),
-                    family.materials["WITHER_INVULNERABLE_LOCATION"].as_str().map(str::to_owned)));
-                cases[0].3 = family.materials["WITHER_LOCATION"].as_str().map(str::to_owned);
+                dangerous.metadata.insert(
+                    models.accessor(kind, "DATA_DANGEROUS").unwrap(),
+                    Metadata::Bool(true),
+                );
+                cases.push((
+                    "DATA_DANGEROUS/true".into(),
+                    dangerous,
+                    base.clone(),
+                    family.materials["WITHER_INVULNERABLE_LOCATION"]
+                        .as_str()
+                        .map(str::to_owned),
+                ));
+                cases[0].3 = family.materials["WITHER_LOCATION"]
+                    .as_str()
+                    .map(str::to_owned);
             }
             if let Some(registry) = presentation::variant_registry(kind)
                 && let Some(entries) = store.registries.get(registry)
             {
                 for (index, (name, data)) in entries.iter().enumerate() {
                     let mut e = entity();
-                    let accessor = models.accessor(kind, "DATA_VARIANT_ID")
-                        .or_else(|| models.accessor(kind, "DATA_VARIANT")).unwrap();
+                    let accessor = models
+                        .accessor(kind, "DATA_VARIANT_ID")
+                        .or_else(|| models.accessor(kind, "DATA_VARIANT"))
+                        .unwrap();
                     e.metadata.insert(accessor, Metadata::Int(index as i32));
                     let expected = match data["model"].as_str() {
-                        Some(model) if !matches!(model, "normal" | "temperate") =>
-                            format!("minecraft:{model}_{}{}#main",
-                                kind.trim_start_matches("minecraft:"), if baby { "_baby" } else { "" }),
+                        Some(model) if !matches!(model, "normal" | "temperate") => format!(
+                            "minecraft:{model}_{}{}#main",
+                            kind.trim_start_matches("minecraft:"),
+                            if baby { "_baby" } else { "" }
+                        ),
                         _ => base.clone(),
                     };
                     let expected_texture = if data["assets"].is_object() {
@@ -1146,23 +1314,37 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                         data["baby_asset_id"].as_str().or(data["asset_id"].as_str())
                     } else {
                         data["asset_id"].as_str()
-                    }.map(str::to_owned);
+                    }
+                    .map(str::to_owned);
                     cases.push((format!("received/{name}"), e, expected, expected_texture));
                 }
             }
             // Only these numeric selectors change the rig in `material`.
             let shape = match kind.as_str() {
-                "minecraft:pufferfish" => Some(("PUFF_STATE", vec![
-                    (0, "minecraft:pufferfish_small#main"),
-                    (1, "minecraft:pufferfish_medium#main"), (2, "minecraft:pufferfish#main")])),
-                "minecraft:tropical_fish" => Some(("DATA_ID_TYPE_VARIANT", vec![
-                    (0, base.as_str()), (1, "minecraft:tropical_fish_large#main")])),
+                "minecraft:pufferfish" => Some((
+                    "PUFF_STATE",
+                    vec![
+                        (0, "minecraft:pufferfish_small#main"),
+                        (1, "minecraft:pufferfish_medium#main"),
+                        (2, "minecraft:pufferfish#main"),
+                    ],
+                )),
+                "minecraft:tropical_fish" => Some((
+                    "DATA_ID_TYPE_VARIANT",
+                    vec![
+                        (0, base.as_str()),
+                        (1, "minecraft:tropical_fish_large#main"),
+                    ],
+                )),
                 _ => None,
             };
             if let Some((accessor, values)) = shape {
                 for (value, expected) in values {
                     let mut e = entity();
-                    e.metadata.insert(models.accessor(kind, accessor).unwrap(), Metadata::Int(value));
+                    e.metadata.insert(
+                        models.accessor(kind, accessor).unwrap(),
+                        Metadata::Int(value),
+                    );
                     cases.push((format!("{accessor}/{value}"), e, expected.to_owned(), None));
                 }
             }
@@ -1172,8 +1354,13 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                 }
                 let selected = presentation::material(&store, &models, &e, &content, 0);
                 let (key, selected_texture, error) = match selected {
-                    Ok(binding) => (Some(binding.rig),
-                        textures.get(binding.texture.layer.saturating_sub(1) as usize).cloned(), None),
+                    Ok(binding) => (
+                        Some(binding.rig),
+                        textures
+                            .get(binding.texture.layer.saturating_sub(1) as usize)
+                            .cloned(),
+                        None,
+                    ),
                     Err(error) => (None, None, Some(error)),
                 };
                 rows.push(json!({"id":format!("selection/{kind}/{age}/{case}"),
@@ -1186,49 +1373,61 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             }
             // Poses share a rig, but each remains a distinct visual/animation obligation.
             for (id, pose) in &models.poses {
-                rows.push(json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
+                rows.push(
+                    json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
                     "entity":kind,"age":age,"pose":pose,"metadata_value":id,
                     "required_rig":base,"selected_rig":null,
                     "selection_error":null,"scope":"rig demand only; animation/pixels unverified",
                     "vanilla_reachability":if baby && family.baby_rig.is_none() {
                         "unverified_inherited_baby_accessor"
-                    } else { "declared_family" }}));
+                    } else { "declared_family" }}),
+                );
             }
         }
         for (enum_name, values) in &schema.enum_ids {
             for (id, value) in values {
-                rows.push(json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
+                rows.push(
+                    json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
                     "entity":kind,"enum":enum_name,"metadata_value":id,"value":value,
                     "required_rig":family.rig,"selected_rig":null,
-                    "scope":"facts inventory; received enum presentation unverified"}));
+                    "scope":"facts inventory; received enum presentation unverified"}),
+                );
             }
         }
         for texture in &family.textures {
-            rows.push(json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
+            rows.push(
+                json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
                 "entity":kind,"texture":texture,"required_rig":family.rig,"selected_rig":null,
-                "scope":"declared material inventory, not evidence that a state selects it"}));
+                "scope":"declared material inventory, not evidence that a state selects it"}),
+            );
         }
     }
     for (kind, armor) in &models.armor_models {
         for (age, slots) in [("adult", &armor.adult), ("baby", &armor.baby)] {
             for (slot, key) in slots {
-                rows.push(json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
+                rows.push(
+                    json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
                     "entity":kind,"age":age,"slot":slot,"required_rig":key,"selected_rig":null,
-                    "scope":"facts armor key; reachability and equipped pixels unverified"}));
+                    "scope":"facts armor key; reachability and equipped pixels unverified"}),
+                );
             }
         }
     }
     for (index, skin) in models.default_skins.iter().enumerate() {
-        rows.push(json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
+        rows.push(
+            json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
             "required_rig":if skin.model == super::PlayerModel::Slim {
                 "minecraft:player_slim#main"
             } else { "minecraft:player#main" }, "selected_rig":null,
-            "scope":"default skin layout demand; profile publication and pixels unverified"}));
+            "scope":"default skin layout demand; profile publication and pixels unverified"}),
+        );
     }
     for (name, data) in &models.builtin_variants["minecraft:painting_variant"] {
-        rows.push(json!({"id":format!("painting/{name}"),"class":"painting-variant",
+        rows.push(
+            json!({"id":format!("painting/{name}"),"class":"painting-variant",
             "required_rig":null,"selected_rig":null,"variant":data,
-            "scope":"resource-driven painting segments, not an authored entity rig"}));
+            "scope":"resource-driven painting segments, not an authored entity rig"}),
+        );
     }
     rows
 }
@@ -1239,71 +1438,134 @@ mod tests {
 
     /// Textures of the received-render fixture; each has its own atlas layer.
     const FIXTURE_TEXTURES: [&str; 8] = [
-        "test:painting/canvas", "minecraft:painting/back", "minecraft:test/frame",
-        "minecraft:entity/minecart/minecart", "minecraft:entity/cushion/white_cushion",
-        "minecraft:entity/cushion/lime_cushion", "minecraft:entity/boat/poplar",
+        "test:painting/canvas",
+        "minecraft:painting/back",
+        "minecraft:test/frame",
+        "minecraft:entity/minecart/minecart",
+        "minecraft:entity/cushion/white_cushion",
+        "minecraft:entity/cushion/lime_cushion",
+        "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
     ];
     fn fixture_layer(texture: &str) -> u32 {
-        7 + FIXTURE_TEXTURES.iter().position(|name| *name == texture).unwrap() as u32
+        7 + FIXTURE_TEXTURES
+            .iter()
+            .position(|name| *name == texture)
+            .unwrap() as u32
     }
 
-    fn render_received_fixture(kind: &str, direction: i32, metadata: &[u8]) -> crate::api::DynamicGeometry {
+    fn render_received_fixture(
+        kind: &str,
+        direction: i32,
+        metadata: &[u8],
+    ) -> crate::api::DynamicGeometry {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let variant = serde_json::json!({"width":1,"height":1,"asset_id":"test:canvas"});
-        content.set_registries(BTreeMap::from([("minecraft:painting_variant".into(),
-            vec![("test:canvas".into(), variant.clone())])]));
+        content.set_registries(BTreeMap::from([(
+            "minecraft:painting_variant".into(),
+            vec![("test:canvas".into(), variant.clone())],
+        )]));
         let region = crate::protocol::content::TextureRegion {
-            layer: 7, uv: [0., 0., 1., 1.], width: 16, height: 16,
+            layer: 7,
+            uv: [0., 0., 1., 1.],
+            width: 16,
+            height: 16,
         };
         for texture in FIXTURE_TEXTURES {
-            content.insert_test_texture(texture, crate::protocol::content::TextureRegion {
-                layer: fixture_layer(texture), ..region
-            });
+            content.insert_test_texture(
+                texture,
+                crate::protocol::content::TextureRegion {
+                    layer: fixture_layer(texture),
+                    ..region
+                },
+            );
         }
         // Owned box fixture, not copied vanilla geometry.
-        let faces: serde_json::Map<String, Value> = ["north", "south", "east", "west", "up", "down"]
-            .into_iter().map(|face| (face.into(), serde_json::json!({"texture":"#frame"}))).collect();
+        let faces: serde_json::Map<String, Value> =
+            ["north", "south", "east", "west", "up", "down"]
+                .into_iter()
+                .map(|face| (face.into(), serde_json::json!({"texture":"#frame"})))
+                .collect();
         let frame = serde_json::to_vec(&serde_json::json!({
             "textures":{"frame":"test/frame"},
             "elements":[{"from":[2,2,14],"to":[14,14,16],"faces":faces}]
-        })).unwrap();
+        }))
+        .unwrap();
         for name in ["item_frame", "glow_item_frame"] {
-            content.insert_test_resource(&format!("assets/minecraft/models/block/{name}.json"), &frame);
+            content.insert_test_resource(
+                &format!("assets/minecraft/models/block/{name}.json"),
+                &frame,
+            );
         }
         content.item_names.insert(1, "test:token".into());
         content.insert_test_item_components(1, BTreeMap::new());
         content.insert_test_resource("assets/test/models/token.json", &frame);
-        content.insert_test_resource("assets/test/items/token.json",
-            br#"{"model":{"type":"minecraft:model","model":"test:token"}}"#);
+        content.insert_test_resource(
+            "assets/test/items/token.json",
+            br#"{"model":{"type":"minecraft:model","model":"test:token"}}"#,
+        );
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
-        store.registries.insert("minecraft:painting_variant".into(),
-            vec![("test:canvas".into(), variant)]);
+        store.registries.insert(
+            "minecraft:painting_variant".into(),
+            vec![("test:canvas".into(), variant)],
+        );
         store.activate_models(models);
         let mut spawn = Writer::default();
         spawn.var(1);
-        spawn.0.extend_from_slice(&[0;16]);
+        spawn.0.extend_from_slice(&[0; 16]);
         spawn.var(doc.entities[kind].protocol_id as i32);
         for coordinate in [4_f64, 4., 3.] {
             spawn.0.extend_from_slice(&coordinate.to_be_bytes());
         }
-        spawn.0.extend_from_slice(&[0;4]);
+        spawn.0.extend_from_slice(&[0; 4]);
         spawn.var(direction);
-        store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        store
+            .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+            .unwrap();
         if !metadata.is_empty() {
-            store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1).unwrap();
+            store
+                .apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1)
+                .unwrap();
         }
         let mut out = crate::api::DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [4.,4.,3.], camera: [4.,5.,0.], camera_rotation: [0.;2], radius: 32., tick: 1, partial: 0., game_time: 0, clock_environment: None, maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|tint, _| match tint { crate::protocol::models::TintKind::None => Ok([1.; 3]), crate::protocol::models::TintKind::Constant(color) => Ok(color), _ => Err("test biome tint not installed".into()) }, light: &|point| {
-            // A painting's segment cells are available, but not its generic eye sample.
-            Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
-                .then_some([15.;2]))
-        }, bed_direction: &|_| None }, &mut out).unwrap();
+        let stats = store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    content: &content,
+                    origin: [4., 4., 3.],
+                    camera: [4., 5., 0.],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 1,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|tint, _| match tint {
+                        crate::protocol::models::TintKind::None => Ok([1.; 3]),
+                        crate::protocol::models::TintKind::Constant(color) => Ok(color),
+                        _ => Err("test biome tint not installed".into()),
+                    },
+                    light: &|point| {
+                        // A painting's segment cells are available, but not its generic eye sample.
+                        Ok(
+                            (kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
+                                .then_some([15.; 2]),
+                        )
+                    },
+                    bed_direction: &|_| None,
+                },
+                &mut out,
+            )
+            .unwrap();
         assert_eq!(stats.submitted, 1, "{kind}: {:?}", stats.unrendered);
         assert!(!out.vertices.is_empty(), "{kind}");
         out
@@ -1318,8 +1580,11 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1334,29 +1599,57 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap();
         };
         spawn(&mut store, 1, "minecraft:zombie", 0.);
         spawn(&mut store, 2, "minecraft:zombie", 1000.);
         assert_eq!(store.query_padding(), 4.);
-        let near = crate::player::Bounds { min: [-1., 60., -1.], max: [1., 70., 1.] };
-        let ids: Vec<_> = store.candidates(near).map(|e| e.handle.network_id).collect();
+        let near = crate::player::Bounds {
+            min: [-1., 60., -1.],
+            max: [1., 70., 1.],
+        };
+        let ids: Vec<_> = store
+            .candidates(near)
+            .map(|e| e.handle.network_id)
+            .collect();
         assert_eq!(ids, [1]);
         // A horse in the next spatial cell, scaled 16 times: its body reaches `beside`.
         spawn(&mut store, 3, "minecraft:horse", 16.5);
-        let beside = crate::player::Bounds { min: [8., 60., -1.], max: [10., 70., 1.] };
-        let found = |store: &super::super::Store| store.candidates(beside).any(|e| e.handle.network_id == 3);
+        let beside = crate::player::Bounds {
+            min: [8., 60., -1.],
+            max: [10., 70., 1.],
+        };
+        let found = |store: &super::super::Store| {
+            store.candidates(beside).any(|e| e.handle.network_id == 3)
+        };
         assert!(!found(&store));
-        let scale = *models.attribute_ids.iter().find(|(_, name)| name.as_str() == "minecraft:scale").unwrap().0;
+        let scale = *models
+            .attribute_ids
+            .iter()
+            .find(|(_, name)| name.as_str() == "minecraft:scale")
+            .unwrap()
+            .0;
         let mut attributes = Writer::default();
         attributes.var(3);
         attributes.var(1);
         attributes.var(scale as i32);
         attributes.0.extend_from_slice(&16f64.to_be_bytes());
         attributes.var(0);
-        store.apply(cb::UPDATE_ATTRIBUTES, &mut Reader::new(&attributes.0), &content, 1).unwrap();
+        store
+            .apply(
+                cb::UPDATE_ATTRIBUTES,
+                &mut Reader::new(&attributes.0),
+                &content,
+                1,
+            )
+            .unwrap();
         let horse = store.get(3).unwrap().handle;
-        assert!(store.bounds(horse, 1, 0.).unwrap().intersects(beside), "the grown horse reaches it");
+        assert!(
+            store.bounds(horse, 1, 0.).unwrap().intersects(beside),
+            "the grown horse reaches it"
+        );
         assert!(found(&store), "padding {}", store.query_padding());
         store.activate_models(std::sync::Arc::clone(&models));
         assert!(found(&store), "activation keeps the grown horse's padding");
@@ -1377,8 +1670,11 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1395,14 +1691,23 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap();
             let e = store.get(id).unwrap();
             let position = e.transform.position;
-            let at = |distance: f64, scale| within(&models, e, position, distance * distance, scale);
+            let at =
+                |distance: f64, scale| within(&models, e, position, distance * distance, scale);
             for (scaling, factor) in [(DEFAULT_SCALING, 1.), (2., 2.)] {
                 let scale = view_scale(8, scaling);
-                assert!(at(reach * factor - 0.01, scale), "{kind} at {scaling} inside");
-                assert!(!at(reach * factor + 0.01, scale), "{kind} at {scaling} outside");
+                assert!(
+                    at(reach * factor - 0.01, scale),
+                    "{kind} at {scaling} inside"
+                );
+                assert!(
+                    !at(reach * factor + 0.01, scale),
+                    "{kind} at {scaling} outside"
+                );
             }
         }
     }
@@ -1410,7 +1715,11 @@ mod tests {
     #[test]
     fn entity_render_rc1_empty_item_frame_has_body_at_packet_anchor() {
         let out = render_received_fixture("minecraft:item_frame", 2, &[]);
-        assert!(out.vertices.iter().all(|v| (0. ..=1.).contains(&v.position[2])));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| (0. ..=1.).contains(&v.position[2]))
+        );
         assert!(out.vertices.iter().any(|v| v.position[2] >= 0.9));
     }
 
@@ -1422,25 +1731,42 @@ mod tests {
     #[test]
     fn entity_render_rc1_painting_emits_mesh_from_received_spawn() {
         let out = render_received_fixture("minecraft:painting", 2, &[]);
-        assert!(out.vertices.iter().all(|v| (0.9374..=1.0001).contains(&v.position[2])));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| (0.9374..=1.0001).contains(&v.position[2]))
+        );
     }
 
     #[test]
     fn entity_render_rc1_minecart_mesh_is_above_rail_not_buried() {
         let out = render_received_fixture("minecraft:minecart", 0, &[]);
-        let bottom = out.vertices.iter().map(|v| v.position[1]).fold(f32::INFINITY, f32::min);
-        let top = out.vertices.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
-        assert!(bottom >= -0.001, "minecart bottom below received rail position: {bottom}");
+        let bottom = out
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::INFINITY, f32::min);
+        let top = out
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            bottom >= -0.001,
+            "minecart bottom below received rail position: {bottom}"
+        );
         assert!(top > 0.5, "minecart top buried: {top}");
     }
-
 
     #[test]
     fn entity_render_263_poplar_boats_use_boat_hulls_and_poplar_textures() {
         let boat = render_received_fixture("minecraft:poplar_boat", 0, &[]);
         let chest_boat = render_received_fixture("minecraft:poplar_chest_boat", 0, &[]);
         let count = |out: &crate::api::DynamicGeometry, texture: &str| {
-            out.vertices.iter().filter(|v| v.texture_layer == fixture_layer(texture)).count()
+            out.vertices
+                .iter()
+                .filter(|v| v.texture_layer == fixture_layer(texture))
+                .count()
         };
         let hull = count(&boat, "minecraft:entity/boat/poplar");
         assert!(hull > 0);
@@ -1452,14 +1778,26 @@ mod tests {
 
     #[test]
     fn entity_render_rc1_frame_metadata_direction_overrides_spawn() {
-        let out = render_received_fixture("minecraft:item_frame", 2, &[1,8,12,5,255]);
-        assert!(out.vertices.iter().all(|v| v.position[0] >= -0.0001 && v.position[0] <= 0.1251));
+        let out = render_received_fixture("minecraft:item_frame", 2, &[1, 8, 12, 5, 255]);
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| v.position[0] >= -0.0001 && v.position[0] <= 0.1251)
+        );
     }
 
     #[test]
     fn entity_render_rc1_frame_emits_received_held_item_too() {
-        let out = render_received_fixture("minecraft:item_frame", 2, &[1,9,7,1,1,0,0,10,1,2,255]);
-        assert_eq!(out.vertices.len(), 48, "owned frame box plus owned held-item box");
+        let out = render_received_fixture(
+            "minecraft:item_frame",
+            2,
+            &[1, 9, 7, 1, 1, 0, 0, 10, 1, 2, 255],
+        );
+        assert_eq!(
+            out.vertices.len(),
+            48,
+            "owned frame box plus owned held-item box"
+        );
     }
 
     #[test]
@@ -1467,9 +1805,14 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
-        content.particle_names.insert(123, "minecraft:raid_omen".into());
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        content
+            .particle_names
+            .insert(123, "minecraft:raid_omen".into());
         let models = std::sync::Arc::new(Models::load_state(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(models);
@@ -1478,18 +1821,29 @@ mod tests {
         spawn.0.extend_from_slice(&[0; 16]);
         spawn.var(120); // 26.3 slime
         spawn.0.extend_from_slice(&[0; 29]);
-        assert!(store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap());
+        assert!(
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap()
+        );
         // Entity 1, particle-list accessor 10, serializer 17, one particle 123,
         // followed by a byte metadata value to verify the particle consumes no options.
         let packet = [1, 10, 17, 1, 123, 8, 0, 42, 255];
         let mut reader = Reader::new(&packet);
-        assert!(store.apply(cb::SET_ENTITY_DATA, &mut reader, &content, 2).unwrap());
+        assert!(
+            store
+                .apply(cb::SET_ENTITY_DATA, &mut reader, &content, 2)
+                .unwrap()
+        );
         reader.done().unwrap();
         match &store.get(1).unwrap().metadata[&10] {
             super::super::metadata::Metadata::Particles(particles) => {
-                assert_eq!(particles, &[serde_json::json!({
-                    "type_id": 123, "type": "minecraft:raid_omen", "data": null
-                })]);
+                assert_eq!(
+                    particles,
+                    &[serde_json::json!({
+                        "type_id": 123, "type": "minecraft:raid_omen", "data": null
+                    })]
+                );
             }
             other => panic!("unexpected metadata: {other:?}"),
         }
@@ -1502,18 +1856,32 @@ mod tests {
         // The embedded facts are the sorted 26.3 SimpleParticleType registry report.
         let doc = Models::parse().unwrap();
         assert_eq!(doc.simple_particles.len(), 106);
-        assert!(doc.simple_particles.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            doc.simple_particles
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
         for name in [
-            "minecraft:raid_omen", "minecraft:sulfur_bubbles", "minecraft:noxious_gas",
-            "minecraft:noxious_gas_cloud", "minecraft:red_poplar_leaves",
-            "minecraft:orange_poplar_leaves", "minecraft:yellow_poplar_leaves",
+            "minecraft:raid_omen",
+            "minecraft:sulfur_bubbles",
+            "minecraft:noxious_gas",
+            "minecraft:noxious_gas_cloud",
+            "minecraft:red_poplar_leaves",
+            "minecraft:orange_poplar_leaves",
+            "minecraft:yellow_poplar_leaves",
             "minecraft:sulfur_cube_goo",
         ] {
-            assert!(doc.simple_particles.iter().any(|particle| particle == name), "{name}");
+            assert!(
+                doc.simple_particles.iter().any(|particle| particle == name),
+                "{name}"
+            );
         }
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = Models::load_state(&content).unwrap();
         for (id, name) in doc.simple_particles.iter().enumerate() {
             content.particle_names.insert(id as u32, name.clone());
@@ -1527,9 +1895,13 @@ mod tests {
             reader.done().unwrap();
             match &values[&8] {
                 super::super::metadata::Metadata::Particles(particles) => {
-                    assert_eq!(particles, &[serde_json::json!({
-                        "type_id": id, "type": name, "data": null
-                    })], "{name}");
+                    assert_eq!(
+                        particles,
+                        &[serde_json::json!({
+                            "type_id": id, "type": name, "data": null
+                        })],
+                        "{name}"
+                    );
                 }
                 other => panic!("{name}: unexpected metadata: {other:?}"),
             }
@@ -1566,10 +1938,16 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         assert_eq!(doc.game_version, "26.3");
-        assert_eq!(doc.entities["minecraft:slime"].accessors["ID_SIZE"], [18, 1]);
+        assert_eq!(
+            doc.entities["minecraft:slime"].accessors["ID_SIZE"],
+            [18, 1]
+        );
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         content.item_names.insert(0, "test:body".into());
         content.insert_test_item_components(0, BTreeMap::new());
         let models = std::sync::Arc::new(Models::load_state(&content).unwrap());
@@ -1580,9 +1958,22 @@ mod tests {
         spawn.0.extend_from_slice(&[0; 16]); // UUID
         spawn.var(120); // reports/registries.json: minecraft:slime
         spawn.0.extend_from_slice(&[0; 29]); // xyz, zero LP Vec3, rotations, spawn data
-        assert!(store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap());
+        assert!(
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap()
+        );
         // entity=1, accessor=18, INT serializer=1, size=4, end=255.
-        assert!(store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(&[1, 18, 1, 4, 255]), &content, 2).unwrap());
+        assert!(
+            store
+                .apply(
+                    cb::SET_ENTITY_DATA,
+                    &mut Reader::new(&[1, 18, 1, 4, 255]),
+                    &content,
+                    2
+                )
+                .unwrap()
+        );
         assert_eq!(store.get(1).unwrap().metadata[&18].int(), Some(4));
         assert_eq!(models.dimensions(store.get(1).unwrap()).unwrap().1, 4.);
         // 26.3 SulfurCube's vertical walk animation is hasBodyItem(), not the
@@ -1600,16 +1991,21 @@ mod tests {
     fn regression_263_baby_cube_mob_dimensions_scale_by_size_not_age() {
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = Models::load_state(&content).unwrap();
         let (_, mut cube) = super::super::animation_tests::fixture();
         cube.type_name = "minecraft:sulfur_cube".into();
         assert_eq!(models.accessor(&cube.type_name, "DATA_BABY_ID"), Some(16));
         assert_eq!(models.accessor(&cube.type_name, "ID_SIZE"), Some(18));
         for baby in [false, true] {
-            cube.metadata.insert(16, super::super::metadata::Metadata::Bool(baby));
-            cube.metadata.insert(18, super::super::metadata::Metadata::Int(2));
+            cube.metadata
+                .insert(16, super::super::metadata::Metadata::Bool(baby));
+            cube.metadata
+                .insert(18, super::super::metadata::Metadata::Int(2));
             let (dimensions, scale) = models.dimensions(&cube).unwrap();
             assert_eq!((dimensions.width, dimensions.height), (0.49, 0.49));
             assert_eq!(scale, 2., "baby={baby}");
@@ -1621,8 +2017,11 @@ mod tests {
         use super::super::metadata::Metadata;
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let mut models = Models::load_state(&content).unwrap();
         let entity = |kind: &str| {
             let (_, mut e) = super::super::animation_tests::fixture();
@@ -1636,28 +2035,56 @@ mod tests {
         };
         let mut husk = entity("minecraft:husk");
         husk.metadata.insert(16, Metadata::Bool(true));
-        assert_eq!(size(&models, &husk), (0.49, 0.98, 1.), "a baby husk takes BABY_DIMENSIONS");
+        assert_eq!(
+            size(&models, &husk),
+            (0.49, 0.98, 1.),
+            "a baby husk takes BABY_DIMENSIONS"
+        );
         husk.metadata.insert(16, Metadata::Bool(false));
         assert_eq!(size(&models, &husk), (0.6, 1.95, 1.));
         husk.metadata.insert(6, Metadata::Pose(2));
-        assert_eq!(size(&models, &husk), (0.2, 0.2, 1.), "a sleeping husk takes SLEEPING_DIMENSIONS");
+        assert_eq!(
+            size(&models, &husk),
+            (0.2, 0.2, 1.),
+            "a sleeping husk takes SLEEPING_DIMENSIONS"
+        );
         // A changed schema forgets what was resolved from it: the next call reads the new
         // constant, not the one resolved on the first call.
-        let DimensionConstant::Dimensions(sleeping) = models.schemas.get_mut("minecraft:husk").unwrap()
-            .dimension_constants.get_mut("SLEEPING_DIMENSIONS").unwrap() else { panic!("dimensions") };
+        let DimensionConstant::Dimensions(sleeping) = models
+            .schemas
+            .get_mut("minecraft:husk")
+            .unwrap()
+            .dimension_constants
+            .get_mut("SLEEPING_DIMENSIONS")
+            .unwrap()
+        else {
+            panic!("dimensions")
+        };
         sleeping.width = 0.3;
         assert_eq!(size(&models, &husk), (0.3, 0.2, 1.));
         husk.metadata.insert(6, Metadata::Pose(0));
         let mut stand = entity("minecraft:armor_stand");
         stand.metadata.insert(15, Metadata::Byte(1));
-        assert_eq!(size(&models, &stand), (0.25, 0.9875, 1.), "a small armor stand");
+        assert_eq!(
+            size(&models, &stand),
+            (0.25, 0.9875, 1.),
+            "a small armor stand"
+        );
         stand.metadata.insert(15, Metadata::Byte(16));
         assert_eq!(size(&models, &stand), (0., 0., 1.), "a marker armor stand");
         let mut player = entity("minecraft:player");
         player.metadata.insert(6, Metadata::Pose(5));
-        assert_eq!(size(&models, &player), (0.6, 1.5, 1.), "a crouching avatar takes its POSES entry");
+        assert_eq!(
+            size(&models, &player),
+            (0.6, 1.5, 1.),
+            "a crouching avatar takes its POSES entry"
+        );
         player.metadata.insert(6, Metadata::Pose(8));
-        assert_eq!(size(&models, &player), (0.6, 1.8, 1.), "an avatar pose without an entry stands");
+        assert_eq!(
+            size(&models, &player),
+            (0.6, 1.8, 1.),
+            "an avatar pose without an entry stands"
+        );
         // Box rules: a wind charge's box is 0.15 below its position, a husk's stands on it.
         let charge = entity("minecraft:wind_charge");
         let b = super::super::physical::bounds_at(&models, &charge, [0., 10., 0.]).unwrap();
@@ -1675,10 +2102,34 @@ mod tests {
             e.type_name = kind.into();
             models.ids(&e).seat
         };
-        assert_eq!(seat("minecraft:oak_boat"), Seat::Boat { chest: false, raft: false });
-        assert_eq!(seat("minecraft:oak_chest_boat"), Seat::Boat { chest: true, raft: false });
-        assert_eq!(seat("minecraft:bamboo_raft"), Seat::Boat { chest: false, raft: true });
-        assert_eq!(seat("minecraft:bamboo_chest_raft"), Seat::Boat { chest: true, raft: true });
+        assert_eq!(
+            seat("minecraft:oak_boat"),
+            Seat::Boat {
+                chest: false,
+                raft: false
+            }
+        );
+        assert_eq!(
+            seat("minecraft:oak_chest_boat"),
+            Seat::Boat {
+                chest: true,
+                raft: false
+            }
+        );
+        assert_eq!(
+            seat("minecraft:bamboo_raft"),
+            Seat::Boat {
+                chest: false,
+                raft: true
+            }
+        );
+        assert_eq!(
+            seat("minecraft:bamboo_chest_raft"),
+            Seat::Boat {
+                chest: true,
+                raft: true
+            }
+        );
         assert_eq!(seat("minecraft:horse"), Seat::Horse);
         assert_eq!(seat("minecraft:skeleton_horse"), Seat::Horse);
         assert_eq!(seat("minecraft:camel"), Seat::Camel);
@@ -1695,12 +2146,22 @@ mod tests {
     fn regression_263_cushion_and_painting_metadata() {
         use crate::protocol::{Reader, Writer};
         let doc = Models::parse().unwrap();
-        assert_eq!(doc.entities["minecraft:cushion"].accessors["DATA_COLOR"], [8, 43]);
+        assert_eq!(
+            doc.entities["minecraft:cushion"].accessors["DATA_COLOR"],
+            [8, 43]
+        );
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
-        content.set_registries(BTreeMap::from([("minecraft:painting_variant".into(),
-            (0..3).map(|id| (format!("test:painting_{id}"), serde_json::json!({}))).collect())]));
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        content.set_registries(BTreeMap::from([(
+            "minecraft:painting_variant".into(),
+            (0..3)
+                .map(|id| (format!("test:painting_{id}"), serde_json::json!({})))
+                .collect(),
+        )]));
         let models = Models::load_state(&content).unwrap();
         let mut reader = Reader::new(&[8, 43, 14, 255]);
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
@@ -1711,8 +2172,15 @@ mod tests {
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
         reader.done().unwrap();
         assert_eq!(values[&9].serializer_id(), 34);
-        assert_eq!(values[&9].int(), Some(0), "holder reference 1 names registry entry 0");
-        let last = content.registry_entries("minecraft:painting_variant").unwrap().len() as i32;
+        assert_eq!(
+            values[&9].int(),
+            Some(0),
+            "holder reference 1 names registry entry 0"
+        );
+        let last = content
+            .registry_entries("minecraft:painting_variant")
+            .unwrap()
+            .len() as i32;
         let mut packet = Writer::default();
         packet.0.extend_from_slice(&[9, 34]);
         packet.var(last);
@@ -1724,13 +2192,19 @@ mod tests {
         let mut packet = Writer::default();
         packet.0.extend_from_slice(&[9, 34, 0, 2, 3]); // inline holder, width, height
         packet.string("test:painting");
-        packet.0.extend_from_slice(&[1, 8, 0, 1, b'T', 1, 8, 0, 1, b'A', 10, 0, 5, 255]);
+        packet
+            .0
+            .extend_from_slice(&[1, 8, 0, 1, b'T', 1, 8, 0, 1, b'A', 10, 0, 5, 255]);
         let mut reader = Reader::new(&packet.0);
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
         reader.done().unwrap();
         assert_eq!(values[&9].serializer_id(), 34);
         assert_eq!(values[&9].int(), None);
-        assert_eq!(values[&10].int(), Some(5), "inline holder consumes exactly its fields");
+        assert_eq!(
+            values[&10].int(),
+            Some(5),
+            "inline holder consumes exactly its fields"
+        );
         let value = serde_json::to_value(&values[&9]).unwrap();
         assert_eq!(value["value"]["width"], 2);
         assert_eq!(value["value"]["height"], 3);
@@ -1743,8 +2217,11 @@ mod tests {
     fn entity_schema_rejects_same_names_at_stale_protocol_ids() {
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id + 1, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id + 1, name.clone()))
+            .collect();
         assert!(Models::check_registry(&doc, &content).is_err());
     }
 
@@ -1787,8 +2264,11 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1802,30 +2282,44 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap();
         }
         let size = |d: &Dimensions| (d.width, d.height, d.eye_height);
-        let constant = |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
-            Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
-            _ => None,
-        };
-        let Some(DimensionConstant::Poses(table)) =
-            doc.entities["minecraft:mannequin"].dimension_constants.get("POSES")
+        let constant =
+            |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
+                Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
+                _ => None,
+            };
+        let Some(DimensionConstant::Poses(table)) = doc.entities["minecraft:mannequin"]
+            .dimension_constants
+            .get("POSES")
         else {
             panic!("mannequin POSES table");
         };
         let sized_in = |store: &mut super::super::Store, id: i32, pose: u8| {
-            let index = models.entity_accessor(store.get(id).unwrap(), "DATA_POSE").unwrap();
+            let index = models
+                .entity_accessor(store.get(id).unwrap(), "DATA_POSE")
+                .unwrap();
             let entity = store.get_mut(id).unwrap();
-            entity.metadata.insert(index, super::super::Metadata::Pose(pose));
-            models.dimensions(store.get(id).unwrap()).map(|(d, _)| size(d)).ok()
+            entity
+                .metadata
+                .insert(index, super::super::Metadata::Pose(pose));
+            models
+                .dimensions(store.get(id).unwrap())
+                .map(|(d, _)| size(d))
+                .ok()
         };
         let mut checked = 0;
         for (&pose, name) in &models.poses {
             let avatar = if name == "SLEEPING" {
                 constant("minecraft:mannequin", "SLEEPING_DIMENSIONS")
             } else {
-                table.get(name).map(size).or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
+                table
+                    .get(name)
+                    .map(size)
+                    .or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
             };
             assert_eq!(sized_in(&mut store, 1, pose), avatar, "mannequin {name}");
             let camel = match name.as_str() {
@@ -1852,8 +2346,11 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1866,13 +2363,30 @@ mod tests {
         }
         spawn.0.extend_from_slice(&[0; 4]);
         spawn.var(0);
-        store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
-        let pose_of = |name: &str| *models.poses.iter().find(|(_, pose)| pose.as_str() == name).unwrap().0;
-        let index = models.entity_accessor(store.get(1).unwrap(), "DATA_POSE").unwrap();
-        let set_pose = |store: &mut super::super::Store, name: &str| {
-            store.get_mut(1).unwrap().metadata.insert(index, super::super::Metadata::Pose(pose_of(name)));
+        store
+            .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+            .unwrap();
+        let pose_of = |name: &str| {
+            *models
+                .poses
+                .iter()
+                .find(|(_, pose)| pose.as_str() == name)
+                .unwrap()
+                .0
         };
-        let height = |store: &super::super::Store| models.dimensions(store.get(1).unwrap()).unwrap().0.height;
+        let index = models
+            .entity_accessor(store.get(1).unwrap(), "DATA_POSE")
+            .unwrap();
+        let set_pose = |store: &mut super::super::Store, name: &str| {
+            store
+                .get_mut(1)
+                .unwrap()
+                .metadata
+                .insert(index, super::super::Metadata::Pose(pose_of(name)));
+        };
+        let height = |store: &super::super::Store| {
+            models.dimensions(store.get(1).unwrap()).unwrap().0.height
+        };
         set_pose(&mut store, "STANDING");
         let standing = {
             let _frame = SizedScope::enter();
@@ -1885,7 +2399,10 @@ mod tests {
             let _frame = SizedScope::enter();
             height(&store)
         };
-        assert!(crouching < standing, "the next scope sees the received pose: {crouching} vs {standing}");
+        assert!(
+            crouching < standing,
+            "the next scope sees the received pose: {crouching} vs {standing}"
+        );
         set_pose(&mut store, "STANDING");
         assert_eq!(height(&store), standing, "outside a scope");
     }
