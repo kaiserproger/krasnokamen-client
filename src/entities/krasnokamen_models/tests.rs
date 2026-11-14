@@ -1381,15 +1381,6 @@ fn cow_and_mooshroom_front_legs_match_vanilla_quadruped() {
 }
 
 #[test]
-fn bed_has_no_legacy_entity_rig_with_mirrored_leg() {
-    // Updated: the merged `special_item` bed arm renders bed_head/bed_foot from these
-    // entity rigs again (26.3 item path), so they ship; the mirrored leg_right is fixed
-    // in the asset itself.
-    assert!(authored("bed_head").is_some());
-    assert!(authored("bed_foot").is_some());
-}
-
-#[test]
 fn baby_leggings_stay_visible_above_boots_in_every_family() {
     for kind in [
         "drowned",
@@ -1513,12 +1504,15 @@ fn bell_wall_texels_follow_the_clean_control_orientation() {
 
 #[test]
 fn obsolete_bed_entity_texture_rigs_are_not_shipped_in_26_3() {
-    // Updated: superseded by the merged bed special-item arm — bed_head/bed_foot rigs
-    // ship again in 26.3 for the bed item's special renderer.
+    // 26.3 draws beds from block models (`block/red_bed_head`, `block/red_bed_foot`,
+    // per-face `block/red_bed_*` textures) and the bed item is a composite of those;
+    // the client jar has no `textures/entity/bed/` at all. The old entity rigs
+    // declared `entity/bed/red.png` and therefore cannot ship.
     assert!(
-        EMBEDDED
+        !EMBEDDED
             .iter()
-            .any(|(name, _)| matches!(*name, "bed_head.json" | "bed_foot.json"))
+            .any(|(name, _)| matches!(*name, "bed_head.json" | "bed_foot.json")),
+        "a 26.3 pack has no entity bed texture for these rigs"
     );
 }
 
