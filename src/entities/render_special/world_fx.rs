@@ -355,10 +355,6 @@ pub(super) fn append_leash(
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    // NEGATIVE CONTROL (RCBNegLeash): pre-e8fe40c2 behavior, no rope producer.
-    if true {
-        return Ok(Handled::Unhandled);
-    }
     let Some(holder) = leash_holder(entity, store) else {
         return Ok(Handled::Unhandled);
     };
