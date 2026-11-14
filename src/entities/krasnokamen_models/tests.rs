@@ -376,16 +376,37 @@ fn parser_rejects_malformed_models() {
     );
 }
 
+/// Textures of a real client resource pack, or `None` when the run opted out.
+///
+/// A missing pack is a failure, not a skip. These checks used to skip silently,
+/// which hid a stale 26.1.2 pack in `dist/resources`: 26.3-only assets
+/// (`models/block/template_sign_*`, `textures/entity/cushion/*`,
+/// `textures/entity/sulfur_cube/*`) were missing and the shipped bed rigs sampled
+/// an `entity/bed/red.png` that 26.3 does not have. Build a pack with
+/// `python3 tools/resources.py build --jar <26.3 client.jar> --models`, or set
+/// `KRASNOKAMEN_CLIENT_NO_PACK=1` where no client jar exists (CI).
 fn texture_root() -> Option<PathBuf> {
     let candidates = [
         std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist/resources")),
     ];
-    candidates
+    if let Some(root) = candidates
         .into_iter()
         .flatten()
         .map(|root| root.join("assets/minecraft/textures"))
         .find(|root| root.is_dir())
+    {
+        return Some(root);
+    }
+    if std::env::var("KRASNOKAMEN_CLIENT_NO_PACK").is_ok_and(|value| value == "1") {
+        return None;
+    }
+    panic!(
+        "no client resource pack: build one with \
+         `python3 tools/resources.py build --jar <26.3 client.jar> --models`, point \
+         KRASNOKAMEN_CLIENT_RESOURCE_ROOT at an extracted pack, or set \
+         KRASNOKAMEN_CLIENT_NO_PACK=1 where no client jar exists"
+    )
 }
 fn png_size(path: &std::path::Path) -> [u32; 2] {
     let info = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()))
@@ -457,7 +478,10 @@ fn every_shipped_model_is_well_formed() {
         }
     }
     if textures.is_none() {
-        eprintln!("vanilla textures not available: texture existence/size check skipped");
+        eprintln!(
+            "vanilla textures not available and KRASNOKAMEN_CLIENT_NO_PACK=1: \
+             texture existence/size check skipped"
+        );
     }
 }
 
@@ -604,11 +628,14 @@ fn png_opaque(path: &std::path::Path) -> (usize, usize, Vec<bool>) {
 /// A limb whose baked quads sample only fully transparent texels of the rig's default skin is
 /// invisible once the cutout material discards them (the zombie, husk and giant lost their left
 /// arm and leg this way). Bakes every shipped rig and samples the baked UVs against the locally
-/// supplied vanilla skin; skipped when those textures are absent.
+/// supplied vanilla skin; skipped only under `KRASNOKAMEN_CLIENT_NO_PACK=1`.
 #[test]
 fn baked_limbs_sample_visible_texels_of_the_default_skin() {
     let Some(root) = texture_root() else {
-        eprintln!("vanilla textures not available: limb visibility check skipped");
+        eprintln!(
+            "vanilla textures not available and KRASNOKAMEN_CLIENT_NO_PACK=1: \
+             limb visibility check skipped"
+        );
         return;
     };
     let limbs = [

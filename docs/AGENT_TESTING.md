@@ -941,6 +941,25 @@ Local metadata loading now also needs `KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS`, `KRA
 - `minecraft_press_inputs` accepts `key.keyboard.f1` (alias `hide_hud`): one press toggles the HUD like the physical F1 key. The `hide_hud` setting also controls the HUD. Creative and spectator hide the health, armour, hunger and air rows. The hotbar, selection frame and crosshair use GUI sprites from the runtime resource stack; the crosshair has its own inverting blend.
 - World presentation includes a cloud layer built from the runtime `environment/clouds` texture, with cloud height from the received environment attribute; cell size, thickness and drift are authored visual approximations. A dark outline follows targeted selection-box edges. Torch flame and smoke use runtime particle sprites and an independently authored emitter; their motion and emission rate are approximations.
 
+## Resource pack for source tests
+
+The model tests check every shipped rig's declared texture against a real client
+resource pack (`dist/resources`, or `KRASNOKAMEN_CLIENT_RESOURCE_ROOT`) and fail
+when it is absent, naming the command that builds one:
+
+```sh
+python3 tools/resources.py build --jar <26.3 client.jar> --models
+```
+
+`dist/` is ignored by Git, so every worktree needs its own build; the pack holds
+Mojang bytes and is never committed. `KRASNOKAMEN_CLIENT_NO_PACK=1` is the only
+opt-out and belongs only where no client jar exists: CI sets it explicitly in
+`.github/workflows/release.yml` (`env:`), and the texture checks then print that
+they were skipped. `python3 tools/resources.py check --models` verifies an
+existing pack without running cargo. A pack that exists but is stale still fails
+the per-model texture checks, which is how the 26.1.2 copy of `dist/resources`
+was caught.
+
 ## Required workflow
 
 **describe/capabilities → exact instance/profile → baseline observe → fenced action → causal wait → observed result → capture → assertions/evidence → release control.**

@@ -198,6 +198,15 @@ cargo build --release          # builds krasnokamen-client and krasnokamen-launc
 
 CI (`.github/workflows/release.yml`) builds Linux and Windows archives plus an ad-hoc-signed Apple Silicon `Krasnokamen.app` zip on every `v*` tag, attaches checksums, and asserts that no `.jar` or `assets/` directory is in the package.
 
+### Tests
+
+```sh
+python3 tools/resources.py build --jar <26.3 client.jar> --models   # once per worktree: dist/ is ignored
+cargo test --locked -p krasnokamen-client --lib
+```
+
+The model tests check every shipped rig's texture against that pack and fail with this command when it is absent; `KRASNOKAMEN_CLIENT_NO_PACK=1` is the explicit opt-out where no client jar exists. `python3 tools/resources.py check --models` verifies a pack without running the suite.
+
 ### Publishing the data bundles
 
 The launcher installs two bundles, each pinned by name and SHA-256 in `launcher/src/pins.rs`: the facts bundle on every install and the content bundle on the first singleplayer Play. Each script merges its entry into `target/publish/solaris-content.json`, keeping the other entries; `publish_content.sh` takes the release from `GAME_VERSION` in `launcher/src/paths.rs`:
