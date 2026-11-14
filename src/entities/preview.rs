@@ -64,6 +64,7 @@ pub(super) fn from_nbt(data: &Value, store: &Store, models: &Models, content: &C
         effects: BTreeMap::new(), attributes: BTreeMap::new(), passenger_ids: Vec::new(),
         passengers: Vec::new(), vehicle: None, leash: None, leash_holder_id: None,
         animation: None, damage_tick: None, death_tick: None, hurt_direction: 0., submitted_revision: None,
+        clip: Default::default(), crowd: None,
     };
     let mut baby = None;
     let mut sheep_color = 0i8;

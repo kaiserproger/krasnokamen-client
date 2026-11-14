@@ -10,6 +10,14 @@ const HELP: &str = "Usage:
   solaris-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
                  [--artifact-dir DIR] [--runtime-dir DIR]
+  solaris-client record --server HOST:PORT --username NAME --output take.solrec
+                 --header header.json --duration SECONDS [--ready-file FILE] [--data-dir DIR]
+                 [--ready-entity-uuids roster.txt |
+                  --roster-file roster.txt --roster-ready-file roster.ready]
+                 [--roster-timeout SECONDS]
+  solaris-client render-replay --recording take.solrec --camera shot.json
+                 --output shot.mp4 [--size 1920x1080] [--start SECONDS --end SECONDS]
+                 [--motion-samples 1..16] [--data-dir DIR]
   solaris-client doctor [--json]
   solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
   solaris-client mcp-schema              Export the live native MCP argument schemas

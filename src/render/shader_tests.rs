@@ -18,12 +18,15 @@ pub(super) fn observation() -> Observation {
         data: json!({}),
     }
 }
+/// Renders `scene` and reads back the colour target as tightly packed RGBA rows.
 pub(super) fn pixels(renderer: &mut Renderer, scene: &Scene) -> Vec<u8> {
     renderer.stats = FrameStats::default();
     let mut encoder = renderer.encode_scene(scene, &observation(), None).unwrap();
+    let size = renderer.targets.color.size();
+    let row = (size.width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("shader regression pixels"),
-        size: 64 * 256,
+        size: u64::from(row * size.height),
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -38,13 +41,13 @@ pub(super) fn pixels(renderer: &mut Renderer, scene: &Scene) -> Vec<u8> {
             buffer: &buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(256),
-                rows_per_image: Some(64),
+                bytes_per_row: Some(row),
+                rows_per_image: Some(size.height),
             },
         },
         wgpu::Extent3d {
-            width: 64,
-            height: 64,
+            width: size.width,
+            height: size.height,
             depth_or_array_layers: 1,
         },
     );
@@ -63,7 +66,13 @@ pub(super) fn pixels(renderer: &mut Renderer, scene: &Scene) -> Vec<u8> {
         })
         .unwrap();
     rx.recv().unwrap().unwrap();
-    let pixels = buffer.slice(..).get_mapped_range().to_vec();
+    let pixels = buffer
+        .slice(..)
+        .get_mapped_range()
+        .chunks(row as usize)
+        .flat_map(|line| &line[..size.width as usize * 4])
+        .copied()
+        .collect();
     buffer.unmap();
     assert!(
         !renderer.gpu_failed.load(Ordering::Acquire),

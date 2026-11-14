@@ -78,7 +78,7 @@ fn network_fixture() -> NetworkFixture {
             let _ = response_rx.recv();
         }
     });
-    let network = Network::connect(address.to_string(), "SuggestionTest".into(), 8, true, Arc::new(|| {})).unwrap();
+    let network = Network::connect(address.to_string(), "SuggestionTest".into(), 8, true, Arc::new(|| {}), None).unwrap();
     ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
     NetworkFixture { network, requests: request_rx, responses: response_tx, delivered: delivered_rx }
 }

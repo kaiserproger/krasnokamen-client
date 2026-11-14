@@ -14,8 +14,12 @@ use std::{
     time::Instant,
 };
 mod arena;
+#[cfg(test)]
+mod entity_instancing_tests;
+mod entity_instancing;
 mod far;
 mod far_generate;
+mod capture;
 mod frame;
 mod graphics;
 pub use graphics::GraphicsPreset;
@@ -332,6 +336,9 @@ struct FrameStats {
     // outline mask. The matching index count is `entity_submitted_indices`;
     // no second counter. Shadow-depth re-submissions stay in `draw_calls`.
     entity_draws: u64,
+    // GPU crowd: instances culled this frame and indirect draws issued in all views.
+    crowd_instances: u64,
+    crowd_draws: u64,
     // Cull provenance: graph rejection runs before the frustum test, so a
     // graph-rejected section may also sit outside the frustum.
     frustum_rejected_chunks: u64,
@@ -402,6 +409,9 @@ pub struct Renderer {
     uploaded_meshes: Vec<([i32; 3], u64)>,
     fixture: Option<ResidentMesh>,
     dynamic: Stream<{ EntityMaterial::COUNT }>,
+    /// GPU crowd renderer; `None` when the adapter lacks compute, indirect draws or
+    /// vertex-stage storage buffers (those entities then stay on the CPU path).
+    crowd: Option<entity_instancing::Crowd>,
     first_person: Stream<{ EntityMaterial::COUNT }>,
     overlay: Stream<5>,
     sunrise: Stream,
@@ -539,7 +549,8 @@ impl Renderer {
             || height == 0
             || width > adapter.limits().max_texture_dimension_2d
             || height > adapter.limits().max_texture_dimension_2d
-            || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024 > 256 * 1024 * 1024
+            || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024
+                > if surface.is_none() { 2 * 1024 * 1024 * 1024 } else { 256 * 1024 * 1024 }
         {
             return Err("render_target_dimensions_or_memory_budget_exceeded".into());
         }
@@ -751,6 +762,9 @@ impl Renderer {
             &features,
         );
         let dynamic = Stream::new(&device);
+        let crowd = entity_instancing::supported(downlevel.flags, &device.limits())
+            .then(|| entity_instancing::Crowd::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout));
+        capabilities["crowd_instancing_enabled"] = json!(crowd.is_some());
         let first_person = Stream::new(&device);
         let overlay = Stream::new(&device);
         let sunrise = Stream::new(&device);
@@ -837,6 +851,7 @@ impl Renderer {
             staged_chunks: Vec::new(),
             uploaded_meshes: Vec::new(),
             dynamic,
+            crowd,
             first_person,
             overlay,
             sunrise,
@@ -869,7 +884,7 @@ impl Renderer {
             capabilities,
             device_type: adapter_info.device_type,
             timing,
-            monotonic_origin: Instant::now(),
+            monotonic_origin: crate::replay::clock::now(),
             visibility_time_ms: 0,
             capture: None,
             capture_cull: None,
@@ -891,6 +906,11 @@ impl Renderer {
 
     pub(crate) fn software_adapter(&self) -> bool {
         self.device_type == wgpu::DeviceType::Cpu
+    }
+
+    /// Whether this renderer draws `Scene::crowd` (session routing for crowd entities).
+    pub fn crowd_supported(&self) -> bool {
+        self.crowd.is_some()
     }
 
     pub fn set_reference_mode(&mut self, reference: bool) {

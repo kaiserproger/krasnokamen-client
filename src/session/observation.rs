@@ -984,6 +984,8 @@ impl Session {
                 )?;
             }
         }
+        // This frame's crowd instances (none when the entity pass did not run).
+        self.entities.take_crowd(&mut self.scene.crowd);
         let ui_start = self.profile_scene_ms.as_ref().map(|_| std::time::Instant::now());
         if !animation_only && let Some(ui) = &mut self.ui {
             let content = self.content.as_ref().ok_or("content unavailable")?;

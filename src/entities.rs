@@ -3,8 +3,10 @@
 use crate::protocol::packet_ids::play::clientbound as cb;
 mod block_components;
 mod blocks;
+pub(crate) mod clip_pose;
 mod creaking_eyes;
 mod creeper;
+pub(crate) mod crowd;
 mod display;
 mod dragon;
 mod drowned_outer;
@@ -44,6 +46,7 @@ pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
 pub use presentation::{special_item, PresentationStats};
+pub use crowd::{CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
@@ -164,6 +167,10 @@ pub struct Entity {
     pub death_tick: Option<u64>,
     pub hurt_direction: f32,
     pub submitted_revision: Option<u64>,
+    /// Keyframe clip layers the clip runtime plays (`clip_pose`).
+    pub clip: clip_pose::ClipState,
+    /// Cached crowd composite of this entity's appearance (`crowd`).
+    pub(crate) crowd: Option<crowd::Binding>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
@@ -295,6 +302,8 @@ pub struct Store {
     local_avatar_tick: Option<u64>,
     render_local_avatar: bool,
     local_render_slot: Option<usize>,
+    /// GPU crowd composites and this frame's instances (off until a renderer enables it).
+    pub(crate) crowd: crowd::Registry,
 }
 impl Store {
     pub fn new() -> Self {
@@ -311,6 +320,7 @@ impl Store {
         self.items.set_entity_models(models.clone());
         self.preview_cache.clear();
         self.equipment_cache = equipment::Cache::default();
+        self.crowd.clear_composites();
         self.snow_pumpkin_state = None;
         self.mooshroom_mushroom_states = [None; 2];
         self.nameplate_cache = render_nameplates::Cache::default();
@@ -356,6 +366,7 @@ impl Store {
         self.uuid_entities.clear();
         self.items.clear();
         self.equipment_cache = equipment::Cache::default();
+        self.crowd.clear_composites();
         self.block_entities.clear();
         self.preview_cache.clear();
         self.predicted_block_data.clear();
@@ -835,6 +846,8 @@ impl Store {
                     death_tick: None,
                     hurt_direction: 0.,
                     submitted_revision: None,
+                    clip: Default::default(),
+                    crowd: None,
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"
@@ -1576,6 +1589,15 @@ impl Store {
             self.local_avatar = self.slots.pop();
         }
         result
+    }
+    /// Routes eligible humanoid mobs and horses to the GPU crowd renderer instead of
+    /// per-frame CPU vertices. Only a renderer that draws `Scene::crowd` enables it.
+    pub fn set_crowd_instancing(&mut self, enabled: bool) {
+        self.crowd.enabled = enabled;
+    }
+    /// Moves this frame's crowd instances into `scene`, keeping both allocations.
+    pub fn take_crowd(&mut self, scene: &mut CrowdScene) {
+        self.crowd.take(scene);
     }
 }
 fn cell(p: [f64; 3]) -> [i32; 2] {

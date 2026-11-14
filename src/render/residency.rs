@@ -516,7 +516,7 @@ impl Renderer {
             // starts here once per section reset, never at worker/fence completion.
             if resident.uploaded_time_ms.is_none() {
                 resident.uploaded_time_ms =
-                    Some(self.monotonic_origin.elapsed().as_millis() as u64);
+                    Some(crate::replay::clock::elapsed(self.monotonic_origin).as_millis() as u64);
             }
 
             // Record the exact ack only after bytes + mapping committed.

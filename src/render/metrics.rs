@@ -248,6 +248,9 @@ impl Renderer {
             .map_or(0, shadow::ShadowBatch::reserved_bytes));
         target["entity_draws"] = json!(self.stats.entity_draws);
         target["entity_submitted_indices"] = json!(self.stats.entity_submitted_indices);
+        target["crowd_instances"] = json!(self.stats.crowd_instances);
+        target["crowd_draw_calls"] = json!(self.stats.crowd_draws);
+        target["crowd_upload_bytes"] = json!(self.crowd.as_ref().map_or(0, |crowd| crowd.uploaded_bytes));
         // Entity/block-entity contributions share material draws.
         target["entity_geometry_indices"] = json!(self.stats.entity_geometry_indices);
         target["block_entity_geometry_indices"] = json!(self.stats.block_entity_geometry_indices);

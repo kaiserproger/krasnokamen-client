@@ -35,7 +35,7 @@ impl Renderer {
         ]);
         let frustum = Frustum::new(view_projection);
         self.transparent.clear();
-        self.visibility_time_ms = self.monotonic_origin.elapsed().as_millis() as u64;
+        self.visibility_time_ms = crate::replay::clock::elapsed(self.monotonic_origin).as_millis() as u64;
         self.stats.unknown_fade_policy_sections = 0;
         // Cull outcomes belong to this visibility pass: reset per call so a
         // repeated pose reproduces identical counts. Upload bytes below keep
@@ -418,6 +418,22 @@ impl Renderer {
                 sunlight,
             );
         }
+        if let Some(crowd) = &mut self.crowd {
+            // Cull views: the unjittered camera, then every shadow cascade.
+            let mut views = [view_projection; entity_instancing::MAX_VIEWS];
+            let count = 1 + cascades.count as usize;
+            for cascade in 0..count - 1 {
+                views[1 + cascade] = cascades.matrices[cascade];
+            }
+            self.stats.crowd_instances = u64::from(crowd.prepare(
+                &self.device,
+                &self.queue,
+                &scene.crowd,
+                &views[..count],
+                relative(scene.origin, scene.camera_position),
+                projection.y_axis.y * self.config.height as f32 * 0.5,
+            ));
+        }
         let uv = |texture: Option<crate::api::SkyTexture>| texture.map_or([0.; 4], |t| t.uv);
         let layer =
             |texture: Option<crate::api::SkyTexture>| texture.map_or(-1., |t| t.layer as f32);
@@ -509,7 +525,7 @@ impl Renderer {
             shadow_projection: cascades.matrices[0].to_cols_array(),
             fancy: [
                 f32::from(u8::from(fancy)),
-                self.monotonic_origin.elapsed().as_secs_f32(),
+                crate::replay::clock::elapsed(self.monotonic_origin).as_secs_f32(),
                 ((scene.camera_position[0] * 0.57 + scene.camera_position[2] * 0.39)
                     .rem_euclid(std::f64::consts::TAU)) as f32,
                 ((scene.camera_position[0] * 0.57 + scene.camera_position[2] * 0.39) * 1.7)
@@ -643,6 +659,9 @@ impl Renderer {
                 mdi.encode_frustum(&mut encoder, self.timing.compute_writes(16));
             }
         }
+        if let Some(crowd) = &self.crowd {
+            crowd.encode(&mut encoder);
+        }
         if fancy {
             self.stats.shadow_terrain_api_calls = 0;
             self.stats.shadow_terrain_logical_draws = [0; 2];
@@ -711,6 +730,11 @@ impl Renderer {
                         pass.draw_indexed(range.clone(), 0, 1..2);
                         self.stats.draw_calls += 1;
                     }
+                }
+                if let Some(crowd) = &self.crowd {
+                    let issued = crowd.draw(&mut pass, 1 + cascade, true);
+                    self.stats.draw_calls += issued;
+                    self.stats.crowd_draws += issued;
                 }
             }
         }
@@ -941,6 +965,15 @@ impl Renderer {
                     }
                 }
                 if material == 1 && dynamic {
+                    if let Some(crowd) = &self.crowd {
+                        let issued = crowd.draw(&mut pass, 0, false);
+                        if issued > 0 {
+                            pass.set_vertex_buffer(1, self.instances.slice(..));
+                        }
+                        calls += issued;
+                        entity_calls += issued;
+                        self.stats.crowd_draws += issued;
+                    }
                     // Source RenderType ordering is independent of opaque/cutout
                     // terrain bins. Distinct shader/blend/depth families stay intact.
                     pass.set_vertex_buffer(0, self.dynamic.vertices.slice(..));

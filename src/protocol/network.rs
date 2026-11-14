@@ -52,6 +52,7 @@ const MAX_INBOUND_BACKLOG_BYTES: usize = 64 * 1024 * 1024;
 const MAX_OUTBOUND_BACKLOG: usize = 8192;
 struct ConnectionState {
     cancelled: AtomicBool,
+    recording_complete: AtomicBool,
     outbound_backlog: AtomicUsize,
     inbound_bytes: AtomicUsize,
     inbound_events: AtomicUsize,
@@ -86,7 +87,6 @@ pub struct Network {
     socket: Option<TcpStream>,
     #[cfg(windows)]
     worker_wake: thread::Thread,
-    #[cfg(test)]
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Network {
@@ -96,11 +96,13 @@ impl Network {
         view_distance: u8,
         main_arm_right: bool,
         wake: Arc<dyn Fn() + Send + Sync>,
+        recording: Option<crate::replay::format::RecordingOptions>,
     ) -> Result<Self> {
         let (send, incoming) = mpsc::channel();
         let (outgoing, receive) = mpsc::channel();
         let state = Arc::new(ConnectionState {
             cancelled: AtomicBool::new(false),
+            recording_complete: AtomicBool::new(false),
             outbound_backlog: AtomicUsize::new(0),
             inbound_bytes: AtomicUsize::new(0),
             inbound_events: AtomicUsize::new(0),
@@ -131,6 +133,7 @@ impl Network {
             .map_err(|e| e.to_string())?;
         socket.set_nodelay(true).map_err(|e| e.to_string())?;
         let control = socket.try_clone().map_err(|e| e.to_string())?;
+        let recorder = recording.map(crate::replay::format::Recorder::start).transpose()?;
         let worker = thread::Builder::new()
             .name("minecraft-io".into())
             .spawn(move || {
@@ -142,7 +145,16 @@ impl Network {
                     &receive,
                     &stop,
                     wake.as_ref(),
+                    recorder.as_ref(),
                 );
+                let result = match recorder {
+                    Some(recorder) => {
+                        let completion=recorder.finish(stop.recording_complete.load(Ordering::Acquire),
+                            result.as_ref().err().map(String::as_str));
+                        result.and(completion)
+                    },
+                    None => result,
+                };
                 if let Err(e) = result {
                     *stop.terminal_error.lock() = Some(e);
                     wake();
@@ -151,8 +163,6 @@ impl Network {
             .map_err(|e| e.to_string())?;
         #[cfg(windows)]
         let worker_wake = worker.thread().clone();
-        #[cfg(not(test))]
-        drop(worker);
         Ok(Self {
             incoming,
             outgoing,
@@ -160,7 +170,6 @@ impl Network {
             socket: Some(control),
             #[cfg(windows)]
             worker_wake,
-            #[cfg(test)]
             worker: Some(worker),
         })
     }
@@ -215,6 +224,20 @@ impl Network {
         self.state.main_arm_right.store(right, Ordering::Release);
         #[cfg(windows)]
         self.worker_wake.unpark();
+    }
+    /// Explicit recorder stop: close IO, drain the file worker, then expose its
+    /// flush/fsync result. Ordinary live disconnect keeps its nonblocking Drop.
+    pub(crate) fn finish_recording(mut self,take_complete:bool) -> Result<()> {
+        self.state.recording_complete.store(take_complete,Ordering::Release);
+        self.state.cancelled.store(true, Ordering::Release);
+        if let Some(socket) = &self.socket { let _ = socket.shutdown(Shutdown::Both); }
+        #[cfg(windows)]
+        self.worker_wake.unpark();
+        if let Some(worker) = self.worker.take() { worker.join().map_err(|_| "network worker panicked")?; }
+        match self.state.terminal_error.lock().take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }
 impl Drop for Network {
@@ -379,6 +402,7 @@ fn run(
     commands: &Receiver<(i32, Vec<u8>)>,
     state: &ConnectionState,
     wake: &(dyn Fn() + Send + Sync),
+    recorder: Option<&crate::replay::format::Recorder>,
 ) -> Result<()> {
     let ServerEndpoint { addr, endpoint } = server;
     // Status uses its own connection, so its bytes cannot cross login framing.
@@ -443,7 +467,12 @@ fn run(
             write(&mut socket, id, &client_information(settings.0, settings.1), compression)?;
             advertised_radius = Some(settings);
         }
-        while let Some((id, body)) = extract(&mut buffer, compression)? {
+        // Tap every decoded incoming packet once before the Login/Configuration
+        // state machine and the terminal/ordinary Event::Packet handoff below.
+        // Status is a separate connection, not part of the recorded session.
+        while let Some((id, body)) = super::extract_observed(&mut buffer, compression, |bytes| {
+            recorder.map_or(Ok(()), |recorder| recorder.packet(bytes))
+        })? {
             flush_outbound(&mut socket, commands, state, compression)?;
             let original = phase;
             let settings = (state.view_distance.load(Ordering::Acquire), state.main_arm_right.load(Ordering::Acquire));
@@ -566,10 +595,12 @@ fn run(
             // park retains an unpark token: an arrival between draining commands
             // and parking cannot be lost. Reads, sends, settings and Drop wake us.
             thread::park();
+            if state.cancelled.load(Ordering::Acquire) { break; }
             reader.try_read(&mut buffer)?;
         }
         #[cfg(not(windows))]
         match socket.read(&mut tmp) {
+            Ok(0) if state.cancelled.load(Ordering::Acquire) => break,
             Ok(0) => return Err("server closed connection".into()),
             Ok(n) => {
                 if buffer.len() + n > MAX_FRAME + 5 {
@@ -584,6 +615,7 @@ fn run(
                         | std::io::ErrorKind::TimedOut
                         | std::io::ErrorKind::Interrupted
                 ) => {}
+            Err(_) if state.cancelled.load(Ordering::Acquire) => break,
             Err(e) => return Err(e.to_string()),
         }
     }
@@ -677,7 +709,7 @@ mod tests {
     fn windows_play_socket_never_uses_a_read_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let network = Network::connect(
-            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, true, Arc::new(|| {})
+            listener.local_addr().unwrap().to_string(), "NoTimeout".into(), 8, true, Arc::new(|| {}), None
         ).unwrap();
         assert_eq!(network.socket.as_ref().unwrap().read_timeout().unwrap(), None);
     }
@@ -741,7 +773,7 @@ mod tests {
             write(&mut status, 0, &response.0, None).unwrap();
         });
         let mut network = Network::connect(
-            address.to_string(), "VersionTest".into(), 8, true, Arc::new(|| {}),
+            address.to_string(), "VersionTest".into(), 8, true, Arc::new(|| {}), None,
         ).unwrap();
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
@@ -803,6 +835,7 @@ mod tests {
                 8,
                 true,
                 Arc::new(|| {}),
+                None,
             )
             .unwrap();
             peer.join().unwrap();
@@ -903,7 +936,7 @@ mod tests {
             login.shutdown(Shutdown::Write).unwrap();
         });
         let mut network =
-            Network::connect(address.to_string(), "RadiusTest".into(), 8, true, Arc::new(|| {})).unwrap();
+            Network::connect(address.to_string(), "RadiusTest".into(), 8, true, Arc::new(|| {}), None).unwrap();
         assert_eq!(
             stages.recv_timeout(Duration::from_secs(5)).unwrap(),
             Phase::Configuration
@@ -932,6 +965,7 @@ mod tests {
             8,
             true,
             Arc::new(|| {}),
+            None,
         )
         .unwrap();
         for _ in 0..1000 {
@@ -948,6 +982,7 @@ mod tests {
             outgoing,
             state: Arc::new(ConnectionState {
                 cancelled: AtomicBool::new(false),
+                recording_complete: AtomicBool::new(false),
                 outbound_backlog: AtomicUsize::new(0),
                 inbound_bytes: AtomicUsize::new(0),
                 inbound_events: AtomicUsize::new(0),
@@ -1011,7 +1046,7 @@ mod tests {
                 }
                 write(&mut login, id, &[1, 2, 3], None).unwrap();
             });
-            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, Arc::new(|| {})).unwrap();
+            let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, Arc::new(|| {}), None).unwrap();
             peer.join().unwrap();
             network.worker.take().unwrap().join().unwrap();
             assert!(matches!(network.try_recv(), Ok(Event::Packet(received, packet_id, body))
