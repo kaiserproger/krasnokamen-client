@@ -2,6 +2,10 @@
 //! Derived model data is explicitly activated; no Java process is used by the client.
 use crate::protocol::packet_ids::play::clientbound as cb;
 mod animation;
+#[cfg(test)]
+mod animation_tests;
+#[cfg(test)]
+mod asset_model_regression_tests;
 mod block_components;
 mod blocks;
 pub(crate) mod clip_pose;
@@ -45,8 +49,7 @@ pub use metadata::Metadata;
 pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
-pub use presentation::{special_item, PresentationStats};
-pub use crowd::{CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
+pub use presentation::{PresentationStats, special_item};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
@@ -937,7 +940,9 @@ impl Store {
                 let kind = animation::SwingKind::from_wire(r.var()?)?;
                 let duration = r.var()?;
                 r.done()?;
-                let hand = u8::try_from(hand).ok().filter(|hand| *hand < 2)
+                let hand = u8::try_from(hand)
+                    .ok()
+                    .filter(|hand| *hand < 2)
                     .ok_or_else(|| format!("swing_animation hand {hand}"))?;
                 let duration = u32::try_from(duration)
                     .map_err(|_| format!("swing_animation duration {duration}"))?;
@@ -946,7 +951,15 @@ impl Store {
                 let models = self.models.clone();
                 let played = self.get_mut(target).map(|e| {
                     e.revision = revision;
-                    animation::receive_swing(e, models.as_deref(), content, hand, kind, duration, tick)
+                    animation::receive_swing(
+                        e,
+                        models.as_deref(),
+                        content,
+                        hand,
+                        kind,
+                        duration,
+                        tick,
+                    )
                 });
                 if let Some(animation::Swing::Clip(_, Some(mount))) = played
                     && let Some(vehicle) = self.get_mut(mount.network_id)

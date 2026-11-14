@@ -35,7 +35,8 @@ impl Renderer {
         ]);
         let frustum = Frustum::new(view_projection);
         self.transparent.clear();
-        self.visibility_time_ms = crate::replay::clock::elapsed(self.monotonic_origin).as_millis() as u64;
+        self.visibility_time_ms =
+            crate::replay::clock::elapsed(self.monotonic_origin).as_millis() as u64;
         self.stats.unknown_fade_policy_sections = 0;
         // Cull outcomes belong to this visibility pass: reset per call so a
         // repeated pose reproduces identical counts. Upload bytes below keep

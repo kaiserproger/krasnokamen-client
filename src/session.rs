@@ -19,15 +19,14 @@ mod attack_dispatch_tests;
 mod mining_start_tests;
 mod observation;
 mod packets;
+#[cfg(test)]
+mod placement_prediction_tests;
 mod replay;
+mod torch_particles;
 mod ui_packets;
-mod weather;
-#[cfg(test)]
-mod weather_tests;
-#[cfg(test)]
-mod hud_packet_tests;
 #[cfg(test)]
 mod vehicle_packet_tests;
+mod weather;
 #[cfg(test)]
 mod block_break_prediction_tests;
 #[cfg(test)]
@@ -846,7 +845,9 @@ impl Session {
         Ok(out)
     }
     fn send(&self, id: i32, payload: Writer) -> Result<()> {
-        if self.replaying { return Ok(()); }
+        if self.replaying {
+            return Ok(());
+        }
         self.network
             .as_ref()
             .ok_or("not connected")?
@@ -1022,7 +1023,10 @@ impl Session {
         self.send_loader(outgoing)
     }
     fn flush_commands(&mut self) -> Result<()> {
-        if self.replaying { self.commands.clear(); return Ok(()); }
+        if self.replaying {
+            self.commands.clear();
+            return Ok(());
+        }
         let network = self.network.as_ref().ok_or("not connected")?;
         for command in self.commands.drain(..) {
             network.send(command.id, command.payload.0)?;

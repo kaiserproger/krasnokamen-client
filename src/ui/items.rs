@@ -208,7 +208,8 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, [f32; 6])> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.2))
+        self.select(c, s, ctx)
+            .map(|selected| (&selected.1, selected.2))
     }
     /// `model_with` plus the selection's shape: equal shapes mean identical entity geometry
     /// (display transform of `ctx`, quad positions, UVs, colours, layers, materials, alpha
@@ -219,7 +220,8 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, u64)> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
+        self.select(c, s, ctx)
+            .map(|selected| (&selected.1, selected.3))
     }
     #[expect(clippy::type_complexity, reason = "the retained selection entry")]
     fn select<'a>(
@@ -357,13 +359,16 @@ impl ItemModels {
             }
             let display = display_matrix(&result, &ctx.display);
             let bounds = model_bounds(&result, display);
-            let shape = *self.shapes.entry(shape_key(&result, display)).or_insert_with(|| {
-                NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            });
-            return Ok(self
-                .selected
-                .entry(key)
-                .or_insert((Arc::clone(&s.components), result, bounds, shape)));
+            let shape = *self
+                .shapes
+                .entry(shape_key(&result, display))
+                .or_insert_with(|| NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            return Ok(self.selected.entry(key).or_insert((
+                Arc::clone(&s.components),
+                result,
+                bounds,
+                shape,
+            )));
         }
         Ok(&self.selected[&key])
     }
@@ -382,8 +387,20 @@ fn shape_key(model: &BakedModel, display: Mat4) -> Vec<u32> {
             RenderLayer::Opaque | RenderLayer::Cutout => EntityMaterial::ItemCutout,
             RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
         });
-        key.extend(q.positions.iter().flatten().chain(q.uv.iter().flatten()).chain(&color).map(|v| v.to_bits()));
-        key.extend([q.alpha.to_bits(), q.texture_layer, material as u32, u32::from(q.light_emission)]);
+        key.extend(
+            q.positions
+                .iter()
+                .flatten()
+                .chain(q.uv.iter().flatten())
+                .chain(&color)
+                .map(|v| v.to_bits()),
+        );
+        key.extend([
+            q.alpha.to_bits(),
+            q.texture_layer,
+            material as u32,
+            u32::from(q.light_emission),
+        ]);
     }
     key
 }
@@ -1346,9 +1363,14 @@ mod tests {
                 "minecraft:item_model".into(), json!(format!("krasnokamen_battle:{name}")),
             )]));
             let mut models = ItemModels::new();
-            let baked = models.model(&content, &stack, "thirdperson_righthand").unwrap();
+            let baked = models
+                .model(&content, &stack, "thirdperson_righthand")
+                .unwrap();
             assert!(!baked.quads.is_empty(), "{name}");
-            assert!(baked.quads.iter().all(|quad| quad.texture_layer == 10), "{name}");
+            assert!(
+                baked.quads.iter().all(|quad| quad.texture_layer == 10),
+                "{name}"
+            );
         }
     }
 

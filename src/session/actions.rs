@@ -592,9 +592,16 @@ impl Session {
                     self.content.as_ref().ok_or("content unavailable")?,
                 )?)
             }
-            UiCommand::InventoryBulk { context, slot, stack } => {
+            UiCommand::InventoryBulk {
+                context,
+                slot,
+                stack,
+            } => {
                 self.commands.extend(self.inventory.execute_bulk_quick_move(
-                    &context, slot, &stack, self.content.as_ref().ok_or("content unavailable")?,
+                    &context,
+                    slot,
+                    &stack,
+                    self.content.as_ref().ok_or("content unavailable")?,
                 )?);
             }
             UiCommand::CreativePick {

@@ -126,7 +126,12 @@ pub(crate) struct Selection {
 impl Default for Selection {
     fn default() -> Self {
         // `SwingAnimation.DEFAULT`: whack for 6 ticks.
-        Self { swings: 0, armed: false, vanilla_ticks: 6, swing_end: 0 }
+        Self {
+            swings: 0,
+            armed: false,
+            vanilla_ticks: 6,
+            swing_end: 0,
+        }
     }
 }
 
@@ -182,7 +187,8 @@ pub(crate) fn receive_swing(
         });
     match chosen {
         Some((family, name, entry)) => {
-            let left_handed = models.is_some_and(|models| super::presentation::left_main_arm(models, e));
+            let left_handed =
+                models.is_some_and(|models| super::presentation::left_main_arm(models, e));
             let arm = usize::from(hand) ^ usize::from(left_handed);
             e.clip.layers[ACTION] = ClipLayer {
                 clip: entry.id,
@@ -211,15 +217,24 @@ pub(crate) fn receive_swing(
 
 fn start(e: &mut Entity, layer: usize, name: &str, tick: u64) {
     if let Some(entry) = catalog().get(name) {
-        e.clip.layers[layer] =
-            ClipLayer { clip: entry.id, start_tick: tick, rate: 1., weight: 1., mirror: false };
+        e.clip.layers[layer] = ClipLayer {
+            clip: entry.id,
+            start_tick: tick,
+            rate: 1.,
+            weight: 1.,
+            mirror: false,
+        };
     }
 }
 
 /// A received hurt (`hurt_animation` / `damage_event`) adds the flinch to armed entities.
 pub(crate) fn on_hurt(e: &mut Entity, tick: u64) {
     if e.physical.combat.armed && e.death_tick.is_none() {
-        let clip = if select::horse_like(&e.type_name) { select::HORSE_HURT } else { select::HURT };
+        let clip = if select::horse_like(&e.type_name) {
+            select::HORSE_HURT
+        } else {
+            select::HURT
+        };
         start(e, FLINCH, clip, tick);
     }
 }
@@ -227,7 +242,11 @@ pub(crate) fn on_hurt(e: &mut Entity, tick: u64) {
 /// A received death (entity event 3) plays the death fall on armed entities.
 pub(crate) fn on_death(e: &mut Entity, tick: u64) {
     if e.physical.combat.armed {
-        let clip = if select::horse_like(&e.type_name) { select::HORSE_DEATH } else { select::DEATH };
+        let clip = if select::horse_like(&e.type_name) {
+            select::HORSE_DEATH
+        } else {
+            select::DEATH
+        };
         e.clip.layers[FLINCH] = ClipLayer::default();
         start(e, ACTION, clip, tick);
     }

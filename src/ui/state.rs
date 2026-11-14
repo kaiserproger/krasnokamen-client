@@ -109,7 +109,11 @@ pub enum UiCommand {
     },
     Inventory(UiIntent),
     InventoryGesture(Vec<UiIntent>),
-    InventoryBulk { context: UiContext, slot: i16, stack: crate::inventory::Stack },
+    InventoryBulk {
+        context: UiContext,
+        slot: i16,
+        stack: crate::inventory::Stack,
+    },
     CreativePick {
         context: UiContext,
         stack: crate::inventory::Stack,
@@ -2168,10 +2172,14 @@ impl UiState {
                                 };
                                 let now = Instant::now();
                                 self.double_slot_click = button == 0
-                                    && previous_click.is_some_and(|(old_slot, old_button, time)| {
-                                        old_slot == slot && old_button == button
-                                            && now.duration_since(time) < Duration::from_millis(250)
-                                    });
+                                    && previous_click.is_some_and(
+                                        |(old_slot, old_button, time)| {
+                                            old_slot == slot
+                                                && old_button == button
+                                                && now.duration_since(time)
+                                                    < Duration::from_millis(250)
+                                        },
+                                    );
                                 self.collect_on_release = button == 0
                                     && !modifiers.shift
                                     && self.drag_carrying
@@ -2192,7 +2200,9 @@ impl UiState {
                                     ClickMode::Pickup
                                 };
                                 if modifiers.shift && !self.drag_carrying {
-                                    self.last_quick_moved = inventory.menu().slots
+                                    self.last_quick_moved = inventory
+                                        .menu()
+                                        .slots
                                         .get(slot as usize)
                                         .and_then(Option::as_ref)
                                         .filter(|stack| !stack.empty())
@@ -2314,10 +2324,13 @@ impl UiState {
                             start.screen_instance == inventory.screen_instance
                                 && start.container_id == inventory.menu().id
                         });
-                        let same_cursor = self.drag_expected.as_ref().is_some_and(|expected| {
-                            inventory.cursor.as_ref() == Some(expected)
-                        });
-                        let bulk = same_menu && self.double_slot_click && modifiers.shift
+                        let same_cursor = self
+                            .drag_expected
+                            .as_ref()
+                            .is_some_and(|expected| inventory.cursor.as_ref() == Some(expected));
+                        let bulk = same_menu
+                            && self.double_slot_click
+                            && modifiers.shift
                             && matches!(self.drag, Some(PointerButton::Left))
                             && matches!(target.as_ref(), Some((_, NodeAction::Slot(slot), true)) if inventory.can_take_all_from(*slot));
                         if bulk {
@@ -2372,13 +2385,17 @@ impl UiState {
                                 };
                                 if let Some(slot) = destination {
                                     let mode = if modifiers.shift && slot != -999 {
-                                        self.last_quick_moved = inventory.menu().slots
+                                        self.last_quick_moved = inventory
+                                            .menu()
+                                            .slots
                                             .get(slot as usize)
                                             .and_then(Option::as_ref)
                                             .filter(|stack| !stack.empty())
                                             .cloned();
                                         ClickMode::QuickMove
-                                    } else if self.collect_on_release && Some(slot) == self.drag_origin {
+                                    } else if self.collect_on_release
+                                        && Some(slot) == self.drag_origin
+                                    {
                                         ClickMode::PickupAll
                                     } else {
                                         ClickMode::Pickup

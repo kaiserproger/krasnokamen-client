@@ -154,7 +154,9 @@ impl Network {
             .map_err(|e| e.to_string())?;
         socket.set_nodelay(true).map_err(|e| e.to_string())?;
         let control = socket.try_clone().map_err(|e| e.to_string())?;
-        let recorder = recording.map(crate::replay::format::Recorder::start).transpose()?;
+        let recorder = recording
+            .map(crate::replay::format::Recorder::start)
+            .transpose()?;
         let worker = thread::Builder::new()
             .name("minecraft-io".into())
             .spawn(move || {
@@ -170,10 +172,12 @@ impl Network {
                 );
                 let result = match recorder {
                     Some(recorder) => {
-                        let completion=recorder.finish(stop.recording_complete.load(Ordering::Acquire),
-                            result.as_ref().err().map(String::as_str));
+                        let completion = recorder.finish(
+                            stop.recording_complete.load(Ordering::Acquire),
+                            result.as_ref().err().map(String::as_str),
+                        );
                         result.and(completion)
-                    },
+                    }
                     None => result,
                 };
                 if let Err(e) = result {
@@ -265,13 +269,19 @@ impl Network {
     }
     /// Explicit recorder stop: close IO, drain the file worker, then expose its
     /// flush/fsync result. Ordinary live disconnect keeps its nonblocking Drop.
-    pub(crate) fn finish_recording(mut self,take_complete:bool) -> Result<()> {
-        self.state.recording_complete.store(take_complete,Ordering::Release);
+    pub(crate) fn finish_recording(mut self, take_complete: bool) -> Result<()> {
+        self.state
+            .recording_complete
+            .store(take_complete, Ordering::Release);
         self.state.cancelled.store(true, Ordering::Release);
-        if let Some(socket) = &self.socket { let _ = socket.shutdown(Shutdown::Both); }
+        if let Some(socket) = &self.socket {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
         #[cfg(windows)]
         self.worker_wake.unpark();
-        if let Some(worker) = self.worker.take() { worker.join().map_err(|_| "network worker panicked")?; }
+        if let Some(worker) = self.worker.take() {
+            worker.join().map_err(|_| "network worker panicked")?;
+        }
         match self.state.terminal_error.lock().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -678,7 +688,9 @@ fn run(
             // park retains an unpark token: an arrival between draining commands
             // and parking cannot be lost. Reads, sends, settings and Drop wake us.
             thread::park();
-            if state.cancelled.load(Ordering::Acquire) { break; }
+            if state.cancelled.load(Ordering::Acquire) {
+                break;
+            }
             reader.try_read(&mut buffer)?;
         }
         #[cfg(not(windows))]

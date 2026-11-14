@@ -9,7 +9,13 @@ fn content() -> Content {
     for (registry, names) in [
         ("minecraft:block_transformer", vec!["test:axe"]),
         ("minecraft:decorated_pot_pattern", vec!["test:pattern"]),
-        ("minecraft:sound_event", vec!["minecraft:item.armor.equip_generic", "minecraft:item.shears.snip"]),
+        (
+            "minecraft:sound_event",
+            vec![
+                "minecraft:item.armor.equip_generic",
+                "minecraft:item.shears.snip",
+            ],
+        ),
         ("minecraft:entity_type", vec!["test:first", "test:second"]),
         ("minecraft:item", vec!["test:brick"]),
     ] {
@@ -49,7 +55,9 @@ fn equippable_wire_payload_preserves_battle_asset_id() {
     bytes.var(3);
     bytes.var(0);
     bytes.var(1);
-    for flag in [1, 1, 1, 0, 0] { bytes.byte(flag); }
+    for flag in [1, 1, 1, 0, 0] {
+        bytes.byte(flag);
+    }
     bytes.var(2);
     fixture("equippable", &bytes.0, H::record([
         ("slot", H::string("chest")),
@@ -62,16 +70,30 @@ fn equippable_wire_payload_preserves_battle_asset_id() {
 fn equippable_slot_wire_ids_match_vanilla_equipment_slot_ids() {
     // EquipmentSlot-26.3.javap.txt lines 250-330, 346-349: STREAM_CODEC uses id, not ordinal.
     for (slot, id) in [
-        ("mainhand", 0), ("feet", 1), ("legs", 2), ("chest", 3),
-        ("head", 4), ("offhand", 5), ("body", 6), ("saddle", 7),
+        ("mainhand", 0),
+        ("feet", 1),
+        ("legs", 2),
+        ("chest", 3),
+        ("head", 4),
+        ("offhand", 5),
+        ("body", 6),
+        ("saddle", 7),
     ] {
         let mut bytes = Writer::default();
         bytes.var(id);
         bytes.var(1);
-        for _ in 0..3 { bytes.byte(0); }
-        for flag in [1, 1, 1, 0, 0] { bytes.byte(flag); }
+        for _ in 0..3 {
+            bytes.byte(0);
+        }
+        for flag in [1, 1, 1, 0, 0] {
+            bytes.byte(flag);
+        }
         bytes.var(2);
-        fixture("equippable", &bytes.0, H::record([("slot", H::string(slot))]));
+        fixture(
+            "equippable",
+            &bytes.0,
+            H::record([("slot", H::string(slot))]),
+        );
     }
 }
 

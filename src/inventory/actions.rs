@@ -491,14 +491,15 @@ impl InventoryStore {
                         1..=4 => (1..=4).contains(&index),
                         _ => index >= 5,
                     },
-                    _ if prediction.menu.player_slot_index(source).is_some() =>
-                        prediction.menu.player_slot_index(index).is_some(),
+                    _ if prediction.menu.player_slot_index(source).is_some() => {
+                        prediction.menu.player_slot_index(index).is_some()
+                    }
                     _ if prediction.menu.player_slot_index(index).is_some() => false,
                     MenuKind::Crafting => (source == 0) == (index == 0),
-                    MenuKind::Anvil | MenuKind::Grindstone | MenuKind::Cartography =>
-                        (source == 2) == (index == 2),
-                    MenuKind::Loom | MenuKind::Smithing =>
-                        (source == 3) == (index == 3),
+                    MenuKind::Anvil | MenuKind::Grindstone | MenuKind::Cartography => {
+                        (source == 2) == (index == 2)
+                    }
+                    MenuKind::Loom | MenuKind::Smithing => (source == 3) == (index == 3),
                     MenuKind::Stonecutter => (source == 1) == (index == 1),
                     MenuKind::Crafter => (source == 45) == (index == 45),
                     MenuKind::Horse if source < 2 || index < 2 => source == index,
@@ -508,20 +509,32 @@ impl InventoryStore {
                     continue;
                 }
                 let candidate = prediction.slot(index)?;
-                if !candidate.empty() && candidate.same_item(template)
+                if !candidate.empty()
+                    && candidate.same_item(template)
                     && candidate.count <= template.max_count()?
                     && prediction.may_pickup(index)?
                 {
-                    prediction.execute(&UiIntent::ClickSlot {
-                        context: context.clone(),
-                        slot: index as i16,
-                        button: 0,
-                        mode: ClickMode::QuickMove,
-                    }, &mut commands)?;
+                    prediction.execute(
+                        &UiIntent::ClickSlot {
+                            context: context.clone(),
+                            slot: index as i16,
+                            button: 0,
+                            mode: ClickMode::QuickMove,
+                        },
+                        &mut commands,
+                    )?;
                 }
             }
         }
-        let Prediction { menu, player, cursor, drag, experience_level, player_slot_identities, .. } = prediction;
+        let Prediction {
+            menu,
+            player,
+            cursor,
+            drag,
+            experience_level,
+            player_slot_identities,
+            ..
+        } = prediction;
         self.player = player;
         if self.active.is_some() {
             self.active = Some(menu);

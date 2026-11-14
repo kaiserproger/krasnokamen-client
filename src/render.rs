@@ -14,12 +14,12 @@ use std::{
     time::Instant,
 };
 mod arena;
+mod capture;
+mod entity_instancing;
 #[cfg(test)]
 mod entity_instancing_tests;
-mod entity_instancing;
 mod far;
 mod far_generate;
-mod capture;
 mod frame;
 mod graphics;
 pub use graphics::GraphicsPreset;
@@ -555,7 +555,11 @@ impl Renderer {
             || width > adapter.limits().max_texture_dimension_2d
             || height > adapter.limits().max_texture_dimension_2d
             || u64::from(width) * u64::from(height) * 40 + 16 * 1024 * 1024
-                > if surface.is_none() { 2 * 1024 * 1024 * 1024 } else { 256 * 1024 * 1024 }
+                > if surface.is_none() {
+                    2 * 1024 * 1024 * 1024
+                } else {
+                    256 * 1024 * 1024
+                }
         {
             return Err("render_target_dimensions_or_memory_budget_exceeded".into());
         }
@@ -783,8 +787,13 @@ impl Renderer {
             &features,
         );
         let dynamic = Stream::new(&device);
-        let crowd = entity_instancing::supported(downlevel.flags, &device.limits())
-            .then(|| entity_instancing::Crowd::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout));
+        let crowd = entity_instancing::supported(downlevel.flags, &device.limits()).then(|| {
+            entity_instancing::Crowd::new(
+                &device,
+                &pipelines.camera_layout,
+                &pipelines.atlas_layout,
+            )
+        });
         capabilities["crowd_instancing_enabled"] = json!(crowd.is_some());
         let first_person = Stream::new(&device);
         let overlay = Stream::new(&device);

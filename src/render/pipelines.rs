@@ -181,11 +181,21 @@ impl Pipelines {
                     &layout,
                     &world_buffers,
                     MATERIALS[material],
-                    if MATERIALS[material].shader.kind == 11 { COLOR } else { super::post::HDR },
+                    if MATERIALS[material].shader.kind == 11 {
+                        COLOR
+                    } else {
+                        super::post::HDR
+                    },
                     "source_vertex",
                 ));
                 first_person.push(create_source(
-                    device, &shader, &layout, &world_buffers, MATERIALS[material], COLOR, "source_vertex",
+                    device,
+                    &shader,
+                    &layout,
+                    &world_buffers,
+                    MATERIALS[material],
+                    COLOR,
+                    "source_vertex",
                 ));
             }
         }

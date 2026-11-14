@@ -92,8 +92,21 @@ pub(crate) const HORSE_DEATH: &str = "animation.krasnokamen.horse.death";
 /// Every clip name the selection can start; the shipped files must provide each.
 #[cfg(test)]
 pub(crate) const ALL: [&str; 15] = [
-    SWORD_COMBO[0], SWORD_COMBO[1], SWORD_COMBO[2], SPEAR, MACE, SHIELD, STAGGER, BOW, CROSSBOW,
-    LANCE, MOUNTED_SWORD, HURT, DEATH, HORSE_HURT, HORSE_DEATH,
+    SWORD_COMBO[0],
+    SWORD_COMBO[1],
+    SWORD_COMBO[2],
+    SPEAR,
+    MACE,
+    SHIELD,
+    STAGGER,
+    BOW,
+    CROSSBOW,
+    LANCE,
+    MOUNTED_SWORD,
+    HURT,
+    DEATH,
+    HORSE_HURT,
+    HORSE_DEATH,
 ];
 
 const fn right(clips: &'static [&'static str]) -> Family {
@@ -112,7 +125,10 @@ pub(crate) fn family(class: Class, kind: SwingKind, mounted: bool) -> Option<Fam
         (Class::Heavy, _) => right(&[MACE]),
         (Class::Bow, _) => right(&[BOW]),
         (Class::Crossbow, _) => right(&[CROSSBOW]),
-        (Class::Shield, _) => Family { clips: &[SHIELD], arm: 1 },
+        (Class::Shield, _) => Family {
+            clips: &[SHIELD],
+            arm: 1,
+        },
     })
 }
 
@@ -120,7 +136,10 @@ pub(crate) fn family(class: Class, kind: SwingKind, mounted: bool) -> Option<Fam
 pub(crate) fn horse_like(type_name: &str) -> bool {
     matches!(
         type_name,
-        "minecraft:horse" | "minecraft:donkey" | "minecraft:mule" | "minecraft:zombie_horse"
+        "minecraft:horse"
+            | "minecraft:donkey"
+            | "minecraft:mule"
+            | "minecraft:zombie_horse"
             | "minecraft:skeleton_horse"
     )
 }

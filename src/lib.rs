@@ -2,6 +2,7 @@ pub mod api;
 pub mod audio;
 pub mod automation;
 pub mod capture;
+mod content_paths;
 mod controls;
 #[cfg(test)]
 mod controls_tests;
@@ -24,7 +25,6 @@ pub mod profile_textures;
 pub mod protocol;
 pub mod render;
 pub mod replay;
-pub mod session;
 mod screenshot;
 pub mod session;
 mod singleplayer;
@@ -967,7 +967,10 @@ impl App {
             },
             None => None,
         };
-        let remaining = self.next_tick.saturating_duration_since(replay::clock::now()).as_secs_f32();
+        let remaining = self
+            .next_tick
+            .saturating_duration_since(replay::clock::now())
+            .as_secs_f32();
         let prepare_start = Instant::now();
         self.session
             .prepare_frame((1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.))?;
@@ -1298,8 +1301,10 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        self.session.set_software_renderer(renderer.software_adapter());
-        self.session.set_crowd_instancing(renderer.crowd_supported());
+        self.session
+            .set_software_renderer(renderer.software_adapter());
+        self.session
+            .set_crowd_instancing(renderer.crowd_supported());
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.renderer

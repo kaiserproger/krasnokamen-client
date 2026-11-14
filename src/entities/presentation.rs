@@ -895,23 +895,57 @@ pub fn append(
             && store.local_render_slot != Some(slot)
             && let Some(kind) = super::crowd::kind(&store.slots[slot].type_name)
         {
-            let Store { crowd, items, equipment_cache, slots, .. } = &mut *store;
-            let routed = super::crowd::try_instance(crowd, items, equipment_cache, &mut slots[slot], super::crowd::Inputs {
-                models: &models,
-                content,
-                frame: EntityDrawFrame { origin, transform, tick, partial, light, parent: None },
-                item_context: clock_context.as_ref(),
-                bed_direction,
-            });
+            let Store {
+                crowd,
+                items,
+                equipment_cache,
+                slots,
+                ..
+            } = &mut *store;
+            let routed = super::crowd::try_instance(
+                crowd,
+                items,
+                equipment_cache,
+                &mut slots[slot],
+                super::crowd::Inputs {
+                    models: &models,
+                    content,
+                    frame: EntityDrawFrame {
+                        origin,
+                        transform,
+                        tick,
+                        partial,
+                        light,
+                        parent: None,
+                    },
+                    item_context: clock_context.as_ref(),
+                    bed_direction,
+                },
+            );
             match routed {
                 Ok(()) => {
-                    append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], transform, out)?;
+                    append_entity_fire(
+                        &store.slots[slot],
+                        &models,
+                        content,
+                        origin,
+                        camera_rotation[0],
+                        transform,
+                        out,
+                    )?;
                     stats.crowd += 1;
                     stats.animated += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
                     continue;
                 }
-                Err(reason) => *stats.crowd_fallback.entry(kind).or_default().entry(reason).or_default() += 1,
+                Err(reason) => {
+                    *stats
+                        .crowd_fallback
+                        .entry(kind)
+                        .or_default()
+                        .entry(reason)
+                        .or_default() += 1
+                }
             }
         }
         let entity = &store.slots[slot];
@@ -971,7 +1005,14 @@ pub(super) fn root_matrix(
     frame: EntityDrawFrame,
     bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
 ) -> Mat4 {
-    let EntityDrawFrame { origin, transform: t, tick, partial, parent, .. } = frame;
+    let EntityDrawFrame {
+        origin,
+        transform: t,
+        tick,
+        partial,
+        parent,
+        ..
+    } = frame;
     let body_yaw = entity
         .source
         .as_ref()
@@ -990,7 +1031,10 @@ pub(super) fn root_matrix(
                 * Mat4::from_translation(Vec3::new(0., -1.501, 0.))
         }
         RootStyle::Arrow => projectile_root(
-            relative, t.yaw, t.pitch, entity.type_name == "minecraft:trident",
+            relative,
+            t.yaw,
+            t.pitch,
+            entity.type_name == "minecraft:trident",
         ),
         RootStyle::Boat => boat_root(relative, t.yaw),
         RootStyle::Minecart => {
@@ -1016,12 +1060,17 @@ pub(super) fn root_matrix(
         let (offset, yaw) = match direction {
             Some([x, z]) => {
                 let angle: f32 = match (x, z) {
-                    (0, 1) => 0., (0, -1) => 180.,
-                    (-1, 0) => -90., (1, 0) => 90.,
+                    (0, 1) => 0.,
+                    (0, -1) => 180.,
+                    (-1, 0) => -90.,
+                    (1, 0) => 90.,
                     _ => body_yaw,
                 };
                 let schema = &models.schemas[&entity.type_name];
-                let eye = match (boolean(models, entity, "DATA_BABY_ID"), schema.dimension_constants.get("BABY_DIMENSIONS")) {
+                let eye = match (
+                    boolean(models, entity, "DATA_BABY_ID"),
+                    schema.dimension_constants.get("BABY_DIMENSIONS"),
+                ) {
                     (true, Some(resources::DimensionConstant::Dimensions(d))) => d.eye_height,
                     _ => schema.dimensions.eye_height,
                 };
@@ -1053,11 +1102,7 @@ pub(super) fn root_matrix(
         entity.type_name.as_str(),
         "minecraft:slime" | "minecraft:magma_cube"
     ) {
-        matrix = scale_cube_model(
-            matrix,
-            relative,
-            number(models, entity, "ID_SIZE"),
-        );
+        matrix = scale_cube_model(matrix, relative, number(models, entity, "ID_SIZE"));
     }
     if entity.type_name == "minecraft:armor_stand"
         && number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0) & 1 != 0
@@ -1094,22 +1139,20 @@ pub(super) fn root_matrix(
         }
         // Short backward lean when struck; the hit flash rides along.
         if let (Some(damage), None) = (entity.damage_tick, entity.death_tick) {
-            let lean =
-                crate::motion::hurt_lean(tick.saturating_sub(damage) as f32 + partial);
+            let lean = crate::motion::hurt_lean(tick.saturating_sub(damage) as f32 + partial);
             if lean > 0. {
                 let (sin, cos) = body_yaw.to_radians().sin_cos();
                 matrix = Mat4::from_translation(relative)
-                    * Mat4::from_axis_angle(
-                        Vec3::new(cos, 0., sin),
-                        -lean.to_radians(),
-                    )
+                    * Mat4::from_axis_angle(Vec3::new(cos, 0., sin), -lean.to_radians())
                     * Mat4::from_translation(-relative)
                     * matrix;
             }
         }
     }
     let layers = entity.clip.active(tick, partial);
-    let clip = layers.iter().any(Option::is_some)
+    let clip = layers
+        .iter()
+        .any(Option::is_some)
         .then(|| super::clip_pose::library().delta(&layers, super::clip_pose::Channel::Root))
         .flatten();
     if let Some(death) = entity.death_tick.filter(|_| matches!(binding.style, RootStyle::Living)) {
@@ -1119,7 +1162,9 @@ pub(super) fn root_matrix(
     if let Some(clip) = clip {
         matrix *= clip.about(super::clip_pose::FEET);
     }
-    if let Some(parent) = parent { matrix = parent * matrix; }
+    if let Some(parent) = parent {
+        matrix = parent * matrix;
+    }
     matrix
 }
 
@@ -1161,7 +1206,12 @@ pub(super) fn draw_entity(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EntityDrawFrame { tick, partial, light, .. } = frame;
+    let EntityDrawFrame {
+        tick,
+        partial,
+        light,
+        ..
+    } = frame;
     let start = out.vertices.len();
         match entity.binding.as_ref().unwrap() {
             Ok(binding) => {
@@ -1346,15 +1396,50 @@ pub(super) fn draw_entity(
                                     let transforms = [Mat4::IDENTITY, store.transforms[body]];
                                     emit_rig(collar_rig, &transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
                                 } else {
-                                    emit_rig(rig, store.transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
-                                }
-                            });
-                        if let Err(reason) = result {
-                            stats.unrendered.insert(format!("{}:collar", entity.type_name), reason);
-                        }
+                                    "minecraft:red_mushroom"
+                                };
+                                let state = content.resolve_block_state(block, &BTreeMap::new())?;
+                                store.mooshroom_mushroom_states[index] = Some(state);
+                                state
+                            }
+                        };
+                        let mushroom = content
+                            .model_for(state)?
+                            .ok_or("mooshroom mushroom block model unavailable")?;
+                        let head = rig
+                            .bones
+                            .iter()
+                            .zip(store.transforms.iter())
+                            .find_map(|(bone, transform)| {
+                                (bone.role == BoneRole::Head).then_some(*transform)
+                            })
+                            .ok_or("mooshroom has no head bone")?;
+                        append_mooshroom_mushrooms(mushroom, matrix, head, light, out)
+                    })();
+                    if let Err(reason) = result {
+                        stats.unrendered.insert(entity.type_name.clone(), reason);
                     }
-                    super::sheep::append(
-                        entity,
+                }
+                let hurt = matches!(binding.style, RootStyle::Living)
+                    && (entity
+                        .damage_tick
+                        .is_some_and(|damage| tick.saturating_sub(damage) < 10)
+                        || entity.death_tick.is_some());
+                let white = super::creeper::flash(swell);
+                if hurt || white > 0. {
+                    let overlay = if hurt { [0., 3.] } else { [white, 10.] };
+                    for vertex in &mut out.vertices[start..] {
+                        vertex.overlay_uv = overlay;
+                    }
+                }
+            }
+            stats.animated += 1;
+            if !invisible && entity.type_name == "minecraft:player" {
+                let profile = store.profiles.get(&entity.uuid).and_then(|p| p.textures);
+                if let Err(reason) = store.equipment_cache.append_player_back(
+                    entity,
+                    profile,
+                    super::equipment::Frame {
                         models,
                         content,
                         tick,
@@ -1451,6 +1536,28 @@ pub(super) fn draw_entity(
                     .unrendered
                     .insert(entity.type_name.clone(), reason.clone());
             }
+            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+            if entity.type_name == "minecraft:creeper"
+                && let Err(reason) = super::creeper::append_charge(
+                    entity,
+                    models,
+                    content,
+                    (tick, partial, matrix),
+                    store.transforms,
+                    out,
+                )
+            {
+                stats
+                    .unrendered
+                    .insert(format!("{}:charge", entity.type_name), reason);
+            }
+        }
+        Err(reason) => {
+            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
+                stats
+                    .unrendered
+                    .insert(entity.type_name.clone(), reason.clone());
+            }
         }
     }
     Ok(())
@@ -1482,13 +1589,16 @@ pub(super) fn held_item_context(
     };
     let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
     let living = e.source.as_ref().and_then(|s| s.living.as_ref());
-    (context, crate::ui::items::ItemContext {
-        display: context.into(),
-        using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
-        use_ticks: living.map_or(0., |s| s.item_use_ticks(partial)),
-        crossbow_pull: living.map_or(0., |s| s.crossbow_pull(partial)),
-        ..item_context.cloned().unwrap_or_default()
-    })
+    (
+        context,
+        crate::ui::items::ItemContext {
+            display: context.into(),
+            using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
+            use_ticks: living.map_or(0., |s| s.item_use_ticks(partial)),
+            crossbow_pull: living.map_or(0., |s| s.crossbow_pull(partial)),
+            ..item_context.cloned().unwrap_or_default()
+        },
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1814,7 +1924,10 @@ pub(super) struct AxisMap {
 }
 impl AxisMap {
     fn set(value: Vec3) -> Self {
-        Self { scale: Vec3::ZERO, offset: value }
+        Self {
+            scale: Vec3::ZERO,
+            offset: value,
+        }
     }
     pub(super) fn apply(self, rest: Vec3) -> Vec3 {
         rest * self.scale + self.offset
@@ -1882,7 +1995,13 @@ pub(super) struct RolePose {
     pub age: f32,
 }
 
-pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u64, partial: f32) -> RolePose {
+pub(super) fn role_pose(
+    e: &Entity,
+    models: &Models,
+    content: &Content,
+    tick: u64,
+    partial: f32,
+) -> RolePose {
     let living = e.source.as_ref().and_then(|source| source.living.as_ref());
     // Relative-position packets do not carry useful velocity for locomotion.
     // The source owner advances WalkRule from interpolated position deltas.
@@ -1900,11 +2019,26 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let t = e.presented_transform(tick, partial);
     let body_yaw = living.map_or(t.yaw, |state| state.body(partial));
     let head_yaw = living.map_or(t.head_yaw, |state| state.head(partial));
-    let head = Vec3::new(t.pitch.to_radians(),
-        ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.).clamp(-85., 85.).to_radians(), 0.);
+    let head = Vec3::new(
+        t.pitch.to_radians(),
+        ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.)
+            .clamp(-85., 85.)
+            .to_radians(),
+        0.,
+    );
     let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
-    let gait = equipped_arm_rotations(e, models, content, head,
-        [(phase + std::f32::consts::PI).cos() * amplitude, phase.cos() * amplitude], age, partial);
+    let gait = equipped_arm_rotations(
+        e,
+        models,
+        content,
+        head,
+        [
+            (phase + std::f32::consts::PI).cos() * amplitude,
+            phase.cos() * amplitude,
+        ],
+        age,
+        partial,
+    );
     // A received `swing_animation` without a clip sets the vanilla swing's duration.
     let swing_ticks = e.physical.combat.vanilla_ticks().max(1) as f32;
     let attack = e
@@ -1926,12 +2060,19 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
     let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
     let spell = number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0);
     let left_main = left_main_arm(models, e);
-    let attack_hand = e.animation.map_or(0, |(action, _)| usize::from(action == 3));
-    let trident = e.type_name == "minecraft:drowned" && aggressive
-        && e.equipment_value(0).and_then(|s| content.item_names.get(&s.id))
+    let attack_hand = e
+        .animation
+        .map_or(0, |(action, _)| usize::from(action == 3));
+    let trident = e.type_name == "minecraft:drowned"
+        && aggressive
+        && e.equipment_value(0)
+            .and_then(|s| content.item_names.get(&s.id))
             .is_some_and(|name| name == "minecraft:trident");
     let arms = std::array::from_fn(|arm| {
-        let mut map = AxisMap { scale: Vec3::ONE, offset: gait[arm] };
+        let mut map = AxisMap {
+            scale: Vec3::ONE,
+            offset: gait[arm],
+        };
         if spell {
             map = AxisMap::set(gait[arm]);
         }
@@ -1969,7 +2110,10 @@ pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u6
         head: [pitch.to_radians(), yaw_rel.to_radians()],
         arms,
         arm_pivot_z_zero: spell,
-        legs: [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing],
+        legs: [
+            phase.cos() * swing,
+            (phase + std::f32::consts::PI).cos() * swing,
+        ],
         riding: e.vehicle.is_some(),
         crouch: number(models, e, "DATA_POSE") == Some(5),
         phase,
@@ -1989,10 +2133,22 @@ pub(super) fn evaluate_rig(
     out: &mut Vec<Mat4>,
 ) {
     let pose = role_pose(e, models, content, tick, partial);
-    evaluate_posed_rig(rig, e, models, (tick, partial), &pose, &super::clip_pose::library(), root, out);
+    evaluate_posed_rig(
+        rig,
+        e,
+        models,
+        (tick, partial),
+        &pose,
+        &super::clip_pose::library(),
+        root,
+        out,
+    );
 }
 
-#[expect(clippy::too_many_arguments, reason = "one pose evaluation shared by the entity and crowd paths")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one pose evaluation shared by the entity and crowd paths"
+)]
 pub(super) fn evaluate_posed_rig(
     rig: &Rig,
     e: &Entity,
@@ -2006,7 +2162,12 @@ pub(super) fn evaluate_posed_rig(
     out.clear();
     out.reserve(rig.bones.len());
     let living = e.source.as_ref().and_then(|source| source.living.as_ref());
-    let RolePose { phase, amplitude, age, .. } = *pose;
+    let RolePose {
+        phase,
+        amplitude,
+        age,
+        ..
+    } = *pose;
     let pet_sitting = matches!(e.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
         && number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 1 != 0;
     let pet_baby = pet_sitting && boolean(models, e, "DATA_BABY_ID");
@@ -2018,12 +2179,17 @@ pub(super) fn evaluate_posed_rig(
     let wave = (age * 0.3).sin();
     let wing_flap = if super::render_living::folds_wings(&e.type_name) {
         (wave + 1.) * 0.7 * wing_beat
-    } else { wave * 0.3 };
+    } else {
+        wave * 0.3
+    };
     let layers = e.clip.active(tick, partial);
     let legs = super::clip_pose::leg_factor(amplitude, pose.riding);
     let carry = if layers.iter().any(Option::is_some) {
         // The entity's main rig sets the waist, so worn parts lean with the body.
-        let main = e.binding.as_ref().and_then(|binding| binding.as_ref().ok())
+        let main = e
+            .binding
+            .as_ref()
+            .and_then(|binding| binding.as_ref().ok())
             .map_or(rig, |binding| models.rig(&binding.rig));
         clips.carry(&layers, super::clip_pose::hip(main))
     } else {
@@ -2122,7 +2288,14 @@ pub(super) fn evaluate_posed_rig(
             );
         }
         if let Some(channel) = super::clip_pose::channel_of(bone) {
-            clips.apply(&layers, channel, legs, bone.rotation, &mut rotation, &mut pivot);
+            clips.apply(
+                &layers,
+                channel,
+                legs,
+                bone.rotation,
+                &mut rotation,
+                &mut pivot,
+            );
         }
         let mut parent = bone.parent.map(|i| out[i]).unwrap_or(root);
         if let Some(carry) = carry
@@ -2531,8 +2704,20 @@ pub(super) fn append_equipment(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EquipmentPose { entity: e, rig, transforms, item_context } = pose;
-    let super::equipment::Frame { models, content, tick, partial, light, .. } = frame;
+    let EquipmentPose {
+        entity: e,
+        rig,
+        transforms,
+        item_context,
+    } = pose;
+    let super::equipment::Frame {
+        models,
+        content,
+        tick,
+        partial,
+        light,
+        ..
+    } = frame;
     let layers = e.clip.active(tick, partial);
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
         let Some(stack) = e.equipment_value(slot) else {
@@ -2632,7 +2817,8 @@ pub(super) fn append_equipment(
             continue;
         };
         let _ = bone;
-        let (context, state) = held_item_context(e, models, slot, anatomical_hand, partial, item_context);
+        let (context, state) =
+            held_item_context(e, models, slot, anatomical_hand, partial, item_context);
         match items.model_with(content, stack, &state) {
             Ok(model) => {
                 let bone = if e.type_name == "minecraft:vex" && slot < 2 {
@@ -2647,12 +2833,23 @@ pub(super) fn append_equipment(
                 } else {
                     *matrix
                 };
-                let bone = match (slot < 2).then(|| super::clip_pose::library().grip(&layers, anatomical_hand)).flatten() {
+                let bone = match (slot < 2)
+                    .then(|| super::clip_pose::library().grip(&layers, anatomical_hand))
+                    .flatten()
+                {
                     Some(grip) => bone * grip,
                     None => bone,
                 };
-                let attachment = held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
-                append_baked_stack(model, attachment * item_matrix(model, context), light, content, stack, out)?;
+                let attachment =
+                    held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
+                append_baked_stack(
+                    model,
+                    attachment * item_matrix(model, context),
+                    light,
+                    content,
+                    stack,
+                    out,
+                )?;
             }
             Err(reason) => {
                 stats
