@@ -544,6 +544,8 @@ fn append_entity_fire(
     transform: super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    // NEGATIVE CONTROL (RCBNegFire): pre-43362918 behavior, the on-fire flag is never read.
+    return Ok(());
     let flags = number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
     if flags & 1 == 0 || flags & 32 != 0 || entity.type_name == "minecraft:falling_block" {
         return Ok(());
