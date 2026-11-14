@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "krasnokamen_battle:iron_plate"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "krasnokamen_battle:iron_plate"
+      }
+    ]
+  }
+}

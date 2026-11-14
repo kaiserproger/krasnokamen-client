@@ -14,7 +14,7 @@
 //! The envelope fades one-shot and held clips in over [`FADE_IN`] seconds of clip time and
 //! one-shot clips back out over [`FADE_OUT`]; looping clips play at full weight. A
 //! strike's contact frame must lie on full weight (checked here).
-use super::super::clip_pose::{BakedClip, ChannelSample, Playback, BAKE_HZ, CHANNELS};
+use super::super::clip_pose::{BAKE_HZ, BakedClip, CHANNELS, ChannelSample, Playback};
 use super::format::{Clip, Looping, Part};
 use crate::protocol::Result;
 use glam::Vec3;
@@ -33,7 +33,8 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 pub(crate) fn envelope(clip: &Clip, time: f32) -> f32 {
     match clip.looping {
         Looping::Once => {
-            smoothstep(0., FADE_IN, time) * (1. - smoothstep(clip.length - FADE_OUT, clip.length, time))
+            smoothstep(0., FADE_IN, time)
+                * (1. - smoothstep(clip.length - FADE_OUT, clip.length, time))
         }
         Looping::Hold => smoothstep(0., FADE_IN, time),
         Looping::Loop => 1.,
@@ -52,13 +53,22 @@ pub(crate) fn bake(clip: &Clip) -> Result<BakedClip> {
     if let Some(contact) = clip.contact
         && envelope(clip, contact) < 1.
     {
-        return Err(format!("{}: contact at {contact}s lies inside a fade", clip.name));
+        return Err(format!(
+            "{}: contact at {contact}s lies inside a fade",
+            clip.name
+        ));
     }
     for track in &clip.tracks {
         if let Some(scale) = &track.scale
-            && scale.keys.iter().any(|key| key.pre != Vec3::ONE || key.post != Vec3::ONE)
+            && scale
+                .keys
+                .iter()
+                .any(|key| key.pre != Vec3::ONE || key.post != Vec3::ONE)
         {
-            return Err(format!("{}: the renderer has no scale channel ({:?})", clip.name, track.part));
+            return Err(format!(
+                "{}: the renderer has no scale channel ({:?})",
+                clip.name, track.part
+            ));
         }
     }
     let wrap = (clip.looping == Looping::Loop).then_some(clip.length);
@@ -70,12 +80,15 @@ pub(crate) fn bake(clip: &Clip) -> Result<BakedClip> {
         let mut frame = [ChannelSample::default(); CHANNELS];
         for track in &clip.tracks {
             let channel = track.part.channel() as usize;
-            let rotation = track
-                .rotation
+            let rotation = track.rotation.as_ref().map_or(Vec3::ZERO, |curve| {
+                curve.sample(time, wrap) * std::f32::consts::PI / 180.
+            });
+            let offset = track
+                .position
                 .as_ref()
-                .map_or(Vec3::ZERO, |curve| curve.sample(time, wrap) * std::f32::consts::PI / 180.);
-            let offset = track.position.as_ref().map_or(Vec3::ZERO, |curve| curve.sample(time, wrap) / 16.);
-            let replaces = clip.replace && matches!(track.part, Part::RightArm | Part::LeftArm | Part::Root);
+                .map_or(Vec3::ZERO, |curve| curve.sample(time, wrap) / 16.);
+            let replaces =
+                clip.replace && matches!(track.part, Part::RightArm | Part::LeftArm | Part::Root);
             frame[channel] = ChannelSample {
                 rotation: (rotation * fade).to_array(),
                 weight: if replaces { fade } else { 0. },

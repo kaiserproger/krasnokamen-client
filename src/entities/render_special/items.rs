@@ -1,6 +1,9 @@
 use super::*;
 
-pub(in crate::entities) fn observed_stack(content: &Content, value: &Value) -> Result<Option<Stack>> {
+pub(in crate::entities) fn observed_stack(
+    content: &Content,
+    value: &Value,
+) -> Result<Option<Stack>> {
     let Some(id) = value.get("id").and_then(Value::as_str) else {
         return if value.is_null() || value.as_object().is_some_and(|o| o.is_empty()) {
             Ok(None)
@@ -29,11 +32,7 @@ pub(in crate::entities) fn observed_stack(content: &Content, value: &Value) -> R
     crate::inventory::creative_stack_with_components(content, id, count, &components).map(Some)
 }
 impl Cache {
-    fn ensure_observed_stack(
-        &mut self,
-        content: &Content,
-        value: &Value,
-    ) -> Result<usize> {
+    fn ensure_observed_stack(&mut self, content: &Content, value: &Value) -> Result<usize> {
         let key = value as *const Value as usize;
         let changed = self
             .observed_items
@@ -73,7 +72,13 @@ pub(crate) fn append_observed_item(
     cache: &mut Cache,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let ObservedItemFrame { context, seed, root, light, block_world } = frame;
+    let ObservedItemFrame {
+        context,
+        seed,
+        root,
+        light,
+        block_world,
+    } = frame;
     let key = cache.ensure_observed_stack(content, observed)?;
     let Some(stack) = cache.observed_items[&key].stack.as_ref() else {
         return Ok(());
@@ -95,7 +100,8 @@ pub(crate) fn append_observed_item(
         world.sun_angle = sun_angle;
         world.moon_phase = moon_phase;
         let key = (position, seed);
-        if cache.block_clock_needles.len() >= 4096 && !cache.block_clock_needles.contains_key(&key) {
+        if cache.block_clock_needles.len() >= 4096 && !cache.block_clock_needles.contains_key(&key)
+        {
             cache.block_clock_needles.pop_first();
         }
         world.needles = cache.block_clock_needles.entry(key).or_default().clone();
