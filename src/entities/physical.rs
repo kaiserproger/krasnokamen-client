@@ -803,6 +803,9 @@ impl Store {
         let Some(models) = self.models.clone() else {
             return Ok(());
         };
+        // No metadata or attribute that sizes an entity changes while entities tick:
+        // `Models::sized` memoizes.
+        let _sized = super::resources::SizedScope::enter();
         let mut active = std::mem::take(&mut self.physical_active);
         let look_target = self.look_target;
         // While frames draw entities (one did since the last tick), a mob outside the camera's

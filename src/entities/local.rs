@@ -83,6 +83,7 @@ impl Store {
                 crowd: None,
                 clock: None,
                 kind_slot: Default::default(),
+                sized_memo: Default::default(),
             };
             entity.physical.lerp_duration = 1;
             entity.source = Some(source_state::SourceState::new(&entity, &models)?);

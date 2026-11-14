@@ -1129,7 +1129,7 @@ mod tests {
                 attribute_ids: BTreeMap::new(),
                 digest: String::new(),
                 armor_models: BTreeMap::new(),
-                motion: BTreeMap::new(),
+                motion: Default::default(),
             }));
             let position = [192, 77, -446];
             let origin = position.map(f64::from);

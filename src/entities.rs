@@ -179,6 +179,8 @@ pub struct Entity {
     pub(crate) clock: Option<render_special::ClockMemo>,
     /// This entity's kind slot in the active schema table (`Models::schema_of`).
     pub(crate) kind_slot: std::cell::Cell<resources::KindSlot>,
+    /// `Models::sized`'s answer within the current `resources::SizedScope`.
+    pub(crate) sized_memo: std::cell::Cell<resources::SizedMemo>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
@@ -264,7 +266,10 @@ pub struct BlockEntity {
 #[derive(Default)]
 pub struct Store {
     slots: Vec<Entity>,
-    ids: BTreeMap<i32, usize>,
+    /// Network id -> slot. Hashed, not ordered: looked up per entity many times a tick and frame
+    /// (an ordered map of ~20k ids walked several scattered nodes per lookup); `observation`
+    /// sorts the ids it pages.
+    ids: IdMap,
     spatial: BTreeMap<[i32; 2], BTreeSet<i32>>,
     pub(crate) motion_spans: BTreeMap<i64, usize>,
     leash_holders: BTreeMap<Handle, BTreeSet<i32>>,
@@ -771,12 +776,14 @@ impl Store {
         let mut rows = Vec::with_capacity(limit);
         let mut bytes_used = 2048usize;
         let mut next = None;
-        for (&id, &slot) in self.ids.range((
-            after
-                .map(std::ops::Bound::Excluded)
-                .unwrap_or(std::ops::Bound::Unbounded),
-            std::ops::Bound::Unbounded,
-        )) {
+        let mut ids: Vec<(i32, usize)> = self
+            .ids
+            .iter()
+            .filter(|(id, _)| after.is_none_or(|after| **id > after))
+            .map(|(&id, &slot)| (id, slot))
+            .collect();
+        ids.sort_unstable_by_key(|&(id, _)| id);
+        for (id, slot) in ids {
             if rows.len() == limit {
                 next = rows
                     .last()
@@ -906,6 +913,7 @@ impl Store {
                     crowd: None,
                     clock: None,
                     kind_slot: Default::default(),
+                    sized_memo: Default::default(),
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"
@@ -1689,6 +1697,8 @@ impl Store {
         frame: EntityRenderFrame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<PresentationStats> {
+        // No metadata or attribute changes while the frame draws: `Models::sized` memoizes.
+        let _sized = resources::SizedScope::enter();
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
         if self.render_local_avatar && let Some(avatar) = self.local_avatar.take() {
@@ -1713,6 +1723,23 @@ impl Store {
 }
 fn cell(p: [f64; 3]) -> [i32; 2] {
     [(p[0] / 16.).floor() as i32, (p[2] / 16.).floor() as i32]
+}
+/// `Store::ids`: network ids hashed by one multiply (the FxHash step), not SipHash.
+type IdMap = std::collections::HashMap<i32, usize, std::hash::BuildHasherDefault<IdHasher>>;
+#[derive(Default)]
+struct IdHasher(u64);
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        }
+    }
+    fn write_i32(&mut self, value: i32) {
+        self.0 = (self.0.rotate_left(5) ^ u64::from(value as u32)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
 }
 /// Floor of `Store::spatial_padding`: the farthest a default-size box reaches past its schema
 /// width (a shulker peeking a block, a four-block painting).

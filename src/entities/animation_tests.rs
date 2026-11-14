@@ -16,7 +16,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         attribute_ids: BTreeMap::new(),
         digest: String::new(),
         armor_models: BTreeMap::new(),
-        motion: BTreeMap::new(),
+        motion: Default::default(),
     };
     let transform = Transform {
         position: [0.; 3],
@@ -67,6 +67,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         crowd: None,
         clock: None,
         kind_slot: Default::default(),
+        sized_memo: Default::default(),
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},
@@ -2225,6 +2226,34 @@ fn offscreen_mob_waits_and_catches_up_on_entry() {
     let at = |store: &Store| store.get(id).unwrap().presented_transform(13, 0.).position;
     assert_eq!(at(&hidden), at(&seen), "on entry it is drawn where it would have been");
     assert_eq!(at(&seen), [3., 0., 0.]);
+}
+
+/// `observation` pages entities in network-id order whatever order they arrived in (the id map
+/// is hashed), and its cursor resumes after the last row of a page.
+#[test]
+fn observation_pages_in_network_id_order() {
+    let mut store = Store::new();
+    let ids: Vec<i32> = (0..120).map(|i| (i * 7919) % 1009 - 500).collect();
+    for &id in &ids {
+        let (_, mut entity) = fixture();
+        entity.handle.network_id = id;
+        store.ids.insert(id, store.slots.len());
+        store.slots.push(entity);
+    }
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    let page = |after: Option<i32>, limit| {
+        let observed = store.observation(after, limit);
+        let rows: Vec<i32> = observed["entities"].as_array().unwrap().iter()
+            .map(|row| row["network_id"].as_i64().unwrap() as i32).collect();
+        (rows, observed["next_cursor"].as_i64().map(|v| v as i32))
+    };
+    let (first, cursor) = page(None, 40);
+    assert_eq!(first.as_slice(), &sorted[..40]);
+    assert_eq!(cursor, Some(sorted[39]));
+    let (rest, cursor) = page(cursor, 512);
+    assert_eq!(rest.as_slice(), &sorted[40..]);
+    assert_eq!(cursor, None);
 }
 
 /// The camera jumps (a respawn) to a mob that waited outside its box while updates carried it

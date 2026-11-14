@@ -58,7 +58,7 @@ pub(super) fn session() -> Session {
         attribute_ids: BTreeMap::new(),
         digest: String::new(),
         armor_models: BTreeMap::new(),
-        motion: BTreeMap::new(),
+        motion: Default::default(),
     }));
     session.content = Some(Content::test_cube());
     let content = session.content.as_mut().unwrap();

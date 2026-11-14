@@ -593,7 +593,8 @@ pub struct Models {
     pub attribute_ids: BTreeMap<u32, String>,
     pub digest: String,
     pub(crate) armor_models: BTreeMap<String, ArmorModels>,
-    pub(crate) motion: BTreeMap<String, MotionFacts>,
+    /// Hashed by kind name: looked up per ticked living entity.
+    pub(crate) motion: NameMap<MotionFacts>,
 }
 /// Renderer rig keys of the per-slot armor shells of a humanoid family.
 #[derive(Deserialize, Debug)]
@@ -668,7 +669,7 @@ impl Models {
             attributes: doc.attributes,
             digest: Self::digest(),
             armor_models: BTreeMap::new(),
-            motion: doc.motion,
+            motion: doc.motion.into_iter().collect(),
         })
     }
     pub fn load(content: &Content) -> Result<Self> {
@@ -704,7 +705,7 @@ impl Models {
             attributes: doc.attributes,
             digest: Self::digest(),
             armor_models: doc.armor_models,
-            motion: doc.motion,
+            motion: doc.motion.into_iter().collect(),
         })
     }
     /// Rig key of one armor slot shell (`head`/`chest`/`legs`/`feet`) of a humanoid family.
@@ -776,14 +777,33 @@ impl Models {
     ) -> Result<(&'a Dimensions, f32)> {
         self.sized(entity).map(|(dimensions, scale, _)| (dimensions, scale))
     }
-    /// `dimensions` and the kind's box rule (`physical::bounds_at`).
+    /// `dimensions` and the kind's box rule (`physical::bounds_at`). Inside a `SizedScope`
+    /// (one frame's or tick's presentation, where metadata and attributes do not change) an
+    /// entity's repeated calls are answered from its memo of that scope.
     pub(crate) fn sized<'a>(
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32, Shape)> {
         let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
         let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name, &self.poses));
-        let shape = sizing.shape;
+        let scope = SIZED_SCOPE.with(std::cell::Cell::get);
+        let memo = entity.sized_memo.get();
+        let (choice, scale) = if scope != 0 && memo.scope == scope {
+            (memo.choice, memo.scale)
+        } else {
+            let (choice, scale) = Self::size_choice(entity, schema, sizing)?;
+            if scope != 0 {
+                entity.sized_memo.set(SizedMemo { scope, choice, scale });
+            }
+            (choice, scale)
+        };
+        Ok((choice.of(schema, sizing), scale, sizing.shape))
+    }
+    fn size_choice(
+        entity: &super::Entity,
+        schema: &EntitySchema,
+        sizing: &Sizing,
+    ) -> Result<(SizedChoice, f32)> {
         let number = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
         };
@@ -792,9 +812,10 @@ impl Models {
                 .and_then(super::Metadata::boolean)
                 .unwrap_or(false)
         };
+        let pose_id = number(sizing.pose).unwrap_or(0) as u8;
         let pose = sizing
             .poses
-            .get(usize::from(number(sizing.pose).unwrap_or(0) as u8))
+            .get(usize::from(pose_id))
             .and_then(Option::as_ref)
             .ok_or("unknown entity pose")?;
         let living = sizing.living;
@@ -812,68 +833,57 @@ impl Models {
             Sanitize::AtMost(most) => attribute_scale.min(most),
             Sanitize::One => 1.,
         };
+        let present = |dimensions: &Option<Dimensions>, missing: &str| {
+            dimensions.as_ref().map(|_| ()).ok_or_else(|| missing.to_string())
+        };
         if living && pose.sleeping {
-            return Ok((
-                sizing.sleeping.as_ref().ok_or("source sleeping dimensions missing")?,
-                1.,
-                shape,
-            ));
+            present(&sizing.sleeping, "source sleeping dimensions missing")?;
+            return Ok((SizedChoice::Sleeping, 1.));
         }
         if sizing.armor_stand {
             let flags = number(sizing.client_flags).unwrap_or(0);
-            return Ok((
-                if flags & 16 != 0 {
-                    sizing.marker.as_ref().ok_or("source marker dimensions missing")?
-                } else if flags & 1 != 0 {
-                    sizing
-                        .baby_dimensions
-                        .as_ref()
-                        .ok_or("source small armor stand dimensions missing")?
-                } else {
-                    &schema.dimensions
-                },
-                attribute_scale,
-                shape,
-            ));
+            let choice = if flags & 16 != 0 {
+                present(&sizing.marker, "source marker dimensions missing")?;
+                SizedChoice::Marker
+            } else if flags & 1 != 0 {
+                present(&sizing.baby_dimensions, "source small armor stand dimensions missing")?;
+                SizedChoice::Baby
+            } else {
+                SizedChoice::Schema
+            };
+            return Ok((choice, attribute_scale));
         }
         if sizing.avatar {
-            return Ok((
-                pose.avatar.as_ref().ok_or("source avatar dimensions missing")?,
-                attribute_scale,
-                shape,
-            ));
+            present(&pose.avatar, "source avatar dimensions missing")?;
+            return Ok((SizedChoice::Avatar(pose_id), attribute_scale));
         }
         let baby = boolean(sizing.baby);
         let age_scale = if baby { sizing.baby_scale } else { 1. };
         if sizing.camel && pose.sitting {
-            return Ok((
-                sizing.sitting.as_ref().ok_or("source camel sitting dimensions missing")?,
-                age_scale * attribute_scale,
-                shape,
-            ));
+            present(&sizing.sitting, "source camel sitting dimensions missing")?;
+            return Ok((SizedChoice::Sitting, age_scale * attribute_scale));
         }
         let special = if sizing.goat && pose.long_jumping {
-            Some(sizing.long_jumping.as_ref().ok_or("source goat jump dimensions missing")?)
+            present(&sizing.long_jumping, "source goat jump dimensions missing")?;
+            Some(SizedChoice::LongJumping)
         } else if !sizing.digging_states.is_empty()
             && sizing.digging_states.contains(&number(sizing.state).unwrap_or(0))
         {
-            Some(sizing.digging.as_ref().ok_or("source sniffer digging dimensions missing")?)
+            present(&sizing.digging, "source sniffer digging dimensions missing")?;
+            Some(SizedChoice::Digging)
         } else {
             None
         };
-        if let Some(d) = special {
-            return Ok((d, if d.fixed { 1. } else { age_scale * attribute_scale }, shape));
+        if let Some(choice) = special {
+            let fixed = choice.of(schema, sizing).fixed;
+            return Ok((choice, if fixed { 1. } else { age_scale * attribute_scale }));
         }
-        if let Some(baby_dimensions) = &sizing.baby_dimensions {
-            return Ok((
-                if baby { baby_dimensions } else { &schema.dimensions },
-                attribute_scale,
-                shape,
-            ));
+        if sizing.baby_dimensions.is_some() {
+            return Ok((if baby { SizedChoice::Baby } else { SizedChoice::Schema }, attribute_scale));
         }
         let owner = &sizing.owner;
         if *owner == SizeOwner::ChestedHorse && !baby {
-            return Ok((&schema.dimensions, attribute_scale, shape));
+            return Ok((SizedChoice::Schema, attribute_scale));
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
@@ -895,14 +905,73 @@ impl Models {
             SizeOwner::Other | SizeOwner::ChestedHorse => 1.,
         };
         Ok((
-            &schema.dimensions,
+            SizedChoice::Schema,
             if schema.dimensions.fixed {
                 1.
             } else {
                 age_scale * attribute_scale * family_scale
             },
-            shape,
         ))
+    }
+}
+
+thread_local! {
+    /// Nonzero while a `SizedScope` is alive on this thread: its id.
+    static SIZED_SCOPE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+static NEXT_SIZED_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// One frame's or tick's presentation, during which no metadata or attribute changes: while it
+/// is alive `Models::sized` memoizes each entity's answer (`Entity::sized_memo`).
+pub(crate) struct SizedScope(u64);
+impl SizedScope {
+    pub(crate) fn enter() -> Self {
+        let id = NEXT_SIZED_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(SIZED_SCOPE.with(|scope| scope.replace(id)))
+    }
+}
+impl Drop for SizedScope {
+    fn drop(&mut self) {
+        SIZED_SCOPE.with(|scope| scope.set(self.0));
+    }
+}
+
+/// An entity's `Models::sized` answer within one `SizedScope` (`scope` 0: none).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SizedMemo {
+    scope: u64,
+    choice: SizedChoice,
+    scale: f32,
+}
+
+/// Which of its kind's dimensions `Models::sized` chose (each present when chosen).
+#[derive(Clone, Copy, Debug, Default)]
+enum SizedChoice {
+    #[default]
+    Schema,
+    Sleeping,
+    Marker,
+    Baby,
+    Avatar(u8),
+    Sitting,
+    LongJumping,
+    Digging,
+}
+impl SizedChoice {
+    fn of<'a>(self, schema: &'a EntitySchema, sizing: &'a Sizing) -> &'a Dimensions {
+        let present = |dimensions: &'a Option<Dimensions>| dimensions.as_ref().expect("chosen dimensions are present");
+        match self {
+            Self::Schema => &schema.dimensions,
+            Self::Sleeping => present(&sizing.sleeping),
+            Self::Marker => present(&sizing.marker),
+            Self::Baby => present(&sizing.baby_dimensions),
+            Self::Avatar(pose) => present(
+                &sizing.poses[usize::from(pose)].as_ref().expect("chosen pose is known").avatar,
+            ),
+            Self::Sitting => present(&sizing.sitting),
+            Self::LongJumping => present(&sizing.long_jumping),
+            Self::Digging => present(&sizing.digging),
+        }
     }
 }
 pub(super) fn part_lookup(bones: &[Bone]) -> BTreeMap<String, usize> {
@@ -1773,5 +1842,51 @@ mod tests {
         assert!(constant("minecraft:camel", "SLEEPING_DIMENSIONS").is_some());
         assert!(constant("minecraft:camel", "SITTING_DIMENSIONS").is_none());
         assert_ne!(table["CROUCHING"].height, table["STANDING"].height);
+    }
+
+    /// `sized` memoizes an entity's answer within one `SizedScope` only: a pose received
+    /// between two frames resizes the entity in the next one, and outside any scope every call
+    /// reads the metadata afresh.
+    #[test]
+    fn sized_memo_lasts_one_scope() {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        let mut spawn = Writer::default();
+        spawn.var(1);
+        spawn.0.extend_from_slice(&[0; 16]);
+        spawn.var(doc.entities["minecraft:mannequin"].protocol_id as i32);
+        for coordinate in [0f64, 64., 0.] {
+            spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+        }
+        spawn.0.extend_from_slice(&[0; 4]);
+        spawn.var(0);
+        store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        let pose_of = |name: &str| *models.poses.iter().find(|(_, pose)| pose.as_str() == name).unwrap().0;
+        let index = models.entity_accessor(store.get(1).unwrap(), "DATA_POSE").unwrap();
+        let set_pose = |store: &mut super::super::Store, name: &str| {
+            store.get_mut(1).unwrap().metadata.insert(index, super::super::Metadata::Pose(pose_of(name)));
+        };
+        let height = |store: &super::super::Store| models.dimensions(store.get(1).unwrap()).unwrap().0.height;
+        set_pose(&mut store, "STANDING");
+        let standing = {
+            let _frame = SizedScope::enter();
+            let first = height(&store);
+            assert_eq!(height(&store), first, "repeated within the scope");
+            first
+        };
+        set_pose(&mut store, "CROUCHING");
+        let crouching = {
+            let _frame = SizedScope::enter();
+            height(&store)
+        };
+        assert!(crouching < standing, "the next scope sees the received pose: {crouching} vs {standing}");
+        set_pose(&mut store, "STANDING");
+        assert_eq!(height(&store), standing, "outside a scope");
     }
 }

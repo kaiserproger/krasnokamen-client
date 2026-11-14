@@ -568,7 +568,7 @@ mod tests {
             attribute_ids: BTreeMap::new(),
             digest: String::new(),
             armor_models: BTreeMap::new(),
-            motion: BTreeMap::new(),
+            motion: Default::default(),
         }));
         (content, store)
     }
@@ -669,6 +669,7 @@ mod tests {
             crowd: None,
             clock: None,
             kind_slot: Default::default(),
+            sized_memo: Default::default(),
         });
         handle
     }
@@ -1204,6 +1205,7 @@ mod tests {
             crowd: None,
             clock: None,
             kind_slot: Default::default(),
+            sized_memo: Default::default(),
         };
         let received = entity.metadata.clone();
         super::super::display::on_metadata(&models, &mut entity, &received);
