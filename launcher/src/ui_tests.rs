@@ -14,6 +14,51 @@ fn test_app() -> App {
     ));
     App::new(Layout::new(root))
 }
+/// An installation that looks complete to the old readiness test (current
+/// `installed.json`, every required path) but whose resource pack predates this
+/// launcher: Play must run the install stage that re-extracts the pack.
+#[test]
+fn ordinary_play_repairs_an_installation_whose_pack_lost_its_marker() {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let scratch = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let root = scratch.join(format!(
+        "krasnokamen-play-ready-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let sha1 = "a".repeat(40);
+    let layout = crate::bootstrap::test_install(
+        &root,
+        &sha1,
+        &[(
+            "assets/minecraft/models/block/template_sign_rot_0.json",
+            b"{}",
+        )],
+    );
+    std::fs::create_dir_all(layout.join("resources/assets/minecraft/models/block")).unwrap();
+    std::fs::write(
+        layout.join("resources/assets/minecraft/models/block/oak_sign.json"),
+        b"{}",
+    )
+    .unwrap();
+
+    let app = App::new(Layout::new(root.clone()));
+    assert!(
+        !app.ready,
+        "a stale pack must send ordinary Play through the install stage, not start the client"
+    );
+
+    crate::bootstrap::test_repair(&layout, &sha1);
+    let app = App::new(layout);
+    assert!(
+        app.ready,
+        "a pack whose marker matches the client jar lets Play start directly"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn paint(
     app: &mut App,
     ctx: &egui::Context,

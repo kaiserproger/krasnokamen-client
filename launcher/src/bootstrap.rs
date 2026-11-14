@@ -46,13 +46,28 @@ impl Installed {
     }
 }
 
-/// Play can start immediately: everything required is on disk and recorded.
+/// Play can start immediately: everything required is on disk and recorded,
+/// including a resource pack whose marker names the jar this installation
+/// extracted. `ui.rs` starts the client without `run` when this is true, so a
+/// stale, copied or half-written pack must make it false and send Play through
+/// the install stage that repairs it.
 pub fn is_ready(layout: &Layout) -> bool {
     let installed = Installed::load(layout);
     installed.game_version == GAME_VERSION
         && !installed.bundles.is_empty()
         && !installed.resources_for.is_empty()
         && paths::missing(&layout.root).is_empty()
+        && pack_ready(layout, &installed)
+}
+
+/// The pack's marker, compared with what the local client jar produces. The jar
+/// must be present (stage 3 downloads it before stage 5): without it nothing can
+/// say the pack is current, so readiness is false and `run` decides.
+fn pack_ready(layout: &Layout, installed: &Installed) -> bool {
+    let Ok(manifest) = resources_manifest(&layout.client_jar(), &installed.client_sha1) else {
+        return false;
+    };
+    resources_current(layout, installed, &manifest, false, false)
 }
 
 pub struct Options {
@@ -212,7 +227,7 @@ fn install_facts(layout: &Layout, staging: &Path, rep: &Reporter) -> Result<()> 
 const RESOURCES_MARKER: &str = ".resources.json";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-struct ResourcesManifest {
+pub(crate) struct ResourcesManifest {
     game_version: String,
     client_sha1: String,
     entries: u64,
@@ -221,7 +236,7 @@ struct ResourcesManifest {
 
 /// What the jar's `assets/` tree must produce: the file count and a digest of the
 /// sorted paths, so a pack built from any other jar never matches.
-fn resources_manifest(jar: &Path, client_sha1: &str) -> Result<ResourcesManifest> {
+pub(crate) fn resources_manifest(jar: &Path, client_sha1: &str) -> Result<ResourcesManifest> {
     use sha2::{Digest, Sha256};
     let mut archive = zip::ZipArchive::new(fs::File::open(jar)?)?;
     let mut paths = Vec::new();
@@ -266,7 +281,11 @@ fn pack_is_current(layout: &Layout, expected: &ResourcesManifest) -> bool {
         .is_some_and(|marker| marker == *expected)
 }
 
-fn extract_resources(layout: &Layout, rep: &Reporter, expected: &ResourcesManifest) -> Result<()> {
+pub(crate) fn extract_resources(
+    layout: &Layout,
+    rep: &Reporter,
+    expected: &ResourcesManifest,
+) -> Result<()> {
     let staging = layout.join("resources.staging");
     if staging.exists() {
         fs::remove_dir_all(&staging)?;
@@ -307,13 +326,33 @@ fn extract_resources(layout: &Layout, rep: &Reporter, expected: &ResourcesManife
         staging.join(RESOURCES_MARKER),
         serde_json::to_vec_pretty(expected)?,
     )?;
-    // Swap the finished pack in. An additive extraction would keep entries the
-    // jar dropped and could leave a half-written pack that later runs trust.
-    let root = layout.join("resources");
-    if root.exists() {
-        fs::remove_dir_all(&root)?;
+    swap_pack(
+        &staging,
+        &layout.join("resources"),
+        &layout.join("resources.old"),
+    )
+}
+
+/// Swap a finished staging pack in, keeping the previous pack until the new one is
+/// in place: an additive extraction would keep entries the jar dropped, and
+/// deleting the old pack before the rename leaves the installation with none when
+/// that rename fails.
+fn swap_pack(staging: &Path, root: &Path, backup: &Path) -> Result<()> {
+    if backup.exists() {
+        fs::remove_dir_all(backup)?;
     }
-    fs::rename(&staging, &root)?;
+    if root.exists() {
+        fs::rename(root, backup)?;
+    }
+    if let Err(error) = fs::rename(staging, root) {
+        if backup.exists() {
+            let _ = fs::rename(backup, root);
+        }
+        return Err(error.into());
+    }
+    if backup.exists() {
+        fs::remove_dir_all(backup)?;
+    }
     Ok(())
 }
 
@@ -408,19 +447,65 @@ pub fn ensure_singleplayer_runtime(
     Ok(())
 }
 
+/// Write a jar with the given `assets/**` members (test fixture).
+#[cfg(test)]
+pub(crate) fn write_test_jar(path: &Path, entries: &[(&str, &[u8])]) {
+    let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    for (name, body) in entries {
+        writer
+            .start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(body).unwrap();
+    }
+    writer.finish().unwrap();
+}
+
+/// A layout that satisfies every non-pack readiness requirement: every
+/// `paths::REQUIRED` entry, the client jar, and an `installed.json` for this
+/// release (test fixture).
+#[cfg(test)]
+pub(crate) fn test_install(root: &Path, client_sha1: &str, jar: &[(&str, &[u8])]) -> Layout {
+    let layout = Layout::new(root.to_owned());
+    for (relative, directory) in paths::REQUIRED {
+        let target = layout.join(relative);
+        if *directory {
+            fs::create_dir_all(&target).unwrap();
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&target, b"").unwrap();
+        }
+    }
+    fs::create_dir_all(layout.join("mojang/versions").join(GAME_VERSION)).unwrap();
+    write_test_jar(&layout.client_jar(), jar);
+    Installed {
+        game_version: GAME_VERSION.to_owned(),
+        client_sha1: client_sha1.to_owned(),
+        bundles: std::collections::BTreeMap::from([(
+            "solaris-facts-26.3-r1".to_owned(),
+            "x".to_owned(),
+        )]),
+        resources_for: client_sha1.to_owned(),
+    }
+    .save(&layout)
+    .unwrap();
+    layout
+}
+
+/// An extractable pack for a test jar: `assets/**` only, with a marker.
+#[cfg(test)]
+pub(crate) fn test_repair(layout: &Layout, client_sha1: &str) {
+    let manifest = resources_manifest(&layout.client_jar(), client_sha1).unwrap();
+    extract_resources(layout, &Reporter::new(None, true), &manifest).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn write_jar(path: &Path, entries: &[(&str, &[u8])]) {
-        let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
-        for (name, body) in entries {
-            writer
-                .start_file(*name, zip::write::SimpleFileOptions::default())
-                .unwrap();
-            writer.write_all(body).unwrap();
-        }
-        writer.finish().unwrap();
+        write_test_jar(path, entries);
     }
 
     #[test]
@@ -478,6 +563,62 @@ mod tests {
         );
         assert!(pack_is_current(&layout, &expected));
         assert!(!layout.join("resources.staging").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_installation_whose_pack_lost_its_marker_is_not_ready() {
+        let root = std::env::temp_dir().join(format!("krasnokamen-ready-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let sha1 = "a".repeat(40);
+        let layout = test_install(
+            &root,
+            &sha1,
+            &[("assets/minecraft/models/block/oak_sign_rot_0.json", b"{}")],
+        );
+        // The 26.1.2-era pack a player still has: the directory exists, no marker.
+        fs::create_dir_all(layout.join("resources/assets/minecraft/models/block")).unwrap();
+        fs::write(
+            layout.join("resources/assets/minecraft/models/block/oak_sign.json"),
+            b"{}",
+        )
+        .unwrap();
+        assert!(
+            paths::missing(&layout.root).is_empty(),
+            "the fixture must satisfy every non-pack requirement"
+        );
+        assert!(
+            !is_ready(&layout),
+            "a markerless pack must not report the installation ready; Play then runs the repair stage"
+        );
+        test_repair(&layout, &sha1);
+        assert!(
+            is_ready(&layout),
+            "the repaired pack makes Play start the client directly"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_pack_swap_keeps_the_previous_pack() {
+        let root = std::env::temp_dir().join(format!("krasnokamen-swap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let pack = root.join("resources");
+        fs::create_dir_all(pack.join("assets/minecraft")).unwrap();
+        fs::write(pack.join("assets/minecraft/oak_sign.json"), b"{}").unwrap();
+        // A staging directory that vanished (or a failed rename): the swap must put
+        // the previous pack back instead of leaving the installation without one.
+        let error = swap_pack(
+            &root.join("resources.staging"),
+            &pack,
+            &root.join("resources.old"),
+        );
+        assert!(error.is_err());
+        assert!(
+            pack.join("assets/minecraft/oak_sign.json").is_file(),
+            "the previous pack is restored"
+        );
+        assert!(!root.join("resources.old").exists());
         let _ = fs::remove_dir_all(&root);
     }
 
