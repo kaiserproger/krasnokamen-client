@@ -290,6 +290,9 @@ pub struct Sizing {
     armor_stand: bool,
     /// The kind has a `POSES` table (avatars): dimensions by pose name.
     avatar: bool,
+    /// Per `DATA_POSE` id (`Models::poses`, `None` for an id it lacks): what `sized` asks of
+    /// the pose's name, resolved once instead of comparing names per entity.
+    poses: Vec<Option<PoseRule>>,
     goat: bool,
     /// A sniffer's `State` ids named `DIGGING` (empty for every other kind).
     digging_states: Vec<i32>,
@@ -300,9 +303,18 @@ pub struct Sizing {
     sitting: Option<Dimensions>,
     long_jumping: Option<Dimensions>,
     digging: Option<Dimensions>,
-    standing: Option<Dimensions>,
     /// The kind's box rule in `physical::bounds_at`.
     shape: Shape,
+}
+
+/// One pose of a kind (`Sizing::poses`).
+#[derive(Debug)]
+struct PoseRule {
+    sleeping: bool,
+    sitting: bool,
+    long_jumping: bool,
+    /// An avatar's dimensions in this pose: its `POSES` entry, else `STANDING_DIMENSIONS`.
+    avatar: Option<Dimensions>,
 }
 
 /// How `physical::bounds_at` derives a kind's box from its dimensions.
@@ -343,7 +355,7 @@ enum SizeOwner {
 }
 
 impl Sizing {
-    fn of(schema: &EntitySchema, kind: &str) -> Self {
+    fn of(schema: &EntitySchema, kind: &str, poses: &BTreeMap<u8, String>) -> Self {
         let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
         let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
         let owner = |method: &str| schema.method_owners.get(method).map(String::as_str);
@@ -389,6 +401,27 @@ impl Sizing {
             },
             armor_stand: kind == "minecraft:armor_stand",
             avatar: matches!(schema.dimension_constants.get("POSES"), Some(DimensionConstant::Poses(_))),
+            poses: {
+                let table = match schema.dimension_constants.get("POSES") {
+                    Some(DimensionConstant::Poses(table)) => Some(table),
+                    _ => None,
+                };
+                let mut rules: Vec<Option<PoseRule>> = Vec::new();
+                for (&id, name) in poses {
+                    let index = usize::from(id);
+                    if rules.len() <= index {
+                        rules.resize_with(index + 1, || None);
+                    }
+                    rules[index] = Some(PoseRule {
+                        sleeping: name == "SLEEPING",
+                        sitting: name == "SITTING",
+                        long_jumping: name == "LONG_JUMPING",
+                        avatar: table.and_then(|table| table.get(name)).cloned()
+                            .or_else(|| constant("STANDING_DIMENSIONS")),
+                    });
+                }
+                rules
+            },
             goat: schema.class == "net.minecraft.world.entity.animal.goat.Goat",
             digging_states: if schema.class == "net.minecraft.world.entity.animal.sniffer.Sniffer" {
                 schema.enum_ids.get("State").map_or_else(Vec::new, |ids| {
@@ -403,7 +436,6 @@ impl Sizing {
             sitting: constant("SITTING_DIMENSIONS"),
             long_jumping: constant("LONG_JUMPING_DIMENSIONS"),
             digging: constant("DIGGING_DIMENSIONS"),
-            standing: constant("STANDING_DIMENSIONS"),
             shape: match kind {
                 "minecraft:item_frame" | "minecraft:glow_item_frame" => Shape::ItemFrame,
                 "minecraft:interaction" => Shape::Interaction,
@@ -750,7 +782,7 @@ impl Models {
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32, Shape)> {
         let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
-        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name));
+        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name, &self.poses));
         let shape = sizing.shape;
         let number = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
@@ -760,9 +792,10 @@ impl Models {
                 .and_then(super::Metadata::boolean)
                 .unwrap_or(false)
         };
-        let pose = self
+        let pose = sizing
             .poses
-            .get(&(number(sizing.pose).unwrap_or(0) as u8))
+            .get(usize::from(number(sizing.pose).unwrap_or(0) as u8))
+            .and_then(Option::as_ref)
             .ok_or("unknown entity pose")?;
         let living = sizing.living;
         let mut attribute_scale = if living {
@@ -779,7 +812,7 @@ impl Models {
             Sanitize::AtMost(most) => attribute_scale.min(most),
             Sanitize::One => 1.,
         };
-        if living && pose == "SLEEPING" {
+        if living && pose.sleeping {
             return Ok((
                 sizing.sleeping.as_ref().ok_or("source sleeping dimensions missing")?,
                 1.,
@@ -803,28 +836,23 @@ impl Models {
                 shape,
             ));
         }
-        if sizing.avatar
-            && let Some(DimensionConstant::Poses(poses)) = schema.dimension_constants.get("POSES")
-        {
+        if sizing.avatar {
             return Ok((
-                poses
-                    .get(pose)
-                    .or(sizing.standing.as_ref())
-                    .ok_or("source avatar dimensions missing")?,
+                pose.avatar.as_ref().ok_or("source avatar dimensions missing")?,
                 attribute_scale,
                 shape,
             ));
         }
         let baby = boolean(sizing.baby);
         let age_scale = if baby { sizing.baby_scale } else { 1. };
-        if sizing.camel && pose == "SITTING" {
+        if sizing.camel && pose.sitting {
             return Ok((
                 sizing.sitting.as_ref().ok_or("source camel sitting dimensions missing")?,
                 age_scale * attribute_scale,
                 shape,
             ));
         }
-        let special = if sizing.goat && pose == "LONG_JUMPING" {
+        let special = if sizing.goat && pose.long_jumping {
             Some(sizing.long_jumping.as_ref().ok_or("source goat jump dimensions missing")?)
         } else if !sizing.digging_states.is_empty()
             && sizing.digging_states.contains(&number(sizing.state).unwrap_or(0))
@@ -1680,5 +1708,70 @@ mod tests {
         };
         assert_eq!(poses["SLEEPING"].eye_height, 0.2);
         assert!(poses["SLEEPING"].fixed);
+    }
+
+    /// `sized` answers each `DATA_POSE` id by the name `Models::poses` gives it: an avatar's
+    /// `POSES` entry (its standing dimensions for a pose it lacks), a sleeping living body's
+    /// sleeping box, a sitting camel's sitting rule.
+    #[test]
+    fn sized_follows_each_pose_name() {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        for (id, kind) in [(1, "minecraft:mannequin"), (2, "minecraft:camel")] {
+            let mut spawn = Writer::default();
+            spawn.var(id);
+            spawn.0.extend_from_slice(&[0; 16]);
+            spawn.var(doc.entities[kind].protocol_id as i32);
+            for coordinate in [0f64, 64., 0.] {
+                spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+            }
+            spawn.0.extend_from_slice(&[0; 4]);
+            spawn.var(0);
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        }
+        let size = |d: &Dimensions| (d.width, d.height, d.eye_height);
+        let constant = |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
+            Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
+            _ => None,
+        };
+        let Some(DimensionConstant::Poses(table)) =
+            doc.entities["minecraft:mannequin"].dimension_constants.get("POSES")
+        else {
+            panic!("mannequin POSES table");
+        };
+        let sized_in = |store: &mut super::super::Store, id: i32, pose: u8| {
+            let index = models.entity_accessor(store.get(id).unwrap(), "DATA_POSE").unwrap();
+            let entity = store.get_mut(id).unwrap();
+            entity.metadata.insert(index, super::super::Metadata::Pose(pose));
+            models.dimensions(store.get(id).unwrap()).map(|(d, _)| size(d)).ok()
+        };
+        let mut checked = 0;
+        for (&pose, name) in &models.poses {
+            let avatar = if name == "SLEEPING" {
+                constant("minecraft:mannequin", "SLEEPING_DIMENSIONS")
+            } else {
+                table.get(name).map(size).or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
+            };
+            assert_eq!(sized_in(&mut store, 1, pose), avatar, "mannequin {name}");
+            let camel = match name.as_str() {
+                "SITTING" => constant("minecraft:camel", "SITTING_DIMENSIONS"),
+                "SLEEPING" => constant("minecraft:camel", "SLEEPING_DIMENSIONS"),
+                _ => Some(size(&doc.entities["minecraft:camel"].dimensions)),
+            };
+            assert_eq!(sized_in(&mut store, 2, pose), camel, "camel {name}");
+            checked += 1;
+        }
+        assert_eq!(checked, 18);
+        // Each rule changes the answer: sleeping and crouching boxes differ from standing ones,
+        // and a sitting camel has no `SITTING_DIMENSIONS` in these facts (an error, not its box).
+        assert!(constant("minecraft:camel", "SLEEPING_DIMENSIONS").is_some());
+        assert!(constant("minecraft:camel", "SITTING_DIMENSIONS").is_none());
+        assert_ne!(table["CROUCHING"].height, table["STANDING"].height);
     }
 }
