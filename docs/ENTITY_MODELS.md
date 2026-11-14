@@ -30,11 +30,11 @@ and matched-vanilla visuals remain unverified.
 The armor stand has a ground-level base and a wooden crossbar-and-post body. Its
 arm and base-plate geometry follows the received `ShowArms` and `NoBasePlate` flags;
 small stands scale the stand and its equipment together about the feet.
-Baby zombie-family and piglin-family armor uses shells fitted to each authored body and its
-animation pivots. Baby chest-shell arm fronts and caps sample opaque regions of the iron base
-texture. A native scene with a baby zombie in iron armor and a separate unarmored control
-showed the previously exposed cyan shoulder strips covered; other species, armor materials,
-animation and matched-vanilla appearance remain unverified.
+Baby zombie/husk bodies and their shared armor use child-sized torso/limb volumes with
+matching animation pivots. The chest-shell arms sample the supplied child equipment atlas's
+shoulder region and transparent forearms, rather than stretching an opaque leg strip over
+the whole arm. Other baby families, armor materials and motion require separate matched
+controls; a source or enclosure regression alone is not an appearance acceptance.
 Adult horse body armor and saddles use separate independently authored overlay rigs and the
 received equippable asset's `horse_body` and `horse_saddle` texture layers. Overlay joints
 follow the corresponding authored horse bones; unsupported species and missing resources stay
@@ -103,9 +103,13 @@ Experience orbs render as camera-facing sprites using received XP value and acti
 resources, with a camera-rotated lighting normal. A native-client scene exercised one
 received value-1 orb from two views against a no-orb control. The sprite was small in
 these views; texture details, other values and matched-vanilla appearance remain unverified.
-Projectile tridents transform their authored pole axis into the same orientation basis as
-arrows. A received downward-pitch state was visually checked; flight and vanilla parity
-remain unverified.
+The shared trident geometry translates the local 26.3 `TridentModel.createLayer` data:
+five solid boxes, neutral part pivots and the source UV/mirror values. This is not an
+independent by-eye fit. The supplied item graph and `trident_in_hand` display transforms
+own held placement; no second item half-turn or fitted grip offset is added.
+Projectile tridents transform the source pole axis into the same orientation basis as
+arrows. Geometry, held grip frame and thrown tip/shaft axes have regression coverage;
+matched first-person, third-person and thrown frames are separate acceptance evidence.
 Enchanting tables render their animated book and conduits render their inactive shell or
 active cage, wind and camera-facing eye in the native scene. A dry inactive conduit and an
 enchanting table were visually exercised; active conduit and matched-vanilla parity were not.
@@ -168,6 +172,115 @@ The renderer asks for rigs by key (`minecraft:cow#renderer_main`, `minecraft:cow
 variants collapse (`boat`, `chest_boat`, `raft`, `chest_raft`, every `*_minecart` -> `minecart`),
 armor-layer slots map to `armor_<slot>` / `armor_baby_<slot>`, with species-specific baby
 shells where body pivots differ.
+
+### Selection coverage is separate from texture coverage
+
+`entity_selection_coverage_report` enumerates every facts entity, adult/baby selection,
+built-in received visual variant, rig-changing fish state, pose, exported enum value,
+declared family texture, humanoid armor slot and literal rig demand in production entity,
+equipment, block-entity and special-item selectors. It calls the production `material`
+selector and resolves demanded keys through the real `Catalog::from_sources` and `model_id`.
+The report retains **required** and **selected** keys separately: a missing variant cannot
+pass because its base family still renders. Test textures isolate selection from resource
+activation; they are not player textures or pixel evidence.
+
+Generate the raw JSON with `SOLARIS_ENTITY_COVERAGE_REPORT=<receipt>/coverage-raw.json`
+on `cargo test --lib entity_selection_coverage -- --nocapture`, then summarize it with
+`python3 tools/entity_models.py selection-report <receipt>/coverage-raw.json -o <receipt>/coverage.json`.
+The summary command returns nonzero for missing/rejected rigs, failed material selection,
+or unresolved non-family obligations. It does not delete the report on failure.
+`entity_selection_coverage_detects_removed_and_rejected_required_entry` removes and corrupts
+the cold-cow source in isolated catalog inputs; the exact received cold-cow row must fail
+while the valid catalog passes. No shipping asset is edited by this negative control.
+
+Classification is conservative: `missing` means no required source, `rejected` means a
+source exists but the runtime catalog did not admit it, and `simplified` means authored
+geometry without a matched visual proof. A simplified rig is **not** the magenta placeholder.
+Non-family entities are `non-rig-unverified`, not automatically missing authored rigs:
+paintings, frames, items and effects have other rendering owners; unsupported entities
+must remain explicit. Pose/enum/texture/armor and literal rows inventory demands, not proof
+of reachable state transitions or animation. Poses are an intentional conservative
+cross-product, not a claim that every species uses every pose. An inherited `DATA_BABY_ID`
+does not prove a species can be a baby; rows without a declared baby rig explicitly mark
+that reachability unverified. Dynamic resource-pack registries add obligations beyond the
+embedded built-in variants.
+
+All generated rows remain unaccepted. Promote only against retained native frames,
+entity IDs/received state, exact build/resource/settings identity and the same-version Java
+oracle scene. Adult/baby, received variants, equipped/posed entities and block/item special
+models each need real rendered samples. A contact sheet from this Python tool, a nonempty
+mesh, texel coverage or catalog presence cannot establish `rendered-and-oracle-verified`.
+The fail-visible runtime fallback remains unchanged.
+
+### Independently authored climate variant rigs
+
+The native-selection inventory found demanded keys for `cold_cow`, `cold_pig`,
+`cold_chicken`, `warm_cow` and `warm_zombie_nautilus`. The first four have adult and baby
+entries; the zombie nautilus has only its reachable adult entry: nine files under
+`assets/solaris/models/entity/`. The existing directory embedding and `model_id` resolver
+admit them without a second catalog. An inherited `DATA_BABY_ID` is not a vanilla baby
+requirement: local 26.3 `ZombieNautilus.canBeABaby()` is false, and `AgeableMob.isBaby()`
+gates on it. The inventory excludes that proven-unreachable baby branch; no synthetic
+`warm_zombie_nautilus_baby` asset is shipped. The original reachability evidence remains in
+the local `ClientQ04/zombie-nautilus-baby-reachability.json` receipt.
+
+Cow, pig and adult chicken bodies reuse the project's existing Solaris-authored primitives
+and joint names. Clean paired controls fit the cold cow's short horns and separate pink
+muzzle net, the warm cow's squared horn bends, and both calves' small horn stubs. The cold
+pig's adult coat uses the extra lower texture net.
+
+The shared temperate/warm baby chicken and cold baby entry use the same body/beak and
+planar shank/toe/wing layout, grounded in the local 26.3 `BabyChickenModel` anatomy and
+the supplied 16-pixel texture nets. There is no separate adult-style head/wattle or inflated
+second body. Both feet sample their actual leg and toe islands in all three baby textures;
+adult chicken assets are unchanged by this correction.
+
+The coral zombie nautilus has an independently fitted stepped shell, head, eight tentacles
+and four crossed coral fans. Paired front/side controls determine its source-facing root
+and ground-reaching shell, with the tall red/blue fans at the sides rather than all on top.
+The shell samples the PNG's separate upper and lower nets: a ten-pixel upper band
+and eight-pixel lower skirt, including its transparent head opening. Stretching the
+upper band over the whole shell loses the lower red/blue pattern. Coral fans sample
+their separate four-, five- and six-pixel-wide PNG islands without adjacent colors.
+The pink roof fan is one double-sided longitudinal plane, not crossed planes:
+its edge-on front view must not become a second full flower silhouette.
+Dimensions, deformations and placements remain independently authored fits.
+
+Sources are existing Solaris-owned primitives, local supplied PNG layout/opacity/color,
+matched frames and bounded local model-contract inspection for the child chicken anatomy.
+No Java implementation, serialized model arrays, decompilation output or Mojang bytes are
+copied into these JSON files. Texture images, local inspection output and reference frames
+remain private receipts, never shipped assets. Failed scenes without their subjects are
+not geometry references or appearance proof.
+Catalog/selection regressions do not establish silhouette, animation or equipment parity:
+these entries remain simplified/unaccepted until their exact native and Java scenes qualify.
+
+### 26.3 material and coordinate boundaries
+
+Beds use the supplied 26.3 normal block models and composite item graph. The obsolete
+`bed_head`/`bed_foot` entity rigs, special-item route and block-entity body pass are removed:
+they depended on the no-longer-supplied `entity/bed/<color>.png` atlas. Bed item regression
+fixtures exercise both resource model halves, their separate texture layers and graph
+translation without injecting a legacy entity texture.
+
+The authored trident keeps its coordinates in the raw special-item bake. Its resource item
+graph owns the Y/Z conversion; adding another half-turn reverses the visible prongs against
+the clean Java control. The original baseline angle interpretation is withdrawn rather
+than treated as proof of a baseline defect. Projectile roots are unchanged.
+The baby zombie/husk head and helmet use the same fitted joint and six-unit head volume
+rather than stretching the baby face over an adult-sized cube. Their torso, limbs and shared
+armor are fitted independently from clean paired controls. Pot walls run from the bottom
+cap to a flat shoulder under one broad neck; they do not expose a separate bottom stripe.
+Bell side rectangles reverse V while retaining the existing body/rim geometry. These are
+authored fits from supplied images and matched frames, not copied Java model arrays; source
+regressions alone do not constitute matched-frame acceptance.
+
+Wither-skull material selection uses the received `DATA_DANGEROUS` flag and the existing
+`WITHER_LOCATION`/`WITHER_INVULNERABLE_LOCATION` material facts. Both paths must resolve a
+real texture through the production selector, rather than accepting an empty default.
+
+
+
 
 ### Sign text belongs to the block-entity pass
 
@@ -372,7 +485,7 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
   Adult and baby pigs use independently authored texture-sized head, snout, torso and leg
   geometry without separate ears or tail: the adult head sits in front of the body with the
   snout just below the eyes, and the piglet head rises a pixel above its back. The cold pig's
-  extra texture layer is not modelled.
+  separate authored coat samples its additional texture layer.
   Adult camel and camel husk rigs stand on 22-pixel legs, so the back and saddle reach the
   received two-block rider seat. The first rider sits on the back between the neck and the
   hump. Sitting lowers the back by 19 pixels onto the received sitting seat and tucks the
@@ -455,7 +568,8 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
 * Entity metadata is Solaris-owned data: `assets/solaris/entities/entity-facts.json` (embedded in
   the binary; protocol ids, dimensions, metadata accessors, texture/variant selection, head/body
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
-  the launcher needs no JDK and nothing is derived from the client jar for entities.
+  the launcher needs no JDK or runtime extraction. The trident layer above was translated
+  offline from local 26.3 class data; it is an explicit exception to independent geometry authoring.
 * Spider legs use a Solaris-authored alternating swing driven by received displacement;
   they ease back to their authored resting pose when movement stops. The adult spider rig
   now uses single sloped leg bars rather than added vertical feet, based on a Java
