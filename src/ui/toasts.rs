@@ -398,7 +398,7 @@ pub(crate) fn progress_map_order<'a>(ids: &[&'a str]) -> Vec<&'a str> {
         hash ^ (hash >> 16)
     };
     /// HashMap.resize: double the table; split bins keep their relative order.
-    fn resize<'a>(bins: &mut Vec<Vec<(&'a str, u32)>>, threshold: &mut usize) {
+    fn resize(bins: &mut Vec<Vec<(&str, u32)>>, threshold: &mut usize) {
         let capacity = bins.len() * 2;
         *threshold = if bins.len() >= 16 {
             *threshold * 2
@@ -743,11 +743,11 @@ impl UiState {
                         0xffffff00
                     };
                     // Font.split(title, 125).
-                    let lines = self.text.layout(&**title, 125.)?.line_widths.len();
+                    let lines = self.text.layout(title, 125.)?.line_widths.len();
                     let t = instance.visible_for;
                     if lines == 1 {
                         text(out, &kind, f32::MAX, 30., 7., color)?;
-                        text(out, &**title, 125., 30., 18., 0xffffffff)?;
+                        text(out, title, 125., 30., 18., 0xffffffff)?;
                     } else if t < 1500 {
                         let alpha =
                             (((1500 - t) as f32 / 300.).clamp(0., 1.) * 255.).floor() as u32;
@@ -756,7 +756,7 @@ impl UiState {
                         let alpha =
                             (((t - 1500) as f32 / 300.).clamp(0., 1.) * 252.).floor() as u32;
                         let top = SLOT_HEIGHT / 2 - lines as i32 * 9 / 2;
-                        text(out, &**title, 125., 30., top as f32, argb(alpha, 0xffffff))?;
+                        text(out, title, 125., 30., top as f32, argb(alpha, 0xffffff))?;
                     }
                     if let Some(icon) = icon {
                         items.push((icon, [8., 8., 16., 16.]));

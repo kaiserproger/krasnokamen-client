@@ -55,7 +55,8 @@ impl World {
             .biome_zoom_seed
             .ok_or("source_biome_seed_unreceived")?;
         let position = biome_sample_position(position, seed, self.min_y, self.height)?;
-        self.biome(position).ok_or_else(|| "source_biome_unloaded".into())
+        self.biome(position)
+            .ok_or_else(|| "source_biome_unloaded".into())
     }
     pub fn biome_has_precipitation(&self, position: [i32; 3], content: &Content) -> Result<bool> {
         let biome = self.source_biome(position)?;
@@ -65,7 +66,12 @@ impl World {
     }
     /// Top of the highest motion-blocking or fluid cell in a received column.
     /// Unloaded columns are unknown, not open sky.
-    pub(crate) fn precipitation_height(&self, x: i32, z: i32, content: &Content) -> Result<Option<i32>> {
+    pub(crate) fn precipitation_height(
+        &self,
+        x: i32,
+        z: i32,
+        content: &Content,
+    ) -> Result<Option<i32>> {
         let Some(chunk) = self.chunk(chunk_position([x, self.min_y, z])) else {
             return Ok(None);
         };
@@ -83,7 +89,11 @@ impl World {
         }
         Ok(Some(self.min_y))
     }
-    pub(crate) fn precipitation_is_snow(&self, position: [i32; 3], content: &Content) -> Result<Option<bool>> {
+    pub(crate) fn precipitation_is_snow(
+        &self,
+        position: [i32; 3],
+        content: &Content,
+    ) -> Result<Option<bool>> {
         let biome = match self.source_biome(position) {
             Ok(biome) => biome,
             Err(error) if error == "source_biome_unloaded" => return Ok(None),
@@ -93,8 +103,13 @@ impl World {
         if !crate::environment::biome::has_precipitation(biome)? {
             return Ok(None);
         }
-        let sea_level = self.environment_context.sea_level.ok_or("world sea level unreceived")?;
-        Ok(Some(crate::environment::biome::temperature(biome, position, sea_level)? < 0.15))
+        let sea_level = self
+            .environment_context
+            .sea_level
+            .ok_or("world sea level unreceived")?;
+        Ok(Some(
+            crate::environment::biome::temperature(biome, position, sea_level)? < 0.15,
+        ))
     }
     pub fn is_raining_at(&self, position: [i32; 3], content: &Content) -> Result<bool> {
         if !self.environment.raining()?

@@ -1,9 +1,9 @@
 //! Version-pinned entity shape and query rules. Predicates follow declaring Java owners,
 //! not an approximate species list; server tags remain authoritative.
-use super::{resources::Shape, Entity, Handle, Metadata, Models, Store};
+use super::{Entity, Handle, Metadata, Models, Store, resources::Shape};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 /// Where `Store::candidate_slots` found a candidate.
@@ -106,7 +106,9 @@ impl Default for AnimationState {
     }
 }
 pub(crate) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
-    models.entity_accessor(e, name).and_then(|id| e.metadata_value(id))
+    models
+        .entity_accessor(e, name)
+        .and_then(|id| e.metadata_value(id))
 }
 pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i32 {
     value(models, e, name)
@@ -139,7 +141,10 @@ fn stays_active(e: &Entity) -> bool {
         || super::display::is_display(e)
         || matches!(
             e.type_name.as_str(),
-            "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
+            "minecraft:shulker"
+                | "minecraft:polar_bear"
+                | "minecraft:ender_dragon"
+                | "minecraft:falling_block"
         )
 }
 pub(crate) fn boolean(models: &Models, e: &Entity, name: &str, default: bool) -> bool {
@@ -154,13 +159,17 @@ fn float(models: &Models, e: &Entity, name: &str, default: f32) -> f32 {
     }
 }
 fn hierarchy(models: &Models, e: &Entity, class: &str) -> bool {
-    models.schema_of(e).expect("entity schema of a known kind")
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .hierarchy
         .iter()
         .any(|v| v == class)
 }
 fn owner<'a>(models: &'a Models, e: &Entity, method: &str) -> &'a str {
-    models.schema_of(e).expect("entity schema of a known kind")
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .method_owners
         .get(method)
         .map(String::as_str)
@@ -282,7 +291,8 @@ impl Store {
         Ok(())
     }
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
-        self.candidate_slots(area).map(|(_, slot)| &self.slots[slot])
+        self.candidate_slots(area)
+            .map(|(_, slot)| &self.slots[slot])
     }
     /// `candidates` as slots, each with where it was found.
     pub(crate) fn candidate_slots(&self, area: Bounds) -> impl Iterator<Item = (Place, usize)> {
@@ -295,12 +305,18 @@ impl Store {
             .filter_map(|(cell, id)| Some((Place::Bucket(cell), *self.ids.get(&id)?)))
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat: their raw body bucket
-            // cannot decide whether the presentation exists, so they are always gathered
-            // and the frame's distance/verdict checks decide (a broken seat rule is
-            // reported as unrendered even when the seat itself is out of range).
-            .chain(self.passenger_vehicles.iter().filter_map(move |(id, vehicle)| {
-                Some((Place::Seat(self.root_cell(*vehicle)), *self.ids.get(id)?))
-            }))
+            // cannot decide whether the presentation exists, their root vehicle's does.
+            .chain(
+                self.passenger_vehicles
+                    .iter()
+                    .filter_map(move |(id, vehicle)| {
+                        let place = Place::Seat(self.root_cell(*vehicle));
+                        if !place.within(&cells) {
+                            return None;
+                        }
+                        Some((place, *self.ids.get(id)?))
+                    }),
+            )
             .filter(|(_, slot)| {
                 !self.slots[*slot]
                     .source
@@ -319,13 +335,18 @@ impl Store {
                 super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
             ]
         };
-        Cells { bucket: range(padding), seat: range(2. * padding) }
+        Cells {
+            bucket: range(padding),
+            seat: range(2. * padding),
+        }
     }
     /// Spatial cell of the root of `vehicle`'s chain (its raw received position, as bucketed);
     /// `None` when a link is not received.
     fn root_cell(&self, mut vehicle: Handle) -> Option<[i32; 2]> {
         for _ in 0..self.ids.len().min(1024) + 1 {
-            let entity = self.get(vehicle.network_id).filter(|entity| entity.handle == vehicle)?;
+            let entity = self
+                .get(vehicle.network_id)
+                .filter(|entity| entity.handle == vehicle)?;
             match entity.vehicle {
                 Some(next) => vehicle = next,
                 None => return Some(super::cell(entity.position)),
@@ -347,7 +368,10 @@ impl Store {
     fn chain_shown(&self, id: i32, depth: usize) -> bool {
         self.get(id).is_some_and(|e| {
             e.physical.shown_tick == self.frame_tick
-                || (depth < 1024 && e.passenger_ids.iter().any(|&p| self.chain_shown(p, depth + 1)))
+                || (depth < 1024
+                    && e.passenger_ids
+                        .iter()
+                        .any(|&p| self.chain_shown(p, depth + 1)))
         })
     }
     fn pickable(&self, models: &Models, e: &Entity) -> Result<bool> {
@@ -412,23 +436,20 @@ impl Store {
                     for index in 0..8 {
                         if let Some(distance) =
                             clip(flight.bounds(index)?, origin, direction, limit)
+                            && hit.is_none_or(|old| distance < old.distance)
                         {
-                            if hit.is_none_or(|old| distance < old.distance) {
-                                hit = Some(EntityHit {
-                                    handle: Handle {
-                                        network_id: e
-                                            .handle
-                                            .network_id
-                                            .checked_add(index as i32 + 1)
-                                            .ok_or("dragon part id overflow")?,
-                                        generation: e.handle.generation,
-                                    },
-                                    point: std::array::from_fn(|i| {
-                                        origin[i] + direction[i] * distance
-                                    }),
-                                    distance,
-                                });
-                            }
+                            hit = Some(EntityHit {
+                                handle: Handle {
+                                    network_id: e
+                                        .handle
+                                        .network_id
+                                        .checked_add(index as i32 + 1)
+                                        .ok_or("dragon part id overflow")?,
+                                    generation: e.handle.generation,
+                                },
+                                point: std::array::from_fn(|i| origin[i] + direction[i] * distance),
+                                distance,
+                            });
                         }
                     }
                 }
@@ -574,7 +595,12 @@ impl Store {
     /// (`EntitySelector.pushableBy`) among boxes intersecting its own, and `doPush` calls
     /// `player.push(entity)` (`Entity.push(Entity)`), which moves the player away from it.
     /// The caller applies it only while the player itself is pushable.
-    pub(crate) fn local_player_push(&self, player: Bounds, player_id: i32, tick: u64) -> Result<[f64; 2]> {
+    pub(crate) fn local_player_push(
+        &self,
+        player: Bounds,
+        player_id: i32,
+        tick: u64,
+    ) -> Result<[f64; 2]> {
         let models = self.models_ref().ok_or("entity models not activated")?;
         let root = self.root_vehicle(player_id)?;
         let x = (player.min[0] + player.max[0]) / 2.;
@@ -646,7 +672,8 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area)
+            {
                 return Ok(false);
             }
         }
@@ -844,7 +871,9 @@ impl Store {
             && tick.saturating_sub(self.frame_tick) <= super::MAX_TICKS_WITHOUT_FRAME;
         // A passenger chain waits or ticks as one: it ticks when the latest frame drew any of its
         // bodies (`chain_shown`); the local player's never waits.
-        let local_root = self.local_entity_id.and_then(|id| self.root_vehicle(id).ok());
+        let local_root = self
+            .local_entity_id
+            .and_then(|id| self.root_vehicle(id).ok());
         // Entities whose presentation stops moving leave `physical_active` after the loop.
         let mut idle = Vec::new();
         for id in &active {
@@ -857,22 +886,29 @@ impl Store {
             if presenting
                 && e.physical.shown_tick != self.frame_tick
                 && self.local_entity_id != Some(*id)
-                && e.source.as_ref().is_some_and(|source| source.living.is_some())
+                && e.source
+                    .as_ref()
+                    .is_some_and(|source| source.living.is_some())
                 && e.physical.dragon.is_none()
                 && look_target.is_none_or(|eye| {
-                    e.position.iter().zip(eye).map(|(p, q)| (p - f64::from(q)).powi(2)).sum::<f64>()
+                    e.position
+                        .iter()
+                        .zip(eye)
+                        .map(|(p, q)| (p - f64::from(q)).powi(2))
+                        .sum::<f64>()
                         > BODY_TICK_RADIUS * BODY_TICK_RADIUS
                 })
                 && ((e.passenger_ids.is_empty() && e.vehicle.is_none())
-                    || self.root_vehicle(*id).is_ok_and(|root| {
-                        local_root != Some(root) && !self.chain_shown(root, 0)
-                    }))
+                    || self
+                        .root_vehicle(*id)
+                        .is_ok_and(|root| local_root != Some(root) && !self.chain_shown(root, 0)))
             {
                 let e = &mut self.slots[slot];
                 e.physical.waited = e.physical.waited.saturating_add(1);
                 // Its interpolation ended: release its motion span now, as a tick would, so it
                 // does not widen every spatial query while it waits.
-                let span = if u64::from(e.physical.lerp_progress) + u64::from(e.physical.lerp_waited())
+                let span = if u64::from(e.physical.lerp_progress)
+                    + u64::from(e.physical.lerp_waited())
                     >= u64::from(e.physical.lerp_duration)
                 {
                     std::mem::take(&mut e.physical.lerp_span)
@@ -890,7 +926,11 @@ impl Store {
             let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
             let standing = super::presentation::flag_at(e, ids.standing);
             // Only a boat reads its bounds from before the tick (`source_state::tick`).
-            let boat_bounds = if ids.boat { Some(self.bounds(e.handle, tick, 0.)?) } else { None };
+            let boat_bounds = if ids.boat {
+                Some(self.bounds(e.handle, tick, 0.)?)
+            } else {
+                None
+            };
             let seat_moves = ids.seat.moves();
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
@@ -921,8 +961,12 @@ impl Store {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
-                    &mut e.physical.seat_motion, e.handle, position, tick,
-                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
+                    &mut e.physical.seat_motion,
+                    e.handle,
+                    position,
+                    tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(),
+                    standing,
                 );
             }
             e.physical.peek_old = e.physical.peek;
@@ -976,7 +1020,8 @@ impl Store {
             self.remove_motion_span(span);
             if falling {
                 let mut colliders = std::mem::take(&mut self.falling_colliders);
-                let result = self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
+                let result =
+                    self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
                 self.falling_colliders = colliders;
                 result?;
             }
@@ -1001,10 +1046,17 @@ impl Store {
     /// Vanilla 26.3 FallingBlockEntity ticks gravity, collision and air drag on
     /// the client between the server's position updates.
     fn tick_falling_block(
-        &mut self, id: i32, models: &Models, world: &World, content: &Content,
-        tick: u64, colliders: &mut Vec<Bounds>,
+        &mut self,
+        id: i32,
+        models: &Models,
+        world: &World,
+        content: &Content,
+        tick: u64,
+        colliders: &mut Vec<Bounds>,
     ) -> Result<()> {
-        let Some(entity) = self.get(id) else { return Ok(()) };
+        let Some(entity) = self.get(id) else {
+            return Ok(());
+        };
         let mut velocity = entity.physical.falling_velocity.unwrap_or(entity.velocity);
         if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
             velocity[1] -= 0.04;
@@ -1059,7 +1111,9 @@ impl Store {
         let root = self.root_vehicle(own).unwrap_or(own);
         // This frame already drew the chain through another of its bodies: it is marked whole.
         if entity.physical.shown_tick == tick
-            && self.get(root).is_some_and(|e| e.physical.shown_tick == tick)
+            && self
+                .get(root)
+                .is_some_and(|e| e.physical.shown_tick == tick)
         {
             return Ok(());
         }
@@ -1068,7 +1122,9 @@ impl Store {
         let mut pending = vec![root];
         for _ in 0..self.ids.len().min(1024) + 1 {
             let Some(id) = pending.pop() else { break };
-            let Some(&slot) = self.ids.get(&id) else { continue };
+            let Some(&slot) = self.ids.get(&id) else {
+                continue;
+            };
             self.slots[slot].physical.shown_tick = tick;
             self.absorb_wait(slot, models, content)?;
             pending.extend_from_slice(&self.slots[slot].passenger_ids);

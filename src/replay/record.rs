@@ -260,19 +260,33 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir(&directory).unwrap();
-        let output=directory.join("take.solrec");
-        let path=directory.join("take.ready");
-        let mut session=Session::replay_fixture();
-        session.phase="play".into();
-        session.player.pose_known=true;
-        session.set_recording(Some(RecordingOptions {path:output.clone(),header:Header {
-            protocol_version:777,server_build:"ready-fixture".into(),seed:0,start_tick:0,wall_time:0,
-        }}));
-        for tick in [9000,9003] {
-            let mut body=crate::protocol::Writer::default();
-            body.string("krasnokamen:tick");body.i64(tick);body.i64(0);
-            session.receive_packet(crate::protocol::network::Phase::Play,
-                crate::protocol::packet_ids::play::clientbound::CUSTOM_PAYLOAD,&body.0).unwrap();
+        let output = directory.join("take.solrec");
+        let path = directory.join("take.ready");
+        let mut session = Session::replay_fixture();
+        session.phase = "play".into();
+        session.player.pose_known = true;
+        session.set_recording(Some(RecordingOptions {
+            path: output.clone(),
+            header: Header {
+                protocol_version: 777,
+                server_build: "ready-fixture".into(),
+                seed: 0,
+                start_tick: 0,
+                wall_time: 0,
+            },
+        }));
+        for tick in [9000, 9003] {
+            let mut body = crate::protocol::Writer::default();
+            body.string("krasnokamen:tick");
+            body.i64(tick);
+            body.i64(0);
+            session
+                .receive_packet(
+                    crate::protocol::network::Phase::Play,
+                    crate::protocol::packet_ids::play::clientbound::CUSTOM_PAYLOAD,
+                    &body.0,
+                )
+                .unwrap();
         }
         assert!(session.recording_ready(&Roster::new()));
         publish_ready(Some(&path), &output, &session, "joined", 0).unwrap();

@@ -1,13 +1,13 @@
 //! Exact native screen and button identity for the canonical Minecraft tools.
 use super::{
-    state::{EditorState, Screen, UiState},
     Modifiers, PointerButton, PointerPhase, UiIntent,
+    state::{EditorState, Screen, UiState},
 };
 use crate::{
     inventory::{InventoryStore, MenuKind},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 impl UiState {
     pub(crate) fn visible_container(&self) -> bool {
@@ -350,15 +350,13 @@ impl UiState {
             .nodes
             .iter()
             .any(|n| n.role == "textbox" && n.label == label && n.visible)
-        {
-            if let Some(id) = self
+            && let Some(id) = self
                 .nodes
                 .iter()
                 .find(|n| n.role == "textbox" && n.label == label)
                 .map(|n| n.id.clone())
-            {
-                self.reveal_for_automation(&id, inventory, content)?;
-            }
+        {
+            self.reveal_for_automation(&id, inventory, content)?;
         }
         let (id, length) = exact_input_target(&self.nodes, &self.fields, label, value)?;
         Ok((
@@ -486,9 +484,10 @@ mod tests {
             writer.var(stat);
             writer.var(count);
         }
-        assert!(ui
-            .apply(3, &mut crate::protocol::Reader::new(&writer.0), content)
-            .unwrap());
+        assert!(
+            ui.apply(3, &mut crate::protocol::Reader::new(&writer.0), content)
+                .unwrap()
+        );
     }
     fn statistics_row_labels(ui: &UiState) -> Vec<String> {
         ui.observed_nodes()
@@ -574,10 +573,11 @@ mod tests {
             [UiCommand::SeenAdvancements { tab: Some(id) }] if id == "custom:root"));
         assert_eq!(ui.screen(), Screen::Advancements);
         for root in ui.advancement_tab_ids() {
-            assert!(ui
-                .nodes
-                .iter()
-                .any(|node| node.id == format!("advancement/tab/{root}")));
+            assert!(
+                ui.nodes
+                    .iter()
+                    .any(|node| node.id == format!("advancement/tab/{root}"))
+            );
         }
         for (label, root) in [
             ("Adventure", "minecraft:adventure/root"),
@@ -589,14 +589,16 @@ mod tests {
             assert_eq!(ui.selected_advancement_root(), Some(root));
             assert_eq!(ui.scroll, 0);
         }
-        assert!(ui
-            .nodes
-            .iter()
-            .any(|node| node.id == "advancement/minecraft:story/row_00"));
-        assert!(!ui
-            .nodes
-            .iter()
-            .any(|node| node.id == "advancement/minecraft:adventure/root"));
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|node| node.id == "advancement/minecraft:story/row_00")
+        );
+        assert!(
+            !ui.nodes
+                .iter()
+                .any(|node| node.id == "advancement/minecraft:adventure/root")
+        );
         let list = ui
             .nodes
             .iter()
@@ -616,10 +618,11 @@ mod tests {
         .unwrap();
         let (_, viewport) = ui.advancement_list_viewport();
         assert_eq!(ui.scroll, 31usize.saturating_sub(viewport));
-        assert!(ui
-            .nodes
-            .iter()
-            .any(|node| node.id == "advancement/minecraft:story/row_29"));
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|node| node.id == "advancement/minecraft:story/row_29")
+        );
         let row = ui
             .nodes
             .iter()
@@ -640,10 +643,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ui.scroll, 0);
-        assert!(ui
-            .nodes
-            .iter()
-            .any(|node| node.id == "advancement/minecraft:story/row_00"));
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|node| node.id == "advancement/minecraft:story/row_00")
+        );
         ui.execute(
             UiIntent::ScrollTarget {
                 context: ui.context(&inventory),
@@ -666,10 +670,11 @@ mod tests {
             assert!(matches!(effects.commands.as_slice(),
                 [UiCommand::SeenAdvancements { tab: Some(id) }] if id == root));
             assert_eq!(ui.scroll, 0);
-            assert!(ui
-                .nodes
-                .iter()
-                .any(|node| node.id == format!("advancement/{root}")));
+            assert!(
+                ui.nodes
+                    .iter()
+                    .any(|node| node.id == format!("advancement/{root}"))
+            );
         }
         let done = click_statistics_button(&mut ui, &mut inventory, &content, "Done");
         assert!(matches!(
@@ -677,10 +682,11 @@ mod tests {
             [UiCommand::SeenAdvancements { tab: None }]
         ));
         assert_eq!(ui.screen(), Screen::Pause);
-        assert!(!ui
-            .nodes
-            .iter()
-            .any(|node| node.id.starts_with("advancement")));
+        assert!(
+            !ui.nodes
+                .iter()
+                .any(|node| node.id.starts_with("advancement"))
+        );
         click_statistics_button(&mut ui, &mut inventory, &content, "Advancements");
         let close = ui
             .execute(
@@ -695,10 +701,11 @@ mod tests {
             close.commands.as_slice(),
             [UiCommand::SeenAdvancements { tab: None }]
         ));
-        assert!(!ui
-            .nodes
-            .iter()
-            .any(|node| node.id.starts_with("advancement")));
+        assert!(
+            !ui.nodes
+                .iter()
+                .any(|node| node.id.starts_with("advancement"))
+        );
     }
     #[test]
     fn p1_advancements_received_selected_tab_rebuilds_without_outbound_echo() {
@@ -721,23 +728,26 @@ mod tests {
         let mut packet = crate::protocol::Writer::default();
         packet.byte(1);
         packet.string("minecraft:adventure/root");
-        assert!(ui
-            .apply(87, &mut crate::protocol::Reader::new(&packet.0), &content)
-            .unwrap());
+        assert!(
+            ui.apply(87, &mut crate::protocol::Reader::new(&packet.0), &content)
+                .unwrap()
+        );
         ui.semantic_tree(&inventory, &content).unwrap();
         assert_eq!(
             ui.selected_advancement_root(),
             Some("minecraft:adventure/root")
         );
         assert_eq!(ui.scroll, 0);
-        assert!(ui
-            .nodes
-            .iter()
-            .any(|node| node.id == "advancement/minecraft:adventure/root"));
-        assert!(!ui
-            .nodes
-            .iter()
-            .any(|node| node.id.starts_with("advancement/minecraft:story/")));
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|node| node.id == "advancement/minecraft:adventure/root")
+        );
+        assert!(
+            !ui.nodes
+                .iter()
+                .any(|node| node.id.starts_with("advancement/minecraft:story/"))
+        );
     }
     #[test]
     fn exact_button_activates_options_tabs_switches_and_sliders() {
@@ -817,14 +827,15 @@ mod tests {
             "accessibility",
             "disconnect",
         ] {
-            assert!(ui
-                .nodes
-                .iter()
-                .any(|node| node.id == format!("pause/{id}") && node.enabled && node.visible));
+            assert!(
+                ui.nodes
+                    .iter()
+                    .any(|node| node.id == format!("pause/{id}") && node.enabled && node.visible)
+            );
         }
         let (_, title) = ui.source_screen_metadata(&inventory).unwrap().unwrap();
-        assert!(ui
-            .exact_button(
+        assert!(
+            ui.exact_button(
                 &inventory,
                 &content,
                 Some("wrong.class"),
@@ -832,9 +843,10 @@ mod tests {
                 "Statistics",
                 false
             )
-            .is_err());
-        assert!(ui
-            .exact_button(
+            .is_err()
+        );
+        assert!(
+            ui.exact_button(
                 &inventory,
                 &content,
                 None,
@@ -842,10 +854,12 @@ mod tests {
                 "Statistics",
                 false
             )
-            .is_err());
-        assert!(ui
-            .exact_button(&inventory, &content, None, &title, "not a button", false)
-            .is_err());
+            .is_err()
+        );
+        assert!(
+            ui.exact_button(&inventory, &content, None, &title, "not a button", false)
+                .is_err()
+        );
         let intent = ui
             .exact_button(
                 &inventory,
@@ -879,24 +893,26 @@ mod tests {
         }
         ui.resize(1280, 720, 1.5);
         ui.semantic_tree(&inventory, &content).unwrap();
-        assert!(ui
-            .activate_for_test(
+        assert!(
+            ui.activate_for_test(
                 NodeAction::Screen(Screen::Statistics),
                 &mut inventory,
                 &content
             )
             .unwrap()
             .commands
-            .is_empty());
+            .is_empty()
+        );
         assert!(
             click_statistics_button(&mut ui, &mut inventory, &content, "Items")
                 .commands
                 .is_empty()
         );
-        assert!(ui
-            .observed_nodes()
-            .iter()
-            .any(|node| node["id"] == "statistics/waiting"));
+        assert!(
+            ui.observed_nodes()
+                .iter()
+                .any(|node| node["id"] == "statistics/waiting")
+        );
         assert!(statistics_row_labels(&ui).is_empty());
     }
     #[test]
@@ -919,10 +935,11 @@ mod tests {
         );
         ui.semantic_tree(&inventory, &content).unwrap();
         assert!(ui.statistics().received());
-        assert!(!ui
-            .observed_nodes()
-            .iter()
-            .any(|node| node["id"] == "statistics/waiting"));
+        assert!(
+            !ui.observed_nodes()
+                .iter()
+                .any(|node| node["id"] == "statistics/waiting")
+        );
         let labels = statistics_row_labels(&ui);
         for label in [
             "stat.minecraft.walk_one_cm: 1.25 km",
@@ -967,15 +984,16 @@ mod tests {
     }
     #[test]
     fn p1_statistics_waiting_response_and_screen_session_lifecycle() {
-        use super::super::{state::UiCommand, statistics::StatisticsGroup, Modifiers};
+        use super::super::{Modifiers, state::UiCommand, statistics::StatisticsGroup};
         let (content, mut inventory, mut ui) = statistics_fixture();
         ui.execute(UiIntent::OpenPause, &mut inventory, &content)
             .unwrap();
         click_statistics_button(&mut ui, &mut inventory, &content, "Statistics");
         let revision = ui.revision;
-        assert!(ui
-            .apply(3, &mut crate::protocol::Reader::new(&[1]), &content)
-            .is_err());
+        assert!(
+            ui.apply(3, &mut crate::protocol::Reader::new(&[1]), &content)
+                .is_err()
+        );
         assert_eq!(ui.revision, revision);
         assert!(!ui.statistics().received());
         award_statistics(&mut ui, &content, &[(0, 2, 37)]);
@@ -993,17 +1011,21 @@ mod tests {
         ));
         assert!(!ui.statistics().received());
         assert!(statistics_row_labels(&ui).is_empty());
-        assert!(ui.statistics().observation(&content).unwrap()["counters"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|counter| counter["value"] == 37));
+        assert!(
+            ui.statistics().observation(&content).unwrap()["counters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|counter| counter["value"] == 37)
+        );
         // Empty AwardStats is still a response and retains earlier absolute counters.
         award_statistics(&mut ui, &content, &[]);
         ui.semantic_tree(&inventory, &content).unwrap();
-        assert!(statistics_row_labels(&ui)
-            .iter()
-            .any(|label| label == "stat.minecraft.damage_dealt: 3.70"));
+        assert!(
+            statistics_row_labels(&ui)
+                .iter()
+                .any(|label| label == "stat.minecraft.damage_dealt: 3.70")
+        );
         let effects = ui
             .execute(
                 UiIntent::Key {
@@ -1019,10 +1041,12 @@ mod tests {
         assert_eq!(ui.screen(), Screen::Pause);
         click_statistics_button(&mut ui, &mut inventory, &content, "Back to game");
         assert_eq!(ui.screen(), Screen::Game);
-        assert!(ui.semantic_tree(&inventory, &content).unwrap()["nodes"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            ui.semantic_tree(&inventory, &content).unwrap()["nodes"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         ui.execute(UiIntent::OpenPause, &mut inventory, &content)
             .unwrap();
         click_statistics_button(&mut ui, &mut inventory, &content, "Statistics");
@@ -1031,10 +1055,12 @@ mod tests {
         assert_eq!(ui.screen(), Screen::Game);
         assert_eq!(ui.statistics_group, StatisticsGroup::General);
         assert!(!ui.statistics().received());
-        assert!(ui.statistics().observation(&content).unwrap()["counters"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            ui.statistics().observation(&content).unwrap()["counters"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(ui.observed_nodes().is_empty());
     }
     #[test]

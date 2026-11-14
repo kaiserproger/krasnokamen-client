@@ -58,14 +58,23 @@ impl Recorder {
         Some(Self { file, samples: 0 })
     }
     fn write(&mut self, pcm: &[f32; FRAME]) {
-        let bytes: Vec<u8> = pcm.iter().flat_map(|s| ((s.clamp(-1., 1.) * 32767.) as i16).to_le_bytes()).collect();
+        let bytes: Vec<u8> = pcm
+            .iter()
+            .flat_map(|s| ((s.clamp(-1., 1.) * 32767.) as i16).to_le_bytes())
+            .collect();
         self.samples += FRAME as u32;
         let data = self.samples * 2;
         // The header is patched after every frame so a killed client still leaves a valid WAV.
         let _ = self.file.write_all(&bytes);
         let end = self.file.stream_position().unwrap_or(0);
-        let _ = self.file.seek(SeekFrom::Start(4)).and_then(|_| self.file.write_all(&(36 + data).to_le_bytes()));
-        let _ = self.file.seek(SeekFrom::Start(40)).and_then(|_| self.file.write_all(&data.to_le_bytes()));
+        let _ = self
+            .file
+            .seek(SeekFrom::Start(4))
+            .and_then(|_| self.file.write_all(&(36 + data).to_le_bytes()));
+        let _ = self
+            .file
+            .seek(SeekFrom::Start(40))
+            .and_then(|_| self.file.write_all(&data.to_le_bytes()));
         let _ = self.file.seek(SeekFrom::Start(end));
     }
 }
@@ -107,16 +116,29 @@ impl VoiceMixer {
     }
     /// `(decoded frames, peak of the last decoded frame)` for tests and facts.
     pub fn speaker_stats(&self, speaker: [u8; 16]) -> Option<(u64, f32)> {
-        self.state.lock().speakers.get(&speaker).map(|s| (s.frames, s.peak))
+        self.state
+            .lock()
+            .speakers
+            .get(&speaker)
+            .map(|s| (s.frames, s.peak))
     }
     pub fn clear(&self) {
         self.state.lock().speakers.clear();
     }
     /// Decode one relayed packet into the speaker's jitter buffer.
     /// `range` overrides the server's voice range for this speaker (e.g. a monitor's speakers).
-    pub fn push(&self, speaker: [u8; 16], position: [f32; 3], range: Option<f32>, seq: u32, opus: &[u8]) -> Result<()> {
+    pub fn push(
+        &self,
+        speaker: [u8; 16],
+        position: [f32; 3],
+        range: Option<f32>,
+        seq: u32,
+        opus: &[u8],
+    ) -> Result<()> {
         let mut state = self.state.lock();
-        let State { speakers, recorder, .. } = &mut *state;
+        let State {
+            speakers, recorder, ..
+        } = &mut *state;
         if !speakers.contains_key(&speaker) {
             if speakers.len() >= MAX_SPEAKERS {
                 return Err("too many simultaneous voice speakers".into());
@@ -176,13 +198,16 @@ impl VoiceMixer {
         let mut state = self.state.lock();
         let (listener, range, volume) = (state.listener, state.range, state.volume);
         let now = Instant::now();
-        state.speakers.retain(|_, s| s.playing || now.duration_since(s.last) < Duration::from_secs(2));
+        state
+            .speakers
+            .retain(|_, s| s.playing || now.duration_since(s.last) < Duration::from_secs(2));
         for speaker in state.speakers.values_mut().filter(|s| s.playing) {
             let distance = (0..3)
                 .map(|i| (f64::from(speaker.position[i]) - listener[i]).powi(2))
                 .sum::<f64>()
                 .sqrt();
-            let gain = (1. - distance / f64::from(speaker.range.unwrap_or(range))).clamp(0., 1.) as f32;
+            let gain =
+                (1. - distance / f64::from(speaker.range.unwrap_or(range))).clamp(0., 1.) as f32;
             for sample in out.iter_mut() {
                 match speaker.pcm.pop_front() {
                     Some(value) => *sample += value * gain * volume,
@@ -204,7 +229,11 @@ pub(super) struct VoiceSource {
 }
 impl VoiceSource {
     pub fn new(mixer: Arc<VoiceMixer>) -> Self {
-        Self { mixer, block: Box::new([0.; FRAME]), at: FRAME }
+        Self {
+            mixer,
+            block: Box::new([0.; FRAME]),
+            at: FRAME,
+        }
     }
 }
 impl Iterator for VoiceSource {
@@ -242,7 +271,11 @@ mod tests {
         let mut encoder = Encoder::new().unwrap();
         (0..count)
             .map(|n| {
-                let pcm = std::array::from_fn(|i| 0.5 * ((2. * std::f32::consts::PI * 440. * (n * FRAME + i) as f32) / RATE as f32).sin());
+                let pcm = std::array::from_fn(|i| {
+                    0.5 * ((2. * std::f32::consts::PI * 440. * (n * FRAME + i) as f32)
+                        / RATE as f32)
+                        .sin()
+                });
                 encoder.encode(&pcm).unwrap()
             })
             .collect()
@@ -257,18 +290,28 @@ mod tests {
         let mixer = VoiceMixer::new();
         let speaker = [1; 16];
         let wire = packets(6);
-        mixer.push(speaker, [24., 0., 0.], None, 0, &wire[0]).unwrap();
-        mixer.push(speaker, [24., 0., 0.], None, 1, &wire[1]).unwrap();
+        mixer
+            .push(speaker, [24., 0., 0.], None, 0, &wire[0])
+            .unwrap();
+        mixer
+            .push(speaker, [24., 0., 0.], None, 1, &wire[1])
+            .unwrap();
         assert_eq!(peak(&mixer), 0., "still prefilling");
-        mixer.push(speaker, [24., 0., 0.], None, 2, &wire[2]).unwrap();
+        mixer
+            .push(speaker, [24., 0., 0.], None, 2, &wire[2])
+            .unwrap();
         assert_eq!(mixer.speaker_stats(speaker).map(|s| s.0), Some(3));
         let half = peak(&mixer);
         assert!(half > 0.1, "audible at half range: {half}");
         // Moving the speaker out of range silences it without dropping the stream.
-        mixer.push(speaker, [100., 0., 0.], None, 3, &wire[3]).unwrap();
+        mixer
+            .push(speaker, [100., 0., 0.], None, 3, &wire[3])
+            .unwrap();
         assert_eq!(peak(&mixer), 0.);
         mixer.set_listener([100., 0., 0.]);
-        mixer.push(speaker, [100., 0., 0.], None, 4, &wire[4]).unwrap();
+        mixer
+            .push(speaker, [100., 0., 0.], None, 4, &wire[4])
+            .unwrap();
         assert!(peak(&mixer) > half, "full volume at zero distance");
     }
     #[test]
@@ -277,7 +320,9 @@ mod tests {
         let speaker = [2; 16];
         let wire = packets(4);
         for (seq, packet) in wire.iter().take(3).enumerate() {
-            mixer.push(speaker, [0.; 3], None, seq as u32, packet).unwrap();
+            mixer
+                .push(speaker, [0.; 3], None, seq as u32, packet)
+                .unwrap();
         }
         mixer.push(speaker, [0.; 3], None, 2, &wire[2]).unwrap(); // duplicate
         for _ in 0..3 {
@@ -292,7 +337,9 @@ mod tests {
         let mixer = VoiceMixer::new();
         let wire = packets(3);
         for (seq, packet) in wire.iter().enumerate() {
-            mixer.push([3; 16], [40., 0., 0.], Some(32.), seq as u32, packet).unwrap();
+            mixer
+                .push([3; 16], [40., 0., 0.], Some(32.), seq as u32, packet)
+                .unwrap();
         }
         assert_eq!(peak(&mixer), 0., "40 blocks is beyond a 32-block range");
         assert!(mixer.speaker_stats([3; 16]).unwrap().1 > 0.1);

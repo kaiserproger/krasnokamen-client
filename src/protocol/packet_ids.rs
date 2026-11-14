@@ -306,14 +306,24 @@ mod tests {
         let path = std::env::var_os("KRASNOKAMEN_CLIENT_PACKETS_REPORT")
             .map(std::path::PathBuf::from)
             .expect("set KRASNOKAMEN_CLIENT_PACKETS_REPORT=<26.3 packets.json> to run this acceptance test");
-        let report: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read 26.3 packet report {}: {e}", path.display()))
-        ).expect("26.3 packet report JSON");
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| {
+                panic!("cannot read 26.3 packet report {}: {e}", path.display())
+            }))
+            .expect("26.3 packet report JSON");
         let groups = [
             ("login", "clientbound", login::clientbound::IDS),
             ("login", "serverbound", login::serverbound::IDS),
-            ("configuration", "clientbound", configuration::clientbound::IDS),
-            ("configuration", "serverbound", configuration::serverbound::IDS),
+            (
+                "configuration",
+                "clientbound",
+                configuration::clientbound::IDS,
+            ),
+            (
+                "configuration",
+                "serverbound",
+                configuration::serverbound::IDS,
+            ),
             ("play", "clientbound", play::clientbound::IDS),
             ("play", "serverbound", play::serverbound::IDS),
         ];
@@ -323,12 +333,17 @@ mod tests {
             for &(name, id) in ids {
                 let actual = report[phase][direction][name]["protocol_id"].as_i64();
                 if actual != Some(i64::from(id)) {
-                    failures.push(format!("{phase}/{direction}/{name}: client={id}, report={actual:?}"));
+                    failures.push(format!(
+                        "{phase}/{direction}/{name}: client={id}, report={actual:?}"
+                    ));
                 }
                 checked += 1;
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
-        eprintln!("checked {checked} named packet IDs against {}", path.display());
+        eprintln!(
+            "checked {checked} named packet IDs against {}",
+            path.display()
+        );
     }
 }

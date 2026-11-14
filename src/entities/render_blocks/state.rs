@@ -69,13 +69,11 @@ pub(crate) fn tick(
                 source.skull_ticks += 1;
             }
         }
-        "minecraft:bell" => {
-            if source.bell_direction.is_some() {
-                source.bell_ticks += 1;
-                if source.bell_ticks >= 50 {
-                    source.bell_direction = None;
-                    source.bell_ticks = 0;
-                }
+        "minecraft:bell" if source.bell_direction.is_some() => {
+            source.bell_ticks += 1;
+            if source.bell_ticks >= 50 {
+                source.bell_direction = None;
+                source.bell_ticks = 0;
             }
         }
         "minecraft:end_gateway" => {

@@ -29,8 +29,11 @@ impl App {
     }
     /// Once per frame: start/stop the microphone with the Options toggle and pump packets.
     pub(crate) fn update_voice(&mut self) {
-        if !self.focused || self.session.screen() != "game" || self.session.chat_open()
-            || self.session.dialog_screen_active() || self.computer.has_modal()
+        if !self.focused
+            || self.session.screen() != "game"
+            || self.session.chat_open()
+            || self.session.dialog_screen_active()
+            || self.computer.has_modal()
         {
             self.voice.key_down = false;
         }
@@ -52,8 +55,18 @@ impl App {
         } else if self.voice.capture.take().is_some() {
             self.session.set_voice_mic(None);
         }
-        let flag = |app: &Self, key: &str| app.session.native_setting(key).and_then(serde_json::Value::as_bool).unwrap_or(false);
-        let level = |app: &Self, key: &str| app.session.native_setting(key).and_then(serde_json::Value::as_f64).unwrap_or(1.) as f32;
+        let flag = |app: &Self, key: &str| {
+            app.session
+                .native_setting(key)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        let level = |app: &Self, key: &str| {
+            app.session
+                .native_setting(key)
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or(1.) as f32
+        };
         let (muted, deaf) = (flag(self, "voice_mute"), flag(self, "voice_deafen"));
         if let Some(audio) = self.session.audio() {
             audio.voice().set_volume(level(self, "voice_volume"));
@@ -61,12 +74,19 @@ impl App {
         let mic_volume = level(self, "voice_mic_volume");
         let server = self.session.voice_net.enabled;
         let listen = enabled && server && !deaf;
-        if listen != self.session.voice_net.listening && self.session.send_voice(listen_packet(listen)).is_ok() {
+        if listen != self.session.voice_net.listening
+            && self.session.send_voice(listen_packet(listen)).is_ok()
+        {
             self.session.voice_net.listening = listen;
         }
-        let Some(capture) = &self.voice.capture else { return };
-        let game_input = self.focused && self.session.screen() == "game" && !self.session.chat_open()
-            && !self.session.dialog_screen_active() && !self.computer.has_modal();
+        let Some(capture) = &self.voice.capture else {
+            return;
+        };
+        let game_input = self.focused
+            && self.session.screen() == "game"
+            && !self.session.chat_open()
+            && !self.session.dialog_screen_active()
+            && !self.computer.has_modal();
         capture.set_gain(mic_volume);
         capture.set_ptt(self.voice.key_down && game_input && !muted);
         while let Ok((seq, packet)) = capture.packets.try_recv() {
@@ -74,7 +94,11 @@ impl App {
                 eprintln!("voice send failed: {error}");
             }
         }
-        let state = if server { capture.state() } else { MicState::Off };
+        let state = if server {
+            capture.state()
+        } else {
+            MicState::Off
+        };
         self.session.set_voice_mic(match state {
             MicState::Off => None,
             _ if deaf => Some(("DEAF", [0.6, 0.35, 0.05])),
@@ -92,8 +116,14 @@ mod tests {
 
     #[test]
     fn microphone_stays_closed_without_server_voice_support() {
-        assert!(!microphone_wanted(true, false), "server never offered voice");
-        assert!(!microphone_wanted(false, true), "player left voice chat off");
+        assert!(
+            !microphone_wanted(true, false),
+            "server never offered voice"
+        );
+        assert!(
+            !microphone_wanted(false, true),
+            "player left voice chat off"
+        );
         assert!(microphone_wanted(true, true));
     }
 }

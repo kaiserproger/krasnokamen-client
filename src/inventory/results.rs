@@ -89,10 +89,11 @@ impl Prediction<'_> {
             MenuKind::Anvil if self.changed(before, 0..2) => self.recompute_anvil()?,
             MenuKind::Grindstone if self.changed(before, 0..2) => self.recompute_grindstone()?,
             MenuKind::Smithing if self.changed(before, 0..3) => self.set(3, Stack::default(), true),
-            MenuKind::Cartography if self.changed(before, 0..2) => {
-                if self.slot(0)?.empty() || self.slot(1)?.empty() {
-                    self.set(2, Stack::default(), true);
-                }
+            MenuKind::Cartography
+                if self.changed(before, 0..2)
+                    && (self.slot(0)?.empty() || self.slot(1)?.empty()) =>
+            {
+                self.set(2, Stack::default(), true);
             }
             MenuKind::Stonecutter if self.changed(before, 0..1) => {
                 if before[0].as_ref().map(|s| s.id) != Some(self.slot(0)?.id) {

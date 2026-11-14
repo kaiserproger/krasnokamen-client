@@ -1,12 +1,40 @@
+//! Stage-0 union brought in pre-existing clippy-1.95 style lints across the crate
+//! (arg counts, type complexity, font `Arc` Send+Sync in ui/font.rs + ui/ttf.rs).
+//! Allowed crate-wide for the stage-2 integration; re-enable per module in stage 3.
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::needless_range_loop,
+    clippy::field_reassign_with_default,
+    clippy::arc_with_non_send_sync,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::nonminimal_bool,
+    clippy::if_same_then_else,
+    clippy::assertions_on_constants,
+    clippy::float_equality_without_abs,
+    clippy::doc_lazy_continuation,
+    clippy::cloned_ref_to_slice_refs,
+    clippy::single_range_in_vec_init,
+    clippy::redundant_field_names,
+    clippy::manual_memcpy,
+    clippy::manual_checked_ops,
+    clippy::large_enum_variant,
+    clippy::enum_variant_names,
+    clippy::incompatible_msrv,
+    clippy::unsafe_removed_from_name,
+    dead_code,
+    private_interfaces
+)]
+
 pub mod api;
 pub mod audio;
 pub mod automation;
 pub mod capture;
+pub mod computer;
 mod content_paths;
 mod controls;
 #[cfg(test)]
 mod controls_tests;
-pub mod computer;
 pub mod entities;
 pub mod environment;
 mod far;
@@ -24,15 +52,15 @@ pub mod profile_textures;
 pub mod protocol;
 pub mod render;
 pub mod replay;
-pub mod session;
 mod screenshot;
+pub mod session;
 mod singleplayer;
 pub mod terrain;
 mod terrain_wait;
 pub mod ui;
-mod voice;
 #[cfg(test)]
 mod ui_hotfix_tests;
+mod voice;
 
 use api::{Command, InputIntent, Request, Shared, SharedState};
 use automation::{Config as AutomationConfig, Server};
@@ -56,8 +84,10 @@ fn toggle_fullscreen_key(session: &mut Session, code: KeyCode, pressed: bool) ->
     if code != KeyCode::F11 || !pressed {
         return false;
     }
-    let fullscreen = session.native_setting("fullscreen")
-        .and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let fullscreen = session
+        .native_setting("fullscreen")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     if let Err(error) = session.apply_client_setting("fullscreen", &json!(!fullscreen)) {
         eprintln!("cannot toggle fullscreen: {error}");
     }
@@ -73,22 +103,42 @@ fn native_item_key(
 ) -> Option<InputIntent> {
     let action = bindings.action(input)?;
     if !inventory_open && matches!(action, "drop" | "swap_offhand" | "pick") {
-        return Some(InputIntent::Key { key: action.into(), pressed });
+        return Some(InputIntent::Key {
+            key: action.into(),
+            pressed,
+        });
     }
-    if !pressed { return None; }
-    if let Some(index) = action.strip_prefix("hotbar_").and_then(|n| n.parse::<u8>().ok()) {
+    if !pressed {
+        return None;
+    }
+    if let Some(index) = action
+        .strip_prefix("hotbar_")
+        .and_then(|n| n.parse::<u8>().ok())
+    {
         if inventory_open {
-            return Some(InputIntent::Ui { intent: ui::UiIntent::Key {
-                key: index.to_string(), pressed, modifiers,
-            }});
+            return Some(InputIntent::Ui {
+                intent: ui::UiIntent::Key {
+                    key: index.to_string(),
+                    pressed,
+                    modifiers,
+                },
+            });
         }
         return Some(InputIntent::Hotbar { slot: index - 1 });
     }
     if inventory_open {
-        let key = match action { "drop" => "q", "swap_offhand" => "f", _ => return None };
-        return Some(InputIntent::Ui { intent: ui::UiIntent::Key {
-            key: key.into(), pressed, modifiers,
-        }});
+        let key = match action {
+            "drop" => "q",
+            "swap_offhand" => "f",
+            _ => return None,
+        };
+        return Some(InputIntent::Ui {
+            intent: ui::UiIntent::Key {
+                key: key.into(),
+                pressed,
+                modifiers,
+            },
+        });
     }
     None
 }
@@ -130,7 +180,10 @@ fn artifact_root(path: &Path, data_root: &Path) -> Result<PathBuf, String> {
 
 pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     let mut args = args.into_iter().peekable();
-    if args.peek().is_some_and(|arg| arg.starts_with('-') && arg != "--help" && arg != "-h") {
+    if args
+        .peek()
+        .is_some_and(|arg| arg.starts_with('-') && arg != "--help" && arg != "-h")
+    {
         return launch::play(args);
     }
     match args.next().as_deref() {
@@ -145,12 +198,17 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
             Ok(())
         }
         Some("profile-summary") => {
-            let path = args.next().ok_or("usage: krasnokamen-client profile-summary <file>")?;
+            let path = args
+                .next()
+                .ok_or("usage: krasnokamen-client profile-summary <file>")?;
             if args.next().is_some() {
                 return Err("usage: krasnokamen-client profile-summary <file>".into());
             }
             let summary = frame_trace::summarize(Path::new(&path))?;
-            println!("{}", serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())?
+            );
             Ok(())
         }
         Some("doctor") => {
@@ -237,7 +295,11 @@ fn frame_interval(vsync: bool, max_fps: u64) -> Duration {
 }
 
 fn frame_deadline(timer_paced: bool, next_tick: Instant, next_frame: Instant) -> Instant {
-    if timer_paced { next_tick.min(next_frame) } else { next_tick }
+    if timer_paced {
+        next_tick.min(next_frame)
+    } else {
+        next_tick
+    }
 }
 
 /// Pointer capture follows gameplay input on every owner turn, not only on
@@ -383,13 +445,22 @@ impl App {
         // Synchronize derived UI state before building the snapshot. An idle
         // publication gate cannot rely on another turn to publish these nodes.
         let desktop_dialog = self.computer.dialog();
-        if let Some(ui) = self.session.ui_mut() { ui.set_desktop_dialog(desktop_dialog); }
+        if let Some(ui) = self.session.ui_mut() {
+            ui.set_desktop_dialog(desktop_dialog);
+        }
         if self.computer.has_overlay() {
             let lines = self.computer.lines();
-            if let Some(ui) = self.session.ui_mut() { ui.set_debug_lines(lines); }
+            if let Some(ui) = self.session.ui_mut() {
+                ui.set_debug_lines(lines);
+            }
         } else if self.debug_overlay {
-            let render = self.shared.observation.lock().unwrap_or_else(|e| e.into_inner())
-                .data["render"].clone();
+            let render = self
+                .shared
+                .observation
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .data["render"]
+                .clone();
             let lines = self.session.debug_lines(&render);
             if let Some(ui) = self.session.ui_mut() {
                 ui.set_debug_lines(lines);
@@ -476,12 +547,18 @@ impl App {
                 return;
             }
         };
-        let path = screenshot::path(&self.options.artifacts, &stamp,
-            self.screenshot_replies.iter().map(|(path, _)| path));
+        let path = screenshot::path(
+            &self.options.artifacts,
+            &stamp,
+            self.screenshot_replies.iter().map(|(path, _)| path),
+        );
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
         let (reply, receive) = mpsc::sync_channel(1);
         self.screenshot_captures.push_back(Request {
-            command: Command::Capture { name, destination: Some(path.clone()) },
+            command: Command::Capture {
+                name,
+                destination: Some(path.clone()),
+            },
             reply,
             expected_connection_epoch: None,
             expected_dimension_epoch: None,
@@ -493,8 +570,10 @@ impl App {
     /// Physical F2 requests wait for the renderer; automation captures retain
     /// their existing immediate/busy contract.
     fn schedule_screenshot(&mut self, renderer_ready: bool) {
-        if renderer_ready && self.pending_capture.is_none()
-            && let Some(request) = self.screenshot_captures.pop_front() {
+        if renderer_ready
+            && self.pending_capture.is_none()
+            && let Some(request) = self.screenshot_captures.pop_front()
+        {
             self.pending_capture = Some(request);
             self.next_frame = Instant::now();
             if let Some(window) = &self.window {
@@ -508,7 +587,8 @@ impl App {
             eprintln!("{message}");
         }
         if let Some(ui) = self.session.ui_mut()
-            && let Err(error) = ui.local_message(&message) {
+            && let Err(error) = ui.local_message(&message)
+        {
             eprintln!("screenshot chat: {error}");
         }
         self.publish_session();
@@ -540,7 +620,10 @@ impl App {
         };
         let mut bindings = self.session.bindings.clone();
         bindings.set(action, binding);
-        if let Err(error) = self.session.apply_client_setting("key_bindings", &bindings.value()) {
+        if let Err(error) = self
+            .session
+            .apply_client_setting("key_bindings", &bindings.value())
+        {
             eprintln!("cannot save key binding: {error}");
         }
         self.publish_session();
@@ -549,16 +632,30 @@ impl App {
 
     fn dispatch_binding(&mut self, binding: controls::Binding, pressed: bool) {
         let inventory = self.session.screen() == "inventory";
-        if let Some(intent) = native_item_key(&self.session.bindings, binding, pressed, self.native_modifiers, inventory) {
+        if let Some(intent) = native_item_key(
+            &self.session.bindings,
+            binding,
+            pressed,
+            self.native_modifiers,
+            inventory,
+        ) {
             self.manual(intent);
             return;
         }
-        let Some(action) = self.session.bindings.action(binding) else { return };
-        if inventory && action != "inventory" { return; }
-        if self.session.screen() != "game" && !inventory { return; }
+        let Some(action) = self.session.bindings.action(binding) else {
+            return;
+        };
+        if inventory && action != "inventory" {
+            return;
+        }
+        if self.session.screen() != "game" && !inventory {
+            return;
+        }
         match action {
             "chat" | "command" if pressed && !inventory => {
-                let _ = self.session.execute_ui(crate::ui::UiIntent::OpenChat { command: action == "command" });
+                let _ = self.session.execute_ui(crate::ui::UiIntent::OpenChat {
+                    command: action == "command",
+                });
                 self.publish_session();
             }
             "screenshot" if pressed => self.capture_screenshot(),
@@ -570,7 +667,10 @@ impl App {
             "perspective" if pressed => self.session.cycle_camera(),
             "forward" | "backward" | "left" | "right" | "jump" | "sneak" | "sprint"
             | "inventory" | "attack" | "use" | "player_list" => {
-                self.manual(InputIntent::Key { key: action.into(), pressed });
+                self.manual(InputIntent::Key {
+                    key: action.into(),
+                    pressed,
+                });
             }
             _ => {}
         }
@@ -651,7 +751,10 @@ impl App {
                     // Screen sharing state lives on the App owner beside the desktop
                     // computer; the verb runs the player's own request/consent/F8 paths.
                     let busy = request.automation_fence.is_some()
-                        && self.pending_tasks.iter().any(|(pending, _)| pending.automation_fence.is_some());
+                        && self
+                            .pending_tasks
+                            .iter()
+                            .any(|(pending, _)| pending.automation_fence.is_some());
                     let result = if busy {
                         Err("writer_action_busy".into())
                     } else {
@@ -688,9 +791,16 @@ impl App {
                         Err("terrain_wait_busy".to_owned())
                     } else if self.session.phase() != "play" {
                         Err("terrain_wait_not_in_play".to_owned())
-                    } else if self.renderer.as_ref().is_none_or(|r| !r.terrain_available())
-                        || self.window.as_ref().is_none_or(|w| { let size = w.inner_size(); size.width == 0 || size.height == 0 })
-                        || self.occluded {
+                    } else if self
+                        .renderer
+                        .as_ref()
+                        .is_none_or(|r| !r.terrain_available())
+                        || self.window.as_ref().is_none_or(|w| {
+                            let size = w.inner_size();
+                            size.width == 0 || size.height == 0
+                        })
+                        || self.occluded
+                    {
                         Err("terrain_wait_renderer_unavailable".to_owned())
                     } else {
                         terrain_wait::parse(arguments)
@@ -705,7 +815,9 @@ impl App {
                                 candidate: None,
                             });
                         }
-                        Err(error) => { let _ = request.reply.send(Err(error)); }
+                        Err(error) => {
+                            let _ = request.reply.send(Err(error));
+                        }
                     }
                 }
                 Command::Minecraft { name, arguments } => {
@@ -785,16 +897,25 @@ impl App {
         self.publish_session();
     }
     fn complete_terrain_wait(&mut self) {
-        let Some(mut wait) = self.terrain_wait.take() else { return };
+        let Some(mut wait) = self.terrain_wait.take() else {
+            return;
+        };
         let failure = if let Err(error) = self.fence(&wait.request) {
             Some(error)
         } else if self.session.terrain_wait_epochs() != wait.epochs {
             Some("terrain_wait_stale_epoch".into())
         } else if self.session.phase() != "play" {
             Some("terrain_wait_disconnected".into())
-        } else if self.renderer.as_ref().is_none_or(|r| !r.terrain_available())
-            || self.window.as_ref().is_none_or(|w| { let size = w.inner_size(); size.width == 0 || size.height == 0 })
-            || self.occluded {
+        } else if self
+            .renderer
+            .as_ref()
+            .is_none_or(|r| !r.terrain_available())
+            || self.window.as_ref().is_none_or(|w| {
+                let size = w.inner_size();
+                size.width == 0 || size.height == 0
+            })
+            || self.occluded
+        {
             Some("terrain_wait_renderer_unavailable".into())
         } else if Instant::now() >= wait.deadline {
             Some(format!("terrain_wait_timeout: sections {:?}", wait.keys))
@@ -816,11 +937,18 @@ impl App {
         if let (Some(candidate), Some(renderer)) = (&wait.candidate, &self.renderer)
             && candidate.completed(renderer.completed_terrain_frame())
         {
-            let sections: Vec<_> = wait.keys.iter().zip(&candidate.revisions).zip(&candidate.selected)
-                .map(|((key, revision), selected)| json!({
-                    "section": key, "requested_revision": revision.to_string(),
-                    "mesh_revision": revision.to_string(), "selected_for_draw": selected
-                })).collect();
+            let sections: Vec<_> = wait
+                .keys
+                .iter()
+                .zip(&candidate.revisions)
+                .zip(&candidate.selected)
+                .map(|((key, revision), selected)| {
+                    json!({
+                        "section": key, "requested_revision": revision.to_string(),
+                        "mesh_revision": revision.to_string(), "selected_for_draw": selected
+                    })
+                })
+                .collect();
             let _ = wait.request.reply.send(Ok(json!({
                 "status": "ready", "connection_epoch": wait.epochs.0.to_string(),
                 "dimension_epoch": wait.epochs.1.to_string(), "resource_epoch": wait.epochs.2.to_string(),
@@ -830,7 +958,6 @@ impl App {
         }
         self.terrain_wait = Some(wait);
     }
-
 
     fn start_automation(&mut self) -> Result<(), String> {
         if self.options.automation {
@@ -887,9 +1014,8 @@ impl App {
             .saturating_duration_since(replay::clock::now())
             .as_secs_f32();
         let prepare_start = Instant::now();
-        self.session.prepare_frame(
-            (1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.),
-        )?;
+        self.session
+            .prepare_frame((1. - remaining / self.tick_interval.as_secs_f32()).clamp(0., 1.))?;
         let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.;
         // Wait for the UI owner's existing redraws to finish its transition.
         let capture = match capture {
@@ -913,25 +1039,36 @@ impl App {
             renderer.render(self.session.scene(), capture, &shared)?;
             if renderer.terrain_frame_id() != previous_frame
                 && let Some(wait) = &mut self.terrain_wait
-                && wait.epochs == self.session.terrain_wait_epochs() && wait.candidate.is_none()
+                && wait.epochs == self.session.terrain_wait_epochs()
+                && wait.candidate.is_none()
                 && let Some(revisions) = self.session.terrain_settled_revisions(&wait.keys)
                 && let Some((frame, selected)) = renderer.terrain_frame(&wait.keys, &revisions)
             {
                 let scene = self.session.scene();
                 wait.candidate = Some(terrain_wait::Candidate {
-                    frame, revisions, selected,
+                    frame,
+                    revisions,
+                    selected,
                     camera: (scene.camera_position, scene.yaw, scene.pitch),
                 });
             }
-            self.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());
-            self.session.far_generated(renderer.far_gpu_generation(), renderer.drain_far_generated());
+            self.session
+                .release_uploaded_terrain(renderer.drain_uploaded_meshes());
+            self.session.far_generated(
+                renderer.far_gpu_generation(),
+                renderer.drain_far_generated(),
+            );
             renderer.update_metrics(&mut shared.data["render"]);
             let epochs = self.session.context_epochs();
             if renderer.spawn_meshes_presented(
-                self.session.scene(), epochs, self.session.spawn_meshes_ready(),
+                self.session.scene(),
+                epochs,
+                self.session.spawn_meshes_ready(),
             ) {
                 self.session.note_renderer_scene_confirmation(
-                    epochs.0, epochs.1, self.session.scene().revision,
+                    epochs.0,
+                    epochs.1,
+                    self.session.scene().revision,
                 );
             }
             self.shared.changed.notify_all();
@@ -946,14 +1083,18 @@ impl App {
             render["client_publish_skipped"] = json!(self.publish_skipped);
             render["cpu_session_tick_ms"] = json!(self.tick_cpu_ms);
             render["cpu_session_events_ms"] = json!(self.events_cpu_ms);
-            for (key, value) in session::TICK_DETAIL_NAMES.iter().zip(self.session.take_tick_detail()) {
+            for (key, value) in session::TICK_DETAIL_NAMES
+                .iter()
+                .zip(self.session.take_tick_detail())
+            {
                 render["cpu_session_tick_detail_ms"][*key] = json!(value);
             }
             if let Some([terrain, entities, ui]) = self.session.take_scene_profile() {
                 render["cpu_terrain_update_ms"] = json!(terrain);
                 render["cpu_entity_extract_ms"] = json!(entities);
                 render["cpu_ui_geometry_ms"] = json!(ui);
-                render["terrain_mesh_cpu_total_ms"] = json!(self.session.profile_mesh_cpu_total_ms());
+                render["terrain_mesh_cpu_total_ms"] =
+                    json!(self.session.profile_mesh_cpu_total_ms());
             }
             if let Some(trace) = &mut self.frame_trace {
                 trace.record(render, self.look_events);
@@ -988,7 +1129,10 @@ impl App {
         while index < self.screenshot_replies.len() {
             let result = match self.screenshot_replies[index].1.try_recv() {
                 Ok(result) => result,
-                Err(mpsc::TryRecvError::Empty) => { index += 1; continue; }
+                Err(mpsc::TryRecvError::Empty) => {
+                    index += 1;
+                    continue;
+                }
                 Err(mpsc::TryRecvError::Disconnected) => Err("capture reply channel closed".into()),
             };
             self.screenshot_replies.swap_remove(index);
@@ -1016,7 +1160,9 @@ impl App {
         let mut advanced = 0;
         while now >= self.next_tick && advanced < entities::MAX_TICKS_WITHOUT_FRAME {
             let tick_start = Instant::now();
-            changed |= self.session.tick_after_events(events_drained && advanced == 0);
+            changed |= self
+                .session
+                .tick_after_events(events_drained && advanced == 0);
             self.tick_cpu_ms += tick_start.elapsed().as_secs_f64() * 1000.;
             self.next_tick += self.tick_interval;
             advanced += 1;
@@ -1045,8 +1191,14 @@ impl App {
 
     fn frame_interval(&self) -> Duration {
         frame_interval(
-            self.session.native_setting("vsync").and_then(serde_json::Value::as_bool).unwrap_or(true),
-            self.session.native_setting("max_fps").and_then(serde_json::Value::as_u64).unwrap_or(120),
+            self.session
+                .native_setting("vsync")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true),
+            self.session
+                .native_setting("max_fps")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(120),
         )
     }
 
@@ -1056,14 +1208,22 @@ impl App {
             MouseButton::Right => "use",
             _ => return,
         };
-        let _ = session.input(InputIntent::Key { key: key.into(), pressed: false });
+        let _ = session.input(InputIntent::Key {
+            key: key.into(),
+            pressed: false,
+        });
     }
 
     fn sync_native_window(&mut self) {
         let Some(window) = &self.window else { return };
-        let fullscreen = self.session.native_setting("fullscreen").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let fullscreen = self
+            .session
+            .native_setting("fullscreen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         if fullscreen != window.fullscreen().is_some() {
-            window.set_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
+            window
+                .set_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
         }
         if let Some(ui) = self.session.ui_mut() {
             let ime = ui.ime_state();
@@ -1076,12 +1236,26 @@ impl App {
             }
         }
         if let Some(renderer) = &mut self.renderer {
-            renderer.set_vsync(self.session.native_setting("vsync").and_then(serde_json::Value::as_bool).unwrap_or(true));
-            renderer.set_graphics_preset(self.session.native_setting("graphics_preset").and_then(GraphicsPreset::from_setting).unwrap_or_default());
+            renderer.set_vsync(
+                self.session
+                    .native_setting("vsync")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+            );
+            renderer.set_graphics_preset(
+                self.session
+                    .native_setting("graphics_preset")
+                    .and_then(GraphicsPreset::from_setting)
+                    .unwrap_or_default(),
+            );
         }
-        let game_input = self.focused && !self.occluded && self.session.phase() == "play"
-            && self.session.screen() == "game" && !self.session.chat_open()
-            && !self.session.dialog_screen_active() && !self.computer.has_modal();
+        let game_input = self.focused
+            && !self.occluded
+            && self.session.phase() == "play"
+            && self.session.screen() == "game"
+            && !self.session.chat_open()
+            && !self.session.dialog_screen_active()
+            && !self.computer.has_modal();
         if !game_input && self.cursor_locked {
             let _ = self.session.input(InputIntent::ReleaseAll);
         }
@@ -1092,36 +1266,43 @@ impl App {
                 self.cursor_locked = false;
             }
             Some(true)
-                if window.set_cursor_grab(CursorGrabMode::Locked)
-                    .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined)).is_ok() =>
+                if window
+                    .set_cursor_grab(CursorGrabMode::Locked)
+                    .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                    .is_ok() =>
             {
                 window.set_cursor_visible(false);
                 self.cursor_locked = true;
             }
             _ => {}
         }
-
     }
 
     fn deadline(&self) -> Instant {
         // Presentation-paced frames are woken by the window/compositor, not
         // a past WaitUntil deadline (which would busy-spin on Wayland).
         // A hidden/zero-size surface has no frame timer either.
-        let renderable = !self.occluded && self.window.as_ref().is_some_and(|window| {
-            let size = window.inner_size();
-            size.width > 0 && size.height > 0
-        });
+        let renderable = !self.occluded
+            && self.window.as_ref().is_some_and(|window| {
+                let size = window.inner_size();
+                size.width > 0 && size.height > 0
+            });
         self.pending_tasks
             .iter()
             .map(|(_, task)| task.deadline())
-            .fold({
-                let frame = frame_deadline(
-                    renderable && !self.frame_interval().is_zero(),
-                    self.next_tick,
-                    self.next_frame,
-                );
-                self.terrain_wait.as_ref().map_or(frame, |wait| frame.min(wait.deadline))
-            }, Instant::min)
+            .fold(
+                {
+                    let frame = frame_deadline(
+                        renderable && !self.frame_interval().is_zero(),
+                        self.next_tick,
+                        self.next_frame,
+                    );
+                    self.terrain_wait
+                        .as_ref()
+                        .map_or(frame, |wait| frame.min(wait.deadline))
+                },
+                Instant::min,
+            )
     }
 }
 
@@ -1138,8 +1319,15 @@ impl ApplicationHandler for App {
         let window = match event_loop.create_window(
             Window::default_attributes()
                 .with_title(title)
-                .with_inner_size(winit::dpi::PhysicalSize::new(self.options.width, self.options.height))
-                .with_fullscreen(self.options.fullscreen.then_some(winit::window::Fullscreen::Borderless(None))),
+                .with_inner_size(winit::dpi::PhysicalSize::new(
+                    self.options.width,
+                    self.options.height,
+                ))
+                .with_fullscreen(
+                    self.options
+                        .fullscreen
+                        .then_some(winit::window::Fullscreen::Borderless(None)),
+                ),
         ) {
             Ok(window) => Arc::new(window),
             Err(e) => {
@@ -1192,10 +1380,17 @@ impl ApplicationHandler for App {
         }
         // A press may place a monitor under the pointer. Its release must clear
         // vanilla held-use even if the newly hit monitor or a modal consumes it.
-        if let WindowEvent::MouseInput { state: ElementState::Released, button, .. } = &event {
+        if let WindowEvent::MouseInput {
+            state: ElementState::Released,
+            button,
+            ..
+        } = &event
+        {
             Self::release_mouse_button(&mut self.session, *button);
         }
-        if self.computer_event(&event) { return; }
+        if self.computer_event(&event) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 self.release("window_close");
@@ -1263,29 +1458,36 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
                 self.native_modifiers = crate::ui::Modifiers {
-                    shift: state.shift_key(), control: state.control_key(),
-                    alt: state.alt_key(), logo: state.super_key(),
+                    shift: state.shift_key(),
+                    control: state.control_key(),
+                    alt: state.alt_key(),
+                    logo: state.super_key(),
                 };
                 self.shift_held = state.shift_key();
             }
-            WindowEvent::Ime(ime) if self.focused && self.session.text_field_focused() => {
-                match ime {
-                    winit::event::Ime::Preedit(text, cursor) => {
-                        self.ime_composing = !text.is_empty();
-                        self.manual(InputIntent::Ui { intent: crate::ui::UiIntent::Composition {
-                            text, cursor: cursor.map(|(a, b)| [a, b]),
-                        }});
-                    }
-                    winit::event::Ime::Commit(text) => {
-                        self.ime_composing = false;
-                        self.manual(InputIntent::Ui { intent: crate::ui::UiIntent::Text { text } });
-                    }
-                    winit::event::Ime::Disabled => self.ime_composing = false,
-                    _ => {}
+            WindowEvent::Ime(ime) if self.focused && self.session.text_field_focused() => match ime
+            {
+                winit::event::Ime::Preedit(text, cursor) => {
+                    self.ime_composing = !text.is_empty();
+                    self.manual(InputIntent::Ui {
+                        intent: crate::ui::UiIntent::Composition {
+                            text,
+                            cursor: cursor.map(|(a, b)| [a, b]),
+                        },
+                    });
                 }
-            }
-            WindowEvent::KeyboardInput { event, .. } if self.focused
-                && (!event.repeat || self.session.text_field_focused()) => {
+                winit::event::Ime::Commit(text) => {
+                    self.ime_composing = false;
+                    self.manual(InputIntent::Ui {
+                        intent: crate::ui::UiIntent::Text { text },
+                    });
+                }
+                winit::event::Ime::Disabled => self.ime_composing = false,
+                _ => {}
+            },
+            WindowEvent::KeyboardInput { event, .. }
+                if self.focused && (!event.repeat || self.session.text_field_focused()) =>
+            {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
                 };
@@ -1305,7 +1507,10 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if code == KeyCode::F1 && self.session.screen() == "game" {
-                    self.manual(InputIntent::Key { key: "hide_hud".into(), pressed });
+                    self.manual(InputIntent::Key {
+                        key: "hide_hud".into(),
+                        pressed,
+                    });
                     return;
                 }
                 if matches!(code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
@@ -1348,8 +1553,7 @@ impl ApplicationHandler for App {
                     self.session.shell_screen_active(),
                     self.session.server_dialog_open(),
                     self.session.text_field_focused(),
-                )
-                {
+                ) {
                     // The platform IME owns candidate confirmation/navigation.
                     if self.ime_composing {
                         return;
@@ -1365,8 +1569,12 @@ impl ApplicationHandler for App {
                         return;
                     }
                     let key = match code {
-                        KeyCode::KeyA if (self.native_modifiers.control || self.native_modifiers.logo)
-                            && !self.native_modifiers.alt => Some("a"),
+                        KeyCode::KeyA
+                            if (self.native_modifiers.control || self.native_modifiers.logo)
+                                && !self.native_modifiers.alt =>
+                        {
+                            Some("a")
+                        }
                         KeyCode::Enter | KeyCode::NumpadEnter => Some("Enter"),
                         KeyCode::Tab => Some("Tab"),
                         KeyCode::Backspace => Some("Backspace"),
@@ -1391,10 +1599,14 @@ impl ApplicationHandler for App {
                         }
                         return;
                     }
-                    let alt_graph = self.native_modifiers.control && self.native_modifiers.alt
+                    let alt_graph = self.native_modifiers.control
+                        && self.native_modifiers.alt
                         && !self.native_modifiers.logo;
-                    if pressed && ((!self.native_modifiers.control && !self.native_modifiers.logo
-                        && !self.native_modifiers.alt) || alt_graph)
+                    if pressed
+                        && ((!self.native_modifiers.control
+                            && !self.native_modifiers.logo
+                            && !self.native_modifiers.alt)
+                            || alt_graph)
                         && let Some(text) = event.text.as_ref().filter(|t| {
                             !t.is_empty()
                                 && t.chars().all(|c| !c.is_control() || c == '\t')
@@ -1409,8 +1621,13 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
-                if code == KeyCode::Escape && self.session.screen() == "game"
-                    && self.session.bindings.action(controls::Binding::Key(code)).is_some()
+                if code == KeyCode::Escape
+                    && self.session.screen() == "game"
+                    && self
+                        .session
+                        .bindings
+                        .action(controls::Binding::Key(code))
+                        .is_some()
                 {
                     self.dispatch_binding(controls::Binding::Key(code), pressed);
                     return;
@@ -1442,16 +1659,27 @@ impl ApplicationHandler for App {
                     && (self.session.dialog_screen_active()
                         || self.session.screen() == "inventory") =>
             {
-                if state == ElementState::Pressed && self.capture_binding(controls::Binding::Mouse(button)) {
+                if state == ElementState::Pressed
+                    && self.capture_binding(controls::Binding::Mouse(button))
+                {
                     return;
                 }
                 if self.session.screen() == "inventory"
-                    && self.session.bindings.action(controls::Binding::Mouse(button)).is_some_and(|action| {
-                        action == "inventory" || action == "drop" || action == "swap_offhand"
-                            || action.starts_with("hotbar_")
-                    })
+                    && self
+                        .session
+                        .bindings
+                        .action(controls::Binding::Mouse(button))
+                        .is_some_and(|action| {
+                            action == "inventory"
+                                || action == "drop"
+                                || action == "swap_offhand"
+                                || action.starts_with("hotbar_")
+                        })
                 {
-                    self.dispatch_binding(controls::Binding::Mouse(button), state == ElementState::Pressed);
+                    self.dispatch_binding(
+                        controls::Binding::Mouse(button),
+                        state == ElementState::Pressed,
+                    );
                     return;
                 }
                 // Options sliders drag across Move events: keep real edges there too.
@@ -1512,7 +1740,10 @@ impl ApplicationHandler for App {
                         self.cursor_locked = true;
                     }
                 }
-                self.dispatch_binding(controls::Binding::Mouse(button), state == ElementState::Pressed);
+                self.dispatch_binding(
+                    controls::Binding::Mouse(button),
+                    state == ElementState::Pressed,
+                );
             }
             WindowEvent::MouseWheel { delta, .. }
                 if self.focused
@@ -1563,23 +1794,23 @@ impl ApplicationHandler for App {
                 }
                 if let Err(error) = self.draw() {
                     self.fail(event_loop, error);
-                    return;
                 }
             }
             _ => {}
         }
     }
     fn device_event(&mut self, _: &ActiveEventLoop, _: winit::event::DeviceId, event: DeviceEvent) {
-        if self.focused && self.cursor_locked {
-            if let DeviceEvent::MouseMotion { delta } = event {
-                // Client-local Options sensitivity multiplies the 0.12 base scale.
-                let scale = 0.12 * self.session.mouse_sensitivity();
-                let (yaw, pitch) = self.session.look_angles();
-                let yaw = yaw + delta.0 as f32 * scale;
-                let pitch = (pitch + delta.1 as f32 * scale).clamp(-89.9, 89.9);
-                self.look_events += 1;
-                self.manual(InputIntent::Look { yaw, pitch });
-            }
+        if self.focused
+            && self.cursor_locked
+            && let DeviceEvent::MouseMotion { delta } = event
+        {
+            // Client-local Options sensitivity multiplies the 0.12 base scale.
+            let scale = 0.12 * self.session.mouse_sensitivity();
+            let (yaw, pitch) = self.session.look_angles();
+            let yaw = yaw + delta.0 as f32 * scale;
+            let pitch = (pitch + delta.1 as f32 * scale).clamp(-89.9, 89.9);
+            self.look_events += 1;
+            self.manual(InputIntent::Look { yaw, pitch });
         }
     }
     fn new_events(&mut self, _: &ActiveEventLoop, _: winit::event::StartCause) {
@@ -1597,10 +1828,10 @@ impl ApplicationHandler for App {
         }
         let now = Instant::now();
         if now >= self.next_frame {
-            if let Some(window) = &self.window {
-                if !self.occluded {
-                    window.request_redraw();
-                }
+            if let Some(window) = &self.window
+                && !self.occluded
+            {
+                window.request_redraw();
             }
             self.next_frame = now + self.frame_interval();
         }
@@ -1652,13 +1883,16 @@ mod cpu_hotpath_advance_tests {
         assert!(!session.observation_changed_since_publish());
         // Any of the three triple components opens the gate.
         session.client_tick += 1;
-        assert!(session.observation_changed_since_publish(),
-            "client_tick movement (wait_ticks) must open the publish gate");
+        assert!(
+            session.observation_changed_since_publish(),
+            "client_tick movement (wait_ticks) must open the publish gate"
+        );
         session.note_published();
-        assert!(!session.observation_changed_since_publish(),
-            "noted publish must close the gate for the next idle turn");
+        assert!(
+            !session.observation_changed_since_publish(),
+            "noted publish must close the gate for the next idle turn"
+        );
     }
-
 }
 
 #[cfg(test)]
@@ -1671,7 +1905,10 @@ mod window_input_pacing_tests {
         assert!(!toggle_fullscreen_key(&mut session, KeyCode::F11, false));
         assert!(!toggle_fullscreen_key(&mut session, KeyCode::F10, true));
         assert!(toggle_fullscreen_key(&mut session, KeyCode::F11, true));
-        let path = std::env::temp_dir().join(format!("krasnokamen-f11-settings-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "krasnokamen-f11-settings-{}.json",
+            std::process::id()
+        ));
         local_config::save_client_settings_to(&session.client_settings_snapshot(), &path);
         let saved = local_config::load_client_settings_from(&path);
         assert_eq!(saved.get("fullscreen"), Some(&json!(true)));
@@ -1689,7 +1926,10 @@ mod window_input_pacing_tests {
         assert_eq!(frame_interval(true, 120), Duration::ZERO);
         assert_eq!(frame_interval(true, 0), Duration::ZERO);
         assert_eq!(frame_interval(false, 0), Duration::ZERO);
-        assert_eq!(frame_interval(false, 120), Duration::from_secs_f64(1. / 120.));
+        assert_eq!(
+            frame_interval(false, 120),
+            Duration::from_secs_f64(1. / 120.)
+        );
     }
 
     #[test]
@@ -1698,9 +1938,18 @@ mod window_input_pacing_tests {
         let tick = now + Duration::from_millis(50);
         assert_eq!(frame_deadline(false, tick, now), tick);
         assert_eq!(frame_deadline(true, tick, now), now);
-        assert_eq!(frame_deadline(!frame_interval(true, 120).is_zero(), tick, now), tick);
-        assert_eq!(frame_deadline(!frame_interval(false, 120).is_zero(), tick, now), now);
-        assert_eq!(frame_deadline(!frame_interval(false, 0).is_zero(), tick, now), tick);
+        assert_eq!(
+            frame_deadline(!frame_interval(true, 120).is_zero(), tick, now),
+            tick
+        );
+        assert_eq!(
+            frame_deadline(!frame_interval(false, 120).is_zero(), tick, now),
+            now
+        );
+        assert_eq!(
+            frame_deadline(!frame_interval(false, 0).is_zero(), tick, now),
+            tick
+        );
     }
 
     #[test]
@@ -1712,8 +1961,16 @@ mod window_input_pacing_tests {
             assert_eq!(pointer_grab_change(true, grabbed), Some(true));
             grabbed = grab_succeeds;
         }
-        assert_eq!(pointer_grab_change(true, grabbed), None, "held grab is kept");
-        assert_eq!(pointer_grab_change(false, grabbed), Some(false), "menus/focus loss release");
+        assert_eq!(
+            pointer_grab_change(true, grabbed),
+            None,
+            "held grab is kept"
+        );
+        assert_eq!(
+            pointer_grab_change(false, grabbed),
+            Some(false),
+            "menus/focus loss release"
+        );
         assert_eq!(pointer_grab_change(false, false), None);
     }
 
@@ -1747,13 +2004,23 @@ mod window_input_pacing_tests {
         app.schedule_screenshot(true);
         let first = app.pending_capture.take().unwrap();
         app.schedule_screenshot(false);
-        assert!(app.pending_capture.is_none(), "encoding retains the next F2 request");
+        assert!(
+            app.pending_capture.is_none(),
+            "encoding retains the next F2 request"
+        );
         assert_eq!(app.screenshot_captures.len(), 1);
         app.schedule_screenshot(true);
         let second = app.pending_capture.take().unwrap();
-        let Command::Capture { name: first, .. } = first.command else { panic!() };
-        let Command::Capture { name: second, .. } = second.command else { panic!() };
-        assert_ne!(first, second, "F2 requests in the same second must not collide");
+        let Command::Capture { name: first, .. } = first.command else {
+            panic!()
+        };
+        let Command::Capture { name: second, .. } = second.command else {
+            panic!()
+        };
+        assert_ne!(
+            first, second,
+            "F2 requests in the same second must not collide"
+        );
         assert_eq!(first.len(), 19, "yyyy-MM-dd_HH.mm.ss");
         assert_eq!(first.as_bytes()[10], b'_');
     }

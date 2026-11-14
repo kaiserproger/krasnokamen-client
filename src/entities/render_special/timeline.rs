@@ -1,6 +1,6 @@
 use super::{Entity, Metadata, Models, p};
 use crate::protocol::models::JavaRandom;
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Clone, Copy)]
 enum Kind {
@@ -210,10 +210,8 @@ impl State {
                 }
                 effects.sky_flash = self.lightning_visible();
             }
-            Kind::Fangs => {
-                if self.fang_started {
-                    self.fang_life -= 1;
-                }
+            Kind::Fangs if self.fang_started => {
+                self.fang_life -= 1;
             }
             _ => {}
         }

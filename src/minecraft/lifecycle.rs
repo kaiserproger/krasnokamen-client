@@ -1,11 +1,11 @@
 use super::Outcome;
 use crate::{
     api::InputIntent,
-    player::{collision, AttackBlocker, Bounds, Hit, InteractionIntent},
-    protocol::{content::Content, Result},
+    player::{AttackBlocker, Bounds, Hit, InteractionIntent, collision},
+    protocol::{Result, content::Content},
     session::Session,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) struct Task {
@@ -848,7 +848,7 @@ pub(super) fn start(
             // any other refusal is final and reported with its cause.
             let started = match attack_blocker(session)? {
                 Some(blocker) if !blocker.transient => {
-                    return Err(format!("mining cannot start: {}", blocker.reason))
+                    return Err(format!("mining cannot start: {}", blocker.reason));
                 }
                 Some(_) => false,
                 None => session.interact(InteractionIntent::Attack)?["started"]
@@ -890,11 +890,11 @@ pub(super) fn start(
             return Err(error);
         }
     }
-    if matches!(task.kind, Kind::Respawn { .. }) {
-        if let Err(error) = session.respawn() {
-            task.cancel(session)?;
-            return Err(error);
-        }
+    if matches!(task.kind, Kind::Respawn { .. })
+        && let Err(error) = session.respawn()
+    {
+        task.cancel(session)?;
+        return Err(error);
     }
     match task.on_event(session) {
         Ok(Some(result)) => complete(result),
@@ -916,10 +916,10 @@ impl Task {
                 first.get_or_insert(error);
             }
         }
-        if matches!(self.kind, Kind::Break { .. }) {
-            if let Err(error) = clear_pickup(session) {
-                first.get_or_insert(error);
-            }
+        if matches!(self.kind, Kind::Break { .. })
+            && let Err(error) = clear_pickup(session)
+        {
+            first.get_or_insert(error);
         }
         match first {
             Some(error) => Err(error),

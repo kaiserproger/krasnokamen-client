@@ -4,7 +4,7 @@
 //! the part their own range covers, instead of each walking the spatial index and resolving
 //! every transform (a mounted body's attachment chain included) again.
 
-use super::{physical::Place, resources::Models, view_range, Store, Transform};
+use super::{Store, Transform, physical::Place, resources::Models, view_range};
 use crate::player::Bounds;
 
 /// One candidate seen from the frame's camera.
@@ -22,7 +22,7 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
-    #[expect(clippy::too_many_arguments, reason = "One candidate's view inputs")]
+    // too_many_arguments allowed crate-wide (stage-2 union) for this view-input fn
     pub(crate) fn of(
         store: &Store,
         models: &Models,
@@ -148,7 +148,7 @@ fn area(camera: [f64; 3], range: f64) -> Bounds {
 impl Store {
     /// The frame entities a pass of `range` around `camera` draws from: those the body pass
     /// gathered for this camera and moment when they cover `range`, else gathered into `own`.
-    #[expect(clippy::too_many_arguments, reason = "One pass's view inputs")]
+    // too_many_arguments allowed crate-wide (stage-2 union) for this pass
     pub(crate) fn frame_entities<'a>(
         &'a self,
         own: &'a mut FrameEntities,
@@ -230,7 +230,10 @@ mod tests {
         let mut frame = FrameEntities::default();
         frame.gather(&store, &models, camera, 128., tick, partial);
         assert!(
-            frame.entries.iter().any(|entry| matches!(entry.place, Place::Seat(Some(_)))),
+            frame
+                .entries
+                .iter()
+                .any(|entry| matches!(entry.place, Place::Seat(Some(_)))),
             "riders are gathered"
         );
         for range in [16., 40., 64., 128.] {

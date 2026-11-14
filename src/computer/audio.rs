@@ -108,7 +108,9 @@ impl WavSource {
         let mut at = 12;
         while let Some(header) = bytes.get(at..at + 8) {
             let size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
-            let body = bytes.get(at + 8..(at + 8 + size).min(bytes.len())).unwrap_or(&[]);
+            let body = bytes
+                .get(at + 8..(at + 8 + size).min(bytes.len()))
+                .unwrap_or(&[]);
             match &header[..4] {
                 b"fmt " if body.len() >= 16 => {
                     if u16::from_le_bytes([body[0], body[1]]) != 1 {
@@ -140,7 +142,12 @@ impl WavSource {
         if samples.is_empty() {
             return Err("WAV has no samples".into());
         }
-        Ok(Self { samples, at: 0, start: std::time::Instant::now(), delivered: 0 })
+        Ok(Self {
+            samples,
+            at: 0,
+            start: std::time::Instant::now(),
+            delivered: 0,
+        })
     }
     /// Test tone of `seconds` at `hz`, half scale.
     #[cfg(test)]
@@ -148,7 +155,12 @@ impl WavSource {
         let samples = (0..(RATE as f32 * seconds) as usize)
             .map(|i| 0.5 * (i as f32 * hz * std::f32::consts::TAU / RATE as f32).sin())
             .collect();
-        Self { samples, at: 0, start: std::time::Instant::now(), delivered: 0 }
+        Self {
+            samples,
+            at: 0,
+            start: std::time::Instant::now(),
+            delivered: 0,
+        }
     }
     /// Test clock: pretend `by` of real time has passed since the source started.
     #[cfg(test)]
@@ -187,7 +199,11 @@ pub(crate) struct NullSink {
 impl NullSink {
     pub fn create() -> Result<Self, String> {
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let name = format!("krasnokamen-monitor-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let name = format!(
+            "krasnokamen-monitor-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
         let mut cli = Command::new("pw-cli")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -223,7 +239,11 @@ impl NullSink {
             while raw.read(&mut sink).is_ok_and(|n| n > 0) {}
         });
         match answer.recv_timeout(Duration::from_secs(5)) {
-            Ok(true) => Ok(Self { name, cli, _stdin: stdin }),
+            Ok(true) => Ok(Self {
+                name,
+                cli,
+                _stdin: stdin,
+            }),
             _ => {
                 let _ = cli.kill();
                 let _ = cli.wait();
@@ -233,7 +253,10 @@ impl NullSink {
     }
     /// Environment that sends an app's output to this sink only.
     pub fn env(&self) -> [(&'static str, String); 2] {
-        [("PIPEWIRE_NODE", self.name.clone()), ("PULSE_SINK", self.name.clone())]
+        [
+            ("PIPEWIRE_NODE", self.name.clone()),
+            ("PULSE_SINK", self.name.clone()),
+        ]
     }
     /// Capture the sink's monitor. The sink outlives the capture, so the app
     /// never falls back to the real output when a capture ends.
@@ -261,8 +284,21 @@ impl PipeWireCapture {
     fn open(sink: &str) -> Result<Self, String> {
         let mut child = Command::new("pw-cat")
             .args([
-                "--record", "--target", sink, "-P", "stream.capture.sink=true",
-                "--rate", "48000", "--channels", "1", "--format", "f32", "--latency", "20ms", "--raw", "-",
+                "--record",
+                "--target",
+                sink,
+                "-P",
+                "stream.capture.sink=true",
+                "--rate",
+                "48000",
+                "--channels",
+                "1",
+                "--format",
+                "f32",
+                "--latency",
+                "20ms",
+                "--raw",
+                "-",
             ])
             // An inherited PIPEWIRE_NODE/PULSE_SINK (e.g. a test harness's null sink) would
             // override `--target`: the capture must read this monitor's sink and nothing else.
@@ -289,7 +325,11 @@ impl PipeWireCapture {
                 output.fail("PipeWire capture ended".into());
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self { pcm, child, reader: Some(reader) })
+        Ok(Self {
+            pcm,
+            child,
+            reader: Some(reader),
+        })
     }
 }
 #[cfg(target_os = "linux")]
@@ -343,7 +383,11 @@ mod tests {
         source.start -= std::time::Duration::from_millis(10);
         let mut out = Vec::new();
         source.drain(&mut out).unwrap();
-        assert!((470..=490).contains(&out.len()), "10 ms of audio, got {}", out.len());
+        assert!(
+            (470..=490).contains(&out.len()),
+            "10 ms of audio, got {}",
+            out.len()
+        );
         assert_eq!(&out[..4], [0., 0.5, 0., 0.5], "the clip loops");
         assert!(WavSource::parse(&wav(44_100, 1, &[1])).is_err());
         assert!(WavSource::parse(b"nope").is_err());
@@ -362,9 +406,16 @@ mod tests {
         let speakers = NullSink::create().unwrap();
         let mut leak = speakers.capture().unwrap();
         let tone: Vec<i16> = (0..48_000 * 2 * 2)
-            .map(|i| ((i / 2) as f32 * 440. * std::f32::consts::TAU / RATE as f32).sin().mul_add(12_000., 0.) as i16)
+            .map(|i| {
+                ((i / 2) as f32 * 440. * std::f32::consts::TAU / RATE as f32)
+                    .sin()
+                    .mul_add(12_000., 0.) as i16
+            })
             .collect();
-        let path = std::env::temp_dir().join(format!("krasnokamen-screen-audio-{}.wav", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "krasnokamen-screen-audio-{}.wav",
+            std::process::id()
+        ));
         std::fs::write(&path, wav(RATE, 2, &tone)).unwrap();
         let status = Command::new("pw-play")
             .envs(sink.env())
@@ -377,11 +428,18 @@ mod tests {
         let mut heard = Vec::new();
         capture.drain(&mut heard).unwrap();
         let loud = heard.iter().filter(|s| s.abs() > 0.05).count();
-        assert!(loud > RATE as usize / 2, "monitor heard {loud} loud samples of {}", heard.len());
+        assert!(
+            loud > RATE as usize / 2,
+            "monitor heard {loud} loud samples of {}",
+            heard.len()
+        );
         let mut leaked = Vec::new();
         leak.drain(&mut leaked).unwrap();
         let leaked_peak = leaked.iter().fold(0f32, |m, s| m.max(s.abs()));
-        assert!(leaked_peak < 0.001, "the app leaked onto another sink: {leaked_peak}");
+        assert!(
+            leaked_peak < 0.001,
+            "the app leaked onto another sink: {leaked_peak}"
+        );
         capture.close();
         leak.close();
         drop((sink, speakers));
@@ -390,7 +448,10 @@ mod tests {
     fn pipe_bytes_become_bounded_finite_samples_across_split_floats() {
         let pcm = Pcm::default();
         let mut bytes = FloatBytes::default();
-        let raw: Vec<u8> = [0.5f32, f32::NAN, 7.0].iter().flat_map(|f| f.to_le_bytes()).collect();
+        let raw: Vec<u8> = [0.5f32, f32::NAN, 7.0]
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
         bytes.feed(&raw[..6], &pcm);
         bytes.feed(&raw[6..], &pcm);
         let mut out = Vec::new();
@@ -398,7 +459,11 @@ mod tests {
         assert_eq!(out, [0.5, 0., 1.]);
         pcm.push(std::iter::repeat_n(0.1, MAX_QUEUED + 10));
         pcm.drain(&mut out).unwrap();
-        assert_eq!(out.len(), 3 + MAX_QUEUED, "a stalled consumer never grows the queue");
+        assert_eq!(
+            out.len(),
+            3 + MAX_QUEUED,
+            "a stalled consumer never grows the queue"
+        );
         pcm.fail("gone".into());
         assert_eq!(pcm.drain(&mut out), Err("gone".into()));
     }

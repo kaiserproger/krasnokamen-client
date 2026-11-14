@@ -78,11 +78,11 @@ impl FreeList {
         }
         let old = self.capacity;
         self.capacity = new_capacity;
-        if let Some(last) = self.free.last_mut() {
-            if last.end == old {
-                last.end = new_capacity;
-                return;
-            }
+        if let Some(last) = self.free.last_mut()
+            && last.end == old
+        {
+            last.end = new_capacity;
+            return;
         }
         self.free.push(old..new_capacity);
     }

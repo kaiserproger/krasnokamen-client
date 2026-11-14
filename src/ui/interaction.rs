@@ -477,7 +477,9 @@ impl UiState {
                 return None;
             }
             if matches!(node.action, NodeAction::CreativeTab(_)) {
-                return Some(Arc::new(json!({"action":"show_text","value":{"text":node.label}})));
+                return Some(Arc::new(
+                    json!({"action":"show_text","value":{"text":node.label}}),
+                ));
             }
             let Paint::RichText(layout) = &node.paint else {
                 return None;
@@ -553,16 +555,16 @@ impl UiState {
             rows.push(format!("Absorption {}", self.hud.absorption));
         }
         let slot = 36 + usize::from(inventory.selected_slot);
-        if let Some(stack) = inventory.player.slots.get(slot).and_then(Option::as_ref) {
-            if !stack.empty() {
-                rows.push(format!(
-                    "Selected {} ×{}",
-                    self.text
-                        .language
-                        .plain(super::text::item_name_component(content, stack)?.as_ref())?,
-                    stack.count
-                ));
-            }
+        if let Some(stack) = inventory.player.slots.get(slot).and_then(Option::as_ref)
+            && !stack.empty()
+        {
+            rows.push(format!(
+                "Selected {} ×{}",
+                self.text
+                    .language
+                    .plain(super::text::item_name_component(content, stack)?.as_ref())?,
+                stack.count
+            ));
         }
         self.add(
             "hud/status".into(),

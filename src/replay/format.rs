@@ -73,7 +73,9 @@ pub(crate) fn tick_marker(phase: Phase, id: i32, body: &[u8]) -> Result<Option<(
         return Ok(None);
     }
     let mut reader = Reader::new(body);
-    if reader.string(32767)? != "krasnokamen:tick" { return Ok(None); }
+    if reader.string(32767)? != "krasnokamen:tick" {
+        return Ok(None);
+    }
     let tick = reader.i64()? as u64;
     let wall = reader.i64()? as u64;
     reader.done()?;

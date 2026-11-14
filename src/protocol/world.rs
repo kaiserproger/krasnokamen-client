@@ -403,22 +403,22 @@ impl World {
         self.chunks.iter()
     }
     pub fn insert(&mut self, pos: [i32; 2], mut chunk: Chunk) -> Result<()> {
-        if self.chunks.len() >= self.column_limit()
-            && !self.chunks.contains_key(&pos)
-        {
+        if self.chunks.len() >= self.column_limit() && !self.chunks.contains_key(&pos) {
             return Err("client chunk residency count bound reached".into());
         }
-        if !chunk.surface_heightmap_received {
-            if let Some(previous) = self.chunks.get(&pos) {
-                chunk.surface_heightmap = previous.surface_heightmap.clone();
-            }
+        if !chunk.surface_heightmap_received
+            && let Some(previous) = self.chunks.get(&pos)
+        {
+            chunk.surface_heightmap = previous.surface_heightmap.clone();
         }
         let old_bytes = self.chunks.get(&pos).map_or(0, |c| c.resident_bytes());
         let next_bytes = self.resident_bytes - old_bytes + chunk.resident_bytes();
         if next_bytes > self.byte_limit() {
             return Err(format!(
                 "client decoded chunk residency byte bound reached: {} bytes across {} columns, next {} bytes",
-                self.resident_bytes, self.chunks.len(), next_bytes
+                self.resident_bytes,
+                self.chunks.len(),
+                next_bytes
             ));
         }
         self.chunks.insert(pos, Arc::new(chunk));

@@ -25,7 +25,7 @@ impl Layout {
             slots: Vec::with_capacity(m.slots.len()),
         };
         let mut player = (8., 84.);
-        let mut player_start;
+        let player_start;
         match m.kind {
             MenuKind::Inventory => {
                 out.slot(0, 154., 28.);

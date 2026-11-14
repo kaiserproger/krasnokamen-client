@@ -27,12 +27,12 @@ impl Store {
             .get_mut(id)
             .and_then(|entity| entity.predicted_leash.take())
             .flatten();
-        if let Some(holder) = holder {
-            if let Some(links) = self.predicted_leash_holders.get_mut(&holder) {
-                links.remove(&id);
-                if links.is_empty() {
-                    self.predicted_leash_holders.remove(&holder);
-                }
+        if let Some(holder) = holder
+            && let Some(links) = self.predicted_leash_holders.get_mut(&holder)
+        {
+            links.remove(&id);
+            if links.is_empty() {
+                self.predicted_leash_holders.remove(&holder);
             }
         }
     }
@@ -41,10 +41,10 @@ impl Store {
         if self.resolve(handle)?.handle != handle {
             return Err("dragon child leash prediction".into());
         }
-        if let Some(holder) = holder {
-            if self.resolve(holder)?.handle != holder {
-                return Err("dragon child leash holder prediction".into());
-            }
+        if let Some(holder) = holder
+            && self.resolve(holder)?.handle != holder
+        {
+            return Err("dragon child leash holder prediction".into());
         }
         self.clear_leash_prediction(handle.network_id);
         if let Some(holder) = holder {

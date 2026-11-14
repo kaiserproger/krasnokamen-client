@@ -2,7 +2,10 @@
 //! other desktop windows, so apps are launched INTO a monitor instead: they connect
 //! to a private `krasnokamen-monitor-<n>` socket, render into wl_shm buffers that are
 //! composited to RGBA here, and receive pointer/keyboard events directly.
-use super::{DesktopKey, DesktopSource, Frame, PointerButton, audio::{self, AudioSource}};
+use super::{
+    DesktopKey, DesktopSource, Frame, PointerButton,
+    audio::{self, AudioSource},
+};
 use parking_lot::{Condvar, Mutex};
 use smithay::{
     backend::{
@@ -760,7 +763,9 @@ impl Canvas {
         for y in 0..18 {
             for x in 0..=y / 2 {
                 let (px, py) = (at.x + x, at.y + y);
-                if px < 0 || py < 0 || px >= self.width || py >= self.height { continue; }
+                if px < 0 || py < 0 || px >= self.width || py >= self.height {
+                    continue;
+                }
                 let edge = x == 0 || x == y / 2 || y == 17;
                 let shade = if edge { 0 } else { 255 };
                 let offset = 4 * (py * self.width + px) as usize;
@@ -1023,7 +1028,11 @@ mod tests {
 
     #[test]
     fn pointer_marker_is_visible_and_clipped_to_frame() {
-        let mut canvas = Canvas { width: 24, height: 24, rgba: vec![100; 24 * 24 * 4] };
+        let mut canvas = Canvas {
+            width: 24,
+            height: 24,
+            rgba: vec![100; 24 * 24 * 4],
+        };
         canvas.draw_pointer((2, 2).into());
         assert_eq!(&canvas.rgba[4 * (2 * 24 + 2)..][..4], &[0, 0, 0, 255]);
         assert_eq!(&canvas.rgba[4 * (8 * 24 + 3)..][..4], &[255, 255, 255, 255]);

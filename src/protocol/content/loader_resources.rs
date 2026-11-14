@@ -35,11 +35,15 @@ impl ResourceSource {
             if ns == "krasnokamen" {
                 for root in &self.roots {
                     if root_resource_bytes(root, path, self.limits.max_source_bytes)?.is_some() {
-                        return Err(format!("Loader resource overrides built-in resource {path}"));
+                        return Err(format!(
+                            "Loader resource overrides built-in resource {path}"
+                        ));
                     }
                 }
                 if self.indexed.contains_key(path) {
-                    return Err(format!("Loader resource overrides built-in resource {path}"));
+                    return Err(format!(
+                        "Loader resource overrides built-in resource {path}"
+                    ));
                 }
             }
             if bytes.len() as u64 > self.limits.max_source_bytes {
@@ -125,7 +129,13 @@ impl Content {
             }
         }
         let mut baker = Baker::new(&source);
-        let blocks = super::loader_blocks::PreparedBlocks::new(self, &source, block_entries, &declarations, paths)?;
+        let blocks = super::loader_blocks::PreparedBlocks::new(
+            self,
+            &source,
+            block_entries,
+            &declarations,
+            paths,
+        )?;
         let mut raw = Vec::new();
         let mut sprite_names = BTreeSet::new();
         let mut visited = BTreeSet::new();
@@ -162,13 +172,12 @@ impl Content {
         // Include all verified textures, not just currently referenced ones. These are shared
         // by item resources and ordinary resource consumers such as plugin previews.
         for path in paths.keys() {
-            if let Some((ns, path)) = path.strip_prefix("assets/").and_then(|p| p.split_once('/')) {
-                if let Some(texture) = path
+            if let Some((ns, path)) = path.strip_prefix("assets/").and_then(|p| p.split_once('/'))
+                && let Some(texture) = path
                     .strip_prefix("textures/")
                     .and_then(|p| p.strip_suffix(".png"))
-                {
-                    sprite_names.insert(format!("{ns}:{texture}"));
-                }
+            {
+                sprite_names.insert(format!("{ns}:{texture}"));
             }
         }
         sprite_names.retain(|name| !base_textures.contains_key(name));
@@ -507,22 +516,36 @@ mod tests {
     fn monitor_carriers_rotate_and_restore_without_touching_vanilla_identity() {
         let (mut content, paths, items) = resources();
         let block = content.names.len();
-        content.names.push("minecraft:gray_glazed_terracotta".into());
+        content
+            .names
+            .push("minecraft:gray_glazed_terracotta".into());
         let mut states = Vec::new();
         for (facing, side) in [("north", 2), ("east", 5), ("south", 3), ("west", 4)] {
             let mut info = content.states[1].clone();
             info.block = block;
             states.push((content.states.len() as u32, side, info.model));
             content.states.push(info);
-            content.properties.push(BTreeMap::from([("facing".into(), facing.into())]));
+            content
+                .properties
+                .push(BTreeMap::from([("facing".into(), facing.into())]));
         }
-        let blocks = [json!({"id":"example:monitor","name":"Monitor","model":"example:item/sword",
-            "carrier":"minecraft:gray_glazed_terracotta","drop_item":"example:sword"})];
-        content.activate_loader_resources(&paths, &items, &blocks).unwrap();
+        let blocks = [
+            json!({"id":"example:monitor","name":"Monitor","model":"example:item/sword",
+            "carrier":"minecraft:gray_glazed_terracotta","drop_item":"example:sword"}),
+        ];
+        content
+            .activate_loader_resources(&paths, &items, &blocks)
+            .unwrap();
         for &(state, side, _) in &states {
             assert_eq!(content.loader_block(state), Some(("example:monitor", side)));
-            assert_eq!(content.name(state), Some("minecraft:gray_glazed_terracotta"));
-            assert_eq!(content.model_for(state).unwrap().unwrap().quads[0].face, side as u8);
+            assert_eq!(
+                content.name(state),
+                Some("minecraft:gray_glazed_terracotta")
+            );
+            assert_eq!(
+                content.model_for(state).unwrap().unwrap().quads[0].face,
+                side as u8
+            );
         }
         content.clear_loader_resources().unwrap();
         for (state, _, model) in states {
@@ -585,7 +608,9 @@ mod tests {
         let (mut content, mut paths, entries) = resources();
         let base = Arc::clone(&content.rgba);
         let kept = content.texture("minecraft:kept").unwrap();
-        content.activate_loader_resources(&paths, &entries, &[]).unwrap();
+        content
+            .activate_loader_resources(&paths, &entries, &[])
+            .unwrap();
         let texture = content.texture("example:item/blade").unwrap();
         assert!(texture.layer >= 1);
         let quad = &content.bake_model("example:item/sword").unwrap().quads[0];
@@ -631,13 +656,19 @@ mod tests {
     #[test]
     fn replacing_connection_resources_does_not_accumulate_atlas_pages() {
         let (mut content, paths, entries) = resources();
-        content.activate_loader_resources(&paths, &entries, &[]).unwrap();
+        content
+            .activate_loader_resources(&paths, &entries, &[])
+            .unwrap();
         let layers = content.texture_layers;
-        content.activate_loader_resources(&paths, &entries, &[]).unwrap();
+        content
+            .activate_loader_resources(&paths, &entries, &[])
+            .unwrap();
         assert_eq!(content.texture_layers, layers);
         content.clear_loader_resources().unwrap();
         assert_eq!(content.texture_layers, 1);
-        content.activate_loader_resources(&paths, &entries, &[]).unwrap();
+        content
+            .activate_loader_resources(&paths, &entries, &[])
+            .unwrap();
         assert_eq!(content.texture_layers, layers);
     }
 

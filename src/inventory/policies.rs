@@ -314,34 +314,32 @@ impl Prediction<'_> {
         if self.menu.kind == MenuKind::Inventory
             && (5..9).contains(&index)
             && self.source.game_mode != 1
-        {
-            if let Some(enchantments) = self
+            && let Some(enchantments) = self
                 .slot(index)?
                 .component("minecraft:enchantments")
                 .and_then(Value::as_object)
-            {
-                for (name, level) in enchantments {
-                    if level.as_i64().unwrap_or(0) > 0 {
-                        let entry = self
-                            .content
-                            .registry_entries("minecraft:enchantment")?
-                            .iter()
-                            .find(|(id, _)| id == name)
-                            .ok_or("equipment enchantment holder")?;
-                        if entry
-                            .1
-                            .get("effects")
-                            .and_then(|v| v.get("minecraft:prevent_armor_change"))
-                            .is_some()
-                        {
-                            return Ok(false);
-                        }
+        {
+            for (name, level) in enchantments {
+                if level.as_i64().unwrap_or(0) > 0 {
+                    let entry = self
+                        .content
+                        .registry_entries("minecraft:enchantment")?
+                        .iter()
+                        .find(|(id, _)| id == name)
+                        .ok_or("equipment enchantment holder")?;
+                    if entry
+                        .1
+                        .get("effects")
+                        .and_then(|v| v.get("minecraft:prevent_armor_change"))
+                        .is_some()
+                    {
+                        return Ok(false);
                     }
                 }
             }
         }
         if self.menu.kind == MenuKind::Anvil && index == 2 {
-            let cost = *self.menu.data.get(&0).ok_or("anvil cost unknown")? as i32;
+            let cost = *self.menu.data.get(&0).ok_or("anvil cost unknown")?;
             return Ok(cost > 0 && (self.source.game_mode == 1 || self.experience_level >= cost));
         }
         Ok(true)
@@ -892,7 +890,7 @@ impl Prediction<'_> {
                 if !self.slot(0)?.empty() && !self.slot(1)?.empty() {
                     let selected = self.menu.data.get(&0).copied().unwrap_or(-1);
                     if selected >= 0 {
-                        self.predict_button(selected as i32)?;
+                        self.predict_button(selected)?;
                     }
                 } else {
                     self.menu.data.insert(0, -1);
@@ -906,7 +904,7 @@ impl Prediction<'_> {
                 if !self.slot(0)?.empty() {
                     let selected = self.menu.data.get(&0).copied().unwrap_or(-1);
                     if selected >= 0 {
-                        self.predict_button(selected as i32)?;
+                        self.predict_button(selected)?;
                     }
                 }
             }
@@ -967,7 +965,7 @@ impl Prediction<'_> {
             }
             MenuKind::Anvil if index == 2 => {
                 if self.source.game_mode != 1 {
-                    self.experience_level -= self.menu.data.get(&0).copied().unwrap_or(0) as i32;
+                    self.experience_level -= self.menu.data.get(&0).copied().unwrap_or(0);
                 }
                 let material = self.menu.repair_material_count;
                 if material > 0 {
@@ -1274,10 +1272,11 @@ impl Prediction<'_> {
                 return Ok(true);
             }
             if button == 1 && cursor.empty() {
-                if self.may_pickup(index)? && self.may_place(index, &target)? {
-                    if let Some(item) = Self::bundle_remove(&mut contents)? {
-                        cursor = item;
-                    }
+                if self.may_pickup(index)?
+                    && self.may_place(index, &target)?
+                    && let Some(item) = Self::bundle_remove(&mut contents)?
+                {
+                    cursor = item;
                 }
                 self.set(
                     index,

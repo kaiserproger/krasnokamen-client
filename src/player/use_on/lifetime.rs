@@ -60,7 +60,7 @@ impl Player {
         content: &Content,
         inventory: &InventoryStore,
         entities: &EntityStore,
-        tick: u64,
+        _tick: u64,
         world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
@@ -80,8 +80,15 @@ impl Player {
         } else {
             36 + u16::from(inventory.selected_slot)
         })?;
-        if using.crossbow_components.as_ref().is_some_and(|components| !Arc::ptr_eq(components, &item.components)) {
-            let charge_ticks = crossbow_charge_ticks(item, content, &mut |kind| match kind { EffectSample::Uniform => f64::from(self.random_float()), EffectSample::Gaussian => self.random_gaussian() })?;
+        if using
+            .crossbow_components
+            .as_ref()
+            .is_some_and(|components| !Arc::ptr_eq(components, &item.components))
+        {
+            let charge_ticks = crossbow_charge_ticks(item, content, &mut |kind| match kind {
+                EffectSample::Uniform => f64::from(self.random_float()),
+                EffectSample::Gaussian => self.random_gaussian(),
+            })?;
             let using = self.using.as_mut().unwrap();
             using.crossbow_charge_ticks = charge_ticks;
             using.crossbow_components = Some(Arc::clone(&item.components));
@@ -440,27 +447,28 @@ impl Player {
         tick: u64,
     ) -> Result<()> {
         let mut replacement = false;
-        if !self.abilities.instabuild && result.count < before.count {
-            if let Some(template) = before.component("minecraft:use_remainder") {
-                let retained = before
-                    .patch
-                    .added
-                    .values()
-                    .find(|component| component.name == "minecraft:use_remainder")
-                    .and_then(|component| component.nested_stacks.first());
-                let remainder = match retained {
-                    Some(stack) => stack.clone(),
-                    None => crate::inventory::template_stack(template, content)?,
-                };
-                if result.empty() {
-                    result = remainder;
-                    replacement = true;
-                } else {
-                    self.predict_use(UsePrediction::ExtraItem {
-                        stack: remainder,
-                        drop_remainder: true,
-                    })?;
-                }
+        if !self.abilities.instabuild
+            && result.count < before.count
+            && let Some(template) = before.component("minecraft:use_remainder")
+        {
+            let retained = before
+                .patch
+                .added
+                .values()
+                .find(|component| component.name == "minecraft:use_remainder")
+                .and_then(|component| component.nested_stacks.first());
+            let remainder = match retained {
+                Some(stack) => stack.clone(),
+                None => crate::inventory::template_stack(template, content)?,
+            };
+            if result.empty() {
+                result = remainder;
+                replacement = true;
+            } else {
+                self.predict_use(UsePrediction::ExtraItem {
+                    stack: remainder,
+                    drop_remainder: true,
+                })?;
             }
         }
         if let Some(cooldown) = before.component("minecraft:use_cooldown") {

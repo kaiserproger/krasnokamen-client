@@ -16,15 +16,16 @@ use windows::{
     Win32::{
         Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0},
         Media::Audio::{
-            AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-            AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
-            AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
-            AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
-            AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync,
-            IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+            AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
+            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+            AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+            AUDIOCLIENT_ACTIVATION_PARAMS, AUDIOCLIENT_ACTIVATION_PARAMS_0,
+            AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
+            ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation,
+            IActivateAudioInterfaceCompletionHandler,
             IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
-            PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-            WAVEFORMATEX,
+            PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+            VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
         },
         System::{
             Com::{BLOB, COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
@@ -40,7 +41,10 @@ const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
 #[implement(IActivateAudioInterfaceCompletionHandler)]
 struct Completed(isize);
 impl IActivateAudioInterfaceCompletionHandler_Impl for Completed_Impl {
-    fn ActivateCompleted(&self, _: Option<&IActivateAudioInterfaceAsyncOperation>) -> WinResult<()> {
+    fn ActivateCompleted(
+        &self,
+        _: Option<&IActivateAudioInterfaceAsyncOperation>,
+    ) -> WinResult<()> {
         unsafe { SetEvent(HANDLE(self.0 as *mut _)) }
     }
 }
@@ -69,7 +73,11 @@ pub(crate) fn open(pid: u32) -> Result<Box<dyn AudioSource>, String> {
         })
         .map_err(|e| e.to_string())?;
     match ready.recv_timeout(Duration::from_secs(8)) {
-        Ok(Ok(())) => Ok(Box::new(Loopback { pcm, stop, thread: Some(thread) })),
+        Ok(Ok(())) => Ok(Box::new(Loopback {
+            pcm,
+            stop,
+            thread: Some(thread),
+        })),
         Ok(Err(error)) => {
             let _ = thread.join();
             Err(error)
@@ -161,8 +169,11 @@ fn capture(
             .map_err(win("IAudioClient::Initialize"))?;
         let event = CreateEventW(None, false, false, None).map_err(win("CreateEvent"))?;
         let result = (|| {
-            client.SetEventHandle(event).map_err(win("SetEventHandle"))?;
-            let reader: IAudioCaptureClient = client.GetService().map_err(win("IAudioCaptureClient"))?;
+            client
+                .SetEventHandle(event)
+                .map_err(win("SetEventHandle"))?;
+            let reader: IAudioCaptureClient =
+                client.GetService().map_err(win("IAudioCaptureClient"))?;
             client.Start().map_err(win("IAudioClient::Start"))?;
             let _ = ready.send(Ok(()));
             let mut bytes = FloatBytes::default();
@@ -170,7 +181,9 @@ fn capture(
                 // The event is signalled per period; the timeout only bounds stop latency.
                 WaitForSingleObject(event, 100);
                 loop {
-                    let packet = reader.GetNextPacketSize().map_err(win("GetNextPacketSize"))?;
+                    let packet = reader
+                        .GetNextPacketSize()
+                        .map_err(win("GetNextPacketSize"))?;
                     if packet == 0 {
                         break;
                     }

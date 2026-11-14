@@ -76,7 +76,8 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<Incoming<'_>> {
     }
     match (*kind, body) {
         (0, body) if body.len() > 16 + 12 + 4 => {
-            let float = |i: usize| f32::from_be_bytes(body[16 + 4 * i..20 + 4 * i].try_into().unwrap());
+            let float =
+                |i: usize| f32::from_be_bytes(body[16 + 4 * i..20 + 4 * i].try_into().unwrap());
             let position = [float(0), float(1), float(2)];
             if position.iter().any(|v| !v.is_finite()) {
                 return Err("voice speaker position not finite".into());
@@ -116,7 +117,8 @@ impl Encoder {
         };
         let mut error = 0;
         // SAFETY: valid arguments; the pointer is checked and freed exactly once in Drop.
-        let state = unsafe { libopus::opus_encoder_create(RATE as i32, 1, application, &mut error) };
+        let state =
+            unsafe { libopus::opus_encoder_create(RATE as i32, 1, application, &mut error) };
         if error != libopus::OPUS_OK || state.is_null() {
             return Err(format!("opus encoder create failed: {error}"));
         }
@@ -132,7 +134,15 @@ impl Encoder {
     pub fn encode(&mut self, pcm: &[f32; FRAME]) -> Result<Vec<u8>> {
         let mut out = vec![0u8; MAX_OPUS];
         // SAFETY: `pcm` holds FRAME samples, `out` MAX_OPUS bytes; the encoder is live.
-        let n = unsafe { libopus::opus_encode_float(self.0, pcm.as_ptr(), FRAME as i32, out.as_mut_ptr(), MAX_OPUS as i32) };
+        let n = unsafe {
+            libopus::opus_encode_float(
+                self.0,
+                pcm.as_ptr(),
+                FRAME as i32,
+                out.as_mut_ptr(),
+                MAX_OPUS as i32,
+            )
+        };
         if n < 0 {
             return Err(format!("opus encode failed: {n}"));
         }
@@ -165,7 +175,9 @@ impl Decoder {
         let mut pcm = [0f32; FRAME];
         let (data, len) = packet.map_or((std::ptr::null(), 0), |p| (p.as_ptr(), p.len() as i32));
         // SAFETY: `pcm` holds FRAME samples; `data`/`len` describe a live slice or are null/0.
-        let n = unsafe { libopus::opus_decode_float(self.0, data, len, pcm.as_mut_ptr(), FRAME as i32, 0) };
+        let n = unsafe {
+            libopus::opus_decode_float(self.0, data, len, pcm.as_mut_ptr(), FRAME as i32, 0)
+        };
         if n != FRAME as i32 {
             return Err(format!("opus decode failed: {n}"));
         }
@@ -204,7 +216,8 @@ impl Framer {
         for &sample in input {
             // `position` is the source index of the next output, relative to `previous`.
             while self.position < 1. {
-                self.frame[self.filled] = self.previous + (sample - self.previous) * self.position as f32;
+                self.frame[self.filled] =
+                    self.previous + (sample - self.previous) * self.position as f32;
                 self.filled += 1;
                 if self.filled == FRAME {
                     frame_out(&self.frame);
@@ -245,17 +258,26 @@ impl Capture {
         let failed = Arc::new(AtomicBool::new(false));
         let gain = Arc::new(AtomicU32::new(1f32.to_bits()));
         let state = (sender.clone(), ptt.clone(), failed.clone(), gain.clone());
-        if let Err(e) = thread::Builder::new().name("voice-capture".into()).spawn(move || {
-            let (sender, ptt, failed, gain) = state;
-            if let Err(e) = run(sender, input, output, ptt, gain) {
-                eprintln!("voice capture stopped: {e}");
-                failed.store(true, Ordering::Release);
-            }
-        }) {
+        if let Err(e) = thread::Builder::new()
+            .name("voice-capture".into())
+            .spawn(move || {
+                let (sender, ptt, failed, gain) = state;
+                if let Err(e) = run(sender, input, output, ptt, gain) {
+                    eprintln!("voice capture stopped: {e}");
+                    failed.store(true, Ordering::Release);
+                }
+            })
+        {
             eprintln!("voice capture thread: {e}");
             failed.store(true, Ordering::Release);
         }
-        Self { sender, packets, ptt, failed, gain }
+        Self {
+            sender,
+            packets,
+            ptt,
+            failed,
+            gain,
+        }
     }
     pub fn set_ptt(&self, down: bool) {
         if std::env::var_os(PTT_ALWAYS_ENV).is_none() {
@@ -264,7 +286,8 @@ impl Capture {
     }
     /// Options "Microphone volume" (0..=1).
     pub fn set_gain(&self, gain: f32) {
-        self.gain.store(gain.clamp(0., 1.).to_bits(), Ordering::Release);
+        self.gain
+            .store(gain.clamp(0., 1.).to_bits(), Ordering::Release);
     }
     pub fn state(&self) -> MicState {
         if self.failed.load(Ordering::Acquire) {
@@ -282,7 +305,13 @@ impl Drop for Capture {
     }
 }
 
-fn run(sender: Sender<Message>, input: Receiver<Message>, output: Sender<(u32, Vec<u8>)>, ptt: Arc<AtomicBool>, gain: Arc<AtomicU32>) -> Result<()> {
+fn run(
+    sender: Sender<Message>,
+    input: Receiver<Message>,
+    output: Sender<(u32, Vec<u8>)>,
+    ptt: Arc<AtomicBool>,
+    gain: Arc<AtomicU32>,
+) -> Result<()> {
     let mut encoder = Encoder::new()?;
     let mut seq = 0u32;
     let mut was_talking = false;
@@ -327,7 +356,9 @@ fn run(sender: Sender<Message>, input: Receiver<Message>, output: Sender<(u32, V
 }
 
 fn open_microphone(sender: Sender<Message>) -> Result<(u32, cpal::Stream)> {
-    let device = cpal::default_host().default_input_device().ok_or("no microphone found")?;
+    let device = cpal::default_host()
+        .default_input_device()
+        .ok_or("no microphone found")?;
     let config = device.default_input_config().map_err(|e| e.to_string())?;
     let rate = config.sample_rate().0;
     let channels = usize::from(config.channels());
@@ -342,7 +373,12 @@ fn open_microphone(sender: Sender<Message>) -> Result<(u32, cpal::Stream)> {
     stream.play().map_err(|e| e.to_string())?;
     Ok((rate, stream))
 }
-fn build<T: SizedSample>(device: &cpal::Device, config: &cpal::StreamConfig, channels: usize, sender: Sender<Message>) -> Result<cpal::Stream>
+fn build<T: SizedSample>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    channels: usize,
+    sender: Sender<Message>,
+) -> Result<cpal::Stream>
 where
     f32: FromSample<T>,
 {
@@ -352,7 +388,9 @@ where
             move |data: &[T], _| {
                 let mono = data
                     .chunks_exact(channels)
-                    .map(|frame| frame.iter().map(|s| f32::from_sample_(*s)).sum::<f32>() / channels as f32)
+                    .map(|frame| {
+                        frame.iter().map(|s| f32::from_sample_(*s)).sum::<f32>() / channels as f32
+                    })
                     .collect();
                 let _ = sender.send(Message::Pcm(mono));
             },
@@ -372,10 +410,14 @@ fn read_wav(path: &std::path::Path) -> Result<(u32, Vec<f32>)> {
     let mut at = 12;
     while at + 8 <= bytes.len() {
         let size = u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()) as usize;
-        let body = bytes.get(at + 8..(at + 8 + size).min(bytes.len())).unwrap_or(&[]);
+        let body = bytes
+            .get(at + 8..(at + 8 + size).min(bytes.len()))
+            .unwrap_or(&[]);
         match &bytes[at..at + 4] {
             b"fmt " if body.len() >= 16 => {
-                if u16::from_le_bytes([body[0], body[1]]) != 1 || u16::from_le_bytes([body[14], body[15]]) != 16 {
+                if u16::from_le_bytes([body[0], body[1]]) != 1
+                    || u16::from_le_bytes([body[14], body[15]]) != 16
+                {
                     return Err("microphone WAV must be 16-bit PCM".into());
                 }
                 channels = usize::from(u16::from_le_bytes([body[2], body[3]]));
@@ -393,7 +435,11 @@ fn read_wav(path: &std::path::Path) -> Result<(u32, Vec<f32>)> {
     let samples: Vec<f32> = data
         .chunks_exact(2 * channels)
         .map(|frame| {
-            frame.chunks_exact(2).map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.).sum::<f32>() / channels as f32
+            frame
+                .chunks_exact(2)
+                .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.)
+                .sum::<f32>()
+                / channels as f32
         })
         .collect();
     if samples.is_empty() {
@@ -426,7 +472,10 @@ mod tests {
     use super::*;
 
     fn tone(frame: usize) -> [f32; FRAME] {
-        std::array::from_fn(|i| 0.5 * ((2. * std::f32::consts::PI * 440. * (frame * FRAME + i) as f32) / RATE as f32).sin())
+        std::array::from_fn(|i| {
+            0.5 * ((2. * std::f32::consts::PI * 440. * (frame * FRAME + i) as f32) / RATE as f32)
+                .sin()
+        })
     }
     #[test]
     fn encode_decode_loopback_preserves_the_tone() {
@@ -435,7 +484,11 @@ mod tests {
         let mut last = [0.; FRAME];
         for n in 0..10 {
             let packet = encoder.encode(&tone(n)).unwrap();
-            assert!(!packet.is_empty() && packet.len() <= MAX_OPUS, "{} bytes", packet.len());
+            assert!(
+                !packet.is_empty() && packet.len() <= MAX_OPUS,
+                "{} bytes",
+                packet.len()
+            );
             last = decoder.decode(Some(&packet)).unwrap();
         }
         let power = |pcm: &[f32]| pcm.iter().map(|s| s * s).sum::<f32>() / pcm.len() as f32;
@@ -456,12 +509,26 @@ mod tests {
         server.extend(42u32.to_be_bytes());
         server.extend([5, 6]);
         match parse(&server).unwrap() {
-            Incoming::Audio { speaker, position, seq, opus } => {
-                assert_eq!((speaker, position, seq, opus), ([9; 16], [1.5, 64., -3.], 42, &[5u8, 6][..]));
+            Incoming::Audio {
+                speaker,
+                position,
+                seq,
+                opus,
+            } => {
+                assert_eq!(
+                    (speaker, position, seq, opus),
+                    ([9; 16], [1.5, 64., -3.], 42, &[5u8, 6][..])
+                );
             }
             _ => panic!("expected audio"),
         }
-        assert!(matches!(parse(&[1, 1, 1, 0, 48]).unwrap(), Incoming::State { enabled: true, range: 48 }));
+        assert!(matches!(
+            parse(&[1, 1, 1, 0, 48]).unwrap(),
+            Incoming::State {
+                enabled: true,
+                range: 48
+            }
+        ));
         assert!(parse(&[2, 0]).is_err() && parse(&[1, 0, 1]).is_err() && parse(&[1]).is_err());
         assert_eq!(listen_packet(true), [1, 1, 1]);
     }

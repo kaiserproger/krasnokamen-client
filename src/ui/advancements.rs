@@ -445,7 +445,9 @@ mod tests {
             packet.byte(0); // no telemetry
             // 26.3 PositionedAdvancement appends x/y after the complete holder,
             // including when it has no DisplayInfo (1.0, -2.5 as exact IEEE bytes).
-            packet.0.extend_from_slice(&[0x3f, 0x80, 0, 0, 0xc0, 0x20, 0, 0]);
+            packet
+                .0
+                .extend_from_slice(&[0x3f, 0x80, 0, 0, 0xc0, 0x20, 0, 0]);
         }
         packet.var(0); // no removals
         packet.var(1); // progress for one advancement

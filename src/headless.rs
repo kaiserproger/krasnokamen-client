@@ -13,7 +13,7 @@ pub(super) fn run(options: Options) -> Result<(), String> {
     app.focused = true;
     app.publish_session();
     app.start_automation()?;
-    let result = (|| {
+    let result = {
         while !app.shutdown {
             app.advance();
             let now = Instant::now();
@@ -23,7 +23,7 @@ pub(super) fn run(options: Options) -> Result<(), String> {
             std::thread::park_timeout(app.deadline().saturating_duration_since(Instant::now()));
         }
         Ok(())
-    })();
+    };
     app.release("headless_exit");
     app.session.disconnect();
     app.automation.take();

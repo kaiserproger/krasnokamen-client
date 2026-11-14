@@ -73,12 +73,21 @@ impl Clouds {
         env: &WorldEnvironment,
         out: &mut DynamicGeometry,
     ) -> Result<()> {
-        let View { epoch, camera, origin, ticks } = *view;
+        let View {
+            epoch,
+            camera,
+            origin,
+            ticks,
+        } = *view;
         // A resource stack without the texture simply has no cloud layer.
         if env.sky_kind != SkyKind::Overworld || content.texture(TEXTURE).is_none() {
             return Ok(());
         }
-        if self.cells.as_ref().is_none_or(|(loaded, _)| *loaded != epoch) {
+        if self
+            .cells
+            .as_ref()
+            .is_none_or(|(loaded, _)| *loaded != epoch)
+        {
             let (width, height, rgba) = content.texture_pixels(TEXTURE)?;
             self.cells = Some((epoch, Cells::from_rgba(width, height, &rgba)?));
         }
@@ -86,48 +95,56 @@ impl Clouds {
         let white = content
             .texture("krasnokamen:white")
             .ok_or("missing mandatory texture krasnokamen:white")?;
-        let uv = [(white.uv[0] + white.uv[2]) / 2., (white.uv[1] + white.uv[3]) / 2.];
+        let uv = [
+            (white.uv[0] + white.uv[2]) / 2.,
+            (white.uv[1] + white.uv[3]) / 2.,
+        ];
         let tint = tint(env.sun_angle, env.rain);
         let scroll = ticks * DRIFT;
         let (base_x, base_z) = (
             ((camera[0] + scroll) / CELL).floor() as i64,
             (camera[2] / CELL).floor() as i64,
         );
-        let (y0, y1) = (f64::from(env.cloud_height) - origin[1], f64::from(env.cloud_height) + THICKNESS - origin[1]);
-        let emit = |positions: [[f64; 3]; 4], shade: f32, out: &mut DynamicGeometry| -> Result<()> {
-            if out.vertices.len() + 4 > MAX_VERTICES {
-                return Err("cloud geometry vertex budget reached".into());
-            }
-            let first = u32::try_from(out.vertices.len()).map_err(|_| "cloud index overflow")?;
-            let normal = {
-                let a = std::array::from_fn::<f64, 3, _>(|i| positions[1][i] - positions[0][i]);
-                let b = std::array::from_fn::<f64, 3, _>(|i| positions[2][i] - positions[0][i]);
-                let n = [
-                    a[1] * b[2] - a[2] * b[1],
-                    a[2] * b[0] - a[0] * b[2],
-                    a[0] * b[1] - a[1] * b[0],
-                ];
-                let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
-                n.map(|v| (v / length) as f32)
+        let (y0, y1) = (
+            f64::from(env.cloud_height) - origin[1],
+            f64::from(env.cloud_height) + THICKNESS - origin[1],
+        );
+        let emit =
+            |positions: [[f64; 3]; 4], shade: f32, out: &mut DynamicGeometry| -> Result<()> {
+                if out.vertices.len() + 4 > MAX_VERTICES {
+                    return Err("cloud geometry vertex budget reached".into());
+                }
+                let first =
+                    u32::try_from(out.vertices.len()).map_err(|_| "cloud index overflow")?;
+                let normal = {
+                    let a = std::array::from_fn::<f64, 3, _>(|i| positions[1][i] - positions[0][i]);
+                    let b = std::array::from_fn::<f64, 3, _>(|i| positions[2][i] - positions[0][i]);
+                    let n = [
+                        a[1] * b[2] - a[2] * b[1],
+                        a[2] * b[0] - a[0] * b[2],
+                        a[0] * b[1] - a[1] * b[0],
+                    ];
+                    let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+                    n.map(|v| (v / length) as f32)
+                };
+                for position in positions {
+                    out.vertices.push(Vertex {
+                        position: position.map(|v| v as f32),
+                        color: tint.map(|c| c * shade),
+                        uv,
+                        overlay_uv: [0., 10.],
+                        overlay_tint: [1.; 3],
+                        alpha: ALPHA,
+                        texture_layer: white.layer,
+                        light: [15., 0.],
+                        normal,
+                    });
+                }
+                let indices = [first, first + 1, first + 2, first + 2, first + 3, first];
+                out.indices[EntityMaterial::CloudsDepth as usize].extend(indices);
+                out.indices[EntityMaterial::Clouds as usize].extend(indices);
+                Ok(())
             };
-            for position in positions {
-                out.vertices.push(Vertex {
-                    position: position.map(|v| v as f32),
-                    color: tint.map(|c| c * shade),
-                    uv,
-                    overlay_uv: [0., 10.],
-                    overlay_tint: [1.; 3],
-                    alpha: ALPHA,
-                    texture_layer: white.layer,
-                    light: [15., 0.],
-                    normal,
-                });
-            }
-            let indices = [first, first + 1, first + 2, first + 2, first + 3, first];
-            out.indices[EntityMaterial::CloudsDepth as usize].extend(indices);
-            out.indices[EntityMaterial::Clouds as usize].extend(indices);
-            Ok(())
-        };
         let world_x = |i: i64| i as f64 * CELL - scroll - origin[0];
         let world_z = |j: i64| j as f64 * CELL - origin[2];
         for dz in -RADIUS..=RADIUS {
@@ -147,17 +164,41 @@ impl Clouds {
                     i += 1;
                 }
                 let (x0, x1) = (world_x(start), world_x(i + 1));
-                emit([[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]], 1., out)?;
-                emit([[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], 0.7, out)?;
-                emit([[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], 0.9, out)?;
-                emit([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], 0.9, out)?;
+                emit(
+                    [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+                    1.,
+                    out,
+                )?;
+                emit(
+                    [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
+                    0.7,
+                    out,
+                )?;
+                emit(
+                    [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+                    0.9,
+                    out,
+                )?;
+                emit(
+                    [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
+                    0.9,
+                    out,
+                )?;
                 for cell in start..=i {
                     let (cx0, cx1) = (world_x(cell), world_x(cell + 1));
                     if !cells.at(cell, j - 1) {
-                        emit([[cx0, y0, z0], [cx0, y1, z0], [cx1, y1, z0], [cx1, y0, z0]], 0.8, out)?;
+                        emit(
+                            [[cx0, y0, z0], [cx0, y1, z0], [cx1, y1, z0], [cx1, y0, z0]],
+                            0.8,
+                            out,
+                        )?;
                     }
                     if !cells.at(cell, j + 1) {
-                        emit([[cx0, y0, z1], [cx1, y0, z1], [cx1, y1, z1], [cx0, y1, z1]], 0.8, out)?;
+                        emit(
+                            [[cx0, y0, z1], [cx1, y0, z1], [cx1, y1, z1], [cx0, y1, z1]],
+                            0.8,
+                            out,
+                        )?;
                     }
                 }
                 i += 1;
@@ -199,23 +240,48 @@ mod tests {
     fn cloud_geometry_reaches_the_oracle_horizon_band() {
         let mut content = Content::test_cube();
         let region = crate::protocol::content::TextureRegion {
-            uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1,
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 1,
+            height: 1,
         };
         content.insert_test_texture(TEXTURE, region);
         content.insert_test_texture("krasnokamen:white", region);
         let mut clouds = Clouds {
-            cells: Some((1, Cells { size: 1, solid: vec![true] })),
+            cells: Some((
+                1,
+                Cells {
+                    size: 1,
+                    solid: vec![true],
+                },
+            )),
         };
         let mut geometry = DynamicGeometry::default();
-        clouds.append(
-            &content,
-            &View { epoch: 1, camera: [0.; 3], origin: [0.; 3], ticks: 0. },
-            &WorldEnvironment { sky_kind: SkyKind::Overworld, cloud_height: 100., ..Default::default() },
-            &mut geometry,
-        ).unwrap();
+        clouds
+            .append(
+                &content,
+                &View {
+                    epoch: 1,
+                    camera: [0.; 3],
+                    origin: [0.; 3],
+                    ticks: 0.,
+                },
+                &WorldEnvironment {
+                    sky_kind: SkyKind::Overworld,
+                    cloud_height: 100.,
+                    ..Default::default()
+                },
+                &mut geometry,
+            )
+            .unwrap();
         // Own coverage threshold: the h-far oracle has clouds below the band
         // reached by a roughly 236-block radius, well beyond 500 blocks.
-        assert!(geometry.vertices.iter().any(|vertex| vertex.position[0] > 500.));
+        assert!(
+            geometry
+                .vertices
+                .iter()
+                .any(|vertex| vertex.position[0] > 500.)
+        );
     }
 
     #[test]

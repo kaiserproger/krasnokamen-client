@@ -1,10 +1,10 @@
 //! Authored approximation of the entity discs visible in our Java oracle shots.
 //! The runtime resource pack supplies `misc/shadow`; range, fade and radius
 //! formulae below are our tuning choices, not extracted game constants.
-use super::{presentation as p, Entity, Models, Store};
+use super::{Entity, Models, Store, presentation as p};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
-    protocol::{content::Content, world::World, Result},
+    protocol::{Result, content::Content, world::World},
 };
 
 /// Shadows fade with camera distance and are gone at this range, in blocks.
@@ -64,7 +64,10 @@ pub(super) fn opacity(height: f64, distance_squared: f64, level: u8) -> f32 {
 impl Store {
     /// Appends blob shadows for living entities near the camera onto the full
     /// block tops under them. Returns the number of entities that cast one.
-    #[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Shares the scene extraction inputs"
+    )]
     pub(crate) fn append_shadow_geometry(
         &self,
         content: &Content,
@@ -86,34 +89,34 @@ impl Store {
         let mut casters = 0;
         let mut own = super::frame_entities::FrameEntities::default();
         for entry in self.frame_entities(&mut own, models, camera, SHADOW_RANGE, tick, partial) {
-                let entity = &self.slots[entry.slot];
-                let position = entry.transform.as_ref().map_err(Clone::clone)?.position;
-                let distance_squared = entry.distance_squared;
-                if distance_squared >= SHADOW_RANGE * SHADOW_RANGE || !entry.within {
-                    continue;
-                }
-                let Some(radius) = radius(models, entity)? else {
-                    continue;
-                };
-                let before = out.vertices.len();
-                append_disc(
-                    content,
-                    world,
-                    texture,
-                    origin,
-                    position,
-                    f64::from(radius),
-                    distance_squared,
-                    darken,
-                    out,
-                )?;
-                casters += usize::from(out.vertices.len() > before);
+            let entity = &self.slots[entry.slot];
+            let position = entry.transform.as_ref().map_err(Clone::clone)?.position;
+            let distance_squared = entry.distance_squared;
+            if distance_squared >= SHADOW_RANGE * SHADOW_RANGE || !entry.within {
+                continue;
+            }
+            let Some(radius) = radius(models, entity)? else {
+                continue;
+            };
+            let before = out.vertices.len();
+            append_disc(
+                content,
+                world,
+                texture,
+                origin,
+                position,
+                f64::from(radius),
+                distance_squared,
+                darken,
+                out,
+            )?;
+            casters += usize::from(out.vertices.len() > before);
         }
         Ok(casters)
     }
 }
 
-#[expect(clippy::too_many_arguments, reason = "One disc's inputs")]
+// too_many_arguments allowed crate-wide (stage-2 union)
 fn append_disc(
     content: &Content,
     world: &World,
@@ -174,7 +177,7 @@ fn append_disc(
 }
 
 /// One upward-facing piece of the disc; `uv` spans the whole disc square.
-#[expect(clippy::too_many_arguments, reason = "One clipped disc piece")]
+// too_many_arguments allowed crate-wide (stage-2 union)
 fn quad(
     texture: crate::protocol::content::TextureRegion,
     x: [f64; 2],
@@ -196,7 +199,12 @@ fn quad(
                 (pz - origin[2]) as f32,
             ]
         }),
-        corners.map(|(px, pz)| [((px - disc[0]) / size) as f32, ((pz - disc[1]) / size) as f32]),
+        corners.map(|(px, pz)| {
+            [
+                ((px - disc[0]) / size) as f32,
+                ((pz - disc[1]) / size) as f32,
+            ]
+        }),
         [1.; 3],
         texture.layer,
         EntityMaterial::EntityShadow,
@@ -209,7 +217,11 @@ fn quad(
     let first = out.vertices.len() - 4;
     for vertex in &mut out.vertices[first..] {
         vertex.overlay_uv = [texture.uv[0], texture.uv[1]];
-        vertex.overlay_tint = [texture.uv[2] - texture.uv[0], texture.uv[3] - texture.uv[1], 0.];
+        vertex.overlay_tint = [
+            texture.uv[2] - texture.uv[0],
+            texture.uv[3] - texture.uv[1],
+            0.,
+        ];
     }
     Ok(())
 }
@@ -227,7 +239,10 @@ mod tests {
         assert!((golem - 0.37).abs() < 0.02, "{golem}");
         assert!(opacity(1., 0., 15) < full && opacity(2., 0., 15) == 0.);
         assert_eq!(opacity(0., SHADOW_RANGE * SHADOW_RANGE, 15), 0.);
-        assert!(opacity(0., 0., 4) < 0.1 * full, "night ground hardly shows a shadow");
+        assert!(
+            opacity(0., 0., 4) < 0.1 * full,
+            "night ground hardly shows a shadow"
+        );
         assert_eq!(opacity(0., 0., 0), 0.);
     }
 

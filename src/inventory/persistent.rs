@@ -383,13 +383,11 @@ pub(super) fn rewrite(
         if !source.nested_stacks.is_empty()
             && !payloads.contains_key(&id)
             && !restored.contains(&id)
-        {
-            if let Some(value) = std::sync::Arc::make_mut(&mut stack.patch)
+            && let Some(value) = std::sync::Arc::make_mut(&mut stack.patch)
                 .added
                 .get_mut(&id)
-            {
-                value.nested_stacks = source.nested_stacks.clone();
-            }
+        {
+            value.nested_stacks = source.nested_stacks.clone();
         }
     }
     Ok(stack)

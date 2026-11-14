@@ -190,19 +190,17 @@ impl Store {
                 data.insert("Items".into(), Value::Array(items));
             }
         }
-        if randomizable {
-            if let Some(loot) = components.get("minecraft:container_loot") {
-                data.insert(
-                    "LootTable".into(),
-                    loot.get("loot_table")
-                        .ok_or("container loot table missing")?
-                        .clone(),
-                );
-                data.insert(
-                    "LootTableSeed".into(),
-                    loot.get("seed").cloned().unwrap_or_else(|| Value::from(0)),
-                );
-            }
+        if randomizable && let Some(loot) = components.get("minecraft:container_loot") {
+            data.insert(
+                "LootTable".into(),
+                loot.get("loot_table")
+                    .ok_or("container loot table missing")?
+                    .clone(),
+            );
+            data.insert(
+                "LootTableSeed".into(),
+                loot.get("seed").cloned().unwrap_or_else(|| Value::from(0)),
+            );
         }
         // applyComponents keeps added patch entries, not effective item defaults.
         let retained = patch

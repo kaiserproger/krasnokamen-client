@@ -15,7 +15,7 @@ use crate::api::{LightmapTexture, SkyKind, SkyTexture, WorldEnvironment};
 use crate::protocol::{Reader, Result, content::Content, world::World};
 use attributes::{
     ALL, Attribute as A, AttributeMap, COUNT, Datum, Track, apply_map, color_lerp, defaults, lerp,
-    multiply, number, parse_map, rgb, rgba, scale_rgb,
+    multiply, parse_map, rgb, rgba, scale_rgb,
 };
 pub use fading::{DarknessBlend, DarknessSnapshot};
 pub use lightmap::LightmapInputs;
@@ -360,10 +360,10 @@ impl Environment {
                     .ok_or("dimension clock requires name")
             })
             .transpose()?;
-        if let Some(clock) = &default_clock {
-            if !self.clocks.contains_key(clock) {
-                return Err(format!("dimension references missing clock {clock}"));
-            }
+        if let Some(clock) = &default_clock
+            && !self.clocks.contains_key(clock)
+        {
+            return Err(format!("dimension references missing clock {clock}"));
         }
         for id in &timeline_ids {
             let clock = &self.timelines[*id].1.clock;
@@ -472,7 +472,10 @@ impl Environment {
         content: &Content,
         tick: u64,
     ) -> Result<bool> {
-        if !matches!(id, cb::GAME_EVENT | cb::SET_TIME | cb::TICKING_STATE | cb::TICKING_STEP) {
+        if !matches!(
+            id,
+            cb::GAME_EVENT | cb::SET_TIME | cb::TICKING_STATE | cb::TICKING_STEP
+        ) {
             return Ok(false);
         }
         if id == cb::GAME_EVENT && !matches!(r.bytes.get(r.offset), Some(1 | 2 | 7 | 8)) {
@@ -627,9 +630,16 @@ impl Environment {
         Ok(values)
     }
     /// Numeric item properties sample the owner's position, not the camera.
-    pub(crate) fn item_time_attributes(&self, world: &World, position: [f64; 3]) -> Result<(f32, f32)> {
+    pub(crate) fn item_time_attributes(
+        &self,
+        world: &World,
+        position: [f64; 3],
+    ) -> Result<(f32, f32)> {
         let values = self.camera_attributes(world, position)?;
-        Ok((values[A::SunAngle as usize].float(), values[A::MoonPhase as usize].float()))
+        Ok((
+            values[A::SunAngle as usize].float(),
+            values[A::MoonPhase as usize].float(),
+        ))
     }
     /// Rain-fog target at the camera block. A camera chunk (or its sky light)
     /// that has not arrived yet contributes no rain fog rather than failing the
@@ -898,14 +908,14 @@ fn weather_light_color(c: u32, alpha: u32) -> u32 {
     let mut out = c & 0xff000000;
     for shift in [0, 8, 16] {
         let value = if shift == 0 { 255 } else { 122 };
-        out |= (value * alpha + (c >> shift & 255) * (255 - alpha)) / 255 << shift;
+        out |= ((value * alpha + (c >> shift & 255) * (255 - alpha)) / 255) << shift;
     }
     out
 }
 fn night_vision(duration: Option<i32>, partial: f32) -> f32 {
     match duration {
         None => 0.,
-        Some(d) if d < 0 || d > 200 => 1.,
+        Some(d) if !(0..=200).contains(&d) => 1.,
         Some(d) => 0.7 + sin(((d as f32 - partial) * std::f32::consts::PI * 0.2) as f64) * 0.3,
     }
 }
@@ -1007,7 +1017,7 @@ fn apply_fog_darkness(
 ) {
     let mut darkness = 1. - ((y - min_y as f64) * if p.flat_world { 1. } else { 0.03125 }) as f32;
     if let Some(d) = p.blindness_duration {
-        darkness = if d < 0 || d > 19 {
+        darkness = if !(0..=19).contains(&d) {
             1.
         } else {
             darkness.max(d as f32 / 20.)
@@ -1171,7 +1181,11 @@ mod tests {
         let mut apply = |event: u8, value: f32| {
             let mut bytes = vec![event];
             bytes.extend_from_slice(&value.to_be_bytes());
-            assert!(environment.apply(cb::GAME_EVENT, &mut Reader::new(&bytes), &content, 0).unwrap());
+            assert!(
+                environment
+                    .apply(cb::GAME_EVENT, &mut Reader::new(&bytes), &content, 0)
+                    .unwrap()
+            );
             (environment.rain, environment.thunder)
         };
         // Pinned 26.3 ClientPacketListener initializes start at zero and stop
@@ -1289,7 +1303,10 @@ mod unloaded_biome_tests {
         let dark = e.vignette();
         assert!(dark > 0.8, "{dark}");
         e.tick_vignette(&world, [8.5, 40.6, 8.5]).unwrap();
-        assert!(e.vignette() < dark, "open sky above the stored sections must clear it");
+        assert!(
+            e.vignette() < dark,
+            "open sky above the stored sections must clear it"
+        );
         // An unloaded camera chunk keeps the last strength.
         let held = e.vignette();
         e.tick_vignette(&world, [100.5, 8.6, 100.5]).unwrap();

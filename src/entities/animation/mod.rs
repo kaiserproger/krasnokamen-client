@@ -35,11 +35,17 @@ const FLINCH: usize = 1;
 const SOURCES: [(&str, &str); 2] = [
     (
         "humanoid.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/krasnokamen/animations/humanoid.animation.json")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/krasnokamen/animations/humanoid.animation.json"
+        )),
     ),
     (
         "horse.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/krasnokamen/animations/horse.animation.json")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/krasnokamen/animations/horse.animation.json"
+        )),
     ),
 ];
 

@@ -1,7 +1,8 @@
 //! Source-specific living and player presentation.
 mod modern;
 mod motion;
-pub(crate) use modern::AxolotlAnimation;
-pub(crate) use motion::{BodyRule, MotionFacts, WalkRule};
+#[cfg(test)]
+pub(crate) use motion::BodyRule;
+pub(crate) use motion::MotionFacts;
 mod state;
 pub(crate) use state::{Modern, State, TickInput, folds_wings};

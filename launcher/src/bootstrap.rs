@@ -88,8 +88,9 @@ struct Bundle {
 }
 
 fn fetch_bundle(client: &Client, manifest_url: &str, pin: &Pin) -> Result<Bundle> {
-    let bytes = net::fetch_bytes(client, manifest_url, None)
-        .with_context(|| format!("cannot reach the Krasnokamen content manifest at {manifest_url}"))?;
+    let bytes = net::fetch_bytes(client, manifest_url, None).with_context(|| {
+        format!("cannot reach the Krasnokamen content manifest at {manifest_url}")
+    })?;
     parse_bundle(&bytes, pin)
 }
 

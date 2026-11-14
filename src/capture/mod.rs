@@ -131,7 +131,11 @@ fn presentation_metadata(scene: &crate::api::Scene, entity_extract_ms: f64) -> s
 pub(crate) fn settle_terrain(
     replay: &mut Player,
     renderer: &mut Renderer,
-    mut upload_frame: impl FnMut(&mut Renderer, &crate::api::Scene, &crate::api::Observation) -> Result<(), String>,
+    mut upload_frame: impl FnMut(
+        &mut Renderer,
+        &crate::api::Scene,
+        &crate::api::Observation,
+    ) -> Result<(), String>,
 ) -> Result<u32, String> {
     let mut uploads = 0;
     while !replay.session.settle_replay_geometry()? {
@@ -296,9 +300,13 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
             } else {
                 replay.advance_to(time)?;
             }
-            if replay.last_tick.is_none() { return Err("replay has no krasnokamen:tick marker at shot start; configure recorder account".into()); }
+            if replay.last_tick.is_none() {
+                return Err("replay has no krasnokamen:tick marker at shot start; configure recorder account".into());
+            }
             let partial = replay.partial();
-            replay.session.replay_camera(&path, time.as_secs_f64(), partial)?;
+            replay
+                .session
+                .replay_camera(&path, time.as_secs_f64(), partial)?;
             main_ms[0] += phase.elapsed().as_secs_f64() * 1e3;
             phase_cpu(&mut thread_ms, 0, cpu);
             let (phase, cpu) = (std::time::Instant::now(), thread_cpu_s());
@@ -306,9 +314,13 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
             main_ms[1] += phase.elapsed().as_secs_f64() * 1e3;
             phase_cpu(&mut thread_ms, 1, cpu);
             let (phase, cpu) = (std::time::Instant::now(), thread_cpu_s());
-            upload_frames += settle_terrain(&mut replay, &mut renderer, |renderer, scene, observation| {
-                renderer.replay_rgba(scene, observation, &readback, &mut pixels)
-            })?;
+            upload_frames += settle_terrain(
+                &mut replay,
+                &mut renderer,
+                |renderer, scene, observation| {
+                    renderer.replay_rgba(scene, observation, &readback, &mut pixels)
+                },
+            )?;
             if replay.session.phase() != "play" {
                 return Err(format!(
                     "render starts before Play at {:.3}s",
@@ -373,7 +385,7 @@ fn thread_cpu_s() -> Option<f64> {
     };
     // SAFETY: clock_gettime writes into this live, exclusive timespec.
     let status = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
-    (status == 0).then(|| time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
+    (status == 0).then_some(time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
 }
 #[cfg(not(unix))]
 fn thread_cpu_s() -> Option<f64> {

@@ -643,7 +643,8 @@ fn copper_statue_item_uses_complete_texture_resource_location() {
             "type": "minecraft:copper_golem_statue",
             "texture": format!("minecraft:textures/entity/copper_golem/{name}.png"),
         });
-        let model = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
+        let model =
+            crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
         assert!(model.quads.iter().all(|quad| quad.texture_layer == layer));
         assert!(!model.quads.is_empty());
     }
@@ -758,7 +759,8 @@ fn shield_item_renders_plain_and_patterned_components() {
             ]),
         ),
     ]));
-    let patterned = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
+    let patterned =
+        crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert!(patterned.quads.iter().any(|q| q.texture_layer == 11));
     let red = super::super::render_blocks::dye("red").0;
     let blue = super::super::render_blocks::dye("blue").0;

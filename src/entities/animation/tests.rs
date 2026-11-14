@@ -6,8 +6,8 @@ use super::{
 };
 use crate::{
     entities::{
-        animation_tests::fixture, clip_pose, metadata::Metadata, presentation, resources::Rig,
-        krasnokamen_models, Entity, Models,
+        Entity, Models, animation_tests::fixture, clip_pose, krasnokamen_models,
+        metadata::Metadata, presentation, resources::Rig,
     },
     inventory::Stack,
     protocol::content::Content,
@@ -469,7 +469,7 @@ fn sword_swings_cycle_the_three_hit_combo() {
 #[test]
 fn selection_follows_item_class_type_and_mount() {
     let (models, mut e, mut content) = armed_fixture("minecraft:iron_spear");
-    let mut play = |e: &mut Entity, content: &Content, hand, kind| {
+    let play = |e: &mut Entity, content: &Content, hand, kind| {
         receive_swing(e, Some(&models), content, hand, kind, 23, 0);
         e.clip.layers[ACTION].clip
     };

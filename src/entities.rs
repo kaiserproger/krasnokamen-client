@@ -17,6 +17,7 @@ mod dragon;
 mod drowned_outer;
 mod equipment;
 pub(crate) mod frame_entities;
+mod krasnokamen_models;
 mod local;
 pub(crate) mod metadata;
 mod nameplates;
@@ -30,40 +31,36 @@ mod render_living;
 mod render_nameplates;
 mod render_special;
 mod resources;
+mod shadows;
+mod sheep;
 mod source_commands;
 mod source_state;
-mod sheep;
-mod shadows;
-mod krasnokamen_models;
-mod villagers;
 pub(crate) mod view_range;
+mod villagers;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
-    protocol::{content::Content, Reader, Result},
+    protocol::{Reader, Result, content::Content},
 };
-use glam::Mat4;
 pub(crate) use blocks::BlockEntitySnapshot;
+pub use crowd::{CrowdChunk, CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
+use glam::Mat4;
 pub use metadata::Metadata;
 pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
 pub use presentation::{PresentationStats, special_item};
-pub use crowd::{CrowdChunk, CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
 };
-pub(crate) use render_blocks::{
-    BlockPresentation, BlockRenderStatus, EntityPainter, MovingBlockPainter, StaticBlockSceneFrame,
-};
+pub(crate) use render_blocks::StaticBlockSceneFrame;
 pub use resources::Models;
 pub(crate) use resources::Seat;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    path::Path,
     rc::Rc,
     sync::Arc,
 };
@@ -492,10 +489,10 @@ impl Store {
         self.bounds(handle, tick, 0.)
     }
     pub fn resolve(&self, handle: Handle) -> Result<&Entity> {
-        if let Some((parent, _)) = self.dragon_parts.get(&handle.network_id) {
-            if parent.generation == handle.generation {
-                return self.resolve(*parent);
-            }
+        if let Some((parent, _)) = self.dragon_parts.get(&handle.network_id)
+            && parent.generation == handle.generation
+        {
+            return self.resolve(*parent);
         }
         self.get(handle.network_id)
             .filter(|e| e.handle == handle)
@@ -588,7 +585,10 @@ impl Store {
             .ok_or_else(|| format!("source attribute {name} is not ranged"))
     }
     pub(crate) fn presented_transform(
-        &self, entity: &Entity, tick: u64, partial: f32,
+        &self,
+        entity: &Entity,
+        tick: u64,
+        partial: f32,
     ) -> Result<Transform> {
         self.attached_transform(entity, tick, partial, 0)
     }
@@ -608,7 +608,11 @@ impl Store {
         Ok((eye, transform.head_yaw, transform.pitch))
     }
     fn attached_transform(
-        &self, entity: &Entity, tick: u64, partial: f32, depth: usize,
+        &self,
+        entity: &Entity,
+        tick: u64,
+        partial: f32,
+        depth: usize,
     ) -> Result<Transform> {
         if depth > self.ids.len().min(1024) {
             return Err("entity passenger cycle".into());
@@ -618,19 +622,29 @@ impl Store {
         if self.local_entity_id == Some(entity.handle.network_id) {
             return Ok(transform);
         }
-        let Some(vehicle) = entity.vehicle else { return Ok(transform) };
+        let Some(vehicle) = entity.vehicle else {
+            return Ok(transform);
+        };
         let parent = self.resolve(vehicle)?;
         let parent_transform = self.attached_transform(parent, tick, partial, depth + 1)?;
         let models = self.models_ref().ok_or("entity models not activated")?;
         let (dimensions, scale) = models.dimensions(entity)?;
-        let attachment = dimensions.attachments.get("VEHICLE")
+        let attachment = dimensions
+            .attachments
+            .get("VEHICLE")
             .and_then(|points| points.first())
             .ok_or("source rider vehicle attachment missing")?
             .map(|value| value * f64::from(scale));
         transform.position = crate::player::vehicle::passenger_position(
-            self, parent, entity.handle.network_id, parent_transform.position,
-            parent_transform.yaw, attachment, transform.yaw,
-            parent.physical.seat_motion.as_ref(), parent.physical.seat_game_time,
+            self,
+            parent,
+            entity.handle.network_id,
+            parent_transform.position,
+            parent_transform.yaw,
+            attachment,
+            transform.yaw,
+            parent.physical.seat_motion.as_ref(),
+            parent.physical.seat_game_time,
         )?;
         Ok(transform)
     }
@@ -649,7 +663,8 @@ impl Store {
         }
         let entity = self.resolve(handle)?;
         physical::bounds_at(
-            self.models_ref().ok_or("entity models not activated")?, entity,
+            self.models_ref().ok_or("entity models not activated")?,
+            entity,
             self.presented_transform(entity, tick, partial)?.position,
         )
     }
@@ -717,25 +732,24 @@ impl Store {
                     self.spatial.remove(&cell);
                 }
             }
-            if let Some(vehicle) = e.vehicle {
-                if let Some(other) = self.get_mut(vehicle.network_id) {
-                    if other.handle == vehicle {
-                        other.passengers.retain(|p| *p != e.handle);
-                        other.passenger_ids.retain(|p| *p != id);
-                    }
-                }
+            if let Some(vehicle) = e.vehicle
+                && let Some(other) = self.get_mut(vehicle.network_id)
+                && other.handle == vehicle
+            {
+                other.passengers.retain(|p| *p != e.handle);
+                other.passenger_ids.retain(|p| *p != id);
             }
             for passenger in e.passengers {
-                if let Some(other) = self.get_mut(passenger.network_id) {
-                    if other.handle == passenger {
-                        other.vehicle = None;
-                    }
+                if let Some(other) = self.get_mut(passenger.network_id)
+                    && other.handle == passenger
+                {
+                    other.vehicle = None;
                 }
             }
-            if let Some(holder) = e.leash {
-                if let Some(links) = self.leash_holders.get_mut(&holder) {
-                    links.remove(&id);
-                }
+            if let Some(holder) = e.leash
+                && let Some(links) = self.leash_holders.get_mut(&holder)
+            {
+                links.remove(&id);
             }
             if let Some(links) = self.leash_holders.remove(&e.handle) {
                 for id in links {
@@ -766,7 +780,11 @@ impl Store {
         let old = self.get(id).map(|e| cell(e.position));
         let new = cell(target.position);
         let revision = self.revision;
-        let phase = if self.frame_tick == tick { self.frame_partial } else { 0. };
+        let phase = if self.frame_tick == tick {
+            self.frame_partial
+        } else {
+            0.
+        };
         let old_span = self.get(id).map_or(0, |e| e.physical.lerp_span);
         self.remove_motion_span(old_span);
         if let Some(e) = self.get_mut(id) {
@@ -788,16 +806,16 @@ impl Store {
                 *self.motion_spans.entry(span).or_default() += 1;
             }
         }
-        if let Some(old) = old {
-            if old != new {
-                if let Some(bucket) = self.spatial.get_mut(&old) {
-                    bucket.remove(&id);
-                    if bucket.is_empty() {
-                        self.spatial.remove(&old);
-                    }
+        if let Some(old) = old
+            && old != new
+        {
+            if let Some(bucket) = self.spatial.get_mut(&old) {
+                bucket.remove(&id);
+                if bucket.is_empty() {
+                    self.spatial.remove(&old);
                 }
-                self.spatial.entry(new).or_default().insert(id);
             }
+            self.spatial.entry(new).or_default().insert(id);
         }
     }
     pub fn observation(&self, after: Option<i32>, limit: usize) -> Value {
@@ -980,12 +998,11 @@ impl Store {
                     .entry(uuid.clone())
                     .or_default()
                     .insert(entity_id);
-                if let Some(vehicle) = self.passenger_vehicles.get(&entity_id).copied() {
-                    if let Some(parent) = self.get_mut(vehicle.network_id) {
-                        if parent.handle == vehicle {
-                            parent.passengers.push(handle);
-                        }
-                    }
+                if let Some(vehicle) = self.passenger_vehicles.get(&entity_id).copied()
+                    && let Some(parent) = self.get_mut(vehicle.network_id)
+                    && parent.handle == vehicle
+                {
+                    parent.passengers.push(handle);
                 }
                 self.event(json!({"type":"entity_spawned","handle":handle,"uuid":uuid,"entity_type":name,"origin":"server_observed"}));
             }
@@ -1189,19 +1206,19 @@ impl Store {
                 if self.own_id == Some(target) && self.get(target).is_none() {
                     self.own_metadata.extend(data.clone());
                 }
-                if let Some(e) = self.get(target) {
-                    if let Some(schema) = models.schemas.get(&e.type_name) {
-                        for (index, value) in &data {
-                            let expected = schema
-                                .accessors
-                                .values()
-                                .find(|v| v[0] == u32::from(*index));
-                            if expected.map(|v| v[1]) != Some(value.serializer_id()) {
-                                return Err(format!(
-                                    "undefined/mismatched entity accessor {} index {index}",
-                                    e.type_name
-                                ));
-                            }
+                if let Some(e) = self.get(target)
+                    && let Some(schema) = models.schemas.get(&e.type_name)
+                {
+                    for (index, value) in &data {
+                        let expected = schema
+                            .accessors
+                            .values()
+                            .find(|v| v[0] == u32::from(*index));
+                        if expected.map(|v| v[1]) != Some(value.serializer_id()) {
+                            return Err(format!(
+                                "undefined/mismatched entity accessor {} index {index}",
+                                e.type_name
+                            ));
                         }
                     }
                 }
@@ -1242,10 +1259,10 @@ impl Store {
                 self.revision += 1;
                 let revision = self.revision;
                 self.clear_leash_prediction(target);
-                if let Some(old) = self.get(target).and_then(|e| e.leash) {
-                    if let Some(ids) = self.leash_holders.get_mut(&old) {
-                        ids.remove(&target);
-                    }
+                if let Some(old) = self.get(target).and_then(|e| e.leash)
+                    && let Some(ids) = self.leash_holders.get_mut(&old)
+                {
+                    ids.remove(&target);
                 }
                 if let Some(handle) = handle {
                     self.leash_holders.entry(handle).or_default().insert(target);
@@ -1354,15 +1371,13 @@ impl Store {
                     e.revision = revision;
                 }
                 for id in ids {
-                    if let Some(handle) = handle {
-                        if let Some(previous) = self.passenger_vehicles.insert(id, handle) {
-                            if previous != handle {
-                                if let Some(old) = self.get_mut(previous.network_id) {
-                                    old.passengers.retain(|p| p.network_id != id);
-                                    old.passenger_ids.retain(|p| *p != id);
-                                }
-                            }
-                        }
+                    if let Some(handle) = handle
+                        && let Some(previous) = self.passenger_vehicles.insert(id, handle)
+                        && previous != handle
+                        && let Some(old) = self.get_mut(previous.network_id)
+                    {
+                        old.passengers.retain(|p| p.network_id != id);
+                        old.passenger_ids.retain(|p| *p != id);
                     }
                     if let Some(e) = self.get_mut(id) {
                         e.vehicle = handle;
@@ -1634,7 +1649,7 @@ impl Store {
         raw_nbt: Arc<[u8]>,
         state: Option<u32>,
         content: &Content,
-        tick: u64,
+        _tick: u64,
     ) -> Result<()> {
         let name = content
             .block_entity_names
@@ -1729,7 +1744,8 @@ impl Store {
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.predicted_block_data
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
-        self.preview_cache.retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
+        self.preview_cache
+            .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.block_active
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.special_render_cache.unload_chunk(chunk);
@@ -1744,7 +1760,9 @@ impl Store {
         let _sized = resources::SizedScope::enter();
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
-        if self.render_local_avatar && let Some(avatar) = self.local_avatar.take() {
+        if self.render_local_avatar
+            && let Some(avatar) = self.local_avatar.take()
+        {
             self.local_render_slot = Some(self.slots.len());
             self.slots.push(avatar);
         }

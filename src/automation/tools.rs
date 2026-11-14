@@ -1,14 +1,15 @@
 use super::{
     catalog,
-    control::{nonce, Core},
+    control::{Core, nonce},
 };
 use crate::api::{Command, Request};
 use serde_json::Value;
 use std::{
     path::{Component, Path},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     time::Duration,
 };
@@ -27,19 +28,18 @@ impl Drop for RespawnFence<'_> {
             .observation
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if let Some(lease) = self.core.control.lock().lease.as_mut() {
-            if lease
+        if let Some(lease) = self.core.control.lock().lease.as_mut()
+            && lease
                 .pending_respawn
                 .as_ref()
                 .is_some_and(|pending| Arc::ptr_eq(pending, self.cancelled))
-            {
-                // Complete the authorized handoff even if the owner reply won
-                // the race with the watchdog's context-change notification.
-                lease.observe_respawn(&observed.connection_epoch, &observed.dimension_epoch);
-                if !self.retain_after_success {
-                    lease.pending_respawn = None;
-                    lease.pending_ui_respawn = false;
-                }
+        {
+            // Complete the authorized handoff even if the owner reply won
+            // the race with the watchdog's context-change notification.
+            lease.observe_respawn(&observed.connection_epoch, &observed.dimension_epoch);
+            if !self.retain_after_success {
+                lease.pending_respawn = None;
+                lease.pending_ui_respawn = false;
             }
         }
     }
@@ -243,23 +243,21 @@ pub(super) fn execute(
             return Err("owner_result_unknown".into());
         }
     };
-    if ui_respawn && result.is_ok()
+    if ui_respawn
+        && result.is_ok()
         && let Some(fence) = &mut respawn_fence
     {
         fence.retain_after_success = true;
     }
-    if let Ok(value) = &result {
-        if value["gpu_completion"] == true {
-            if let (Some(uri), Some(path)) =
-                (value["artifact_uri"].as_str(), value["path"].as_str())
-            {
-                let mut control = core.control.lock();
-                if control.artifacts.len() >= 512 {
-                    control.artifacts.pop_first();
-                }
-                control.artifacts.insert(uri.into(), path.into());
-            }
+    if let Ok(value) = &result
+        && value["gpu_completion"] == true
+        && let (Some(uri), Some(path)) = (value["artifact_uri"].as_str(), value["path"].as_str())
+    {
+        let mut control = core.control.lock();
+        if control.artifacts.len() >= 512 {
+            control.artifacts.pop_first();
         }
+        control.artifacts.insert(uri.into(), path.into());
     }
     // Fail-closed but retry-friendly: only genuine session/owner loss may drop the
     // lease (the owner fence is already dead, so the dead `automation_fence` handle

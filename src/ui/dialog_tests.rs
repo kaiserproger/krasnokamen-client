@@ -104,14 +104,20 @@ fn sample(extra: Vec<(&str, Nbt)>) -> Nbt {
             list(vec![
                 button(
                     "Found",
-                    Some(custom("krasnokamen:settlement/found", vec![("v", Nbt::Int(2))])),
+                    Some(custom(
+                        "krasnokamen:settlement/found",
+                        vec![("v", Nbt::Int(2))],
+                    )),
                 ),
                 button("Plain", None),
             ]),
         ),
         (
             "exit_action",
-            button("Close", Some(custom("krasnokamen:settlement/cancel", vec![]))),
+            button(
+                "Close",
+                Some(custom("krasnokamen:settlement/cancel", vec![])),
+            ),
         ),
     ];
     for (key, value) in extra {
@@ -379,7 +385,10 @@ fn notice_and_confirmation_use_footer_buttons_and_escape_picks_the_cancel_side()
         ("type", s("minecraft:confirmation")),
         ("title", s("Sure?")),
         ("pause", Nbt::Byte(0)),
-        ("yes", button("Yes", Some(custom("krasnokamen:x/yes", vec![])))),
+        (
+            "yes",
+            button("Yes", Some(custom("krasnokamen:x/yes", vec![]))),
+        ),
         ("no", button("No", Some(custom("krasnokamen:x/no", vec![])))),
     ]);
     show(&mut ui, &confirm).unwrap();
@@ -769,11 +778,23 @@ fn spyglass_scope_overlay_enters_and_leaves_with_hud_state() {
     let (content, inventory, mut ui) = state();
     ui.hud.scoping = true;
     ui.rebuild_for_test(&inventory, &content).unwrap();
-    assert!(ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope"));
-    assert!(ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope/left"));
+    assert!(
+        ui.observed_nodes()
+            .iter()
+            .any(|node| node["id"] == "hud/scope")
+    );
+    assert!(
+        ui.observed_nodes()
+            .iter()
+            .any(|node| node["id"] == "hud/scope/left")
+    );
     ui.hud.scoping = false;
     ui.rebuild_for_test(&inventory, &content).unwrap();
-    assert!(!ui.observed_nodes().iter().any(|node| node["id"] == "hud/scope"));
+    assert!(
+        !ui.observed_nodes()
+            .iter()
+            .any(|node| node["id"] == "hud/scope")
+    );
 }
 
 /// A notice whose `plain_message` is laid out like the settlement map: a clickable run with a
@@ -849,16 +870,28 @@ fn body_custom_click_payload_keeps_its_nbt_types_in_a_slot() {
 #[test]
 fn body_click_runs_like_a_static_button_then_the_dialog_after_action() {
     let (_content, _inventory, mut ui) = state();
-    show(&mut ui, &map_notice("close", custom_click("krasnokamen:settlement/buildings"))).unwrap();
+    show(
+        &mut ui,
+        &map_notice("close", custom_click("krasnokamen:settlement/buildings")),
+    )
+    .unwrap();
     let mut effects = UiEffects::default();
     ui.dialog_component_click(&body_click_event(&ui), &mut effects)
         .unwrap();
     let (id, payload) = sent(&effects);
     assert_eq!(id, "krasnokamen:settlement/buildings");
-    assert_eq!(payload, &map_payload(), "typed payload, not its JSON shadow");
+    assert_eq!(
+        payload,
+        &map_payload(),
+        "typed payload, not its JSON shadow"
+    );
     assert_eq!(ui.screen(), Screen::Game, "after_action close");
 
-    show(&mut ui, &map_notice("wait_for_response", custom_click("krasnokamen:x"))).unwrap();
+    show(
+        &mut ui,
+        &map_notice("wait_for_response", custom_click("krasnokamen:x")),
+    )
+    .unwrap();
     let event = body_click_event(&ui);
     ui.dialog_component_click(&event, &mut UiEffects::default())
         .unwrap();
@@ -883,7 +916,10 @@ fn body_click_runs_like_a_static_button_then_the_dialog_after_action() {
     ));
     assert_eq!(ui.screen(), Screen::ServerDialog, "after_action none");
 
-    let url = compound(vec![("action", s("open_url")), ("url", s("https://example.org"))]);
+    let url = compound(vec![
+        ("action", s("open_url")),
+        ("url", s("https://example.org")),
+    ]);
     show(&mut ui, &map_notice("none", url)).unwrap();
     let mut effects = UiEffects::default();
     ui.dialog_component_click(&body_click_event(&ui), &mut effects)
@@ -934,7 +970,11 @@ fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
     use crate::ui::PointerPhase::{Down, Move, Up};
     let (content, mut inventory, mut ui) = rendered();
     // after_action none keeps the dialog for the click; closing is covered state-only above.
-    show(&mut ui, &map_notice("none", custom_click("krasnokamen:settlement/buildings"))).unwrap();
+    show(
+        &mut ui,
+        &map_notice("none", custom_click("krasnokamen:settlement/buildings")),
+    )
+    .unwrap();
     rebuild(&mut ui, &content, &inventory);
     let bounds = |ui: &UiState, id: &str| {
         ui.nodes
@@ -953,21 +993,51 @@ fn body_text_lines_center_show_tooltips_and_click_through_the_pointer_path() {
     assert_eq!(link, [body[0] + middle - 6., body[1], 12., 9.]);
     assert_eq!(ui.tooltip_text(), None);
 
-    pointer(&mut ui, &content, &mut inventory, Move, [link[0] + 1., link[1] + 4.]);
+    pointer(
+        &mut ui,
+        &content,
+        &mut inventory,
+        Move,
+        [link[0] + 1., link[1] + 4.],
+    );
     assert_eq!(ui.tooltip_text(), Some("Storage #7 L1"));
     // "CDEF" (24 wide) on the second line.
     let second = [body[0] + middle - 12. + 1., body[1] + 9. + 4.];
     pointer(&mut ui, &content, &mut inventory, Move, second);
     assert_eq!(ui.tooltip_text(), Some("Territory, radius 16"));
-    pointer(&mut ui, &content, &mut inventory, Move, [body[0] + 1., body[1] + 4.]);
+    pointer(
+        &mut ui,
+        &content,
+        &mut inventory,
+        Move,
+        [body[0] + 1., body[1] + 4.],
+    );
     assert_eq!(ui.tooltip_text(), None, "no glyph under the pointer");
 
-    pointer(&mut ui, &content, &mut inventory, Move, [link[0] + 1., link[1] + 4.]);
-    let effects = pointer(&mut ui, &content, &mut inventory, Down, [link[0] + 1., link[1] + 4.]);
+    pointer(
+        &mut ui,
+        &content,
+        &mut inventory,
+        Move,
+        [link[0] + 1., link[1] + 4.],
+    );
+    let effects = pointer(
+        &mut ui,
+        &content,
+        &mut inventory,
+        Down,
+        [link[0] + 1., link[1] + 4.],
+    );
     let (id, payload) = sent(&effects);
     assert_eq!(id, "krasnokamen:settlement/buildings");
     assert_eq!(payload, &map_payload());
-    pointer(&mut ui, &content, &mut inventory, Up, [link[0] + 1., link[1] + 4.]);
+    pointer(
+        &mut ui,
+        &content,
+        &mut inventory,
+        Up,
+        [link[0] + 1., link[1] + 4.],
+    );
     assert_eq!(ui.screen(), Screen::ServerDialog);
 }
 
@@ -983,8 +1053,15 @@ fn client_pointer_gates_on_the_exact_screen_and_emits_cursor_edges() {
             .is_err()
     );
     assert!(
-        ui.exact_pointer(&inventory, &content, class, "Map - test", [1280., 20.], false)
-            .is_err(),
+        ui.exact_pointer(
+            &inventory,
+            &content,
+            class,
+            "Map - test",
+            [1280., 20.],
+            false
+        )
+        .is_err(),
         "outside the 1280-pixel window"
     );
     let intents = ui

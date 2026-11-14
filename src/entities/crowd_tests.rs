@@ -3,8 +3,10 @@ use super::*;
 use crate::{
     api::{DynamicGeometry, Vertex},
     entities::{
-        animation_tests, clip_pose::{BakedClip, ChannelSample, ClipLayer, Playback}, presentation::PresentationStats,
-        render_living, resources, EntityRenderFrame, Store,
+        EntityRenderFrame, Store, animation_tests,
+        clip_pose::{BakedClip, ChannelSample, ClipLayer, Playback},
+        presentation::PresentationStats,
+        render_living, resources,
     },
 };
 use serde_json::json;
@@ -50,7 +52,12 @@ fn stack(id: u32, components: serde_json::Value) -> Stack {
     stack.id = id;
     stack.count = 1;
     stack.components = std::sync::Arc::new(
-        components.as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        components
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     );
     stack
 }
@@ -60,20 +67,27 @@ fn stack(id: u32, components: serde_json::Value) -> Stack {
 fn fixture() -> (Store, Content) {
     let (mut models, mut entity) = animation_tests::fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();
-    schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
-    schema.accessors.insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
+    schema
+        .accessors
+        .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    schema
+        .accessors
+        .insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
     let motion = models.motion.remove("minecraft:pig").unwrap();
     entity.type_name = ZOMBIE.into();
     models.schemas.insert(ZOMBIE.into(), schema);
     models.motion.insert(ZOMBIE.into(), motion);
-    models.families.insert(ZOMBIE.into(), resources::Family {
-        rig: "minecraft:zombie#main".into(),
-        baby_rig: None,
-        texture: Some("minecraft:entity/zombie/zombie".into()),
-        textures: vec![],
-        renderer_class: None,
-        materials: BTreeMap::new(),
-    });
+    models.families.insert(
+        ZOMBIE.into(),
+        resources::Family {
+            rig: "minecraft:zombie#main".into(),
+            baby_rig: None,
+            texture: Some("minecraft:entity/zombie/zombie".into()),
+            textures: vec![],
+            renderer_class: None,
+            materials: BTreeMap::new(),
+        },
+    );
     let parts: BTreeMap<String, String> = ["head", "chest", "legs", "feet"]
         .into_iter()
         .map(|part| (part.to_string(), format!("minecraft:armor_{part}#main")))
@@ -81,7 +95,13 @@ fn fixture() -> (Store, Content) {
     for key in parts.values() {
         assert!(models.has_authored_rig(key), "{key} is an authored rig");
     }
-    models.armor_models.insert(ZOMBIE.into(), resources::ArmorModels { adult: parts.clone(), baby: parts });
+    models.armor_models.insert(
+        ZOMBIE.into(),
+        resources::ArmorModels {
+            adult: parts.clone(),
+            baby: parts,
+        },
+    );
     entity.source = Some(super::super::source_state::SourceState::new(&entity, &models).unwrap());
     for step in 1..=6 {
         walk(&models, &mut entity, f64::from(step) * 0.15);
@@ -90,16 +110,29 @@ fn fixture() -> (Store, Content) {
     entity.transform.pitch = -10.;
     entity.animation = Some((0, TICK - 2));
     entity.damage_tick = Some(TICK - 3);
-    for (slot, id, part) in [(5, 1, "head"), (4, 2, "chest"), (3, 3, "legs"), (2, 4, "feet")] {
-        entity.equipment[slot] = Some(stack(id, json!({
-            "minecraft:equippable": {"slot": part, "asset_id": "test:cloth"},
-            "minecraft:dyed_color": 0x30_60_90,
-        })));
+    for (slot, id, part) in [
+        (5, 1, "head"),
+        (4, 2, "chest"),
+        (3, 3, "legs"),
+        (2, 4, "feet"),
+    ] {
+        entity.equipment[slot] = Some(stack(
+            id,
+            json!({
+                "minecraft:equippable": {"slot": part, "asset_id": "test:cloth"},
+                "minecraft:dyed_color": 0x30_60_90,
+            }),
+        ));
     }
     entity.equipment[0] = Some(stack(5, json!({})));
     entity.equipment[1] = Some(stack(6, json!({})));
     let mut content = Content::test_cube();
-    let region = |layer| crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer, width: 64, height: 64 };
+    let region = |layer| crate::protocol::content::TextureRegion {
+        uv: [0., 0., 1., 1.],
+        layer,
+        width: 64,
+        height: 64,
+    };
     content.insert_test_texture("minecraft:entity/zombie/zombie", region(0));
     content.insert_test_resource(
         "assets/test/equipment/cloth.json",
@@ -119,12 +152,16 @@ fn fixture() -> (Store, Content) {
             "thirdperson_lefthand":{"rotation":[0,90,0],"translation":[10,6,12]}}}"#,
     );
     let mut store = Store::new();
-    store.items.insert_test_model("test:held", content.models[0].clone());
+    store
+        .items
+        .insert_test_model("test:held", content.models[0].clone());
     store.items.insert_test_graph("test:shield", json!({
         "type": "minecraft:special", "base": "test:item/shield", "model": {"type": "minecraft:shield"},
     }));
     let models = std::sync::Arc::new(models);
-    store.items.set_entity_models(std::sync::Arc::clone(&models));
+    store
+        .items
+        .set_entity_models(std::sync::Arc::clone(&models));
     store.models = Some(models);
     store.ids.insert(41, 0);
     store.spatial.entry([0, 0]).or_default().insert(41);
@@ -132,25 +169,32 @@ fn fixture() -> (Store, Content) {
     (store, content)
 }
 
-fn render(store: &mut Store, content: &Content, crowd: bool) -> (DynamicGeometry, PresentationStats) {
+fn render(
+    store: &mut Store,
+    content: &Content,
+    crowd: bool,
+) -> (DynamicGeometry, PresentationStats) {
     store.set_crowd_instancing(crowd);
     let mut out = DynamicGeometry::default();
     let stats = store
-        .append_geometry(EntityRenderFrame {
-            maps: crate::ui::MapRenderFixture::empty().view(),
-            tint_source: &|_, _| Ok([1.; 3]),
-            content,
-            origin: [0.; 3],
-            camera: [0., 1., -4.],
-            camera_rotation: [0.; 2],
-            radius: 32.,
-            tick: TICK,
-            partial: PARTIAL,
-            game_time: 0,
-            clock_environment: None,
-            light: &|_| Ok(Some([12., 3.])),
-            bed_direction: &|_| None,
-        }, &mut out)
+        .append_geometry(
+            EntityRenderFrame {
+                maps: crate::ui::MapRenderFixture::empty().view(),
+                tint_source: &|_, _| Ok([1.; 3]),
+                content,
+                origin: [0.; 3],
+                camera: [0., 1., -4.],
+                camera_rotation: [0.; 2],
+                radius: 32.,
+                tick: TICK,
+                partial: PARTIAL,
+                game_time: 0,
+                clock_environment: None,
+                light: &|_| Ok(Some([12., 3.])),
+                bed_direction: &|_| None,
+            },
+            &mut out,
+        )
         .unwrap();
     assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
     (out, stats)
@@ -190,7 +234,11 @@ pub(crate) fn parity_grid(side: usize, spacing: f32) -> (DynamicGeometry, CrowdS
     for index in 0..side * side {
         let column = (index % side) as f32 - (side - 1) as f32 / 2.;
         let (x, z) = (column * spacing, (index / side) as f32 * spacing);
-        let (mut instance, geometry) = if index % 2 == 0 { (armoured, &armoured_cpu) } else { (bare, &bare_cpu) };
+        let (mut instance, geometry) = if index % 2 == 0 {
+            (armoured, &armoured_cpu)
+        } else {
+            (bare, &bare_cpu)
+        };
         instance.root[0][3] += x;
         instance.root[2][3] += z;
         instance.words[1] = scene.bones;
@@ -198,10 +246,11 @@ pub(crate) fn parity_grid(side: usize, spacing: f32) -> (DynamicGeometry, CrowdS
         scene.counts[instance.words[0] as usize] += 1;
         scene.instances.push(instance);
         let base = cpu.vertices.len() as u32;
-        cpu.vertices.extend(geometry.vertices.iter().map(|v| Vertex {
-            position: [v.position[0] + x, v.position[1], v.position[2] + z],
-            ..*v
-        }));
+        cpu.vertices
+            .extend(geometry.vertices.iter().map(|v| Vertex {
+                position: [v.position[0] + x, v.position[1], v.position[2] + z],
+                ..*v
+            }));
         for (material, indices) in geometry.indices.iter().enumerate() {
             cpu.indices[material].extend(indices.iter().map(|index| index + base));
         }
@@ -210,7 +259,11 @@ pub(crate) fn parity_grid(side: usize, spacing: f32) -> (DynamicGeometry, CrowdS
 }
 
 /// CPU mirror of `crowd_vertex`: every LOD-0 quad of the instance per crowd material.
-fn crowd_quads(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibrary) -> [Vec<[Vertex; 4]>; MATERIALS.len()] {
+fn crowd_quads(
+    meshes: &CrowdMeshes,
+    instance: &CrowdInstance,
+    clips: &ClipLibrary,
+) -> [Vec<[Vertex; 4]>; MATERIALS.len()] {
     let bones = evaluate(meshes, instance, clips);
     let group = &meshes.groups[instance.words[0] as usize];
     let chunk = &meshes.chunks[instance.words[0] as usize];
@@ -223,7 +276,11 @@ fn crowd_quads(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibra
                 [quad[0], quad[1], quad[2], quad[4]].map(|index| {
                     let v = chunk.vertices[index as usize];
                     let m = bones[(v.bone_flags & 0xffff) as usize];
-                    let (c0, c1, c2) = (m.x_axis.truncate(), m.y_axis.truncate(), m.z_axis.truncate());
+                    let (c0, c1, c2) = (
+                        m.x_axis.truncate(),
+                        m.y_axis.truncate(),
+                        m.z_axis.truncate(),
+                    );
                     let cofactor = glam::Mat3::from_cols(c1.cross(c2), c2.cross(c0), c0.cross(c1));
                     let mut normal = cofactor * Vec3::from_array(v.normal);
                     if v.bone_flags & VERTEX_ITEM_NORMAL == 0 {
@@ -255,7 +312,9 @@ fn crowd_quads(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibra
 fn cpu_quads(geometry: &DynamicGeometry, material: EntityMaterial) -> Vec<[Vertex; 4]> {
     geometry.indices[material as usize]
         .chunks(6)
-        .map(|quad| [quad[0], quad[1], quad[2], quad[4]].map(|index| geometry.vertices[index as usize]))
+        .map(|quad| {
+            [quad[0], quad[1], quad[2], quad[4]].map(|index| geometry.vertices[index as usize])
+        })
         .collect()
 }
 
@@ -263,22 +322,44 @@ fn cpu_quads(geometry: &DynamicGeometry, material: EntityMaterial) -> Vec<[Verte
 fn assert_same_quads(label: &str, mut cpu: Vec<[Vertex; 4]>, mut crowd: Vec<[Vertex; 4]>) {
     assert_eq!(cpu.len(), crowd.len(), "{label}: quad count");
     let key = |quad: &[Vertex; 4]| {
-        let centroid = quad.iter().fold(Vec3::ZERO, |sum, v| sum + Vec3::from_array(v.position)) / 4.;
-        let uv = quad.iter().fold([0.; 2], |sum, v| [sum[0] + v.uv[0], sum[1] + v.uv[1]]);
-        [centroid.x, centroid.y, centroid.z, uv[0], uv[1]].map(|value| (value * 1000.).round() as i64)
+        let centroid = quad
+            .iter()
+            .fold(Vec3::ZERO, |sum, v| sum + Vec3::from_array(v.position))
+            / 4.;
+        let uv = quad
+            .iter()
+            .fold([0.; 2], |sum, v| [sum[0] + v.uv[0], sum[1] + v.uv[1]]);
+        [centroid.x, centroid.y, centroid.z, uv[0], uv[1]]
+            .map(|value| (value * 1000.).round() as i64)
     };
     cpu.sort_by_key(key);
     crowd.sort_by_key(key);
     let close = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 2e-4);
     for (index, (a, b)) in cpu.iter().zip(&crowd).enumerate() {
         for (va, vb) in a.iter().zip(b) {
-            assert!(close(&va.position, &vb.position), "{label} quad {index} position {:?} != {:?}", va.position, vb.position);
-            assert!(close(&va.normal, &vb.normal), "{label} quad {index} normal {:?} != {:?}", va.normal, vb.normal);
+            assert!(
+                close(&va.position, &vb.position),
+                "{label} quad {index} position {:?} != {:?}",
+                va.position,
+                vb.position
+            );
+            assert!(
+                close(&va.normal, &vb.normal),
+                "{label} quad {index} normal {:?} != {:?}",
+                va.normal,
+                vb.normal
+            );
             assert!(close(&va.uv, &vb.uv), "{label} quad {index} uv");
-            assert!(close(&va.color, &vb.color) && (va.alpha - vb.alpha).abs() < 1e-6, "{label} quad {index} colour");
+            assert!(
+                close(&va.color, &vb.color) && (va.alpha - vb.alpha).abs() < 1e-6,
+                "{label} quad {index} colour"
+            );
             assert!(close(&va.light, &vb.light), "{label} quad {index} light");
             assert_eq!(va.overlay_uv, vb.overlay_uv, "{label} quad {index} overlay");
-            assert_eq!(va.texture_layer, vb.texture_layer, "{label} quad {index} layer");
+            assert_eq!(
+                va.texture_layer, vb.texture_layer,
+                "{label} quad {index} layer"
+            );
         }
     }
 }
@@ -289,11 +370,22 @@ fn crowd_instance_reproduces_cpu_entity_vertices() {
     let (cpu, cpu_stats) = render(&mut store, &content, false);
     assert_eq!((cpu_stats.submitted, cpu_stats.crowd), (1, 0));
     let (crowd, crowd_stats) = render(&mut store, &content, true);
-    assert_eq!((crowd_stats.submitted, crowd_stats.crowd), (0, 1), "the zombie moves to the crowd path");
-    assert!(crowd.vertices.is_empty(), "no CPU vertices for a crowd entity");
+    assert_eq!(
+        (crowd_stats.submitted, crowd_stats.crowd),
+        (0, 1),
+        "the zombie moves to the crowd path"
+    );
+    assert!(
+        crowd.vertices.is_empty(),
+        "no CPU vertices for a crowd entity"
+    );
     let registry = &store.crowd;
     assert_eq!(registry.instances().len(), 1);
-    let quads = crowd_quads(registry.meshes(), &registry.instances()[0], &clip_pose::library());
+    let quads = crowd_quads(
+        registry.meshes(),
+        &registry.instances()[0],
+        &clip_pose::library(),
+    );
     for (material, crowd) in MATERIALS.iter().zip(quads) {
         let cpu = cpu_quads(&cpu, *material);
         if *material != EntityMaterial::ArmorDecalCutoutNoCull {
@@ -302,7 +394,10 @@ fn crowd_instance_reproduces_cpu_entity_vertices() {
         assert_same_quads(&format!("{material:?}"), cpu, crowd);
     }
     // Everything the CPU path drew is accounted for by the crowd materials.
-    let drawn: usize = MATERIALS.iter().map(|m| cpu.indices[*m as usize].len()).sum();
+    let drawn: usize = MATERIALS
+        .iter()
+        .map(|m| cpu.indices[*m as usize].len())
+        .sum();
     assert_eq!(drawn, cpu.indices.iter().map(Vec::len).sum::<usize>());
 }
 
@@ -312,17 +407,32 @@ fn composites_are_shared_and_follow_appearance_changes() {
     render(&mut store, &content, true);
     let revision = store.crowd.meshes().revision;
     render(&mut store, &content, true);
-    assert_eq!(store.crowd.meshes().revision, revision, "an unchanged appearance reuses its composite");
+    assert_eq!(
+        store.crowd.meshes().revision,
+        revision,
+        "an unchanged appearance reuses its composite"
+    );
     assert_eq!(store.crowd.meshes().groups.len(), 1);
     let boots = store.slots[0].equipment[2].take().unwrap();
     store.slots[0].appearance_revision += 1;
     render(&mut store, &content, true);
-    assert_eq!(store.crowd.meshes().groups.len(), 2, "removed boots make a new composite");
+    assert_eq!(
+        store.crowd.meshes().groups.len(),
+        2,
+        "removed boots make a new composite"
+    );
     assert_eq!(store.crowd.instances()[0].words[0], 1);
     // Equal boots in a new allocation resolve to the first composite again.
-    store.slots[0].equipment[2] = Some(stack(boots.id, serde_json::Value::Object(
-        boots.components.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-    )));
+    store.slots[0].equipment[2] = Some(stack(
+        boots.id,
+        serde_json::Value::Object(
+            boots
+                .components
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        ),
+    ));
     store.slots[0].appearance_revision += 1;
     render(&mut store, &content, true);
     assert_eq!(store.crowd.meshes().groups.len(), 2);
@@ -333,7 +443,12 @@ fn composites_are_shared_and_follow_appearance_changes() {
 fn clip_layers_drive_bones_carry_and_grip_like_the_cpu_pose() {
     let (mut store, content) = fixture();
     render(&mut store, &content, true);
-    let sample = |rotation: [f32; 3], weight: f32, offset: [f32; 3]| ChannelSample { rotation, weight, offset, _pad: 0. };
+    let sample = |rotation: [f32; 3], weight: f32, offset: [f32; 3]| ChannelSample {
+        rotation,
+        weight,
+        offset,
+        _pad: 0.,
+    };
     let frame = |t: f32| {
         let mut frame = [ChannelSample::default(); clip_pose::CHANNELS];
         frame[Channel::Body as usize] = sample([0.3 * t, 0.1, 0.], 0.4, [0., 0.05 * t, 0.]);
@@ -352,12 +467,26 @@ fn clip_layers_drive_bones_carry_and_grip_like_the_cpu_pose() {
     .unwrap();
     let entity = &mut store.slots[0];
     entity.clip.layers = [
-        ClipLayer { clip: 1, start_tick: TICK - 1, rate: 1., weight: 0.8, mirror: false },
-        ClipLayer { clip: 1, start_tick: TICK - 2, rate: 0.5, weight: 0.5, mirror: true },
+        ClipLayer {
+            clip: 1,
+            start_tick: TICK - 1,
+            rate: 1.,
+            weight: 0.8,
+            mirror: false,
+        },
+        ClipLayer {
+            clip: 1,
+            start_tick: TICK - 2,
+            rate: 0.5,
+            weight: 0.5,
+            mirror: true,
+        },
     ];
     let entity = &store.slots[0];
     let models = store.models.clone().unwrap();
-    let Some(Ok(bound)) = entity.binding.as_ref() else { panic!("bound") };
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        panic!("bound")
+    };
     let frame = p::EntityDrawFrame {
         origin: [0.; 3],
         transform: entity.presented_transform(TICK, PARTIAL),
@@ -376,29 +505,61 @@ fn clip_layers_drive_bones_carry_and_grip_like_the_cpu_pose() {
     let mut transforms = Vec::new();
     let mut seen: Vec<usize> = Vec::new();
     for key in ["", "chest", "legs", "feet", "head"] {
-        let rig = if key.is_empty() { main } else { models.rig(models.armor_rig(ZOMBIE, false, key).unwrap()) };
+        let rig = if key.is_empty() {
+            main
+        } else {
+            models.rig(models.armor_rig(ZOMBIE, false, key).unwrap())
+        };
         if seen.contains(&(std::ptr::from_ref(rig) as usize)) {
             continue;
         }
         seen.push(std::ptr::from_ref(rig) as usize);
-        p::evaluate_posed_rig(rig, entity, &models, (TICK, PARTIAL), &pose, &library, root, &mut transforms);
+        p::evaluate_posed_rig(
+            rig,
+            entity,
+            &models,
+            (TICK, PARTIAL),
+            &pose,
+            &library,
+            root,
+            &mut transforms,
+        );
         expected.extend(transforms.iter().copied());
     }
     // The held item hangs from the main rig's right arm through the item grip, the shield
     // from the left arm through the left grip.
-    let arm = main.bones.iter().position(|bone| bone.role == BoneRole::RightArm).unwrap();
-    let left = main.bones.iter().position(|bone| bone.role == BoneRole::LeftArm).unwrap();
+    let arm = main
+        .bones
+        .iter()
+        .position(|bone| bone.role == BoneRole::RightArm)
+        .unwrap();
+    let left = main
+        .bones
+        .iter()
+        .position(|bone| bone.role == BoneRole::LeftArm)
+        .unwrap();
     let layers = entity.clip.active(TICK, PARTIAL);
-    let grip = library.grip(&layers, 0).expect("the right item channel is sampled");
+    let grip = library
+        .grip(&layers, 0)
+        .expect("the right item channel is sampled");
     expected.push(expected[arm] * grip);
-    let left_grip = library.grip(&layers, 1).expect("the left item channel is sampled");
+    let left_grip = library
+        .grip(&layers, 1)
+        .expect("the left item channel is sampled");
     expected.push(expected[left] * left_grip);
     assert_eq!(gpu.len(), expected.len());
     for (index, (a, b)) in gpu.iter().zip(&expected).enumerate() {
         assert!(a.abs_diff_eq(*b, 1e-4), "bone {index}: {a:?} != {b:?}");
     }
     // Without the clip the right arm keeps its vanilla pose.
-    let plain = evaluate(store.crowd.meshes(), &CrowdInstance { words: [instance.words[0], 0, instance.words[2], 0], ..instance }, &library);
+    let plain = evaluate(
+        store.crowd.meshes(),
+        &CrowdInstance {
+            words: [instance.words[0], 0, instance.words[2], 0],
+            ..instance
+        },
+        &library,
+    );
     assert!(!plain[arm].abs_diff_eq(gpu[arm], 1e-3));
 }
 
@@ -407,10 +568,15 @@ fn clip_layers_drive_bones_carry_and_grip_like_the_cpu_pose() {
 fn riding_passengers_pose_their_legs_like_the_cpu_pose() {
     let (mut store, content) = fixture();
     render(&mut store, &content, true);
-    store.slots[0].vehicle = Some(crate::entities::Handle { network_id: 7, generation: 1 });
+    store.slots[0].vehicle = Some(crate::entities::Handle {
+        network_id: 7,
+        generation: 1,
+    });
     let entity = &store.slots[0];
     let models = store.models.clone().unwrap();
-    let Some(Ok(bound)) = entity.binding.as_ref() else { panic!("bound") };
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        panic!("bound")
+    };
     let frame = p::EntityDrawFrame {
         origin: [0.; 3],
         transform: entity.presented_transform(TICK, PARTIAL),
@@ -428,23 +594,73 @@ fn riding_passengers_pose_their_legs_like_the_cpu_pose() {
     assert!(pose.riding);
     let main = models.rig(&bound.rig);
     let mut transforms = Vec::new();
-    p::evaluate_posed_rig(main, entity, &models, (TICK, PARTIAL), &pose, &library, root, &mut transforms);
-    let leg = main.bones.iter().position(|bone| bone.role == BoneRole::RightLeg).unwrap();
+    p::evaluate_posed_rig(
+        main,
+        entity,
+        &models,
+        (TICK, PARTIAL),
+        &pose,
+        &library,
+        root,
+        &mut transforms,
+    );
+    let leg = main
+        .bones
+        .iter()
+        .position(|bone| bone.role == BoneRole::RightLeg)
+        .unwrap();
     for (index, expected) in transforms.iter().enumerate() {
-        assert!(gpu[index].abs_diff_eq(*expected, 1e-4), "bone {index}: {:?} != {expected:?}", gpu[index]);
+        assert!(
+            gpu[index].abs_diff_eq(*expected, 1e-4),
+            "bone {index}: {:?} != {expected:?}",
+            gpu[index]
+        );
     }
-    let standing = evaluate(store.crowd.meshes(), &CrowdInstance { words: [instance.words[0], 0, instance.words[2] & !INSTANCE_RIDING, 0], ..instance }, &library);
-    assert!(!standing[leg].abs_diff_eq(gpu[leg], 1e-3), "the riding flag moves the legs");
+    let standing = evaluate(
+        store.crowd.meshes(),
+        &CrowdInstance {
+            words: [
+                instance.words[0],
+                0,
+                instance.words[2] & !INSTANCE_RIDING,
+                0,
+            ],
+            ..instance
+        },
+        &library,
+    );
+    assert!(
+        !standing[leg].abs_diff_eq(gpu[leg], 1e-3),
+        "the riding flag moves the legs"
+    );
     // 26.3 HumanoidModel (javap): seated legs also turn out (yaw +-PI/10, roll +-0.0785), so the
     // feet hang over the mount's flanks instead of running straight into its back.
     let mut local = Vec::new();
-    p::evaluate_posed_rig(main, entity, &models, (TICK, PARTIAL), &pose, &library, glam::Mat4::IDENTITY, &mut local);
+    p::evaluate_posed_rig(
+        main,
+        entity,
+        &models,
+        (TICK, PARTIAL),
+        &pose,
+        &library,
+        glam::Mat4::IDENTITY,
+        &mut local,
+    );
     let foot = |role: BoneRole| {
-        let index = main.bones.iter().position(|bone| bone.role == role).unwrap();
-        local[index].transform_point3(glam::Vec3::new(0., 0.75, 0.)) - local[index].transform_point3(glam::Vec3::ZERO)
+        let index = main
+            .bones
+            .iter()
+            .position(|bone| bone.role == role)
+            .unwrap();
+        local[index].transform_point3(glam::Vec3::new(0., 0.75, 0.))
+            - local[index].transform_point3(glam::Vec3::ZERO)
     };
-    assert!(foot(BoneRole::RightLeg).x < -0.15 && foot(BoneRole::LeftLeg).x > 0.15,
-        "right foot {} left foot {}", foot(BoneRole::RightLeg), foot(BoneRole::LeftLeg));
+    assert!(
+        foot(BoneRole::RightLeg).x < -0.15 && foot(BoneRole::LeftLeg).x > 0.15,
+        "right foot {} left foot {}",
+        foot(BoneRole::RightLeg),
+        foot(BoneRole::LeftLeg)
+    );
 }
 
 /// NATIVE-DEATH-TILT-PIVOT on the crowd path: a dying soldier's instance carries the vanilla
@@ -459,7 +675,9 @@ fn dying_crowd_instances_tilt_about_the_feet_like_the_cpu_pose() {
     let instance = store.crowd.instances()[0];
     let entity = &store.slots[0];
     let models = store.models.clone().unwrap();
-    let Some(Ok(bound)) = entity.binding.as_ref() else { panic!("bound") };
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        panic!("bound")
+    };
     let frame = p::EntityDrawFrame {
         origin: [0.; 3],
         transform: entity.presented_transform(TICK, PARTIAL),
@@ -470,75 +688,177 @@ fn dying_crowd_instances_tilt_about_the_feet_like_the_cpu_pose() {
     };
     let [r0, r1, r2] = instance.root;
     let instanced = Mat4::from_cols_array_2d(&[
-        [r0[0], r1[0], r2[0], 0.], [r0[1], r1[1], r2[1], 0.], [r0[2], r1[2], r2[2], 0.], [r0[3], r1[3], r2[3], 1.],
+        [r0[0], r1[0], r2[0], 0.],
+        [r0[1], r1[1], r2[1], 0.],
+        [r0[2], r1[2], r2[2], 0.],
+        [r0[3], r1[3], r2[3], 1.],
     ]);
     let root = p::root_matrix(entity, &models, bound, frame, &|_| None);
-    assert!(instanced.abs_diff_eq(root, 1e-5), "{instanced:?} != {root:?}");
+    assert!(
+        instanced.abs_diff_eq(root, 1e-5),
+        "{instanced:?} != {root:?}"
+    );
     let position = frame.transform.position.map(|v| v as f32);
     let feet = instanced.transform_point3(Vec3::new(0., 1.501, 0.));
-    assert!(feet.abs_diff_eq(Vec3::from(position), 1e-4), "the feet stay on the ground: {feet:?}");
+    assert!(
+        feet.abs_diff_eq(Vec3::from(position), 1e-4),
+        "the feet stay on the ground: {feet:?}"
+    );
     let up = instanced.transform_vector3(Vec3::NEG_Y);
-    assert!((up.y - 0.365_82).abs() < 1e-4, "68.54 degrees from upright: {up:?}");
+    assert!(
+        (up.y - 0.365_82).abs() < 1e-4,
+        "68.54 degrees from upright: {up:?}"
+    );
     let library = clip_pose::library();
     let gpu = evaluate(store.crowd.meshes(), &instance, &library);
     let pose = p::role_pose(entity, &models, &content, TICK, PARTIAL);
     let mut transforms = Vec::new();
-    p::evaluate_posed_rig(models.rig(&bound.rig), entity, &models, (TICK, PARTIAL), &pose, &library, root, &mut transforms);
+    p::evaluate_posed_rig(
+        models.rig(&bound.rig),
+        entity,
+        &models,
+        (TICK, PARTIAL),
+        &pose,
+        &library,
+        root,
+        &mut transforms,
+    );
     for (index, expected) in transforms.iter().enumerate() {
-        assert!(gpu[index].abs_diff_eq(*expected, 1e-4), "bone {index}: {:?} != {expected:?}", gpu[index]);
+        assert!(
+            gpu[index].abs_diff_eq(*expected, 1e-4),
+            "bone {index}: {:?} != {expected:?}",
+            gpu[index]
+        );
     }
 }
 
 #[test]
 fn detail_levels_drop_thin_item_quads_then_trims() {
     let template = Content::test_cube().models[0].quads[0].clone();
-    let quad = |positions: [[f32; 3]; 4]| crate::protocol::models::BakedQuad { positions, ..template.clone() };
+    let quad = |positions: [[f32; 3]; 4]| crate::protocol::models::BakedQuad {
+        positions,
+        ..template.clone()
+    };
     let mut model = BakedModel::default();
-    model.quads.push(quad([[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]]));
-    model.quads.push(quad([[0., 0., 0.1], [1., 0., 0.1], [1., 1., 0.1], [0., 1., 0.1]]));
+    model.quads.push(quad([
+        [0., 0., 0.],
+        [1., 0., 0.],
+        [1., 1., 0.],
+        [0., 1., 0.],
+    ]));
+    model.quads.push(quad([
+        [0., 0., 0.1],
+        [1., 0., 0.1],
+        [1., 1., 0.1],
+        [0., 1., 0.1],
+    ]));
     for x in 0..4 {
         let x = x as f32 / 4.;
-        model.quads.push(quad([[x, 0., 0.], [x, 0., 0.0625], [x, 1., 0.0625], [x, 1., 0.]]));
+        model.quads.push(quad([
+            [x, 0., 0.],
+            [x, 0., 0.0625],
+            [x, 1., 0.0625],
+            [x, 1., 0.],
+        ]));
     }
     let main = super::super::krasnokamen_models::authored("minecraft:zombie#main").unwrap();
-    let held = Held { slot: 0, hand: 0, bone: 3, context: "thirdperson_righthand", state: ItemContext::default(), shape: 1, reads: Reads::default() };
-    let texture = crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 16, height: 16 };
+    let held = Held {
+        slot: 0,
+        hand: 0,
+        bone: 3,
+        context: "thirdperson_righthand",
+        state: ItemContext::default(),
+        shape: 1,
+        reads: Reads::default(),
+    };
+    let texture = crate::protocol::content::TextureRegion {
+        uv: [0., 0., 1., 1.],
+        layer: 0,
+        width: 16,
+        height: 16,
+    };
     let parts = [
-        Part::Rig { rig: main, texture, color: [1.; 3], material: EntityMaterial::EntityCutout, body: true },
-        Part::Rig { rig: main, texture, color: [1.; 3], material: EntityMaterial::ArmorDecalCutoutNoCull, body: false },
-        Part::Item { held: &held, model: &model },
+        Part::Rig {
+            rig: main,
+            texture,
+            color: [1.; 3],
+            material: EntityMaterial::EntityCutout,
+            body: true,
+        },
+        Part::Rig {
+            rig: main,
+            texture,
+            color: [1.; 3],
+            material: EntityMaterial::ArmorDecalCutoutNoCull,
+            body: false,
+        },
+        Part::Item {
+            held: &held,
+            model: &model,
+        },
     ];
     let mut meshes = CrowdMeshes::default();
     meshes.append(build(&parts, main, 0.).unwrap());
     let group = &meshes.groups[0];
-    let at = |material: EntityMaterial| group.counts[MATERIALS.iter().position(|m| *m == material).unwrap()];
+    let at = |material: EntityMaterial| {
+        group.counts[MATERIALS.iter().position(|m| *m == material).unwrap()]
+    };
     let body = at(EntityMaterial::EntityCutout);
-    assert!(body[0] > 0 && body == [body[0]; LODS], "the body keeps every level");
+    assert!(
+        body[0] > 0 && body == [body[0]; LODS],
+        "the body keeps every level"
+    );
     let trim = at(EntityMaterial::ArmorDecalCutoutNoCull);
     assert_eq!(trim, [body[0], body[0], 0], "trims leave at level 2");
-    assert_eq!(at(EntityMaterial::ItemCutout), [36, 12, 12], "extrusion edges leave at level 1");
+    assert_eq!(
+        at(EntityMaterial::ItemCutout),
+        [36, 12, 12],
+        "extrusion edges leave at level 1"
+    );
     // The kept quads come first: a level draws a prefix of its range.
-    let items = MATERIALS.iter().position(|m| *m == EntityMaterial::ItemCutout).unwrap();
+    let items = MATERIALS
+        .iter()
+        .position(|m| *m == EntityMaterial::ItemCutout)
+        .unwrap();
     let first = (group.first_index[items] - meshes.chunks[0].first[1]) as usize;
-    let attachment = p::held_item_attachment(Mat4::IDENTITY, 0) * p::item_matrix(&model, "thirdperson_righthand");
+    let attachment = p::held_item_attachment(Mat4::IDENTITY, 0)
+        * p::item_matrix(&model, "thirdperson_righthand");
     let faces: Vec<Vec3> = model.quads[..2]
         .iter()
-        .flat_map(|quad| quad.positions.map(|v| attachment.transform_point3(Vec3::from_array(v))))
+        .flat_map(|quad| {
+            quad.positions
+                .map(|v| attachment.transform_point3(Vec3::from_array(v)))
+        })
         .collect();
     for &index in &meshes.chunks[0].indices[first..first + 12] {
         let position = Vec3::from_array(meshes.chunks[0].vertices[index as usize].position);
-        assert!(faces.iter().any(|face| face.abs_diff_eq(position, 1e-5)), "a face quad vertex");
+        assert!(
+            faces.iter().any(|face| face.abs_diff_eq(position, 1e-5)),
+            "a face quad vertex"
+        );
     }
     // The bound covers every vertex under any pose.
-    assert!(group.radius > 1.5 && group.radius < 6., "radius {}", group.radius);
+    assert!(
+        group.radius > 1.5 && group.radius < 6.,
+        "radius {}",
+        group.radius
+    );
 }
 
 #[test]
 fn ineligible_entities_stay_on_the_cpu_path() {
-    let fallback = |stats: &PresentationStats, reason| stats.crowd_fallback.get(ZOMBIE).and_then(|reasons| reasons.get(reason)).copied();
+    let fallback = |stats: &PresentationStats, reason| {
+        stats
+            .crowd_fallback
+            .get(ZOMBIE)
+            .and_then(|reasons| reasons.get(reason))
+            .copied()
+    };
     // Invisible: the CPU path still draws its equipment.
     let (mut store, content) = fixture();
-    store.slots[0].metadata.insert(0, crate::entities::Metadata::Byte(32));
+    store.slots[0]
+        .metadata
+        .insert(0, crate::entities::Metadata::Byte(32));
     let (_, stats) = render(&mut store, &content, true);
     assert_eq!(stats.crowd, 0);
     assert_eq!(fallback(&stats, "invisible or glowing"), Some(1));
@@ -576,7 +896,10 @@ fn gpu_layouts_match_the_wgsl_structs() {
 fn held_item_selections_follow_stack_and_item_use() {
     let (mut store, mut content) = fixture();
     let cube = content.models[0].clone();
-    for (index, name) in ["test:lowered", "test:raised", "test:early", "test:late"].into_iter().enumerate() {
+    for (index, name) in ["test:lowered", "test:raised", "test:early", "test:late"]
+        .into_iter()
+        .enumerate()
+    {
         let mut model = cube.clone();
         for quad in &mut model.quads {
             for position in &mut quad.positions {
@@ -588,19 +911,30 @@ fn held_item_selections_follow_stack_and_item_use() {
     let model = |name: &str| json!({"type": "minecraft:model", "model": name});
     store.items.insert_test_graph("test:shield", json!({"type": "minecraft:condition",
         "property": "minecraft:using_item", "on_false": model("test:lowered"), "on_true": model("test:raised")}));
-    store.items.insert_test_graph("test:held", json!({"type": "minecraft:range_dispatch",
+    store.items.insert_test_graph(
+        "test:held",
+        json!({"type": "minecraft:range_dispatch",
         "property": "minecraft:use_duration", "fallback": model("test:early"),
-        "entries": [{"threshold": 3.0, "model": model("test:late")}]}));
+        "entries": [{"threshold": 3.0, "model": model("test:late")}]}),
+    );
     content.item_names.insert(7, "test:crossbow".into());
-    store.items.insert_test_graph("test:crossbow", json!({"type": "minecraft:range_dispatch",
+    store.items.insert_test_graph(
+        "test:crossbow",
+        json!({"type": "minecraft:range_dispatch",
         "property": "minecraft:crossbow/pull", "fallback": model("test:early"),
-        "entries": [{"threshold": 0.5, "model": model("test:late")}]}));
+        "entries": [{"threshold": 0.5, "model": model("test:late")}]}),
+    );
     let frame = |store: &mut Store| {
         render(store, &content, true);
-        (store.crowd.instances()[0].words[0], store.items.selections())
+        (
+            store.crowd.instances()[0].words[0],
+            store.items.selections(),
+        )
     };
     let flags = |store: &mut Store, flags: i8| {
-        store.slots[0].metadata.insert(8, crate::entities::Metadata::Byte(flags));
+        store.slots[0]
+            .metadata
+            .insert(8, crate::entities::Metadata::Byte(flags));
     };
     let use_item = |store: &mut Store, ticks: f32, duration: f32| {
         let models = store.models.clone().unwrap();
@@ -608,11 +942,17 @@ fn held_item_selections_follow_stack_and_item_use() {
         let mut source = entity.source.take().unwrap();
         let living = source.living.as_mut().unwrap();
         living.set_local_item_use(Some((ticks, duration)));
-        living.prepare_item_use(&models, entity, &content, 0).unwrap();
+        living
+            .prepare_item_use(&models, entity, &content, 0)
+            .unwrap();
         entity.source = Some(source);
     };
     let (lowered, selections) = frame(&mut store);
-    assert_eq!(frame(&mut store), (lowered, selections), "a steady frame selects nothing");
+    assert_eq!(
+        frame(&mut store),
+        (lowered, selections),
+        "a steady frame selects nothing"
+    );
     // The off hand in use: the shield graph read the use state.
     flags(&mut store, 3);
     let (raised, _) = frame(&mut store);
@@ -628,7 +968,11 @@ fn held_item_selections_follow_stack_and_item_use() {
     use_item(&mut store, 5., 20.);
     let (late, selections) = frame(&mut store);
     assert_ne!(late, lowered, "5.25 ticks select the late model");
-    assert_eq!(frame(&mut store), (late, selections), "unchanged ticks select nothing");
+    assert_eq!(
+        frame(&mut store),
+        (late, selections),
+        "unchanged ticks select nothing"
+    );
     // A new stack resolves again; its graph reads the crossbow pull.
     store.slots[0].equipment[0] = Some(stack(7, json!({})));
     use_item(&mut store, 0., 10.);
@@ -642,16 +986,29 @@ fn held_item_selections_follow_stack_and_item_use() {
     assert_eq!(frame(&mut store), (late, selections));
     // Unrelated metadata (health) as SET_ENTITY_DATA applies it: a new appearance revision
     // and presentation binding. Only the facts are read again; nothing is resolved.
-    store.slots[0].metadata.insert(9, crate::entities::Metadata::Float(10.));
+    store.slots[0]
+        .metadata
+        .insert(9, crate::entities::Metadata::Float(10.));
     store.slots[0].appearance_revision += 1;
     store.slots[0].binding = None;
     let (_, stats) = render(&mut store, &content, true);
-    assert_eq!((store.crowd.instances()[0].words[0], stats.crowd_resolved, store.items.selections()), (late, 0, selections));
+    assert_eq!(
+        (
+            store.crowd.instances()[0].words[0],
+            stats.crowd_resolved,
+            store.items.selections()
+        ),
+        (late, 0, selections)
+    );
     // A worn stack replaced without any appearance change is resolved again.
     store.slots[0].equipment[2] = None;
     let (_, stats) = render(&mut store, &content, true);
     assert_eq!(stats.crowd_resolved, 1);
-    assert_ne!(store.crowd.instances()[0].words[0], late, "no boots: another composite");
+    assert_ne!(
+        store.crowd.instances()[0].words[0],
+        late,
+        "no boots: another composite"
+    );
 }
 
 /// G2 battle soldiers: zombies in the `assets/battle_video` armour holding its weapons and
@@ -661,35 +1018,55 @@ fn held_item_selections_follow_stack_and_item_use() {
 fn battle_store(count: usize) -> (Store, Content) {
     let (mut models, _) = animation_tests::fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();
-    schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
-    schema.accessors.insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
+    schema
+        .accessors
+        .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    schema
+        .accessors
+        .insert("DATA_LIVING_ENTITY_FLAGS".into(), [8, 0]);
     let motion = models.motion.remove("minecraft:pig").unwrap();
     models.schemas.insert(ZOMBIE.into(), schema);
     models.motion.insert(ZOMBIE.into(), motion);
-    models.families.insert(ZOMBIE.into(), resources::Family {
-        rig: "minecraft:zombie#main".into(),
-        baby_rig: None,
-        texture: Some("minecraft:entity/zombie/zombie".into()),
-        textures: vec![],
-        renderer_class: None,
-        materials: BTreeMap::new(),
-    });
+    models.families.insert(
+        ZOMBIE.into(),
+        resources::Family {
+            rig: "minecraft:zombie#main".into(),
+            baby_rig: None,
+            texture: Some("minecraft:entity/zombie/zombie".into()),
+            textures: vec![],
+            renderer_class: None,
+            materials: BTreeMap::new(),
+        },
+    );
     let parts: BTreeMap<String, String> = ["head", "chest", "legs", "feet"]
         .into_iter()
         .map(|part| (part.to_string(), format!("minecraft:armor_{part}#main")))
         .collect();
-    models.armor_models.insert(ZOMBIE.into(), resources::ArmorModels { adult: parts.clone(), baby: parts });
+    models.armor_models.insert(
+        ZOMBIE.into(),
+        resources::ArmorModels {
+            adult: parts.clone(),
+            baby: parts,
+        },
+    );
     let models = std::sync::Arc::new(models);
     let mut content = Content::test_cube();
-    let region = |layer| crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer, width: 64, height: 64 };
+    let region = |layer| crate::protocol::content::TextureRegion {
+        uv: [0., 0., 1., 1.],
+        layer,
+        width: 64,
+        height: 64,
+    };
     content.insert_test_texture("minecraft:entity/zombie/zombie", region(0));
-    let pack = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/battle_video/assets/krasnokamen_battle");
+    let pack = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/battle_video/assets/krasnokamen_battle");
     for dir in ["items", "models/item", "equipment"] {
         for entry in std::fs::read_dir(pack.join(dir)).unwrap() {
             let path = entry.unwrap().path();
             let bytes = std::fs::read(&path).unwrap();
             let name = path.file_name().unwrap().to_str().unwrap();
-            content.insert_test_resource(&format!("assets/krasnokamen_battle/{dir}/{name}"), &bytes);
+            content
+                .insert_test_resource(&format!("assets/krasnokamen_battle/{dir}/{name}"), &bytes);
             if dir == "models/item" {
                 let model: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
                 for texture in model["textures"].as_object().unwrap().values() {
@@ -702,12 +1079,20 @@ fn battle_store(count: usize) -> (Store, Content) {
         for entry in std::fs::read_dir(pack.join("textures/entity/equipment").join(kind)).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_stem().unwrap().to_str().unwrap();
-            content.insert_test_texture(&format!("krasnokamen_battle:entity/equipment/{kind}/{name}"), region(2));
+            content.insert_test_texture(
+                &format!("krasnokamen_battle:entity/equipment/{kind}/{name}"),
+                region(2),
+            );
         }
     }
     for (id, name) in [
-        (20, "minecraft:iron_sword"), (21, "minecraft:shield"), (22, "minecraft:bow"), (23, "minecraft:crossbow"),
-        (24, "minecraft:iron_helmet"), (25, "minecraft:iron_chestplate"), (26, "minecraft:iron_leggings"),
+        (20, "minecraft:iron_sword"),
+        (21, "minecraft:shield"),
+        (22, "minecraft:bow"),
+        (23, "minecraft:crossbow"),
+        (24, "minecraft:iron_helmet"),
+        (25, "minecraft:iron_chestplate"),
+        (26, "minecraft:iron_leggings"),
         (27, "minecraft:iron_boots"),
     ] {
         content.item_names.insert(id, name.into());
@@ -715,17 +1100,30 @@ fn battle_store(count: usize) -> (Store, Content) {
         let path = name.strip_prefix("minecraft:").unwrap();
         content.insert_test_resource(
             &format!("assets/minecraft/items/{path}.json"),
-            format!(r#"{{"model":{{"type":"minecraft:model","model":"minecraft:item/{path}"}}}}"#).as_bytes(),
+            format!(r#"{{"model":{{"type":"minecraft:model","model":"minecraft:item/{path}"}}}}"#)
+                .as_bytes(),
         );
     }
     let mut store = Store::new();
-    store.items.set_entity_models(std::sync::Arc::clone(&models));
+    store
+        .items
+        .set_entity_models(std::sync::Arc::clone(&models));
     store.models = Some(std::sync::Arc::clone(&models));
     let weapons = [
-        (20, "iron_longsword"), (20, "iron_spear"), (20, "iron_halberd"), (20, "iron_flanged_mace"),
-        (20, "iron_lance"), (22, "iron_longbow_standby"), (23, "iron_heavy_crossbow_standby"),
+        (20, "iron_longsword"),
+        (20, "iron_spear"),
+        (20, "iron_halberd"),
+        (20, "iron_flanged_mace"),
+        (20, "iron_lance"),
+        (22, "iron_longbow_standby"),
+        (23, "iron_heavy_crossbow_standby"),
     ];
-    let shields = ["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
+    let shields = [
+        "red_heater_shield",
+        "blue_heater_shield",
+        "iron_kite_shield",
+        "iron_tower_shield",
+    ];
     let side = (count as f64).sqrt().ceil() as usize;
     // Received stacks carry the item's default components plus their patch.
     let patched = |id: u32, patch: serde_json::Value| {
@@ -736,7 +1134,10 @@ fn battle_store(count: usize) -> (Store, Content) {
             "minecraft:max_stack_size": 1, "minecraft:rarity": "common", "minecraft:repair_cost": 0,
             "minecraft:repairable": {"items": "#minecraft:iron_tool_materials"}, "minecraft:tooltip_display": {},
         });
-        components.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
+        components
+            .as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
         stack(id, components)
     };
     for index in 0..count {
@@ -748,32 +1149,68 @@ fn battle_store(count: usize) -> (Store, Content) {
         entity.position = position;
         entity.transform.position = position;
         entity.previous = entity.transform;
-        entity.source = Some(super::super::source_state::SourceState::new(&entity, &models).unwrap());
+        entity.source =
+            Some(super::super::source_state::SourceState::new(&entity, &models).unwrap());
         for step in 1..=3 {
             walk(&models, &mut entity, f64::from(step) * 0.15);
         }
-        let color = if index % 2 == 0 { 0xB9_25_29 } else { 0x29_4D_B7 };
-        let armour = if index % 2 == 0 { "krasnokamen_battle:iron_plate" } else { "krasnokamen_battle:holy" };
-        let helm = if index % 3 == 0 { "krasnokamen_battle:crested_helm" } else { armour };
-        for (slot, id, part, asset) in [(5, 24, "head", helm), (4, 25, "chest", armour), (3, 26, "legs", armour), (2, 27, "feet", armour)] {
-            entity.equipment[slot] = Some(patched(id, json!({
-                "minecraft:equippable": {"slot": part, "asset_id": asset},
-                "minecraft:dyed_color": color,
-            })));
+        let color = if index % 2 == 0 {
+            0xB9_25_29
+        } else {
+            0x29_4D_B7
+        };
+        let armour = if index % 2 == 0 {
+            "krasnokamen_battle:iron_plate"
+        } else {
+            "krasnokamen_battle:holy"
+        };
+        let helm = if index % 3 == 0 {
+            "krasnokamen_battle:crested_helm"
+        } else {
+            armour
+        };
+        for (slot, id, part, asset) in [
+            (5, 24, "head", helm),
+            (4, 25, "chest", armour),
+            (3, 26, "legs", armour),
+            (2, 27, "feet", armour),
+        ] {
+            entity.equipment[slot] = Some(patched(
+                id,
+                json!({
+                    "minecraft:equippable": {"slot": part, "asset_id": asset},
+                    "minecraft:dyed_color": color,
+                }),
+            ));
         }
         let (weapon_id, weapon) = weapons[index % weapons.len()];
-        entity.equipment[0] = Some(patched(weapon_id, json!({"minecraft:item_model": format!("krasnokamen_battle:{weapon}")})));
+        entity.equipment[0] = Some(patched(
+            weapon_id,
+            json!({"minecraft:item_model": format!("krasnokamen_battle:{weapon}")}),
+        ));
         let melee = weapon_id == 20;
         if melee {
-            entity.equipment[1] = Some(patched(21, json!({
-                "minecraft:item_model": format!("krasnokamen_battle:{}", shields[index % shields.len()]),
-                "minecraft:blocks_attacks": {},
-            })));
+            entity.equipment[1] = Some(patched(
+                21,
+                json!({
+                    "minecraft:item_model": format!("krasnokamen_battle:{}", shields[index % shields.len()]),
+                    "minecraft:blocks_attacks": {},
+                }),
+            ));
         }
-        entity.metadata.insert(0, crate::entities::Metadata::Byte(0));
-        entity.metadata.insert(8, crate::entities::Metadata::Byte(if melee && index % 4 == 1 { 3 } else { 0 }));
+        entity
+            .metadata
+            .insert(0, crate::entities::Metadata::Byte(0));
+        entity.metadata.insert(
+            8,
+            crate::entities::Metadata::Byte(if melee && index % 4 == 1 { 3 } else { 0 }),
+        );
         store.ids.insert(id, store.slots.len());
-        store.spatial.entry(super::super::cell(position)).or_default().insert(id);
+        store
+            .spatial
+            .entry(super::super::cell(position))
+            .or_default()
+            .insert(id);
         store.slots.push(entity);
     }
     (store, content)
@@ -786,7 +1223,10 @@ fn battle_store(count: usize) -> (Store, Content) {
 #[test]
 #[ignore = "host timing bench"]
 fn battle_crowd_frame_time() {
-    let count = std::env::var("KRASNOKAMEN_BENCH_SOLDIERS").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000);
+    let count = std::env::var("KRASNOKAMEN_BENCH_SOLDIERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000);
     let built = std::time::Instant::now();
     let (mut store, content) = battle_store(count);
     eprintln!("bench: {count} soldiers built in {:?}", built.elapsed());
@@ -801,21 +1241,24 @@ fn battle_crowd_frame_time() {
         let mut out = DynamicGeometry::default();
         let start = std::time::Instant::now();
         let stats = store
-            .append_geometry(EntityRenderFrame {
-                maps: maps.view(),
-                tint_source: &|_, _| Ok([1.; 3]),
-                content: &content,
-                origin: [0.; 3],
-                camera: [center, 2., center],
-                camera_rotation: [0.; 2],
-                radius: extent,
-                tick: TICK + index / 3,
-                partial: (index % 3) as f32 / 3.,
-                game_time: 0,
-                clock_environment: Some((&base, &time_at)),
-                light: &|_| Ok(Some([12., 3.])),
-                bed_direction: &|_| None,
-            }, &mut out)
+            .append_geometry(
+                EntityRenderFrame {
+                    maps: maps.view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &content,
+                    origin: [0.; 3],
+                    camera: [center, 2., center],
+                    camera_rotation: [0.; 2],
+                    radius: extent,
+                    tick: TICK + index / 3,
+                    partial: (index % 3) as f32 / 3.,
+                    game_time: 0,
+                    clock_environment: Some((&base, &time_at)),
+                    light: &|_| Ok(Some([12., 3.])),
+                    bed_direction: &|_| None,
+                },
+                &mut out,
+            )
             .unwrap();
         let elapsed = start.elapsed();
         store.take_crowd(&mut scene);
@@ -830,21 +1273,39 @@ fn battle_crowd_frame_time() {
         let mean = times.iter().map(|d| ms(*d)).sum::<f64>() / times.len() as f64;
         eprintln!(
             "bench: {label}: {} frames, mean {mean:.2} ms, median {:.2} ms, min {:.2} ms, max {:.2} ms",
-            times.len(), ms(times[times.len() / 2]), ms(times[0]), ms(times[times.len() - 1]),
+            times.len(),
+            ms(times[times.len() / 2]),
+            ms(times[0]),
+            ms(times[times.len() - 1]),
         );
     };
     eprintln!("bench: first frame {:.2} ms", first.as_secs_f64() * 1e3);
     // `KRASNOKAMEN_BENCH_STEADY` frames (default 30), e.g. many for a profile of steady frames.
-    let steady = std::env::var("KRASNOKAMEN_BENCH_STEADY").ok().and_then(|v| v.parse().ok()).unwrap_or(30_u64);
-    report("steady", (1..=steady).map(|index| frame(&mut store, index).0).collect());
+    let steady = std::env::var("KRASNOKAMEN_BENCH_STEADY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30_u64);
+    report(
+        "steady",
+        (1..=steady)
+            .map(|index| frame(&mut store, index).0)
+            .collect(),
+    );
     let mut churn = Vec::new();
     let mut composites = 0;
     for index in 31..=60_u64 {
         for k in 0..count / 100 {
             let slot = (index as usize * 7919 + k * 101) % count;
             let entity = &mut store.slots[slot];
-            let flags = entity.metadata.get(&8).and_then(crate::entities::Metadata::int).unwrap_or(0);
-            entity.metadata.insert(8, crate::entities::Metadata::Byte(if flags == 0 { 3 } else { 0 }));
+            let flags = entity
+                .metadata
+                .get(&8)
+                .and_then(crate::entities::Metadata::int)
+                .unwrap_or(0);
+            entity.metadata.insert(
+                8,
+                crate::entities::Metadata::Byte(if flags == 0 { 3 } else { 0 }),
+            );
             entity.appearance_revision = entity.appearance_revision.wrapping_add(1);
             entity.binding = None;
         }

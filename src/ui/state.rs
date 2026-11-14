@@ -1,19 +1,19 @@
 //! Retained paint/hit/accessibility owner. Network effects are typed domain commands only.
 use super::{
+    ClickMode, Modifiers, PointerButton, PointerPhase, UiIntent,
     edit::EditBuffer,
     items::{ItemContext, ItemModels},
     render::{Painter, TextRenderer},
-    ClickMode, Modifiers, PointerButton, PointerPhase, UiIntent,
 };
 use crate::{
     api::{MeshGeometry, RenderLayer, Vertex},
     inventory::{InventoryStore, MenuKind, UiContext},
-    protocol::{content::Content, models::TintKind, Result},
+    protocol::{Result, content::Content, models::TintKind},
     render::GraphicsPreset,
 };
 use glam::{Mat4, Vec3};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     rc::Rc,
@@ -138,7 +138,10 @@ pub enum UiCommand {
     ChatAck {
         offset: i32,
     },
-    CommandSuggestion { id: i32, command: String },
+    CommandSuggestion {
+        id: i32,
+        command: String,
+    },
     Chat {
         message: String,
         command: bool,
@@ -731,8 +734,11 @@ impl UiState {
     /// unknown keys or non-numeric values where numbers are required.
     pub fn sanitize_setting_value(key: &str, value: &Value) -> Option<Value> {
         match key {
-            "key_bindings" => crate::controls::Bindings::from_value(value).map(|bindings| bindings.value()),
-            "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => value.as_bool().map(|v| json!(v)),
+            "key_bindings" => {
+                crate::controls::Bindings::from_value(value).map(|bindings| bindings.value())
+            }
+            "fullscreen" | "vsync" | "hide_hud" | "main_arm_right" | "desktop_computer"
+            | "voice_chat" | "voice_mute" | "voice_deafen" => value.as_bool().map(|v| json!(v)),
             "language" => value
                 .as_str()
                 .filter(|id| super::text::valid_language_id(id))
@@ -741,12 +747,19 @@ impl UiState {
                 GraphicsPreset::from_setting(value).map(|preset| json!(preset.as_str()))
             }
             "monitor_apps" => {
-                if value.is_null() { return Some(Value::Null); }
+                if value.is_null() {
+                    return Some(Value::Null);
+                }
                 let valid = value.as_array()?.iter().all(|entry| match entry {
                     Value::String(command) => !command.trim().is_empty(),
-                    Value::Array(argv) => !argv.is_empty()
-                        && argv.first().and_then(Value::as_str).is_some_and(|s| !s.is_empty())
-                        && argv.iter().all(Value::is_string),
+                    Value::Array(argv) => {
+                        !argv.is_empty()
+                            && argv
+                                .first()
+                                .and_then(Value::as_str)
+                                .is_some_and(|s| !s.is_empty())
+                            && argv.iter().all(Value::is_string)
+                    }
                     _ => false,
                 });
                 valid.then(|| value.clone())
@@ -828,7 +841,9 @@ impl UiState {
         match key {
             "key_bindings" => Some(crate::controls::Bindings::default().value()),
             "monitor_apps" => Some(Value::Null),
-            "fullscreen" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => Some(json!(false)),
+            "fullscreen" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => {
+                Some(json!(false))
+            }
             "voice_volume" | "voice_mic_volume" => Some(json!(Self::DEFAULT_VOLUME)),
             "vsync" => Some(json!(true)),
             "main_arm_right" => Some(json!(true)),
@@ -851,9 +866,17 @@ impl UiState {
     pub fn next_setting_value(key: &str, current: Option<&Value>) -> Option<Value> {
         let sane = |v: &Value| Self::sanitize_setting_value(key, v);
         match key {
-            "fullscreen" | "vsync" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen" => Some(json!(!current
-                .and_then(Value::as_bool)
-                .unwrap_or(!matches!(key, "fullscreen" | "desktop_computer" | "voice_chat" | "voice_mute" | "voice_deafen")))),
+            "fullscreen" | "vsync" | "desktop_computer" | "voice_chat" | "voice_mute"
+            | "voice_deafen" => Some(json!(!current.and_then(Value::as_bool).unwrap_or(
+                !matches!(
+                    key,
+                    "fullscreen"
+                        | "desktop_computer"
+                        | "voice_chat"
+                        | "voice_mute"
+                        | "voice_deafen"
+                )
+            ))),
             "main_arm_right" => Some(json!(!current.and_then(Value::as_bool).unwrap_or(true))),
             "graphics_preset" => {
                 let current = current
@@ -863,11 +886,13 @@ impl UiState {
             }
             "max_fps" => {
                 let current = current.and_then(Value::as_u64).unwrap_or(120);
-                Some(json!([30, 60, 90, 120, 144, 165, 240, 260, 0]
-                    .into_iter()
-                    .find(|&v| v > current)
-                    .filter(|_| current != 0)
-                    .unwrap_or(if current == 0 { 30 } else { 0 })))
+                Some(json!(
+                    [30, 60, 90, 120, 144, 165, 240, 260, 0]
+                        .into_iter()
+                        .find(|&v| v > current)
+                        .filter(|_| current != 0)
+                        .unwrap_or(if current == 0 { 30 } else { 0 })
+                ))
             }
             "render_distance" => {
                 let Some(cur) = current.and_then(sane).and_then(|v| v.as_u64()) else {
@@ -919,7 +944,11 @@ impl UiState {
                     return Some(json!(Self::DEFAULT_GAMMA));
                 };
                 let stepped = ((cur + Self::VOLUME_STEP as f64) * 10.).round() / 10.;
-                Some(json!(if cur >= 1. - 1e-9 { 0. } else { stepped.min(1.) }))
+                Some(json!(if cur >= 1. - 1e-9 {
+                    0.
+                } else {
+                    stepped.min(1.)
+                }))
             }
             _ => None,
         }
@@ -1325,7 +1354,10 @@ impl UiState {
     pub(crate) fn text_field_focused(&self) -> bool {
         self.focus.as_deref().is_some_and(|id| {
             self.fields.contains_key(id)
-                && self.nodes.iter().any(|n| n.id == id && n.visible && n.enabled)
+                && self
+                    .nodes
+                    .iter()
+                    .any(|n| n.id == id && n.visible && n.enabled)
         })
     }
     pub fn ime_state(&self) -> ImeState {
@@ -2122,7 +2154,10 @@ impl UiState {
                     self.dirty = true;
                 } else if self.screen == Screen::ServerDialog
                     && (self.hovered_text_event().is_some()
-                        || self.nodes.iter().any(|n| n.id == "component/hover/background"))
+                        || self
+                            .nodes
+                            .iter()
+                            .any(|n| n.id == "component/hover/background"))
                 {
                     // Body text tooltips follow the pointer and vanish when it leaves the run.
                     self.dirty = true;
@@ -2140,7 +2175,8 @@ impl UiState {
                 let bundle = target.as_ref().and_then(|(_, action, enabled)| {
                     if let NodeAction::Slot(slot) = action
                         && *enabled
-                        && self.bundle_stack(inventory, *slot)
+                        && self
+                            .bundle_stack(inventory, *slot)
                             .is_some_and(|stack| stack.bundle_visible_items() > 0)
                     {
                         return Some(*slot);
@@ -2156,7 +2192,8 @@ impl UiState {
                         self.drag_slots.clear();
                         self.drag_carrying = inventory.cursor.as_ref().is_some_and(|s| !s.empty());
                         self.drag_origin = None;
-                        self.drag_expected = inventory.cursor.clone().filter(|stack| !stack.empty());
+                        self.drag_expected =
+                            inventory.cursor.clone().filter(|stack| !stack.empty());
                         self.drag_fence = Some(self.context(inventory));
                         if let Some((id, action, enabled)) = target {
                             if !enabled {
@@ -2193,10 +2230,14 @@ impl UiState {
                                 self.collect_on_release = button == 0
                                     && !modifiers.shift
                                     && self.drag_carrying
-                                    && previous_click.is_some_and(|(old_slot, old_button, time)| {
-                                        old_slot == slot && old_button == button
-                                            && now.duration_since(time) < Duration::from_millis(250)
-                                    });
+                                    && previous_click.is_some_and(
+                                        |(old_slot, old_button, time)| {
+                                            old_slot == slot
+                                                && old_button == button
+                                                && now.duration_since(time)
+                                                    < Duration::from_millis(250)
+                                        },
+                                    );
                                 self.last_slot_click = Some((slot, button, now));
                                 let mode = if modifiers.shift {
                                     ClickMode::QuickMove
@@ -2305,12 +2346,15 @@ impl UiState {
                                         _ => None,
                                     }
                                 })
-                                && let Some(pos) = super::options::pos_at(key, bounds, self.pointer[0])
+                                && let Some(pos) =
+                                    super::options::pos_at(key, bounds, self.pointer[0])
                             {
                                 self.slide_to(key, pos, effects);
                             }
                         } else if self.drag.is_some() {
-                            if let Some(id) = self.focus.clone() && self.fields.contains_key(&id) {
+                            if let Some(id) = self.focus.clone()
+                                && self.fields.contains_key(&id)
+                            {
                                 let pos = self.text_hit(&id, self.pointer)?;
                                 self.fields.get_mut(&id).unwrap().cursor = pos;
                                 self.invalidate();
@@ -2336,16 +2380,15 @@ impl UiState {
                             && modifiers.shift
                             && matches!(self.drag, Some(PointerButton::Left))
                             && matches!(target.as_ref(), Some((_, NodeAction::Slot(slot), true)) if inventory.can_take_all_from(*slot));
-                        if bulk {
-                            if let (Some((_, NodeAction::Slot(slot), true)), Some(stack)) =
+                        if bulk
+                            && let (Some((_, NodeAction::Slot(slot), true)), Some(stack)) =
                                 (target.as_ref(), self.last_quick_moved.as_ref())
-                            {
-                                effects.commands.push(UiCommand::InventoryBulk {
-                                    context: self.context(inventory),
-                                    slot: *slot,
-                                    stack: stack.clone(),
-                                });
-                            }
+                        {
+                            effects.commands.push(UiCommand::InventoryBulk {
+                                context: self.context(inventory),
+                                slot: *slot,
+                                stack: stack.clone(),
+                            });
                         }
                         if !bulk && same_menu && same_cursor && self.drag_origin.is_some() {
                             let b = u8::from(matches!(self.drag, Some(PointerButton::Right)));
@@ -2546,19 +2589,18 @@ impl UiState {
         effects: &mut UiEffects,
     ) {
         if self.bundle_hover != slot {
-            if let Some(old) = self.bundle_hover {
-                if self
+            if let Some(old) = self.bundle_hover
+                && self
                     .bundle_stack(inventory, old)
                     .is_some_and(|stack| stack.bundle_selected_index() != -1)
-                {
-                    effects
-                        .commands
-                        .push(UiCommand::Inventory(UiIntent::BundleSelect {
-                            context: self.context(inventory),
-                            slot: old,
-                            index: -1,
-                        }));
-                }
+            {
+                effects
+                    .commands
+                    .push(UiCommand::Inventory(UiIntent::BundleSelect {
+                        context: self.context(inventory),
+                        slot: old,
+                        index: -1,
+                    }));
             }
             self.bundle_hover = slot;
             self.bundle_scroll = [0.; 2];
@@ -2576,50 +2618,48 @@ impl UiState {
         if !delta_x.is_finite() || !delta_y.is_finite() {
             return Err("invalid_scroll".into());
         }
-        if let NodeAction::Slot(slot) = action {
-            if let Some(stack) = self.bundle_stack(inventory, slot) {
-                let visible = stack.bundle_visible_items();
-                if visible > 0 {
-                    let selected = stack.bundle_selected_index();
-                    let mut integral = [0.; 2];
-                    for (axis, delta) in [f64::from(delta_x), f64::from(delta_y)]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        let sign = if delta == 0. { 0. } else { delta.signum() };
-                        if self.bundle_scroll[axis] != 0.
-                            && sign != self.bundle_scroll[axis].signum()
-                        {
-                            self.bundle_scroll[axis] = 0.;
-                        }
-                        self.bundle_scroll[axis] += delta;
-                        integral[axis] = self.bundle_scroll[axis].trunc();
+        if let NodeAction::Slot(slot) = action
+            && let Some(stack) = self.bundle_stack(inventory, slot)
+        {
+            let visible = stack.bundle_visible_items();
+            if visible > 0 {
+                let selected = stack.bundle_selected_index();
+                let mut integral = [0.; 2];
+                for (axis, delta) in [f64::from(delta_x), f64::from(delta_y)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let sign = if delta == 0. { 0. } else { delta.signum() };
+                    if self.bundle_scroll[axis] != 0. && sign != self.bundle_scroll[axis].signum() {
+                        self.bundle_scroll[axis] = 0.;
                     }
-                    if integral == [0.; 2] {
-                        return Ok(());
-                    }
-                    for axis in 0..2 {
-                        self.bundle_scroll[axis] -= integral[axis];
-                    }
-                    let scroll = if integral[1] != 0. {
-                        integral[1]
-                    } else {
-                        -integral[0]
-                    };
-                    let index = (selected - scroll.signum() as i32)
-                        .max(-1)
-                        .rem_euclid(visible as i32);
-                    return self.execute_inner(
-                        UiIntent::BundleSelect {
-                            context: self.context(inventory),
-                            slot,
-                            index,
-                        },
-                        inventory,
-                        content,
-                        effects,
-                    );
+                    self.bundle_scroll[axis] += delta;
+                    integral[axis] = self.bundle_scroll[axis].trunc();
                 }
+                if integral == [0.; 2] {
+                    return Ok(());
+                }
+                for axis in 0..2 {
+                    self.bundle_scroll[axis] -= integral[axis];
+                }
+                let scroll = if integral[1] != 0. {
+                    integral[1]
+                } else {
+                    -integral[0]
+                };
+                let index = (selected - scroll.signum() as i32)
+                    .max(-1)
+                    .rem_euclid(visible as i32);
+                return self.execute_inner(
+                    UiIntent::BundleSelect {
+                        context: self.context(inventory),
+                        slot,
+                        index,
+                    },
+                    inventory,
+                    content,
+                    effects,
+                );
             }
         }
         if let NodeAction::Slider(key) = action {
@@ -2672,7 +2712,10 @@ impl UiState {
         e: &mut UiEffects,
     ) -> Result<()> {
         if key == "F1" && self.screen == Screen::Game {
-            let hidden = self.setting("hide_hud").and_then(Value::as_bool).unwrap_or(false);
+            let hidden = self
+                .setting("hide_hud")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             self.settings.insert("hide_hud".into(), json!(!hidden));
             self.invalidate();
             return Ok(());
@@ -2711,7 +2754,8 @@ impl UiState {
             return Ok(());
         }
         if key == "Tab" {
-            if self.screen == Screen::Chat && self.pending_link.is_none()
+            if self.screen == Screen::Chat
+                && self.pending_link.is_none()
                 && self.focus.as_deref() == Some("chat/input")
             {
                 return self.complete_chat(m.shift, e);
@@ -2772,12 +2816,12 @@ impl UiState {
                 let text = self.fields["chat/input"].text.clone();
                 return self.execute_inner(UiIntent::SendChat { text }, inventory, content, e);
             }
-            if let Some(id) = &self.focus {
-                if !self.fields.get(id).is_some_and(|f| f.multiline) {
-                    let a = self.target(id)?.action.clone();
-                    if !matches!(a, NodeAction::Focus(_)) {
-                        return self.activate(a, m, inventory, content, e);
-                    }
+            if let Some(id) = &self.focus
+                && !self.fields.get(id).is_some_and(|f| f.multiline)
+            {
+                let a = self.target(id)?.action.clone();
+                if !matches!(a, NodeAction::Focus(_)) {
+                    return self.activate(a, m, inventory, content, e);
                 }
             }
         }
@@ -2804,82 +2848,82 @@ impl UiState {
                 return Ok(());
             }
         }
-        if let Some(id) = self.focus.clone() {
-            if self.fields.contains_key(&id) {
-                if m.control || m.logo {
-                    match key {
-                        "a" | "A" => {
-                            let f = self.fields.get_mut(&id).unwrap();
-                            f.select(0, f.text.len())?;
-                        }
-                        "c" | "C" | "x" | "X" => {
-                            if self.clipboard.len() >= 4 {
-                                return Err("clipboard_queue_full".into());
-                            }
-                            let f = self.fields.get_mut(&id).unwrap();
-                            self.clipboard
-                                .push_back(ClipboardRequest::Set(f.selection().into()));
-                            if key.eq_ignore_ascii_case("x") {
-                                f.insert("")?;
-                            }
-                        }
-                        "v" | "V" => {
-                            if self.clipboard.len() >= 4 {
-                                return Err("clipboard_queue_full".into());
-                            }
-                            self.clipboard.push_back(ClipboardRequest::Get);
-                            self.clipboard_fence = Some((self.revision, id));
-                            return Ok(());
-                        }
-                        _ => {}
-                    }
-                }
-                let f = self.fields.get_mut(&id).unwrap();
+        if let Some(id) = self.focus.clone()
+            && self.fields.contains_key(&id)
+        {
+            if m.control || m.logo {
                 match key {
-                    "ArrowLeft" => f.move_cursor(false, m.shift, m.control),
-                    "ArrowRight" => f.move_cursor(true, m.shift, m.control),
-                    "Home" => {
-                        f.cursor = 0;
-                        if !m.shift {
-                            f.anchor = 0;
+                    "a" | "A" => {
+                        let f = self.fields.get_mut(&id).unwrap();
+                        f.select(0, f.text.len())?;
+                    }
+                    "c" | "C" | "x" | "X" => {
+                        if self.clipboard.len() >= 4 {
+                            return Err("clipboard_queue_full".into());
+                        }
+                        let f = self.fields.get_mut(&id).unwrap();
+                        self.clipboard
+                            .push_back(ClipboardRequest::Set(f.selection().into()));
+                        if key.eq_ignore_ascii_case("x") {
+                            f.insert("")?;
                         }
                     }
-                    "End" => {
-                        f.cursor = f.text.len();
-                        if !m.shift {
-                            f.anchor = f.cursor;
+                    "v" | "V" => {
+                        if self.clipboard.len() >= 4 {
+                            return Err("clipboard_queue_full".into());
                         }
-                    }
-                    "Backspace" => f.delete(false, m.control)?,
-                    "Delete" => f.delete(true, m.control)?,
-                    "Enter" if f.multiline => f.insert("\n")?,
-                    "ArrowUp" | "ArrowDown" if self.screen == Screen::Chat => {
-                        if !self.history.is_empty() {
-                            let i = if key == "ArrowUp" {
-                                self.history_index
-                                    .unwrap_or(self.history.len())
-                                    .saturating_sub(1)
-                            } else {
-                                self.history_index
-                                    .unwrap_or(self.history.len())
-                                    .saturating_add(1)
-                                    .min(self.history.len())
-                            };
-                            self.history_index = Some(i);
-                            let value = self.history.get(i).cloned().unwrap_or_default();
-                            f.select(0, f.text.len())?;
-                            f.insert(&value)?;
-                        }
+                        self.clipboard.push_back(ClipboardRequest::Get);
+                        self.clipboard_fence = Some((self.revision, id));
+                        return Ok(());
                     }
                     _ => {}
                 }
-                self.on_field_change(&id, inventory, content, e)?;
-                self.invalidate();
-                return Ok(());
             }
+            let f = self.fields.get_mut(&id).unwrap();
+            match key {
+                "ArrowLeft" => f.move_cursor(false, m.shift, m.control),
+                "ArrowRight" => f.move_cursor(true, m.shift, m.control),
+                "Home" => {
+                    f.cursor = 0;
+                    if !m.shift {
+                        f.anchor = 0;
+                    }
+                }
+                "End" => {
+                    f.cursor = f.text.len();
+                    if !m.shift {
+                        f.anchor = f.cursor;
+                    }
+                }
+                "Backspace" => f.delete(false, m.control)?,
+                "Delete" => f.delete(true, m.control)?,
+                "Enter" if f.multiline => f.insert("\n")?,
+                "ArrowUp" | "ArrowDown"
+                    if self.screen == Screen::Chat && !self.history.is_empty() =>
+                {
+                    let i = if key == "ArrowUp" {
+                        self.history_index
+                            .unwrap_or(self.history.len())
+                            .saturating_sub(1)
+                    } else {
+                        self.history_index
+                            .unwrap_or(self.history.len())
+                            .saturating_add(1)
+                            .min(self.history.len())
+                    };
+                    self.history_index = Some(i);
+                    let value = self.history.get(i).cloned().unwrap_or_default();
+                    f.select(0, f.text.len())?;
+                    f.insert(&value)?;
+                }
+                _ => {}
+            }
+            self.on_field_change(&id, inventory, content, e)?;
+            self.invalidate();
+            return Ok(());
         }
-        if matches!(self.screen, Screen::Menu | Screen::Creative) {
-            if let Some((id, action, enabled)) = self
+        if matches!(self.screen, Screen::Menu | Screen::Creative)
+            && let Some((id, action, enabled)) = self
                 .nodes
                 .iter()
                 .rev()
@@ -2889,55 +2933,57 @@ impl UiState {
                         && contains(node.bounds, self.pointer)
                 })
                 .map(|node| (node.id.clone(), node.action.clone(), node.enabled))
+        {
+            if !enabled {
+                return Err("disabled_ui_target".into());
+            }
+            let (button, mode) = match key {
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                    (key.as_bytes()[0] - b'1', ClickMode::Swap)
+                }
+                "f" | "F" => (40, ClickMode::Swap),
+                "q" | "Q" => (u8::from(m.control), ClickMode::Throw),
+                _ => return Ok(()),
+            };
+            if mode == ClickMode::Swap
+                && inventory
+                    .cursor
+                    .as_ref()
+                    .is_some_and(|stack| !stack.empty())
             {
-                if !enabled {
-                    return Err("disabled_ui_target".into());
-                }
-                let (button, mode) = match key {
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                        (key.as_bytes()[0] - b'1', ClickMode::Swap)
-                    }
-                    "f" | "F" => (40, ClickMode::Swap),
-                    "q" | "Q" => (u8::from(m.control), ClickMode::Throw),
-                    _ => return Ok(()),
-                };
-                if mode == ClickMode::Swap
-                    && inventory.cursor.as_ref().is_some_and(|stack| !stack.empty())
-                {
-                    return Ok(());
-                }
-                self.target(&id)?;
-                match action {
-                    NodeAction::Slot(slot) => {
-                        return self.execute_inner(
-                            UiIntent::ClickSlot {
-                                context: self.context(inventory),
-                                slot,
-                                button,
-                                mode,
-                            },
-                            inventory,
-                            content,
-                            e,
-                        );
-                    }
-                    NodeAction::Creative(key) => {
-                        if button == 40 {
-                            return Err("creative_palette_offhand_unavailable".into());
-                        }
-                        let stack = self
-                            .creative_stacks
-                            .get(&key)
-                            .ok_or("creative_preset_not_retained")?;
-                        e.commands.push(UiCommand::CreativePick {
+                return Ok(());
+            }
+            self.target(&id)?;
+            match action {
+                NodeAction::Slot(slot) => {
+                    return self.execute_inner(
+                        UiIntent::ClickSlot {
                             context: self.context(inventory),
-                            stack: stack.clone(),
+                            slot,
                             button,
                             mode,
-                        });
-                    }
-                    _ => {}
+                        },
+                        inventory,
+                        content,
+                        e,
+                    );
                 }
+                NodeAction::Creative(key) => {
+                    if button == 40 {
+                        return Err("creative_palette_offhand_unavailable".into());
+                    }
+                    let stack = self
+                        .creative_stacks
+                        .get(&key)
+                        .ok_or("creative_preset_not_retained")?;
+                    e.commands.push(UiCommand::CreativePick {
+                        context: self.context(inventory),
+                        stack: stack.clone(),
+                        button,
+                        mode,
+                    });
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -3090,7 +3136,9 @@ impl UiState {
                 self.focus = Some("server/name".into());
             }
             NodeAction::DeleteServer => {
-                self.selected_server.and_then(|i| self.servers.get(i)).ok_or("no_server_selected")?;
+                self.selected_server
+                    .and_then(|i| self.servers.get(i))
+                    .ok_or("no_server_selected")?;
                 self.deleting_server = true;
                 self.title_error = None;
                 self.invalidate();
@@ -3110,12 +3158,17 @@ impl UiState {
                     return Err("server_not_found".into());
                 }
                 servers.remove(index);
-                let result = crate::local_config::servers_path().ok_or_else(|| "Cannot locate local server list".to_owned())
+                let result = crate::local_config::servers_path()
+                    .ok_or_else(|| "Cannot locate local server list".to_owned())
                     .and_then(|path| super::menus::write_servers(&path, &servers));
                 match result {
                     Ok(()) => {
                         self.servers = servers;
-                        self.selected_server = if self.servers.is_empty() { None } else { Some(index.min(self.servers.len() - 1)) };
+                        self.selected_server = if self.servers.is_empty() {
+                            None
+                        } else {
+                            Some(index.min(self.servers.len() - 1))
+                        };
                         self.deleting_server = false;
                         self.title_error = None;
                     }
@@ -3167,12 +3220,13 @@ impl UiState {
                 if self.screen == Screen::Advancements && s != Screen::Advancements {
                     e.commands.push(UiCommand::SeenAdvancements { tab: None });
                 }
-                if s == Screen::Advancements && self.screen != Screen::Advancements {
-                    if let Some(root) = self.selected_advancement_root().map(str::to_owned) {
-                        self.select_advancement_tab(&root)?;
-                        e.commands
-                            .push(UiCommand::SeenAdvancements { tab: Some(root) });
-                    }
+                if s == Screen::Advancements
+                    && self.screen != Screen::Advancements
+                    && let Some(root) = self.selected_advancement_root().map(str::to_owned)
+                {
+                    self.select_advancement_tab(&root)?;
+                    e.commands
+                        .push(UiCommand::SeenAdvancements { tab: Some(root) });
                 }
                 if s == Screen::Statistics && self.screen != Screen::Statistics {
                     self.statistics.begin_request();
@@ -3377,11 +3431,13 @@ impl UiState {
                         .unwrap_or(0.5);
                     json!(if v >= 1. { 0. } else { (v + 0.05).min(1.) })
                 } else {
-                    json!(!self
-                        .settings
-                        .get(key)
-                        .and_then(Value::as_bool)
-                        .unwrap_or(matches!(key, "text_background" | "keep_jigsaws")))
+                    json!(
+                        !self
+                            .settings
+                            .get(key)
+                            .and_then(Value::as_bool)
+                            .unwrap_or(matches!(key, "text_background" | "keep_jigsaws"))
+                    )
                 };
                 self.commit_setting(key, value, e);
             }
@@ -3396,13 +3452,20 @@ impl UiState {
                 self.invalidate();
             }
             NodeAction::ResetBinding(id) => {
-                let mut bindings = self.settings.get("key_bindings")
-                    .and_then(crate::controls::Bindings::from_value).unwrap_or_default();
+                let mut bindings = self
+                    .settings
+                    .get("key_bindings")
+                    .and_then(crate::controls::Bindings::from_value)
+                    .unwrap_or_default();
                 bindings.reset(id);
                 self.commit_setting("key_bindings", bindings.value(), e);
             }
             NodeAction::ResetBindings => {
-                self.commit_setting("key_bindings", crate::controls::Bindings::default().value(), e);
+                self.commit_setting(
+                    "key_bindings",
+                    crate::controls::Bindings::default().value(),
+                    e,
+                );
             }
             NodeAction::EditorToggle(key) => {
                 self.toggle_editor(key)?;
@@ -3607,11 +3670,12 @@ impl UiState {
                 self.text.append_layout(
                     content,
                     &layout,
-                    transform * Mat4::from_translation(Vec3::new(
-                        icon[0] + 17. - layout.width,
-                        icon[1] + 9.,
-                        0.,
-                    )),
+                    transform
+                        * Mat4::from_translation(Vec3::new(
+                            icon[0] + 17. - layout.width,
+                            icon[1] + 9.,
+                            0.,
+                        )),
                     0xffffffff,
                     None,
                     out,
@@ -3623,7 +3687,12 @@ impl UiState {
     /// The darkness vignette lies under the whole HUD. Its dedicated overlay
     /// partition multiplies the frame by `1 - texel * colour`, so the quad
     /// colour carries the strength.
-    fn paint_vignette(&self, content: &Content, out: &mut MeshGeometry, transform: Mat4) -> Result<()> {
+    fn paint_vignette(
+        &self,
+        content: &Content,
+        out: &mut MeshGeometry,
+        transform: Mat4,
+    ) -> Result<()> {
         let strength = self.hud.vignette.clamp(0., 1.);
         if strength < 1. / 512.
             || self.shell_screen_active()
@@ -3801,7 +3870,9 @@ impl UiState {
                     let layout = self
                         .text
                         .layout(&json!({"text":f.display()}), (w - 8.).max(1.))?;
-                    if node.focused && let Some([start, end]) = f.display_selection() {
+                    if node.focused
+                        && let Some([start, end]) = f.display_selection()
+                    {
                         for glyph in layout
                             .glyphs
                             .iter()
@@ -3872,9 +3943,10 @@ impl UiState {
                         let icon = [x + 1., y + 1., w - 2., h - 2.];
                         append_stack_item(content, s, model, icon, transform, p.out)?;
                         if s.count > 1 {
-                            let layout = self
-                                .text
-                                .layout(&json!({"text":s.count.to_string(),"shadow_color":0xff3f3f3fu32}), 24.)?;
+                            let layout = self.text.layout(
+                                &json!({"text":s.count.to_string(),"shadow_color":0xff3f3f3fu32}),
+                                24.,
+                            )?;
                             self.text.append_layout(
                                 content,
                                 &layout,
@@ -4171,7 +4243,8 @@ impl UiState {
                 ],
             )?;
             if matches!(node.paint, Paint::Crosshair(_)) {
-                p.out.overlay_blends[1].extend(p.out.indices[RenderLayer::Translucent as usize].drain(index_start..));
+                p.out.overlay_blends[1]
+                    .extend(p.out.indices[RenderLayer::Translucent as usize].drain(index_start..));
             }
             if let Paint::Slider { desc, .. }
             | Paint::Toggle { desc, .. }
@@ -4313,17 +4386,28 @@ fn append_item(
         return Err("item_geometry_limit".into());
     }
     if model.quads.iter().any(|q| {
-        matches!(q.entity_material, Some(crate::api::EntityMaterial::BannerPattern | crate::api::EntityMaterial::EntitySolid))
+        matches!(
+            q.entity_material,
+            Some(
+                crate::api::EntityMaterial::BannerPattern | crate::api::EntityMaterial::EntitySolid
+            )
+        )
     }) {
         return append_depth_sorted_item(model, transform, display, out);
     }
     // Opaque item faces need painter ordering because the overlay discards depth.
     // Other layers retain their original composition order.
-    if model.quads.iter().all(|q| q.layer == RenderLayer::Opaque && q.alpha == 1.) {
+    if model
+        .quads
+        .iter()
+        .all(|q| q.layer == RenderLayer::Opaque && q.alpha == 1.)
+    {
         return append_depth_sorted_item(model, transform, display, out);
     }
     for q in &model.quads {
-        let positions = q.positions.map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
+        let positions = q
+            .positions
+            .map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
         // Overlay triangles are double-sided and have no depth attachment. Cull
         // the rear face of ordinary translucent/cutout item geometry before
         // blending; GUI Y is inverted by the transform above.
@@ -4356,7 +4440,9 @@ fn append_depth_sorted_item(
         &mut heap[..]
     };
     for (index, (entry, q)) in depths.iter_mut().zip(&model.quads).enumerate() {
-        let positions = q.positions.map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
+        let positions = q
+            .positions
+            .map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
         let depth = positions.iter().map(|p| p[2]).sum::<f32>() * 0.25;
         *entry = (depth, index, positions);
     }
@@ -4380,7 +4466,8 @@ fn append_item_quad(
     };
     if q.gui_light_side && q.shade {
         let [a, b, c, _] = q.positions.map(Vec3::from_array);
-        let normal = display.transform_vector3(b - a)
+        let normal = display
+            .transform_vector3(b - a)
             .cross(display.transform_vector3(c - a))
             .normalize_or_zero();
         if normal != Vec3::ZERO {
@@ -4388,7 +4475,8 @@ fn append_item_quad(
             // directions are the client's pinned default cardinal light vectors.
             let light0 = Vec3::new(0.2, 1., -0.7).normalize();
             let light1 = Vec3::new(-0.2, 1., 0.7).normalize();
-            let brightness = (0.4 + 0.6 * (normal.dot(light0).max(0.) + normal.dot(light1).max(0.))).min(1.);
+            let brightness =
+                (0.4 + 0.6 * (normal.dot(light0).max(0.) + normal.dot(light1).max(0.))).min(1.);
             color = color.map(|c| c * brightness);
         }
     }
@@ -4628,12 +4716,24 @@ mod client_settings_tests {
     #[test]
     fn monitor_apps_preserves_argv_and_supports_defaults_or_no_apps() {
         for value in [Value::Null, json!([]), json!([["ptyxis", "-s"], "foot"])] {
-            assert_eq!(UiState::sanitize_setting_value("monitor_apps", &value), Some(value));
+            assert_eq!(
+                UiState::sanitize_setting_value("monitor_apps", &value),
+                Some(value)
+            );
         }
-        for value in [json!(false), json!([[]]), json!([["", "-s"]]), json!([["foot", 2]]), json!([" "])] {
+        for value in [
+            json!(false),
+            json!([[]]),
+            json!([["", "-s"]]),
+            json!([["foot", 2]]),
+            json!([" "]),
+        ] {
             assert!(UiState::sanitize_setting_value("monitor_apps", &value).is_none());
         }
-        assert_eq!(UiState::default_setting_value("monitor_apps"), Some(Value::Null));
+        assert_eq!(
+            UiState::default_setting_value("monitor_apps"),
+            Some(Value::Null)
+        );
         assert!(UiState::MANAGED_SETTING_KEYS.contains(&"monitor_apps"));
     }
     #[test]
@@ -4683,7 +4783,12 @@ mod vignette_tests {
     fn vignette_is_one_full_window_quad_on_the_multiply_layer() {
         let mut content = Content::test_cube();
         content.creative_tabs_report = Arc::from(br#"{"tabs": []}"#.as_slice());
-        let region = TextureRegion { uv: [0.25, 0.5, 0.75, 1.], layer: 3, width: 256, height: 256 };
+        let region = TextureRegion {
+            uv: [0.25, 0.5, 0.75, 1.],
+            layer: 3,
+            width: 256,
+            height: 256,
+        };
         content.insert_test_texture("minecraft:misc/vignette", region);
         let mut ui = UiState::new_state(&content).unwrap();
         // 1920x1080 divides evenly by every GUI scale, so the quad ends exactly at the edge.
@@ -4706,11 +4811,17 @@ mod vignette_tests {
             assert_eq!(vertex.texture_layer, 3);
         }
         let extent = |axis: usize| {
-            corners.iter().map(|v| v.position[axis]).fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)))
+            corners
+                .iter()
+                .map(|v| v.position[axis])
+                .fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)))
         };
         assert_eq!(extent(0), (0., 1920.));
         assert_eq!(extent(1), (0., 1080.));
-        let us = corners.iter().map(|v| v.uv[0]).fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let us = corners
+            .iter()
+            .map(|v| v.uv[0])
+            .fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
         assert_eq!(us, (0.25, 0.75));
 
         ui.hud.vignette = 0.;
@@ -4738,7 +4849,10 @@ mod item_projection_tests {
         near.positions = [[0., 0., 0.8], [0., 1., 0.8], [1., 1., 0.8], [1., 0., 0.8]];
         far.texture_layer = 10;
         near.texture_layer = 20;
-        for quads in [vec![far.clone(), near.clone()], vec![near.clone(), far.clone()]] {
+        for quads in [
+            vec![far.clone(), near.clone()],
+            vec![near.clone(), far.clone()],
+        ] {
             model.quads = quads;
             let mut mesh = MeshGeometry::default();
             append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
@@ -4755,8 +4869,10 @@ mod item_projection_tests {
         let mut model = content.models[0].clone();
         let mut front = model.quads[0].clone();
         let mut back = front.clone();
-        front.positions = crate::protocol::models::face_positions(3, [0., 0., 0.46875], [1., 1., 0.53125]);
-        back.positions = crate::protocol::models::face_positions(2, [0., 0., 0.46875], [1., 1., 0.53125]);
+        front.positions =
+            crate::protocol::models::face_positions(3, [0., 0., 0.46875], [1., 1., 0.53125]);
+        back.positions =
+            crate::protocol::models::face_positions(2, [0., 0., 0.46875], [1., 1., 0.53125]);
         front.texture_layer = 10;
         back.texture_layer = 20;
         front.entity_material = None;
@@ -4766,14 +4882,22 @@ mod item_projection_tests {
             back.layer = layer;
             for (angle, expected) in [(0., 10), (180., 20)] {
                 model.quads = vec![front.clone(), back.clone()];
-                model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
-                    rotation: [0., angle, 0.], ..Default::default()
-                });
+                model.display.insert(
+                    "gui".into(),
+                    crate::protocol::models::ModelTransform {
+                        rotation: [0., angle, 0.],
+                        ..Default::default()
+                    },
+                );
                 let mut mesh = MeshGeometry::default();
                 append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
                 let indices = &mesh.indices[RenderLayer::Translucent as usize];
                 assert_eq!(indices.len(), 6);
-                assert!(indices.iter().all(|&i| mesh.vertices[i as usize].texture_layer == expected));
+                assert!(
+                    indices
+                        .iter()
+                        .all(|&i| mesh.vertices[i as usize].texture_layer == expected)
+                );
             }
         }
     }
@@ -4783,11 +4907,14 @@ mod item_projection_tests {
         let content = Content::test_cube();
         let mut model = content.models[0].clone();
         model.quads.truncate(1);
-        model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
-            rotation: [30., 225., 0.],
-            translation: [0.25, 0.125, 0.],
-            scale: [0.625; 3],
-        });
+        model.display.insert(
+            "gui".into(),
+            crate::protocol::models::ModelTransform {
+                rotation: [30., 225., 0.],
+                translation: [0.25, 0.125, 0.],
+                scale: [0.625; 3],
+            },
+        );
         let source = Vec3::from_array(model.quads[0].positions[0]);
         let expected = Mat4::from_translation(Vec3::new(8., 8., 0.))
             * Mat4::from_scale(Vec3::new(16., -16., 1.))
@@ -4798,7 +4925,11 @@ mod item_projection_tests {
             * Mat4::from_translation(Vec3::splat(-0.5));
         let mut mesh = MeshGeometry::default();
         append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
-        assert!((Vec3::from_array(mesh.vertices[0].position) - expected.transform_point3(source)).length() < 1e-5);
+        assert!(
+            (Vec3::from_array(mesh.vertices[0].position) - expected.transform_point3(source))
+                .length()
+                < 1e-5
+        );
     }
 
     #[test]
@@ -4853,14 +4984,23 @@ mod banner_item_order_tests {
         assert_eq!(mesh.vertices[4].texture_layer, 10);
         model.quads[0].entity_material = Some(crate::api::EntityMaterial::EntitySolid);
         let mut plain_shield = MeshGeometry::default();
-        append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut plain_shield).unwrap();
+        append_item(
+            &model,
+            [0., 0., 16., 16.],
+            Mat4::IDENTITY,
+            &mut plain_shield,
+        )
+        .unwrap();
         assert_eq!(plain_shield.vertices[0].texture_layer, 20);
         assert_eq!(plain_shield.vertices[4].texture_layer, 10);
 
-        model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
-            rotation: [0., 180., 0.],
-            ..Default::default()
-        });
+        model.display.insert(
+            "gui".into(),
+            crate::protocol::models::ModelTransform {
+                rotation: [0., 180., 0.],
+                ..Default::default()
+            },
+        );
         let mut rotated = MeshGeometry::default();
         append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut rotated).unwrap();
         assert_eq!(rotated.vertices[0].texture_layer, 10);

@@ -2,7 +2,7 @@
 use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     inventory::PacketCommand,
-    protocol::{self, nbt::Nbt, Result, Writer},
+    protocol::{self, Result, Writer, nbt::Nbt},
     ui::{CommandEdit, JigsawEdit, LastSeenUpdate, StructureEdit},
 };
 
@@ -260,7 +260,10 @@ mod dialog_tests {
         // Local 26.3 packets.json: play serverbound custom_click_action = 68.
         assert_eq!(packet.id, 0x44);
         let mut reader = Reader::new(&packet.payload.0);
-        assert_eq!(reader.string(32767).unwrap(), "krasnokamen:dialog_probe/submit");
+        assert_eq!(
+            reader.string(32767).unwrap(),
+            "krasnokamen:dialog_probe/submit"
+        );
         let len = reader.var().unwrap() as usize;
         let body = reader.take(len).unwrap();
         reader.done().unwrap();

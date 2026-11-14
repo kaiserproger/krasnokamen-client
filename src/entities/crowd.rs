@@ -15,11 +15,11 @@
 //! ([`try_instance`] checks every input that could differ and otherwise leaves the
 //! entity to the CPU path). Fire stays a CPU layer for both.
 use super::{
+    Entity, Metadata, Models,
     clip_pose::{self, Channel, ClipLibrary},
     equipment::{self, Worn},
     presentation::{self as p, Binding as Bound, EntityDrawFrame, RootStyle},
     resources::{BoneRole, Rig},
-    Entity, Metadata, Models,
 };
 use crate::{
     api::{EntityMaterial, RenderLayer},
@@ -35,8 +35,8 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -206,7 +206,13 @@ struct Key {
 }
 
 fn texture_key(texture: TextureRegion) -> [u32; 5] {
-    [texture.layer, texture.uv[0].to_bits(), texture.uv[1].to_bits(), texture.uv[2].to_bits(), texture.uv[3].to_bits()]
+    [
+        texture.layer,
+        texture.uv[0].to_bits(),
+        texture.uv[1].to_bits(),
+        texture.uv[2].to_bits(),
+        texture.uv[3].to_bits(),
+    ]
 }
 
 /// An entity's last composite, valid while nothing it was resolved from changed: the crowd
@@ -271,14 +277,17 @@ impl ItemUse {
     fn same(self, other: Self, reads: Reads) -> bool {
         (!reads.contains(Reads::USING_ITEM) || self.using == other.using)
             && (!reads.contains(Reads::USE_TICKS) || self.ticks.to_bits() == other.ticks.to_bits())
-            && (!reads.contains(Reads::CROSSBOW_PULL) || self.pull.to_bits() == other.pull.to_bits())
+            && (!reads.contains(Reads::CROSSBOW_PULL)
+                || self.pull.to_bits() == other.pull.to_bits())
     }
 }
 
 fn same_stack(kept: &Option<(Arc<BTreeMap<String, Value>>, u32)>, stack: Option<&Stack>) -> bool {
     match (kept, stack) {
         (None, None) => true,
-        (Some((components, id)), Some(stack)) => *id == stack.id && Arc::ptr_eq(components, &stack.components),
+        (Some((components, id)), Some(stack)) => {
+            *id == stack.id && Arc::ptr_eq(components, &stack.components)
+        }
         _ => false,
     }
 }
@@ -303,7 +312,11 @@ impl Registry {
         self.generation += 1;
         self.keys.clear();
         let revision = REVISIONS.fetch_add(1, Ordering::Relaxed);
-        self.meshes = Arc::new(CrowdMeshes { revision, pool: revision, ..Default::default() });
+        self.meshes = Arc::new(CrowdMeshes {
+            revision,
+            pool: revision,
+            ..Default::default()
+        });
         self.instances.clear();
         self.counts.clear();
         self.bones = 0;
@@ -364,19 +377,29 @@ pub(super) fn try_instance(
     entity: &mut Entity,
     inputs: Inputs<'_>,
 ) -> Result<bool, Fallback> {
-    let Inputs { models, content, frame, .. } = inputs;
+    let Inputs {
+        models,
+        content,
+        frame,
+        ..
+    } = inputs;
     if registry.instances.len() >= MAX_INSTANCES {
         return Err("instance budget");
     }
-    let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
-    if !matches!(bound.style, RootStyle::Living) || bound.layers.is_some() || bound.anger.is_some() {
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        return Err("unbound");
+    };
+    if !matches!(bound.style, RootStyle::Living) || bound.layers.is_some() || bound.anger.is_some()
+    {
         return Err("special layers");
     }
     // A kept binding passed the checks below for the same rig and facts.
     let (composite, resolved) = match kept(registry, items, entity, &inputs)? {
         Some(composite) => (composite, false),
         None => {
-            let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
+            let Some(Ok(bound)) = entity.binding.as_ref() else {
+                return Err("unbound");
+            };
             let rig = models.rig(&bound.rig);
             let facts = Facts::of(models, entity);
             if rig.is_placeholder() {
@@ -388,15 +411,21 @@ pub(super) fn try_instance(
             if facts.pose != 0 {
                 return Err("pose");
             }
-            (composite(registry, items, equipment, entity, rig, facts, &inputs)?, true)
+            (
+                composite(registry, items, equipment, entity, rig, facts, &inputs)?,
+                true,
+            )
         }
     };
     let bone_count = registry.meshes.groups[composite as usize].bone_count;
     if registry.bones + bone_count > MAX_BONES {
         return Err("bone budget");
     }
-    let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
-    let mut instance = instance(entity, models, content, bound, frame, inputs.bed_direction).ok_or("arm pose")?;
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        return Err("unbound");
+    };
+    let mut instance =
+        instance(entity, models, content, bound, frame, inputs.bed_direction).ok_or("arm pose")?;
     instance.words[0] = composite;
     instance.words[1] = registry.bones;
     registry.bones += bone_count;
@@ -417,7 +446,12 @@ pub(super) fn instance(
     frame: EntityDrawFrame,
     bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
 ) -> Option<CrowdInstance> {
-    let EntityDrawFrame { tick, partial, light, .. } = frame;
+    let EntityDrawFrame {
+        tick,
+        partial,
+        light,
+        ..
+    } = frame;
     let root = p::root_matrix(entity, models, bound, frame, bed_direction);
     let pose = p::role_pose(entity, models, content, tick, partial);
     let code = |scale: f32| -> Option<u32> {
@@ -456,13 +490,26 @@ pub(super) fn instance(
             }
         }
     }
-    let hurt = entity.damage_tick.is_some_and(|damage| tick.saturating_sub(damage) < 10) || entity.death_tick.is_some();
-    let row = |i: usize| [root.x_axis[i], root.y_axis[i], root.z_axis[i], root.w_axis[i]];
+    let hurt = entity
+        .damage_tick
+        .is_some_and(|damage| tick.saturating_sub(damage) < 10)
+        || entity.death_tick.is_some();
+    let row = |i: usize| {
+        [
+            root.x_axis[i],
+            root.y_axis[i],
+            root.z_axis[i],
+            root.w_axis[i],
+        ]
+    };
     let leg = clip_pose::leg_factor(pose.amplitude, pose.riding);
     Some(CrowdInstance {
         root: [row(0), row(1), row(2)],
         pose: [pose.head[0], pose.head[1], pose.legs[0], pose.legs[1]],
-        arms: [pose.arms[0].offset.extend(leg).to_array(), pose.arms[1].offset.extend(0.).to_array()],
+        arms: [
+            pose.arms[0].offset.extend(leg).to_array(),
+            pose.arms[1].offset.extend(0.).to_array(),
+        ],
         layers: timing,
         light: [light[0], light[1], f32::from(u8::from(hurt)), 0.],
         words: [0, 0, flags, clips],
@@ -482,7 +529,11 @@ struct Held {
 
 impl Held {
     fn item_use(&self) -> ItemUse {
-        ItemUse { using: self.state.using_item, ticks: self.state.use_ticks, pull: self.state.crossbow_pull }
+        ItemUse {
+            using: self.state.using_item,
+            ticks: self.state.use_ticks,
+            pull: self.state.crossbow_pull,
+        }
     }
 }
 
@@ -495,36 +546,70 @@ fn kept(
     entity: &mut Entity,
     inputs: &Inputs<'_>,
 ) -> Result<Option<u32>, Fallback> {
-    let Inputs { models, content, frame, item_context, .. } = *inputs;
-    let Some(mut binding) = entity.crowd.take() else { return Ok(None) };
-    let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
+    let Inputs {
+        models,
+        content,
+        frame,
+        item_context,
+        ..
+    } = *inputs;
+    let Some(mut binding) = entity.crowd.take() else {
+        return Ok(None);
+    };
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        return Err("unbound");
+    };
     let texture = texture_key(bound.texture);
     if binding.generation != registry.generation
         || binding.items != items.generation()
         || binding.texture != texture
-        || !binding.stacks.iter().enumerate().all(|(slot, kept)| same_stack(kept, entity.equipment_value(slot)))
+        || !binding
+            .stacks
+            .iter()
+            .enumerate()
+            .all(|(slot, kept)| same_stack(kept, entity.equipment_value(slot)))
     {
         return Ok(None);
     }
     if binding.appearance != entity.appearance_revision {
         // New metadata (most often health): only the facts it could change are compared.
-        if std::ptr::from_ref(models.rig(&bound.rig)) as usize != binding.rig || Facts::of(models, entity) != binding.facts {
+        if std::ptr::from_ref(models.rig(&bound.rig)) as usize != binding.rig
+            || Facts::of(models, entity) != binding.facts
+        {
             return Ok(None);
         }
         binding.appearance = entity.appearance_revision;
     }
     let mut flags = None;
     for (memo, slot) in binding.held.iter_mut().zip(HELD_SLOTS) {
-        let (Some((shape, reads, used)), Some(stack)) = (*memo, entity.equipment_value(slot)) else { continue };
+        let (Some((shape, reads, used)), Some(stack)) = (*memo, entity.equipment_value(slot))
+        else {
+            continue;
+        };
         let flags = *flags.get_or_insert_with(|| {
-            binding.flags.and_then(|index| entity.metadata_value(index)).and_then(Metadata::int).unwrap_or(0)
+            binding
+                .flags
+                .and_then(|index| entity.metadata_value(index))
+                .and_then(Metadata::int)
+                .unwrap_or(0)
         });
         let (using, ticks, pull) = p::held_item_use(entity, flags, slot, frame.partial);
         if !reads.contains(Reads::VOLATILE) && used.same(ItemUse { using, ticks, pull }, reads) {
             continue;
         }
         let rig = models.rig(&bound.rig);
-        let held = held_item(entity, models, content, items, rig, slot, stack, binding.facts.left_main, frame.partial, item_context)?;
+        let held = held_item(
+            entity,
+            models,
+            content,
+            items,
+            rig,
+            slot,
+            stack,
+            binding.facts.left_main,
+            frame.partial,
+            item_context,
+        )?;
         if held.shape != shape {
             return Ok(None);
         }
@@ -546,24 +631,53 @@ fn composite(
     facts: Facts,
     inputs: &Inputs<'_>,
 ) -> Result<u32, Fallback> {
-    let Inputs { models, content, frame, item_context, .. } = *inputs;
-    let Some(Ok(bound)) = entity.binding.as_ref() else { return Err("unbound") };
+    let Inputs {
+        models,
+        content,
+        frame,
+        item_context,
+        ..
+    } = *inputs;
+    let Some(Ok(bound)) = entity.binding.as_ref() else {
+        return Err("unbound");
+    };
     let rig_key = std::ptr::from_ref(rig) as usize;
     let texture = texture_key(bound.texture);
     let bound_texture = bound.texture;
     let left_main = facts.left_main;
     let mut held = Vec::new();
     for slot in HELD_SLOTS {
-        let Some(stack) = entity.equipment_value(slot) else { continue };
-        if !matches!(equipment.resolve(entity, slot, stack, models, content), Ok(Worn::NotWorn)) {
+        let Some(stack) = entity.equipment_value(slot) else {
+            continue;
+        };
+        if !matches!(
+            equipment.resolve(entity, slot, stack, models, content),
+            Ok(Worn::NotWorn)
+        ) {
             continue;
         }
-        held.push(held_item(entity, models, content, items, rig, slot, stack, left_main, frame.partial, item_context)?);
+        held.push(held_item(
+            entity,
+            models,
+            content,
+            items,
+            rig,
+            slot,
+            stack,
+            left_main,
+            frame.partial,
+            item_context,
+        )?);
     }
     let mut worn = Vec::new();
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
-        let Some(stack) = entity.equipment_value(slot) else { continue };
-        match equipment.resolve(entity, slot, stack, models, content).map_err(|_| "unresolved equipment")? {
+        let Some(stack) = entity.equipment_value(slot) else {
+            continue;
+        };
+        match equipment
+            .resolve(entity, slot, stack, models, content)
+            .map_err(|_| "unresolved equipment")?
+        {
             Worn::Omitted => {}
             // Other slots report a missing attachment on the CPU path.
             Worn::NotWorn if matches!(slot, 0 | 1 | 5) => {}
@@ -573,7 +687,10 @@ fn composite(
                     return Err("enchantment glint");
                 }
                 for part in equipment.parts(&layers, None) {
-                    if !matches!(part.material, EntityMaterial::ArmorCutoutNoCull | EntityMaterial::ArmorDecalCutoutNoCull) {
+                    if !matches!(
+                        part.material,
+                        EntityMaterial::ArmorCutoutNoCull | EntityMaterial::ArmorDecalCutoutNoCull
+                    ) {
                         return Err("armour material");
                     }
                     worn.push((layers.rig, part));
@@ -587,17 +704,31 @@ fn composite(
         worn: worn
             .iter()
             .map(|(rig, part)| {
-                (std::ptr::from_ref(*rig) as usize, texture_key(part.texture), part.color.map(f32::to_bits), part.material as u8)
+                (
+                    std::ptr::from_ref(*rig) as usize,
+                    texture_key(part.texture),
+                    part.color.map(f32::to_bits),
+                    part.material as u8,
+                )
             })
             .collect(),
-        items: held.iter().map(|h| (h.slot as u8, h.hand as u8, h.bone as u16, h.shape)).collect(),
+        items: held
+            .iter()
+            .map(|h| (h.slot as u8, h.hand as u8, h.bone as u16, h.shape))
+            .collect(),
     };
     let composite = match registry.keys.get(&key) {
         Some(&composite) => composite,
         None => {
-            let mut parts = vec![Part::Rig { rig, texture: bound_texture, color: [1.; 3], material: EntityMaterial::EntityCutout, body: true }];
+            let mut parts = vec![Part::Rig {
+                rig,
+                texture: bound_texture,
+                color: [1.; 3],
+                material: EntityMaterial::EntityCutout,
+                body: true,
+            }];
             parts.extend(worn.iter().map(|(rig, part)| Part::Rig {
-                rig: *rig,
+                rig,
                 texture: part.texture,
                 color: part.color,
                 material: part.material,
@@ -606,11 +737,14 @@ fn composite(
             let mut quads = Vec::new();
             for h in &held {
                 let stack = entity.equipment_value(h.slot).ok_or("held item")?;
-                let (model, _, _) = items.model_shape(content, stack, &h.state).map_err(|_| "held item model")?;
+                let (model, _, _) = items
+                    .model_shape(content, stack, &h.state)
+                    .map_err(|_| "held item model")?;
                 quads.push((h, model.clone()));
             }
-            parts.extend(quads.iter().map(|(h, model)| Part::Item { held: *h, model }));
-            let built = build(&parts, rig, clip_pose::library().max_offset()).ok_or("composite build")?;
+            parts.extend(quads.iter().map(|(h, model)| Part::Item { held: h, model }));
+            let built =
+                build(&parts, rig, clip_pose::library().max_offset()).ok_or("composite build")?;
             let meshes = Arc::make_mut(&mut registry.meshes);
             let composite = u32::try_from(meshes.groups.len()).map_err(|_| "composite budget")?;
             meshes.append(built);
@@ -619,7 +753,11 @@ fn composite(
             composite
         }
     };
-    let held = HELD_SLOTS.map(|slot| held.iter().find(|h| h.slot == slot).map(|h| (h.shape, h.reads, h.item_use())));
+    let held = HELD_SLOTS.map(|slot| {
+        held.iter()
+            .find(|h| h.slot == slot)
+            .map(|h| (h.shape, h.reads, h.item_use()))
+    });
     entity.crowd = Some(Binding {
         generation: registry.generation,
         items: items.generation(),
@@ -628,7 +766,11 @@ fn composite(
         rig: rig_key,
         facts,
         flags: models.accessor(&entity.type_name, "DATA_LIVING_ENTITY_FLAGS"),
-        stacks: std::array::from_fn(|slot| entity.equipment_value(slot).map(|stack| (Arc::clone(&stack.components), stack.id))),
+        stacks: std::array::from_fn(|slot| {
+            entity
+                .equipment_value(slot)
+                .map(|stack| (Arc::clone(&stack.components), stack.id))
+        }),
         held,
         composite,
     });
@@ -636,7 +778,10 @@ fn composite(
 }
 
 /// Resolves the held/head item of `slot`, or names why the crowd cannot draw it as is.
-#[expect(clippy::too_many_arguments, reason = "the equipment pose inputs of one slot")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the equipment pose inputs of one slot"
+)]
 fn held_item(
     entity: &Entity,
     models: &Models,
@@ -649,7 +794,11 @@ fn held_item(
     partial: f32,
     item_context: Option<&ItemContext>,
 ) -> Result<Held, Fallback> {
-    if rig.bones.iter().any(|bone| bone.role == BoneRole::CrossedArms) {
+    if rig
+        .bones
+        .iter()
+        .any(|bone| bone.role == BoneRole::CrossedArms)
+    {
         return Err("held item with crossed arms");
     }
     let hand = slot ^ usize::from(left_main);
@@ -658,17 +807,39 @@ fn held_item(
         0 | 1 => BoneRole::LeftArm,
         _ => BoneRole::Head,
     };
-    let bone = rig.bones.iter().position(|bone| bone.role == target).ok_or("held item without arm")?;
+    let bone = rig
+        .bones
+        .iter()
+        .position(|bone| bone.role == target)
+        .ok_or("held item without arm")?;
     let (context, state) = p::held_item_context(entity, models, slot, hand, partial, item_context);
-    if crate::ui::items::foil_texture(content, stack).map_err(|_| "held item model")?.is_some() {
+    if crate::ui::items::foil_texture(content, stack)
+        .map_err(|_| "held item model")?
+        .is_some()
+    {
         return Err("held item glint");
     }
-    let (model, shape, reads) = items.model_shape(content, stack, &state).map_err(|_| "held item model")?;
+    let (model, shape, reads) = items
+        .model_shape(content, stack, &state)
+        .map_err(|_| "held item model")?;
     // Plain models are item cutout; shields (special models) are entity solid.
-    if model.quads.iter().any(|quad| !matches!(item_material(quad), EntityMaterial::ItemCutout | EntityMaterial::EntitySolid)) {
+    if model.quads.iter().any(|quad| {
+        !matches!(
+            item_material(quad),
+            EntityMaterial::ItemCutout | EntityMaterial::EntitySolid
+        )
+    }) {
         return Err("held item material");
     }
-    Ok(Held { slot, hand, bone, context, state, shape, reads })
+    Ok(Held {
+        slot,
+        hand,
+        bone,
+        context,
+        state,
+        shape,
+        reads,
+    })
 }
 
 /// The material the CPU path draws an item quad with (`presentation::append_baked`).
@@ -680,8 +851,17 @@ fn item_material(quad: &BakedQuad) -> EntityMaterial {
 }
 
 enum Part<'a> {
-    Rig { rig: &'a Rig, texture: TextureRegion, color: [f32; 3], material: EntityMaterial, body: bool },
-    Item { held: &'a Held, model: &'a BakedModel },
+    Rig {
+        rig: &'a Rig,
+        texture: TextureRegion,
+        color: [f32; 3],
+        material: EntityMaterial,
+        body: bool,
+    },
+    Item {
+        held: &'a Held,
+        model: &'a BakedModel,
+    },
 }
 
 /// One composite before it is appended to the shared buffers.
@@ -712,11 +892,17 @@ impl CrowdMeshes {
             // Each LOD draws a prefix: parts kept at coarser levels come first.
             quads.sort_by_key(|(lod, _)| std::cmp::Reverse(*lod));
             for lod in 0..LODS {
-                group.counts[material][lod] = 6 * quads.iter().filter(|(max, _)| *max >= lod).count() as u32;
+                group.counts[material][lod] =
+                    6 * quads.iter().filter(|(max, _)| *max >= lod).count() as u32;
             }
             indices.extend(quads.iter().flat_map(|(_, indices)| *indices));
         }
-        let chunk = CrowdChunk { first: self.lens, vertices: built.vertices, indices, bones: built.bones };
+        let chunk = CrowdChunk {
+            first: self.lens,
+            vertices: built.vertices,
+            indices,
+            bones: built.bones,
+        };
         self.lens = [
             vertex + chunk.vertices.len() as u32,
             index + chunk.indices.len() as u32,
@@ -735,13 +921,19 @@ fn role_code(role: BoneRole) -> Option<u32> {
         BoneRole::LeftArm => ROLE_LEFT_ARM,
         BoneRole::RightLeg => ROLE_RIGHT_LEG,
         BoneRole::LeftLeg => ROLE_LEFT_LEG,
-        BoneRole::WingNegativeX | BoneRole::WingPositiveX | BoneRole::CrossedArms | BoneRole::Nose => return None,
+        BoneRole::WingNegativeX
+        | BoneRole::WingPositiveX
+        | BoneRole::CrossedArms
+        | BoneRole::Nose => return None,
     })
 }
 
 /// Builds a composite from `parts`; `main` is the entity's rig (hip, item attachments).
 fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
-    let mut built = Built { hip: clip_pose::hip(main), ..Default::default() };
+    let mut built = Built {
+        hip: clip_pose::hip(main),
+        ..Default::default()
+    };
     // Composite bone offset of each distinct rig; the main rig is always first.
     let mut rigs: Vec<(usize, u32)> = Vec::new();
     let mut reach: Vec<(f32, f32)> = Vec::new();
@@ -752,7 +944,9 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
         }
         let offset = built.bones.len() as u32;
         for bone in &rig.bones {
-            let parent = bone.parent.map_or(-1, |parent| (offset as usize + parent) as i32);
+            let parent = bone
+                .parent
+                .map_or(-1, |parent| (offset as usize + parent) as i32);
             let carried = clip_pose::carried(rig, bone);
             built.bones.push(CrowdBone {
                 pivot: bone.pivot.to_array(),
@@ -766,12 +960,19 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
             });
             // Distance bound from the model origin under any rotation: every pivot of the
             // chain (with two clip layers' offsets), the carry about the hip, and scales.
-            let (base, scale) = if parent < 0 { (0., 1.) } else { reach[parent as usize] };
+            let (base, scale) = if parent < 0 {
+                (0., 1.)
+            } else {
+                reach[parent as usize]
+            };
             let mut extent = bone.pivot.length() + 2. * max_offset;
             if carried {
                 extent += 2. * built.hip.length() + 2. * max_offset;
             }
-            reach.push((base + scale * extent, scale * bone.scale.abs().max_element()));
+            reach.push((
+                base + scale * extent,
+                scale * bone.scale.abs().max_element(),
+            ));
         }
         rigs.push((key, offset));
         Some(offset)
@@ -780,10 +981,20 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
     let mut radius = 0_f32;
     for part in parts {
         match *part {
-            Part::Rig { rig, texture, color, material, body } => {
+            Part::Rig {
+                rig,
+                texture,
+                color,
+                material,
+                body,
+            } => {
                 let offset = add_rig(&mut built, &mut reach, rig)?;
                 let slot = MATERIALS.iter().position(|m| *m == material)?;
-                let max_lod = if material == EntityMaterial::ArmorDecalCutoutNoCull { 1 } else { 2 };
+                let max_lod = if material == EntityMaterial::ArmorDecalCutoutNoCull {
+                    1
+                } else {
+                    2
+                };
                 for (index, bone) in rig.bones.iter().enumerate() {
                     let id = offset + index as u32;
                     let (base, scale) = reach[id as usize];
@@ -804,14 +1015,21 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
                                 bone_flags: id | if body { VERTEX_BODY } else { 0 },
                             });
                         }
-                        built.quads[slot].push((max_lod, [first, first + 1, first + 2, first + 2, first + 3, first]));
+                        built.quads[slot].push((
+                            max_lod,
+                            [first, first + 1, first + 2, first + 2, first + 3, first],
+                        ));
                     }
                 }
             }
             Part::Item { held, model } => {
                 let parent = held.bone as u32;
                 let id = built.bones.len() as u32;
-                let channel = if held.slot < 2 { Channel::item(held.hand) as u32 } else { NO_CHANNEL };
+                let channel = if held.slot < 2 {
+                    Channel::item(held.hand) as u32
+                } else {
+                    NO_CHANNEL
+                };
                 built.bones.push(CrowdBone {
                     parent: parent as i32,
                     role: ROLE_ITEM,
@@ -820,16 +1038,30 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
                     ..Default::default()
                 });
                 let (base, scale) = reach[parent as usize];
-                let grip = if held.slot < 2 { 2. * clip_pose::grip_point(held.hand).length() + 2. * max_offset } else { 0. };
-                reach.push((base + scale * grip, scale));
-                let attachment = p::held_item_attachment(Mat4::IDENTITY, if held.slot < 2 { held.hand } else { held.slot })
-                    * p::item_matrix(model, held.context);
-                let area = |q: &[[f32; 3]; 4]| {
-                    (Vec3::from_array(q[1]) - Vec3::from_array(q[0])).cross(Vec3::from_array(q[3]) - Vec3::from_array(q[0])).length()
+                let grip = if held.slot < 2 {
+                    2. * clip_pose::grip_point(held.hand).length() + 2. * max_offset
+                } else {
+                    0.
                 };
-                let largest = model.quads.iter().map(|q| area(&q.positions)).fold(0., f32::max);
+                reach.push((base + scale * grip, scale));
+                let attachment = p::held_item_attachment(
+                    Mat4::IDENTITY,
+                    if held.slot < 2 { held.hand } else { held.slot },
+                ) * p::item_matrix(model, held.context);
+                let area = |q: &[[f32; 3]; 4]| {
+                    (Vec3::from_array(q[1]) - Vec3::from_array(q[0]))
+                        .cross(Vec3::from_array(q[3]) - Vec3::from_array(q[0]))
+                        .length()
+                };
+                let largest = model
+                    .quads
+                    .iter()
+                    .map(|q| area(&q.positions))
+                    .fold(0., f32::max);
                 for quad in &model.quads {
-                    let positions = quad.positions.map(|p| attachment.transform_point3(Vec3::from_array(p)));
+                    let positions = quad
+                        .positions
+                        .map(|p| attachment.transform_point3(Vec3::from_array(p)));
                     let normal = (positions[1] - positions[0]).cross(positions[2] - positions[0]);
                     let color = match quad.tint {
                         TintKind::Constant(color) => color,
@@ -844,13 +1076,22 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
                             uv,
                             color: [color[0], color[1], color[2], quad.alpha],
                             layer: quad.texture_layer,
-                            bone_flags: id | VERTEX_ITEM_NORMAL | u32::from(quad.light_emission) << VERTEX_EMISSION_SHIFT,
+                            bone_flags: id
+                                | VERTEX_ITEM_NORMAL
+                                | u32::from(quad.light_emission) << VERTEX_EMISSION_SHIFT,
                         });
                     }
                     // Extrusion edges of a generated item vanish below the full detail level.
-                    let max_lod = if area(&quad.positions) * 8. < largest { 0 } else { 2 };
+                    let max_lod = if area(&quad.positions) * 8. < largest {
+                        0
+                    } else {
+                        2
+                    };
                     let slot = MATERIALS.iter().position(|m| *m == item_material(quad))?;
-                    built.quads[slot].push((max_lod, [first, first + 1, first + 2, first + 2, first + 3, first]));
+                    built.quads[slot].push((
+                        max_lod,
+                        [first, first + 1, first + 2, first + 2, first + 3, first],
+                    ));
                 }
             }
         }
@@ -865,7 +1106,11 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
 /// CPU mirror of the GPU bone pass (`entity_instancing_prepare.wgsl`): the composite
 /// bone matrices of `instance`, model root included. Tests compare both renderers with it.
 #[cfg(test)]
-pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &ClipLibrary) -> Vec<Mat4> {
+pub(crate) fn evaluate(
+    meshes: &CrowdMeshes,
+    instance: &CrowdInstance,
+    clips: &ClipLibrary,
+) -> Vec<Mat4> {
     let group = &meshes.groups[instance.words[0] as usize];
     let bones = &meshes.chunks[instance.words[0] as usize].bones;
     let r = instance.root;
@@ -892,21 +1137,38 @@ pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &C
             decode(flags >> (arm * 6 + 2)),
             decode(flags >> (arm * 6 + 4)),
         ),
-        offset: Vec3::new(instance.arms[arm][0], instance.arms[arm][1], instance.arms[arm][2]),
+        offset: Vec3::new(
+            instance.arms[arm][0],
+            instance.arms[arm][1],
+            instance.arms[arm][2],
+        ),
     });
     let carry = clips.carry(&layers, Vec3::from_array(group.hip));
     let mut out: Vec<Mat4> = Vec::with_capacity(bones.len());
     for bone in bones {
         let rest = Vec3::from_array(bone.rotation);
-        let parent = if bone.parent < 0 { root } else { out[bone.parent as usize] };
+        let parent = if bone.parent < 0 {
+            root
+        } else {
+            out[bone.parent as usize]
+        };
         if bone.role == ROLE_ITEM {
             let grip = if bone.channel == NO_CHANNEL {
                 None
             } else {
-                clips.delta(&layers, if bone.channel == Channel::RightItem as u32 { Channel::RightItem } else { Channel::LeftItem })
+                clips.delta(
+                    &layers,
+                    if bone.channel == Channel::RightItem as u32 {
+                        Channel::RightItem
+                    } else {
+                        Channel::LeftItem
+                    },
+                )
             };
             let hand = usize::from(bone.channel == Channel::LeftItem as u32);
-            out.push(grip.map_or(parent, |grip| parent * grip.about(clip_pose::grip_point(hand))));
+            out.push(grip.map_or(parent, |grip| {
+                parent * grip.about(clip_pose::grip_point(hand))
+            }));
             continue;
         }
         let mut rotation = rest;
@@ -928,7 +1190,11 @@ pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &C
         }
         if flags & INSTANCE_RIDING != 0 && matches!(bone.role, ROLE_RIGHT_LEG | ROLE_LEFT_LEG) {
             let side = if bone.role == ROLE_RIGHT_LEG { 1. } else { -1. };
-            rotation = Vec3::new(p::RIDING_LEG_PITCH, side * p::RIDING_LEG_YAW, side * p::RIDING_LEG_ROLL);
+            rotation = Vec3::new(
+                p::RIDING_LEG_PITCH,
+                side * p::RIDING_LEG_YAW,
+                side * p::RIDING_LEG_ROLL,
+            );
         }
         if bone.channel != NO_CHANNEL {
             let channel = [
@@ -939,7 +1205,14 @@ pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &C
                 Channel::RightLeg,
                 Channel::LeftLeg,
             ][bone.channel as usize];
-            clips.apply(&layers, channel, instance.arms[0][3], rest, &mut rotation, &mut pivot);
+            clips.apply(
+                &layers,
+                channel,
+                instance.arms[0][3],
+                rest,
+                &mut rotation,
+                &mut pivot,
+            );
         }
         let mut parent = parent;
         if let Some(carry) = carry
@@ -947,7 +1220,9 @@ pub(crate) fn evaluate(meshes: &CrowdMeshes, instance: &CrowdInstance, clips: &C
         {
             parent *= carry;
         }
-        out.push(parent * super::resources::transform(pivot, rotation, Vec3::from_array(bone.scale)));
+        out.push(
+            parent * super::resources::transform(pivot, rotation, Vec3::from_array(bone.scale)),
+        );
     }
     out
 }

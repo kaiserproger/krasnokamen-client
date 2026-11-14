@@ -107,12 +107,11 @@ pub(crate) fn validate_references(screens: &[Value], catalog: &PreviewCatalog) -
     for screen in screens {
         if let Some(widgets) = screen["widgets"].as_array() {
             for widget in widgets {
-                if let Some(id) = widget.get("preview_id") {
-                    if widget["type"] != "world_marker"
-                        || id.as_str().is_none_or(|id| !catalog.contains_key(id))
-                    {
-                        return Err("Loader screen references undeclared world preview".into());
-                    }
+                if let Some(id) = widget.get("preview_id")
+                    && (widget["type"] != "world_marker"
+                        || id.as_str().is_none_or(|id| !catalog.contains_key(id)))
+                {
+                    return Err("Loader screen references undeclared world preview".into());
                 }
             }
         }

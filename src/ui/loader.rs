@@ -396,14 +396,13 @@ impl LoaderView {
                 m["marker_id"].as_str().unwrap(),
             )
             .unwrap();
-            if let Some(preview) = widget["preview_id"].as_str() {
-                if self
+            if let Some(preview) = widget["preview_id"].as_str()
+                && self
                     .previews
                     .get(preview)
                     .is_none_or(|p| p.blocks.is_empty())
-                {
-                    return Err("loader selection preview unavailable".into());
-                }
+            {
+                return Err("loader selection preview unavailable".into());
             }
         } else if !declared {
             return Err("undeclared loader action".into());
@@ -416,17 +415,17 @@ impl LoaderView {
                     f["text"] = json!(edit.text);
                 } else if f.get("number").is_some() {
                     // Java preserves the presented number if an edit is not a finite number.
-                    if let Ok(n) = edit.text.trim().parse::<f64>() {
-                        if n.is_finite() {
-                            f["number"] = json!(n);
-                        }
+                    if let Ok(n) = edit.text.trim().parse::<f64>()
+                        && n.is_finite()
+                    {
+                        f["number"] = json!(n);
                     }
                 }
-            } else if let Some(index) = self.selections.get(id) {
-                if let Some(w) = find(widgets(&self.definition), "id", id) {
-                    let options = values(w, "options");
-                    f["selected"] = options[index % options.len()]["id"].clone();
-                }
+            } else if let Some(index) = self.selections.get(id)
+                && let Some(w) = find(widgets(&self.definition), "id", id)
+            {
+                let options = values(w, "options");
+                f["selected"] = options[index % options.len()]["id"].clone();
             }
         }
         let sequence = self
@@ -572,18 +571,17 @@ impl UiState {
             page: 0,
         };
         let editors = view.editors()?;
-        if let Some(current) = &mut self.loader {
-            if current.instance == instance
-                && current.previews.len() == view.previews.len()
-                && view.previews.iter().all(|(id, preview)| {
-                    current
-                        .previews
-                        .get(id)
-                        .is_some_and(|old| std::sync::Arc::ptr_eq(old, preview))
-                })
-            {
-                view.preview_meshes = std::mem::take(&mut current.preview_meshes);
-            }
+        if let Some(current) = &mut self.loader
+            && current.instance == instance
+            && current.previews.len() == view.previews.len()
+            && view.previews.iter().all(|(id, preview)| {
+                current
+                    .previews
+                    .get(id)
+                    .is_some_and(|old| std::sync::Arc::ptr_eq(old, preview))
+            })
+        {
+            view.preview_meshes = std::mem::take(&mut current.preview_meshes);
         }
         self.fields.retain(|id, _| !id.starts_with("loader/"));
         self.fields.extend(editors);
@@ -932,16 +930,15 @@ impl UiState {
                             enabled,
                             control_width,
                         )]);
-                        if !enabled {
-                            if let Some(reason) =
+                        if !enabled
+                            && let Some(reason) =
                                 a["deny_reason"].as_str().or(w["deny_reason"].as_str())
-                            {
-                                sections.push(vec![self.loader_line(
-                                    format!("loader/deny/{id}"),
-                                    format!("denied: {reason}"),
-                                    available_width,
-                                )?]);
-                            }
+                        {
+                            sections.push(vec![self.loader_line(
+                                format!("loader/deny/{id}"),
+                                format!("denied: {reason}"),
+                                available_width,
+                            )?]);
                         }
                     }
                 }
@@ -1154,6 +1151,26 @@ impl UiState {
         Ok(())
     }
 }
+fn editor_value(definition: &Value, field: &Value) -> Result<Option<(String, usize)>> {
+    let id = field["id"].as_str().ok_or("loader field id required")?;
+    let Some(w) = find(widgets(definition), "id", id) else {
+        return Ok(None);
+    };
+    Ok(Some(match w["type"].as_str().unwrap() {
+        "input_text" if field.get("text").is_some() => (
+            field["text"].as_str().unwrap().to_owned(),
+            w["max_bytes"].as_u64().unwrap() as usize,
+        ),
+        "input_number" if field.get("number").is_some() => {
+            (field["number"].as_f64().unwrap().to_string(), 32)
+        }
+        "select_enum" if field.get("selected").is_some() => return Ok(None),
+        "input_text" | "input_number" | "select_enum" => {
+            return Err("loader declared field type mismatch".into());
+        }
+        _ => return Ok(None),
+    }))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1294,24 +1311,4 @@ mod tests {
         m["markers"][0]["formation"] = json!("wedge");
         validate_model(&m).unwrap();
     }
-}
-fn editor_value(definition: &Value, field: &Value) -> Result<Option<(String, usize)>> {
-    let id = field["id"].as_str().ok_or("loader field id required")?;
-    let Some(w) = find(widgets(definition), "id", id) else {
-        return Ok(None);
-    };
-    Ok(Some(match w["type"].as_str().unwrap() {
-        "input_text" if field.get("text").is_some() => (
-            field["text"].as_str().unwrap().to_owned(),
-            w["max_bytes"].as_u64().unwrap() as usize,
-        ),
-        "input_number" if field.get("number").is_some() => {
-            (field["number"].as_f64().unwrap().to_string(), 32)
-        }
-        "select_enum" if field.get("selected").is_some() => return Ok(None),
-        "input_text" | "input_number" | "select_enum" => {
-            return Err("loader declared field type mismatch".into());
-        }
-        _ => return Ok(None),
-    }))
 }

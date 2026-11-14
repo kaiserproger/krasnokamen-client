@@ -21,7 +21,13 @@ fn paint_banner_part(
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let crate::entities::presentation::RigStyle { tex, color, layer, light, .. } = style;
+    let crate::entities::presentation::RigStyle {
+        tex,
+        color,
+        layer,
+        light,
+        ..
+    } = style;
     transforms.clear();
     transforms.reserve(rig.bones.len());
     for bone in &rig.bones {
@@ -37,13 +43,22 @@ fn paint_banner_part(
         }
         let normal_matrix = matrix.inverse().transpose();
         for (quad, normal) in bone.quads.iter().zip(&bone.normals) {
-            let positions = quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array());
-            let uv = quad.map(|v| [
-                tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
-                tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
-            ]);
+            let positions = quad.map(|v| {
+                matrix
+                    .transform_point3(Vec3::new(v[0], v[1], v[2]))
+                    .to_array()
+            });
+            let uv = quad.map(|v| {
+                [
+                    tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
+                    tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
+                ]
+            });
             emit(positions, uv, color, tex.layer, layer, 1., light, out)?;
-            let normal = normal_matrix.transform_vector3(Vec3::from_array(*normal)).normalize_or_zero().to_array();
+            let normal = normal_matrix
+                .transform_vector3(Vec3::from_array(*normal))
+                .normalize_or_zero()
+                .to_array();
             let first = out.vertices.len() - 4;
             for vertex in &mut out.vertices[first..] {
                 vertex.normal = normal;
@@ -92,9 +107,51 @@ pub(super) fn banner(
         / 100.;
     let flag_angle = math::banner_angle(phase);
     let banner = rig(m, &format!("{key}#main"))?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, false, t, out)?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/base")?, color: rgb(dye(color).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/banner_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        false,
+        t,
+        out,
+    )?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/banner_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        true,
+        t,
+        out,
+    )?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/base")?,
+            color: rgb(dye(color).0),
+            layer: EntityMaterial::BannerPattern,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        true,
+        t,
+        out,
+    )?;
     if let Some(patterns) = e.data_value()["patterns"].as_array() {
         for pattern in patterns.iter().take(16) {
             let id = pattern["pattern"].as_str().ok_or("banner pattern holder")?;
@@ -103,7 +160,21 @@ pub(super) fn banner(
                 .ok_or("banner pattern asset id")?;
             let (namespace, path) = identifier_path(asset);
             let material = format!("{namespace}:entity/banner/{path}");
-            paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, &material)?, color: rgb(dye(pattern["color"].as_str().unwrap_or("white")).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
+            paint_banner_part(
+                banner,
+                root,
+                crate::entities::presentation::RigStyle {
+                    tex: texture(c, &material)?,
+                    color: rgb(dye(pattern["color"].as_str().unwrap_or("white")).0),
+                    layer: EntityMaterial::BannerPattern,
+                    alpha: 1.,
+                    light: f.light,
+                },
+                flag_angle,
+                true,
+                t,
+                out,
+            )?;
         }
     }
     Ok(BlockRenderStatus::Rendered)
@@ -137,7 +208,20 @@ pub(super) fn pot(
                 * Mat4::from_rotation_y(angles[1]),
         );
     }
-    paint_rig(rig(m, "minecraft:decorated_pot_base#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/decorated_pot/decorated_pot_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+    paint_rig(
+        rig(m, "minecraft:decorated_pot_base#main")?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/decorated_pot/decorated_pot_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        t,
+        out,
+        |_, _, _| {},
+    )?;
     let sides = rig(m, "minecraft:decorated_pot_sides#main")?;
     for side in ["back", "left", "right", "front"] {
         let tex = texture(
@@ -298,7 +382,7 @@ fn wire(
         for a in 0..2 {
             for b in 0..2 {
                 let mut p = low;
-                let mut q = low;
+                let mut q;
                 p[(axis + 1) % 3] = if a == 0 {
                     low[(axis + 1) % 3]
                 } else {
@@ -411,9 +495,15 @@ pub(super) fn structure(
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
     let data = &e.data;
-    let mode = data["mode"].as_str().or_else(|| prop(e, c, "mode")).unwrap_or("");
+    let mode = data["mode"]
+        .as_str()
+        .or_else(|| prop(e, c, "mode"))
+        .unwrap_or("");
     let flag = |key: &str, default: bool| {
-        data[key].as_bool().or_else(|| data[key].as_i64().map(|v| v != 0)).unwrap_or(default)
+        data[key]
+            .as_bool()
+            .or_else(|| data[key].as_i64().map(|v| v != 0))
+            .unwrap_or(default)
     };
     let save = mode.eq_ignore_ascii_case("save");
     let load = mode.eq_ignore_ascii_case("load");
@@ -429,7 +519,10 @@ pub(super) fn structure(
             for y in 0..size[1] {
                 for z in 0..size[2] {
                     let p = [low[0] + x, low[1] + y, low[2] + z];
-                    if world.block(std::array::from_fn(|i| e.position[i] + p[i])).is_none() {
+                    if world
+                        .block(std::array::from_fn(|i| e.position[i] + p[i]))
+                        .is_none()
+                    {
                         return Ok(BlockRenderStatus::WorldPending);
                     }
                 }
@@ -437,17 +530,29 @@ pub(super) fn structure(
         }
     }
     let high = std::array::from_fn(|i| low[i] + size[i]);
-    wire(root, low.map(|v| v as f32), high.map(|v| v as f32), [0.9; 3], out)?;
+    wire(
+        root,
+        low.map(|v| v as f32),
+        high.map(|v| v as f32),
+        [0.9; 3],
+        out,
+    )?;
     if save && flag("showair", false) {
         for x in 0..size[0] {
             for y in 0..size[1] {
                 for z in 0..size[2] {
                     let p = [low[0] + x, low[1] + y, low[2] + z];
                     let absolute = std::array::from_fn(|i| e.position[i] + p[i]);
-                    let state = world.block(absolute).ok_or("structure overlay world changed")?;
-                    let name = c.name(state).ok_or("structure overlay unknown block state")?;
+                    let state = world
+                        .block(absolute)
+                        .ok_or("structure overlay world changed")?;
+                    let name = c
+                        .name(state)
+                        .ok_or("structure overlay unknown block state")?;
                     let (inset, color) = match name {
-                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => (0.4, [0.5, 0.5, 1.]),
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => {
+                            (0.4, [0.5, 0.5, 1.])
+                        }
                         "minecraft:structure_void" => (0.45, [1., 0.75, 0.75]),
                         "minecraft:barrier" => (0.45, [1., 0., 0.]),
                         "minecraft:light" => (0.45, [1., 1., 0.]),
@@ -486,8 +591,11 @@ pub(super) fn test_instance(
     let status = data["status"].as_str().unwrap_or("cleared");
     let needs_test = f.visible || status == "finished" && !data["error_message"].is_null();
     let test = match (needs_test, data["test"].as_str()) {
-        (true, Some(name)) => c.registry_entries("minecraft:test_instance")?
-            .iter().find(|(id, _)| id == name).map(|(_, value)| value),
+        (true, Some(name)) => c
+            .registry_entries("minecraft:test_instance")?
+            .iter()
+            .find(|(id, _)| id == name)
+            .map(|(_, value)| value),
         _ => None,
     };
     if test.is_some_and(Value::is_null) {
@@ -496,24 +604,44 @@ pub(super) fn test_instance(
     let color = match status {
         "running" => Some(0x808080),
         "finished" if data["error_message"].is_null() => Some(0x00ff00),
-        "finished" if test.is_some_and(|v| v["required"].as_bool() == Some(false)) => Some(0xff8000),
+        "finished" if test.is_some_and(|v| v["required"].as_bool() == Some(false)) => {
+            Some(0xff8000)
+        }
         "finished" => Some(0xff0000),
         _ => None,
     };
     let initial = out.vertices.len();
     if let Some(color) = color {
         let distance = ((f.camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
-            + (f.camera[2] - f64::from(e.position[2]) - 0.5).powi(2)).sqrt() as f32;
-        let radius = if f.scoping { 1. } else { (distance / 96.).max(1.) };
-        beam(c, root, (f.game_time % 40) as f32 + f.partial, 0, 2048, color,
-             1., 0.2 * radius, 0.25 * radius, "entity/beacon/beacon_beam", out)?;
+            + (f.camera[2] - f64::from(e.position[2]) - 0.5).powi(2))
+        .sqrt() as f32;
+        let radius = if f.scoping {
+            1.
+        } else {
+            (distance / 96.).max(1.)
+        };
+        beam(
+            c,
+            root,
+            (f.game_time % 40) as f32 + f.partial,
+            0,
+            2048,
+            color,
+            1.,
+            0.2 * radius,
+            0.25 * radius,
+            "entity/beacon/beacon_beam",
+            out,
+        )?;
     }
     if f.visible {
         let padding = test.and_then(|v| v["padding"].as_i64()).unwrap_or(0) as i32;
         let mut size = vector(&data["size"])?;
         let quarter = |rotation: &str| match rotation {
-            "clockwise_90" => 1, "clockwise_180" => 2,
-            "counterclockwise_90" => 3, _ => 0,
+            "clockwise_90" => 1,
+            "clockwise_180" => 2,
+            "counterclockwise_90" => 3,
+            _ => 0,
         };
         let rotation = quarter(data["rotation"].as_str().unwrap_or("none"))
             + quarter(test.and_then(|v| v["rotation"].as_str()).unwrap_or("none"));
@@ -522,20 +650,35 @@ pub(super) fn test_instance(
         }
         if size.iter().all(|&v| v > 0) {
             let pos = [padding, padding + 1, padding + 1];
-            wire(root, pos.map(|v| v as f32),
-                std::array::from_fn(|i| (pos[i] + size[i]) as f32), [0.9; 3], out)?;
+            wire(
+                root,
+                pos.map(|v| v as f32),
+                std::array::from_fn(|i| (pos[i] + size[i]) as f32),
+                [0.9; 3],
+                out,
+            )?;
         }
     }
     if let Some(errors) = e.data["errors"].as_array().filter(|v| !v.is_empty()) {
-        let text = f.text.ok_or("source error marker font painter not activated")?;
+        let text = f
+            .text
+            .ok_or("source error marker font painter not activated")?;
         let layouts = f.cache.errors(e, text)?;
         for (index, error) in errors.iter().enumerate() {
             let p = vector(&error["pos"])?;
             let matrix = Mat4::from_translation(Vec3::from_array(std::array::from_fn(|i| {
                 (f64::from(p[i]) - f.origin[i] - 0.02) as f32
             }))) * Mat4::from_scale(Vec3::splat(1.04));
-            cube(matrix, [1., 0., 0.], 0.375, EntityMaterial::DebugFilledBox, out)?;
-            let layout = layouts.get(index).ok_or("source error marker layout missing")?;
+            cube(
+                matrix,
+                [1., 0., 0.],
+                0.375,
+                EntityMaterial::DebugFilledBox,
+                out,
+            )?;
+            let layout = layouts
+                .get(index)
+                .ok_or("source error marker layout missing")?;
             let matrix = Mat4::from_translation(Vec3::new(
                 (f64::from(p[0]) + 0.5 - f.origin[0]) as f32,
                 (f64::from(p[1]) + 1.2 - f.origin[1]) as f32,
@@ -544,12 +687,25 @@ pub(super) fn test_instance(
                 * Mat4::from_rotation_x(f.camera_rotation[1].to_radians())
                 * Mat4::from_scale(Vec3::new(-0.16, -0.16, 0.16))
                 * Mat4::from_translation(Vec3::new(-layout.width / 2., 0., 0.));
-            text.append_world_layout(c, layout, matrix, 0xffffffff,
-                &WorldTextOptions { alignment: TextAlignment::Center,
-                    layer: EntityMaterial::TextSeeThrough, ..Default::default() }, out)?;
+            text.append_world_layout(
+                c,
+                layout,
+                matrix,
+                0xffffffff,
+                &WorldTextOptions {
+                    alignment: TextAlignment::Center,
+                    layer: EntityMaterial::TextSeeThrough,
+                    ..Default::default()
+                },
+                out,
+            )?;
         }
     }
-    Ok(if out.vertices.len() == initial { BlockRenderStatus::SourceHidden } else { BlockRenderStatus::Rendered })
+    Ok(if out.vertices.len() == initial {
+        BlockRenderStatus::SourceHidden
+    } else {
+        BlockRenderStatus::Rendered
+    })
 }
 pub(super) fn beacon(
     e: &BlockEntity,
@@ -570,7 +726,11 @@ pub(super) fn beacon(
     let distance = ((camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
         + (camera[2] - f64::from(e.position[2]) - 0.5).powi(2))
     .sqrt() as f32;
-    let radius = if scoping { 1. } else { (distance / 96.).max(1.) };
+    let radius = if scoping {
+        1.
+    } else {
+        (distance / 96.).max(1.)
+    };
     let mut start = 0;
     for (i, section) in sections.iter().enumerate() {
         beam(
@@ -578,7 +738,11 @@ pub(super) fn beacon(
             root,
             time,
             start,
-            if i + 1 == sections.len() { 2048 } else { section.height },
+            if i + 1 == sections.len() {
+                2048
+            } else {
+                section.height
+            },
             section.color,
             1.,
             0.2 * radius,
@@ -616,7 +780,8 @@ pub(super) fn portal(
             visible[direction as usize] = direction == 0 || direction == 1;
         }
     }
-    let layer = c.texture("minecraft:environment/end_sky")
+    let layer = c
+        .texture("minecraft:environment/end_sky")
         .ok_or("missing mandatory portal texture minecraft:environment/end_sky")?
         .layer;
     if gateway
@@ -669,4 +834,3 @@ pub(super) fn portal(
     }
     Ok(BlockRenderStatus::Rendered)
 }
-

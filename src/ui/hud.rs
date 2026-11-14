@@ -480,10 +480,9 @@ impl HudPackets {
                             for member in members {
                                 if let Some(old) =
                                     board.membership.insert(member.clone(), name.clone())
+                                    && let Some(team) = board.teams.get_mut(&old)
                                 {
-                                    if let Some(team) = board.teams.get_mut(&old) {
-                                        team.members.remove(&member);
-                                    }
+                                    team.members.remove(&member);
                                 }
                                 board.teams.get_mut(&name).unwrap().members.insert(member);
                             }

@@ -10,7 +10,6 @@ pub use materials::{BlockSoundAction, BlockSounds};
 use parking_lot::Mutex;
 use playback::{Gains, Positioned, StreamControl, spatial_gains};
 use resources::Resources;
-pub use voicemix::VoiceMixer;
 use rodio::{
     OutputStream, OutputStreamBuilder, Sink,
     cpal::{
@@ -30,6 +29,7 @@ use std::{
     thread,
     time::Instant,
 };
+pub use voicemix::VoiceMixer;
 
 /// Exact 26.1.2 SoundSource enum order, including the new UI category at wire ID 10.
 #[repr(usize)]
@@ -70,7 +70,9 @@ impl SoundCategory {
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum SoundOrigin {
     Position([f64; 3]),
-    LocalPlayer { position: [f64; 3] },
+    LocalPlayer {
+        position: [f64; 3],
+    },
     Entity {
         id: i32,
         generation: u64,
@@ -81,7 +83,9 @@ pub enum SoundOrigin {
 impl SoundOrigin {
     fn position(self) -> Option<[f64; 3]> {
         match self {
-            Self::Position(p) | Self::Entity { position: p, .. } | Self::LocalPlayer { position: p } => Some(p),
+            Self::Position(p)
+            | Self::Entity { position: p, .. }
+            | Self::LocalPlayer { position: p } => Some(p),
             Self::Relative => None,
         }
     }
@@ -530,7 +534,11 @@ impl Audio {
             shared.state.lock()["last_error"] = Value::from(error.to_string());
             shared.state.lock()["status"] = Value::from("unavailable");
         }
-        Self { sender, shared, voice }
+        Self {
+            sender,
+            shared,
+            voice,
+        }
     }
     /// Remote proximity voices (`krasnokamen:voice`), mixed into the same output device.
     pub fn voice(&self) -> &Arc<VoiceMixer> {
@@ -601,8 +609,17 @@ impl Audio {
         ))?;
         Ok(handle)
     }
-    pub fn listener(&self, position: [f64; 3], local_player_position: [f64; 3], yaw: f32, pitch: f32) -> Result<()> {
-        if position.iter().chain(local_player_position.iter()).any(|v| !v.is_finite() || v.abs() > 1.0e12)
+    pub fn listener(
+        &self,
+        position: [f64; 3],
+        local_player_position: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+    ) -> Result<()> {
+        if position
+            .iter()
+            .chain(local_player_position.iter())
+            .any(|v| !v.is_finite() || v.abs() > 1.0e12)
             || !yaw.is_finite()
             || !pitch.is_finite()
         {
@@ -919,7 +936,10 @@ fn worker(
             Command::Listener(epoch, p) if epoch == active_epoch => {
                 listener = p;
                 for voice in &mut voices {
-                    voice.request.source.follow_local_player(p.local_player_position);
+                    voice
+                        .request
+                        .source
+                        .follow_local_player(p.local_player_position);
                 }
                 Ok(())
             }
@@ -1241,7 +1261,9 @@ fn update_observation(state: &mut Value, voices: &VecDeque<Voice>, listener: Lis
                     p,
                 ),
                 SoundOrigin::LocalPlayer { position: p } => update_vector(
-                    entry.get_mut("source").and_then(|s| s.get_mut("value"))
+                    entry
+                        .get_mut("source")
+                        .and_then(|s| s.get_mut("value"))
                         .and_then(|s| s.get_mut("position"))
                         .expect("local-player voice schema"),
                     p,
@@ -1274,8 +1296,9 @@ mod tests {
     use super::*;
     #[test]
     fn bundle_sound_rejects_compressed_codebook_allocation_bombs_before_decode() {
-        let bytes =
-            include_bytes!("../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg");
+        let bytes = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg"
+        );
         let (setup, _) = validate_bundle_ogg(bytes).unwrap();
         validate_vorbis_codebooks(&setup).unwrap();
         let mut bomb = b"\x05vorbis".to_vec();
@@ -1291,8 +1314,9 @@ mod tests {
     }
     #[test]
     fn bundle_sound_rejects_corrupt_truncated_or_non_vorbis_content() {
-        let bytes =
-            include_bytes!("../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg");
+        let bytes = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg"
+        );
         let clip = PreparedSound::from_ogg(Arc::from(&bytes[..])).unwrap();
         assert_eq!(clip.rate, 48000);
         assert_eq!(clip.samples.len(), 12_000); // Authored quarter-second clip, without codec padding.
@@ -1307,8 +1331,9 @@ mod tests {
         appended.extend_from_slice(bytes);
         assert!(PreparedSound::from_ogg(Arc::from(appended)).is_err());
         assert!(PreparedSound::from_ogg(Arc::from(vec![0; 256 * 1024 + 1])).is_err());
-        let wav =
-            include_bytes!("../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.wav");
+        let wav = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.wav"
+        );
         assert!(PreparedSound::from_ogg(Arc::from(&wav[..])).is_err());
     }
     #[test]

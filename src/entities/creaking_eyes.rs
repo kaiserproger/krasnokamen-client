@@ -19,7 +19,12 @@ pub(super) fn append(
     out: &mut DynamicGeometry,
 ) -> Result<()> {
     let visible = if p::boolean(models, entity, "IS_TEARING_DOWN") {
-        match entity.source.as_ref().and_then(|source| source.living.as_ref()).map(|living| &living.modern) {
+        match entity
+            .source
+            .as_ref()
+            .and_then(|source| source.living.as_ref())
+            .map(|living| &living.modern)
+        {
             Some(Modern::Creaking { eyes_glowing, .. }) => *eyes_glowing,
             _ => return Err("creaking eyes: living creaking source state missing".into()),
         }
@@ -32,7 +37,9 @@ pub(super) fn append(
 
     let key = "minecraft:creaking_eyes#main";
     if !models.has_authored_rig(key) {
-        return Err(format!("creaking eyes rig not activated or authored: {key}"));
+        return Err(format!(
+            "creaking eyes rig not activated or authored: {key}"
+        ));
     }
     let texture = p::texture(content, "entity/creaking/creaking_eyes")?;
     let rig = models.rig(key);
@@ -40,14 +47,29 @@ pub(super) fn append(
     // Both eye rig bones are identity transforms in the animated head frame.
     // Evaluating the Head role would apply its look rotation a second time.
     transforms.resize(rig.bones.len(), head);
-    p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::Eyes, alpha: 1., light }, out)
+    p::emit_rig(
+        rig,
+        transforms,
+        p::RigStyle {
+            tex: texture,
+            color: [1.; 3],
+            layer: EntityMaterial::Eyes,
+            alpha: 1.,
+            light,
+        },
+        out,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        entities::{Metadata, animation_tests, resources::{Bone, BoneRole, Rig}, source_state},
+        entities::{
+            Metadata, animation_tests,
+            resources::{Bone, BoneRole, Rig},
+            source_state,
+        },
         protocol::content::TextureRegion,
     };
     use glam::Vec3;
@@ -63,34 +85,56 @@ mod tests {
         models.schemas.insert(entity.type_name.clone(), schema);
         models.motion.insert(entity.type_name.clone(), motion);
         entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());
-        models.rigs.insert("minecraft:creaking_eyes#main".into(), Rig {
-            bones: vec![Bone {
-                parent: None,
-                pivot: Vec3::ZERO,
-                rotation: Vec3::ZERO,
-                scale: Vec3::ONE,
-                role: BoneRole::Head,
-                name: "eyes".into(),
-                quads: vec![[
-                    [0., 0., 0., 0., 0.],
-                    [0., 1., 0., 0., 1.],
-                    [1., 1., 0., 1., 1.],
-                    [1., 0., 0., 1., 0.],
-                ]],
-                normals: vec![[0., 0., 1.]],
-            }],
-            part_by_name: BTreeMap::new(),
-        });
+        models.rigs.insert(
+            "minecraft:creaking_eyes#main".into(),
+            Rig {
+                bones: vec![Bone {
+                    parent: None,
+                    pivot: Vec3::ZERO,
+                    rotation: Vec3::ZERO,
+                    scale: Vec3::ONE,
+                    role: BoneRole::Head,
+                    name: "eyes".into(),
+                    quads: vec![[
+                        [0., 0., 0., 0., 0.],
+                        [0., 1., 0., 0., 1.],
+                        [1., 1., 0., 1., 1.],
+                        [1., 0., 0., 1., 0.],
+                    ]],
+                    normals: vec![[0., 0., 1.]],
+                }],
+                part_by_name: BTreeMap::new(),
+            },
+        );
         let mut content = Content::test_cube();
-        content.insert_test_texture("minecraft:entity/creaking/creaking_eyes", TextureRegion {
-            uv: [0., 0., 1., 1.], layer: 11, width: 64, height: 64,
-        });
+        content.insert_test_texture(
+            "minecraft:entity/creaking/creaking_eyes",
+            TextureRegion {
+                uv: [0., 0., 1., 1.],
+                layer: 11,
+                width: 64,
+                height: 64,
+            },
+        );
         (models, entity, content)
     }
 
-    fn render(models: &Models, entity: &Entity, content: &Content, head: Mat4) -> Result<DynamicGeometry> {
+    fn render(
+        models: &Models,
+        entity: &Entity,
+        content: &Content,
+        head: Mat4,
+    ) -> Result<DynamicGeometry> {
         let mut out = DynamicGeometry::default();
-        append(models, content, entity, head, &mut Vec::new(), [0.; 2], &mut out)?;
+        append(
+            models,
+            content,
+            entity,
+            head,
+            &mut Vec::new(),
+            [0.; 2],
+            &mut out,
+        )?;
         Ok(out)
     }
 
@@ -99,7 +143,8 @@ mod tests {
         let (models, mut entity, content) = fixture();
         entity.metadata.insert(8, Metadata::Bool(true));
         entity.metadata.insert(0, Metadata::Byte(32));
-        let head = Mat4::from_translation(Vec3::new(3., 4., 5.)) * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let head = Mat4::from_translation(Vec3::new(3., 4., 5.))
+            * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2);
         let out = render(&models, &entity, &content, head).unwrap();
         assert_eq!(out.indices[EntityMaterial::Eyes as usize].len(), 6);
         assert_eq!(out.vertices.len(), 4);
@@ -110,16 +155,45 @@ mod tests {
     #[test]
     fn teardown_flicker_overrides_active_and_missing_state_is_error() {
         let (models, mut entity, content) = fixture();
-        assert!(render(&models, &entity, &content, Mat4::IDENTITY).unwrap().vertices.is_empty());
+        assert!(
+            render(&models, &entity, &content, Mat4::IDENTITY)
+                .unwrap()
+                .vertices
+                .is_empty()
+        );
         entity.metadata.insert(8, Metadata::Bool(true));
         entity.metadata.insert(9, Metadata::Bool(true));
-        assert!(render(&models, &entity, &content, Mat4::IDENTITY).unwrap().vertices.is_empty());
-        let Modern::Creaking { eyes_glowing, .. } = &mut entity.source.as_mut().unwrap().living.as_mut().unwrap().modern else { panic!("creaking state"); };
+        assert!(
+            render(&models, &entity, &content, Mat4::IDENTITY)
+                .unwrap()
+                .vertices
+                .is_empty()
+        );
+        let Modern::Creaking { eyes_glowing, .. } = &mut entity
+            .source
+            .as_mut()
+            .unwrap()
+            .living
+            .as_mut()
+            .unwrap()
+            .modern
+        else {
+            panic!("creaking state");
+        };
         *eyes_glowing = true;
         entity.metadata.insert(8, Metadata::Bool(false));
-        assert!(!render(&models, &entity, &content, Mat4::IDENTITY).unwrap().vertices.is_empty());
+        assert!(
+            !render(&models, &entity, &content, Mat4::IDENTITY)
+                .unwrap()
+                .vertices
+                .is_empty()
+        );
         entity.source = None;
-        assert!(render(&models, &entity, &content, Mat4::IDENTITY).unwrap_err().contains("source state"));
+        assert!(
+            render(&models, &entity, &content, Mat4::IDENTITY)
+                .unwrap_err()
+                .contains("source state")
+        );
     }
 
     #[test]
@@ -130,7 +204,10 @@ mod tests {
         assert!(err.contains("entity/creaking/creaking_eyes"));
         models.rigs.remove("minecraft:creaking_eyes#main");
         // A compiled-in authored rig is valid as well; a placeholder is not.
-        models.rigs.insert("minecraft:creaking_eyes#main".into(), super::super::krasnokamen_models::placeholder(1., 1.));
+        models.rigs.insert(
+            "minecraft:creaking_eyes#main".into(),
+            super::super::krasnokamen_models::placeholder(1., 1.),
+        );
         let err = render(&models, &entity, &content, Mat4::IDENTITY).unwrap_err();
         assert!(err.contains("minecraft:creaking_eyes#main"));
     }

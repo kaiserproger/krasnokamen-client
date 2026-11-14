@@ -414,10 +414,10 @@ impl Player {
                 return Ok(result);
             }
         }
-        if let Some(stack) = item {
-            if short_class(content.item_class(stack.id)?) == "SpawnEggItem" {
-                return Ok(Outcome::CONSUME);
-            }
+        if let Some(stack) = item
+            && short_class(content.item_class(stack.id)?) == "SpawnEggItem"
+        {
+            return Ok(Outcome::CONSUME);
         }
         Ok(Outcome::Pass)
     }
@@ -434,25 +434,24 @@ impl Player {
         let Some(item) = item else {
             return Ok(Outcome::Pass);
         };
-        if let Some(equippable) = item.component("minecraft:equippable") {
-            if equippable
+        if let Some(equippable) = item.component("minecraft:equippable")
+            && equippable
                 .get("equip_on_interact")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
+        {
+            let slot = equipment_slot(
+                equippable
+                    .get("slot")
+                    .and_then(Value::as_str)
+                    .ok_or("equippable slot missing")?,
+            )?;
+            if target.equippable(item, slot, content)?
+                && target.equipment(slot).is_none()
+                && target.alive()?
             {
-                let slot = equipment_slot(
-                    equippable
-                        .get("slot")
-                        .and_then(Value::as_str)
-                        .ok_or("equippable slot missing")?,
-                )?;
-                if target.equippable(item, slot, content)?
-                    && target.equipment(slot).is_none()
-                    && target.alive()?
-                {
-                    // Equippable.equipOnTarget splits/equips only on the server.
-                    return Ok(Outcome::CLIENT);
-                }
+                // Equippable.equipOnTarget splits/equips only on the server.
+                return Ok(Outcome::CLIENT);
             }
         }
         match short_class(content.item_class(item.id)?) {
@@ -495,10 +494,10 @@ impl Player {
 
     fn entity_use_state(&self, target: &Target<'_>) -> Result<EntityUseState> {
         for prediction in self.use_predictions.iter().rev() {
-            if let UsePrediction::EntityUseState { handle, state } = prediction {
-                if *handle == target.entity.handle {
-                    return Ok(state.clone());
-                }
+            if let UsePrediction::EntityUseState { handle, state } = prediction
+                && *handle == target.entity.handle
+            {
+                return Ok(state.clone());
             }
         }
         Ok(target.store.source_use_state(target.entity.handle)?.clone())
@@ -675,7 +674,7 @@ impl Player {
         world: &World,
         content: &Content,
         inventory: &InventoryStore,
-        tick: u64,
+        _tick: u64,
     ) -> Result<Outcome> {
         if (target.is("AgeableMob") || target.is("Tadpole"))
             && item_name(item, content)? == "minecraft:golden_dandelion"
@@ -1374,37 +1373,35 @@ impl Player {
             && (owner == "ZombieHorse"
                 || !baby
                 || !self.holding_entity_item(inventory, content, "minecraft:golden_dandelion")?)
+            && item.is_some()
         {
-            if item.is_some() {
-                if target.food(item, content)? {
-                    return self
-                        .horse_entity_food(target, item, hand, world, content, inventory, tick);
-                }
-                if !target.tame()? {
-                    // makeMad explicitly does nothing on ClientLevel.
-                    return Ok(Outcome::CLIENT);
-                }
-                if owner == "AbstractChestedHorse"
-                    && !target.boolean("DATA_ID_CHEST", false)?
-                    && item_name(item, content)? == "minecraft:chest"
-                {
-                    self.predict_entity_metadata(target, "DATA_ID_CHEST", Metadata::Bool(true))?;
-                    let pitch = self.entity_random_pitch(target)?;
-                    self.entity_null_sound(
-                        target,
-                        world,
-                        if target.is("Llama") {
-                            "minecraft:entity.llama.chest"
-                        } else {
-                            "minecraft:entity.donkey.chest"
-                        },
-                        pitch,
-                    )?;
-                    self.consume_held(hand, inventory, 1)?;
-                    // createInventory copies its existing slots. Client mount
-                    // storage has no server-only contents to fabricate here.
-                    return Ok(Outcome::CLIENT);
-                }
+            if target.food(item, content)? {
+                return self.horse_entity_food(target, item, hand, world, content, inventory, tick);
+            }
+            if !target.tame()? {
+                // makeMad explicitly does nothing on ClientLevel.
+                return Ok(Outcome::CLIENT);
+            }
+            if owner == "AbstractChestedHorse"
+                && !target.boolean("DATA_ID_CHEST", false)?
+                && item_name(item, content)? == "minecraft:chest"
+            {
+                self.predict_entity_metadata(target, "DATA_ID_CHEST", Metadata::Bool(true))?;
+                let pitch = self.entity_random_pitch(target)?;
+                self.entity_null_sound(
+                    target,
+                    world,
+                    if target.is("Llama") {
+                        "minecraft:entity.llama.chest"
+                    } else {
+                        "minecraft:entity.donkey.chest"
+                    },
+                    pitch,
+                )?;
+                self.consume_held(hand, inventory, 1)?;
+                // createInventory copies its existing slots. Client mount
+                // storage has no server-only contents to fabricate here.
+                return Ok(Outcome::CLIENT);
             }
         }
         self.horse_base_interaction(target, item, hand, world, content, inventory, tick)
@@ -1501,10 +1498,10 @@ impl Player {
         // AbstractHorse/Llama only the server age write marks itemUsed.
         used |= target.is("Camel") && can_age_up;
         if used {
-            if let Some(sound) = horse_eating_sound(target)? {
-                if let Some(pitch) = self.entity_random_pitch_if_audible(target)? {
-                    self.entity_null_sound(target, world, sound, pitch)?;
-                }
+            if let Some(sound) = horse_eating_sound(target)?
+                && let Some(pitch) = self.entity_random_pitch_if_audible(target)?
+            {
+                self.entity_null_sound(target, world, sound, pitch)?;
             }
             self.consume_held(hand, inventory, 1)?;
         }
@@ -1591,16 +1588,12 @@ impl Player {
                 }
                 return Ok(result);
             }
-            if let Some(color) = dye(item)? {
-                if color != target.number("DATA_COLLAR_COLOR", 14)? {
-                    self.predict_entity_metadata(
-                        target,
-                        "DATA_COLLAR_COLOR",
-                        Metadata::Int(color),
-                    )?;
-                    self.consume_held(hand, inventory, 1)?;
-                    return Ok(Outcome::CLIENT);
-                }
+            if let Some(color) = dye(item)?
+                && color != target.number("DATA_COLLAR_COLOR", 14)?
+            {
+                self.predict_entity_metadata(target, "DATA_COLLAR_COLOR", Metadata::Int(color))?;
+                self.consume_held(hand, inventory, 1)?;
+                return Ok(Outcome::CLIENT);
             }
         }
         // The untamed bone/anger branch is explicitly server-only.
@@ -1852,60 +1845,59 @@ impl Player {
             // Conversion, drops, damage and shear sound require ServerLevel.
             return Ok(Outcome::CLIENT);
         }
-        if target.number("DATA_TYPE", 0)? == 1 && !target.baby()? {
-            if let Some(effects) = item
+        if target.number("DATA_TYPE", 0)? == 1
+            && !target.baby()?
+            && let Some(effects) = item
                 .map(|item| content.suspicious_stew_effect(item.id))
                 .transpose()?
                 .flatten()
-            {
-                let mut state = self.entity_use_state(target)?;
-                let occupied = state.mooshroom_stew.is_some();
-                if !occupied {
-                    self.consume_held(hand, inventory, 1)?;
-                }
-                let bounds = target.store.bounds(target.entity.handle, tick, 1.)?;
-                let mut samples = [UseParticleSample::default(); 16];
-                let count = if occupied { 2 } else { 4 };
-                for sample in samples.iter_mut().take(count) {
-                    sample.position = [
-                        target.entity.position[0]
-                            + target.store.entity_next_double(target.entity.handle)? / 2.,
-                        target.entity.position[1] + (bounds.max[1] - bounds.min[1]) * 0.5,
-                        target.entity.position[2]
-                            + target.store.entity_next_double(target.entity.handle)? / 2.,
-                    ];
-                    sample.velocity[1] =
-                        target.store.entity_next_double(target.entity.handle)? / 5.;
-                }
-                self.predict_use(UsePrediction::Particles {
-                    kind: if occupied {
-                        UseParticle::SmallSmoke
-                    } else {
-                        UseParticle::Effect {
-                            color: -1,
-                            alpha: 1.,
-                        }
-                    },
-                    samples,
-                    count: count as u8,
-                })?;
-                if !occupied {
-                    state.mooshroom_stew = Some(effects);
-                    self.predict_entity_state(target, state)?;
-                    if !target.silent()? {
-                        self.play_use_level_sound(
-                            world,
-                            "minecraft:entity.mooshroom.eat",
-                            crate::audio::SoundCategory::Neutral,
-                            target.entity.position,
-                            2.,
-                            1.,
-                            false,
-                        )?;
-                    }
-                }
-                return Ok(Outcome::CLIENT);
+        {
+            let mut state = self.entity_use_state(target)?;
+            let occupied = state.mooshroom_stew.is_some();
+            if !occupied {
+                self.consume_held(hand, inventory, 1)?;
             }
+            let bounds = target.store.bounds(target.entity.handle, tick, 1.)?;
+            let mut samples = [UseParticleSample::default(); 16];
+            let count = if occupied { 2 } else { 4 };
+            for sample in samples.iter_mut().take(count) {
+                sample.position = [
+                    target.entity.position[0]
+                        + target.store.entity_next_double(target.entity.handle)? / 2.,
+                    target.entity.position[1] + (bounds.max[1] - bounds.min[1]) * 0.5,
+                    target.entity.position[2]
+                        + target.store.entity_next_double(target.entity.handle)? / 2.,
+                ];
+                sample.velocity[1] = target.store.entity_next_double(target.entity.handle)? / 5.;
+            }
+            self.predict_use(UsePrediction::Particles {
+                kind: if occupied {
+                    UseParticle::SmallSmoke
+                } else {
+                    UseParticle::Effect {
+                        color: -1,
+                        alpha: 1.,
+                    }
+                },
+                samples,
+                count: count as u8,
+            })?;
+            if !occupied {
+                state.mooshroom_stew = Some(effects);
+                self.predict_entity_state(target, state)?;
+                if !target.silent()? {
+                    self.play_use_level_sound(
+                        world,
+                        "minecraft:entity.mooshroom.eat",
+                        crate::audio::SoundCategory::Neutral,
+                        target.entity.position,
+                        2.,
+                        1.,
+                        false,
+                    )?;
+                }
+            }
+            return Ok(Outcome::CLIENT);
         }
         if name == "minecraft:bucket" && !target.baby()? {
             self.play_use_local_sound(world, "minecraft:entity.cow.milk", 1., 1.)?;

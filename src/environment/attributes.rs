@@ -578,7 +578,7 @@ fn alpha_blend(a: u32, b: u32) -> u32 {
     }
     let mut out = alpha << 24;
     for shift in [0, 8, 16] {
-        out |= ((b >> shift & 255) * ba + (a >> shift & 255) * (alpha - ba)) / alpha << shift;
+        out |= (((b >> shift & 255) * ba + (a >> shift & 255) * (alpha - ba)) / alpha) << shift;
     }
     out
 }

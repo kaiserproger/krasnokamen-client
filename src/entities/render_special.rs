@@ -85,7 +85,6 @@ pub(crate) struct ClockMemo {
     needs_world: bool,
 }
 
-
 fn dynamic_item(
     cache: &mut BTreeMap<String, Result<bool>>,
     content: &Content,

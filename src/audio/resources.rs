@@ -38,7 +38,8 @@ impl Resources {
         );
         let index = json_file(&path, 16 << 20)?;
         let assets = PathBuf::from(
-            std::env::var("KRASNOKAMEN_CLIENT_ASSET_ROOT").map_err(|_| "sound asset root missing")?,
+            std::env::var("KRASNOKAMEN_CLIENT_ASSET_ROOT")
+                .map_err(|_| "sound asset root missing")?,
         );
         let bytes = verified_asset(&index, &assets, "minecraft/sounds.json", 16 << 20)?;
         let catalog_hash = format!("{:x}", Sha1::digest(&bytes));

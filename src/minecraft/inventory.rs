@@ -3,11 +3,11 @@ use super::Outcome;
 use crate::{
     api::InputIntent,
     inventory::{Stack, UiContext},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     session::Session,
     ui::{ClickMode, UiIntent},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
     time::{Duration, Instant},
@@ -364,7 +364,9 @@ pub(super) fn start(
                 }
             }
             let tooltip = session.ui.as_ref().and_then(|ui| ui.tooltip_text());
-            return Ok(Some(Outcome::Complete(json!({"status":"ok","tooltip":tooltip}))));
+            return Ok(Some(Outcome::Complete(
+                json!({"status":"ok","tooltip":tooltip}),
+            )));
         }
         "minecraft_read_item_components" => {
             require_play(session)?;
@@ -594,10 +596,11 @@ fn inventory_count(session: &Session, item: &str) -> Result<Option<i32>> {
         // first receipt they contribute nothing; never consult mutable prediction
         // to complete an authoritative inventory wait.
         let stack = session.inventory.received_player_slot(menu_slot)?;
-        if let Some(stack) = stack {
-            if !stack.empty() && item_name(stack, content)? == item {
-                count += stack.count;
-            }
+        if let Some(stack) = stack
+            && !stack.empty()
+            && item_name(stack, content)? == item
+        {
+            count += stack.count;
         }
     }
     Ok(Some(count))
@@ -702,8 +705,12 @@ mod equipment_component_tests {
     fn entity_components_read_received_equipment_not_prediction() {
         let mut session = Session::new_mode("equipment-components-test".into(), false);
         let mut content = Content::test_cube();
-        content.entity_names.insert(1, "minecraft:armor_stand".into());
-        content.item_names.insert(1, "minecraft:diamond_chestplate".into());
+        content
+            .entity_names
+            .insert(1, "minecraft:armor_stand".into());
+        content
+            .item_names
+            .insert(1, "minecraft:diamond_chestplate".into());
         content.insert_test_item_components(
             1,
             BTreeMap::from([(
@@ -719,7 +726,10 @@ mod equipment_component_tests {
             spawn.f64(0.);
         }
         spawn.0.extend([0u8; 5]);
-        session.entities.apply(1, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        session
+            .entities
+            .apply(1, &mut Reader::new(&spawn.0), &content, 1)
+            .unwrap();
         let mut equipment = Writer::default();
         equipment.var(4);
         equipment.byte(4);
@@ -727,7 +737,15 @@ mod equipment_component_tests {
         equipment.var(1);
         equipment.var(0);
         equipment.var(0);
-        session.entities.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&equipment.0), &content, 2).unwrap();
+        session
+            .entities
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&equipment.0),
+                &content,
+                2,
+            )
+            .unwrap();
         let handle = session.entities.get(4).unwrap().handle;
         session.entities.predict_equipment(handle, 4, None).unwrap();
         session.content = Some(content);
@@ -735,8 +753,14 @@ mod equipment_component_tests {
             "entity_uuid":"00000000-0000-0000-0000-000000000000","entity_type":"minecraft:armor_stand"});
         let result = read_components(&session, &args).unwrap();
         assert_eq!(result["item_id"], "minecraft:diamond_chestplate");
-        assert_eq!(result["components"]["minecraft:trim"]["material"], "minecraft:gold");
-        assert_eq!(result["components"]["minecraft:trim"]["pattern"], "minecraft:sentry");
+        assert_eq!(
+            result["components"]["minecraft:trim"]["material"],
+            "minecraft:gold"
+        );
+        assert_eq!(
+            result["components"]["minecraft:trim"]["pattern"],
+            "minecraft:sentry"
+        );
         let mut invalid = args.clone();
         invalid["entity_type"] = json!("minecraft:zombie");
         assert!(read_components(&session, &invalid).is_err());
@@ -747,6 +771,9 @@ mod equipment_component_tests {
         invalid["slot"] = json!(8);
         assert!(read_components(&session, &invalid).is_err());
         invalid["slot"] = json!(3);
-        assert_eq!(read_components(&session, &invalid).unwrap_err(), "stack not observed");
+        assert_eq!(
+            read_components(&session, &invalid).unwrap_err(),
+            "stack not observed"
+        );
     }
 }

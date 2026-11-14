@@ -80,7 +80,8 @@ fn direct_join_needs_no_explicit_profile_or_username() {
 
 #[test]
 fn setup_names_missing_source_before_populating_root() {
-    let root = std::env::temp_dir().join(format!("krasnokamen-cli-setup-test-{}", std::process::id()));
+    let root =
+        std::env::temp_dir().join(format!("krasnokamen-cli-setup-test-{}", std::process::id()));
     let output = client()
         .args([
             "setup",
@@ -96,7 +97,10 @@ fn setup_names_missing_source_before_populating_root() {
     assert!(!output.status.success());
     assert!(!root.exists());
     let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("/nonexistent/krasnokamen-dist/facts"), "{error}");
+    assert!(
+        error.contains("/nonexistent/krasnokamen-dist/facts"),
+        "{error}"
+    );
 }
 
 #[test]

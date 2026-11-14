@@ -16,14 +16,21 @@ pub struct Spec {
 
 /// `krasnokamen-client` next to this executable, else `$KRASNOKAMEN_CLIENT_BIN`, else PATH.
 pub fn client_binary() -> Result<PathBuf> {
-    let name = if cfg!(windows) { "krasnokamen-client.exe" } else { "krasnokamen-client" };
+    let name = if cfg!(windows) {
+        "krasnokamen-client.exe"
+    } else {
+        "krasnokamen-client"
+    };
     if let Some(custom) = std::env::var_os("KRASNOKAMEN_CLIENT_BIN").map(PathBuf::from) {
         if custom.is_file() {
             return Ok(custom);
         }
         bail!("KRASNOKAMEN_CLIENT_BIN={} is not a file", custom.display());
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         let beside = dir.join(name);
         if beside.is_file() {
             return Ok(beside);
@@ -34,7 +41,10 @@ pub fn client_binary() -> Result<PathBuf> {
 
 fn pipe(reader: impl std::io::Read + Send + 'static, rep: Reporter) {
     std::thread::spawn(move || {
-        for line in BufReader::new(reader).lines().map_while(std::result::Result::ok) {
+        for line in BufReader::new(reader)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
             rep.log(format!("[client] {line}"));
         }
     });
@@ -50,7 +60,10 @@ pub fn spawn(spec: &Spec, rep: &Reporter) -> Result<Child> {
         .arg(&spec.server)
         .arg("--username")
         .arg(&spec.username)
-        .env("KRASNOKAMEN_CLIENT_SETTINGS", spec.root.join("client-settings.json"))
+        .env(
+            "KRASNOKAMEN_CLIENT_SETTINGS",
+            spec.root.join("client-settings.json"),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -63,9 +76,12 @@ pub fn spawn(spec: &Spec, rep: &Reporter) -> Result<Child> {
         spec.server,
         spec.username
     ));
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("cannot start {} (is krasnokamen-client next to the launcher?)", binary.display()))?;
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "cannot start {} (is krasnokamen-client next to the launcher?)",
+            binary.display()
+        )
+    })?;
     pipe(child.stdout.take().unwrap(), rep.clone());
     pipe(child.stderr.take().unwrap(), rep.clone());
     Ok(child)

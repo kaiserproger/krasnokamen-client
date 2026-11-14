@@ -31,29 +31,48 @@ fn rc1_hud_scoreboard_packets_reach_sidebar_state() {
     objective.0.extend([0, 8, 0, 6]);
     objective.0.extend(b"Points");
     objective.0.extend([0, 0]);
-    assert!(ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&objective.0), &content).unwrap());
+    assert!(
+        ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&objective.0), &content)
+            .unwrap()
+    );
     let mut display = Writer::default();
     display.var(1);
     display.string("points");
-    assert!(ui.apply(cb::SET_DISPLAY_OBJECTIVE, &mut Reader::new(&display.0), &content).unwrap());
+    assert!(
+        ui.apply(
+            cb::SET_DISPLAY_OBJECTIVE,
+            &mut Reader::new(&display.0),
+            &content
+        )
+        .unwrap()
+    );
     let mut score = Writer::default();
     score.string("Alice");
     score.string("points");
     score.var(42);
     score.0.extend([0, 0]);
-    assert!(ui.apply(cb::SET_SCORE, &mut Reader::new(&score.0), &content).unwrap());
+    assert!(
+        ui.apply(cb::SET_SCORE, &mut Reader::new(&score.0), &content)
+            .unwrap()
+    );
     assert_eq!(ui.scoreboard().sidebar_objective(None).unwrap().0, "points");
     assert_eq!(ui.scoreboard().scores["points"]["Alice"].value, 42);
     let mut reset = Writer::default();
     reset.string("Alice");
     reset.0.push(1);
     reset.string("points");
-    assert!(ui.apply(cb::RESET_SCORE, &mut Reader::new(&reset.0), &content).unwrap());
+    assert!(
+        ui.apply(cb::RESET_SCORE, &mut Reader::new(&reset.0), &content)
+            .unwrap()
+    );
     assert!(!ui.scoreboard().scores["points"].contains_key("Alice"));
     let mut remove = Writer::default();
     remove.string("points");
     remove.0.push(1);
-    assert!(ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&remove.0), &content).unwrap());
+    assert!(
+        ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&remove.0), &content)
+            .unwrap()
+    );
     assert!(ui.scoreboard().sidebar_objective(None).is_none());
 }
 
@@ -71,34 +90,37 @@ fn team_packet_decodes_exact_26_3_layout_for_every_method() {
         w.0.extend([8, 0, s.len() as u8]);
         w.0.extend(s.as_bytes());
     };
-    let packet = |method: u8, params: Option<(i32, i32, Option<i32>, u8)>, players: Option<&[&str]>| {
-        let mut w = Writer::default();
-        w.string("t");
-        w.0.push(method);
-        if let Some((visibility, collision, color, options)) = params {
-            text(&mut w, "D");
-            text(&mut w, "P");
-            text(&mut w, "S");
-            w.var(visibility);
-            w.var(collision);
-            match color {
-                Some(color) => {
-                    w.0.push(1);
-                    w.var(color);
+    let packet =
+        |method: u8, params: Option<(i32, i32, Option<i32>, u8)>, players: Option<&[&str]>| {
+            let mut w = Writer::default();
+            w.string("t");
+            w.0.push(method);
+            if let Some((visibility, collision, color, options)) = params {
+                text(&mut w, "D");
+                text(&mut w, "P");
+                text(&mut w, "S");
+                w.var(visibility);
+                w.var(collision);
+                match color {
+                    Some(color) => {
+                        w.0.push(1);
+                        w.var(color);
+                    }
+                    None => w.0.push(0),
                 }
-                None => w.0.push(0),
+                w.0.push(options);
             }
-            w.0.push(options);
-        }
-        if let Some(players) = players {
-            w.var(players.len() as i32);
-            for player in players {
-                w.string(player);
+            if let Some(players) = players {
+                w.var(players.len() as i32);
+                for player in players {
+                    w.string(player);
+                }
             }
-        }
-        w.0
+            w.0
+        };
+    let send = |ui: &mut UiState, bytes: Vec<u8>| {
+        ui.apply(cb::SET_PLAYER_TEAM, &mut Reader::new(&bytes), &content)
     };
-    let send = |ui: &mut UiState, bytes: Vec<u8>| ui.apply(cb::SET_PLAYER_TEAM, &mut Reader::new(&bytes), &content);
 
     // 0 = add: parameters (RED = TeamColor id 12) + players.
     assert!(send(&mut ui, packet(0, Some((2, 3, Some(12), 3)), Some(&["p"]))).unwrap());
@@ -106,7 +128,10 @@ fn team_packet_decodes_exact_26_3_layout_for_every_method() {
     assert_eq!(*team.parameters.display, serde_json::json!("D"));
     assert_eq!(*team.parameters.prefix, serde_json::json!("P"));
     assert_eq!(*team.parameters.suffix, serde_json::json!("S"));
-    assert_eq!(team.parameters.visibility, TeamVisibility::HideForOtherTeams);
+    assert_eq!(
+        team.parameters.visibility,
+        TeamVisibility::HideForOtherTeams
+    );
     assert_eq!(team.parameters.collision, TeamCollision::PushOwnTeam);
     assert_eq!(team.parameters.formatting, 12);
     assert_eq!(team.parameters.options, 3);
@@ -148,7 +173,8 @@ fn rc1_hud_chat_wraps_without_overlap_in_game_and_history() {
     let mut ui = UiState::new(&content).unwrap();
     ui.resize(427, 240, 1.);
     ui.local_message("older message").unwrap();
-    ui.local_message(&"long styled chat message ".repeat(12)).unwrap();
+    ui.local_message(&"long styled chat message ".repeat(12))
+        .unwrap();
     ui.chat.back_mut().unwrap().component = serde_json::json!({
         "text": "", "extra": [
             {"text": "red ".repeat(35), "color": "red"},
@@ -157,25 +183,64 @@ fn rc1_hud_chat_wraps_without_overlap_in_game_and_history() {
     });
     for chat_open in [false, true] {
         if chat_open {
-            ui.execute(UiIntent::OpenChat { command: false }, &mut inventory, &content).unwrap();
+            ui.execute(
+                UiIntent::OpenChat { command: false },
+                &mut inventory,
+                &content,
+            )
+            .unwrap();
         }
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let message = ui.nodes.iter().find(|node| node.id.starts_with("chat/line/") && node.label.starts_with("red ")).unwrap();
-        let crate::ui::Paint::RichText(layout) = &message.paint else { panic!("chat must retain rich text") };
-        assert!(layout.glyphs.iter().any(|glyph| glyph.position[1] > 0. && layout.runs[glyph.style].style.bold));
-        assert!(layout.runs.iter().any(|run| run.style.color_override && run.style.color[0] > run.style.color[1]));
+        let message = ui
+            .nodes
+            .iter()
+            .find(|node| node.id.starts_with("chat/line/") && node.label.starts_with("red "))
+            .unwrap();
+        let crate::ui::Paint::RichText(layout) = &message.paint else {
+            panic!("chat must retain rich text")
+        };
+        assert!(
+            layout
+                .glyphs
+                .iter()
+                .any(|glyph| glyph.position[1] > 0. && layout.runs[glyph.style].style.bold)
+        );
+        assert!(
+            layout
+                .runs
+                .iter()
+                .any(|run| run.style.color_override && run.style.color[0] > run.style.color[1])
+        );
         let nodes = ui.observed_nodes();
-        let lines: Vec<_> = nodes.iter().filter(|node| node["id"].as_str().is_some_and(|id| id.starts_with("chat/line/") && !id.contains("/action/"))).collect();
+        let lines: Vec<_> = nodes
+            .iter()
+            .filter(|node| {
+                node["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("chat/line/") && !id.contains("/action/"))
+            })
+            .collect();
         assert_eq!(lines.len(), 2);
         let older = lines[1]["bounds"].as_array().unwrap();
         let newer = lines[0]["bounds"].as_array().unwrap();
         assert!(newer[3].as_f64().unwrap() > 18.);
-        assert!(newer[1].as_f64().unwrap() + newer[3].as_f64().unwrap() <= 190.,
-            "the last wrapped line must stay above the status bars");
+        assert!(
+            newer[1].as_f64().unwrap() + newer[3].as_f64().unwrap() <= 190.,
+            "the last wrapped line must stay above the status bars"
+        );
         assert_eq!(newer[3].as_f64().unwrap(), f64::from(layout.height));
-        assert_eq!(older[3].as_f64().unwrap(), 9., "single lines use the same 9px pitch");
-        assert_eq!(older[1].as_f64().unwrap() + older[3].as_f64().unwrap(), newer[1].as_f64().unwrap());
-        assert!(older[1].as_f64().unwrap() + older[3].as_f64().unwrap() <= newer[1].as_f64().unwrap());
+        assert_eq!(
+            older[3].as_f64().unwrap(),
+            9.,
+            "single lines use the same 9px pitch"
+        );
+        assert_eq!(
+            older[1].as_f64().unwrap() + older[3].as_f64().unwrap(),
+            newer[1].as_f64().unwrap()
+        );
+        assert!(
+            older[1].as_f64().unwrap() + older[3].as_f64().unwrap() <= newer[1].as_f64().unwrap()
+        );
     }
 }
 
@@ -192,28 +257,46 @@ fn rc1_hud_sidebar_orders_and_caps_entries() {
     objective.0.extend([0, 8, 0, 6]);
     objective.0.extend(b"Points");
     objective.0.extend([0, 0]);
-    ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&objective.0), &content).unwrap();
+    ui.apply(cb::SET_OBJECTIVE, &mut Reader::new(&objective.0), &content)
+        .unwrap();
     let mut display = Writer::default();
     display.var(1);
     display.string("points");
-    ui.apply(cb::SET_DISPLAY_OBJECTIVE, &mut Reader::new(&display.0), &content).unwrap();
+    ui.apply(
+        cb::SET_DISPLAY_OBJECTIVE,
+        &mut Reader::new(&display.0),
+        &content,
+    )
+    .unwrap();
     for i in 0..20 {
         let mut score = Writer::default();
         score.string(&format!("player{i:02}"));
         score.string("points");
         score.var(i / 2);
         score.0.extend([0, 0]);
-        ui.apply(cb::SET_SCORE, &mut Reader::new(&score.0), &content).unwrap();
+        ui.apply(cb::SET_SCORE, &mut Reader::new(&score.0), &content)
+            .unwrap();
     }
     ui.rebuild_for_test(&inventory, &content).unwrap();
     let nodes = ui.observed_nodes();
-    let names: Vec<_> = nodes.iter().filter_map(|n| {
-        let id = n["id"].as_str()?;
-        (id.starts_with("hud/sidebar/holder/") && id.ends_with("/name")).then(|| n["label"].as_str().unwrap().to_owned())
-    }).collect();
+    let names: Vec<_> = nodes
+        .iter()
+        .filter_map(|n| {
+            let id = n["id"].as_str()?;
+            (id.starts_with("hud/sidebar/holder/") && id.ends_with("/name"))
+                .then(|| n["label"].as_str().unwrap().to_owned())
+        })
+        .collect();
     assert_eq!(names.len(), 15);
-    assert_eq!(&names[..4], ["player18", "player19", "player16", "player17"]);
-    assert!(nodes.iter().any(|n| n["id"] == "hud/sidebar/title" && n["label"] == "Points"));
+    assert_eq!(
+        &names[..4],
+        ["player18", "player19", "player16", "player17"]
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n["id"] == "hud/sidebar/title" && n["label"] == "Points")
+    );
 }
 
 #[test]
@@ -222,11 +305,31 @@ fn rc1_hud_f1_toggles_game_hud() {
     let (content, mut inventory, mut ui) = state();
     ui.resize(427, 240, 1.);
     for hidden in [true, false] {
-        ui.execute(UiIntent::Key { key: "F1".into(), pressed: true, modifiers: Default::default() }, &mut inventory, &content).unwrap();
+        ui.execute(
+            UiIntent::Key {
+                key: "F1".into(),
+                pressed: true,
+                modifiers: Default::default(),
+            },
+            &mut inventory,
+            &content,
+        )
+        .unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        assert_eq!(ui.setting("hide_hud").and_then(serde_json::Value::as_bool), Some(hidden));
-        assert_eq!(ui.observed_nodes().iter().any(|n| n["id"] == "hud/hotbar"), !hidden);
-        assert_eq!(ui.observed_nodes().iter().any(|n| n["id"] == "hud/crosshair"), !hidden);
+        assert_eq!(
+            ui.setting("hide_hud").and_then(serde_json::Value::as_bool),
+            Some(hidden)
+        );
+        assert_eq!(
+            ui.observed_nodes().iter().any(|n| n["id"] == "hud/hotbar"),
+            !hidden
+        );
+        assert_eq!(
+            ui.observed_nodes()
+                .iter()
+                .any(|n| n["id"] == "hud/crosshair"),
+            !hidden
+        );
     }
 }
 #[test]
@@ -234,14 +337,21 @@ fn hide_hud_setting_hides_and_restores_the_hud() {
     let (content, inventory, mut ui) = state();
     ui.resize(427, 240, 1.);
     for hidden in [true, false] {
-        ui.apply_setting("hide_hud", serde_json::json!(hidden)).unwrap();
+        ui.apply_setting("hide_hud", serde_json::json!(hidden))
+            .unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        assert_eq!(ui.observed_nodes().iter().any(|n| n["id"] == "hud/hotbar"), !hidden);
-        assert_eq!(ui.observed_nodes().iter().any(|n| n["id"] == "hud/crosshair"), !hidden);
+        assert_eq!(
+            ui.observed_nodes().iter().any(|n| n["id"] == "hud/hotbar"),
+            !hidden
+        );
+        assert_eq!(
+            ui.observed_nodes()
+                .iter()
+                .any(|n| n["id"] == "hud/crosshair"),
+            !hidden
+        );
     }
 }
-
-
 
 fn dead(ui: &mut UiState) {
     ui.set_presentation(UiPresentation {
@@ -356,7 +466,7 @@ fn chat_open_type_send_returns_to_game() {
     )
     .expect("T must open chat on the Game screen");
     assert_eq!(ui.screen(), Screen::Chat);
-    let text_err = match ui.execute(
+    let _text_err = match ui.execute(
         UiIntent::Text { text: "hi".into() },
         &mut inventory,
         &content,
@@ -788,9 +898,11 @@ fn inventory_captions_clear_slots_and_preview_pin_exists() {
     let title = rect("menu/title");
     // InventoryScreen.extractLabels draws Crafting only; an Inventory
     // caption at y72 would intersect the boots slot (y62..78).
-    assert!(!nodes
-        .iter()
-        .any(|node| node["id"] == "menu/inventory_label"));
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node["id"] == "menu/inventory_label")
+    );
     // Vanilla draws the title as one unbounded line: the label must not wrap
     // inside the panel. It may extend past it; the slot overlap check below
     // still holds because the caption stays in its y6..16 row.
@@ -1062,7 +1174,7 @@ fn pause_and_options_seams() {
     // proof drives pause/settings/done/back-to-game clicks for real (see
     // step-pause/step-options screenshots). Here pin the screen machine:
     // Pause -> Settings -> Pause round-trip via NodeAction directly.
-    use crate::ui::{NodeAction, UiCommand};
+    use crate::ui::NodeAction;
     let effects = ui
         .activate_for_test(
             NodeAction::Screen(Screen::Settings),
@@ -1091,9 +1203,11 @@ fn pause_and_options_seams() {
         .find(|n| n["id"] == "settings/fov")
         .expect("FOV row must exist");
     assert_eq!(fov["role"], "slider");
-    assert!(fov["label"]
-        .as_str()
-        .is_some_and(|l| l.starts_with("Field of view:")));
+    assert!(
+        fov["label"]
+            .as_str()
+            .is_some_and(|l| l.starts_with("Field of view:"))
+    );
     // Escape on Pause goes back (Close path), not stuck.
     ui.execute(
         UiIntent::Key {
@@ -1127,7 +1241,7 @@ fn p1_sign_line_labels_select_each_edit_buffer_without_changing_typing() {
     for line in 0..4 {
         let label = format!("Sign line {}", line + 1);
         let (focus, _) = ui
-            .exact_input(&inventory, &content, &class, &title, &label, "x")
+            .exact_input(&inventory, &content, class, &title, &label, "x")
             .unwrap();
         match &focus {
             UiIntent::Focus { element_id, .. } => {
@@ -1247,7 +1361,10 @@ fn rc2_hud_vitals_follow_the_game_mode() {
         for row in ["hud/heart/", "hud/food/", "hud/armor/", "hud/air/"] {
             assert_eq!(hud_has(&ui, row), shown, "game mode {mode} row {row}");
         }
-        assert!(hud_has(&ui, "hud/hotbar"), "game mode {mode} keeps the hotbar");
+        assert!(
+            hud_has(&ui, "hud/hotbar"),
+            "game mode {mode} keeps the hotbar"
+        );
         assert!(hud_has(&ui, "hud/crosshair"));
     }
 }

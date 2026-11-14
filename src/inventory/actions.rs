@@ -1,5 +1,5 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::{InventoryStore, Menu, MenuKind, PacketCommand, Stack, UiContext};
+use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     protocol::{Result, Writer, content::Content},
     ui::{ClickMode, UiIntent},
@@ -154,17 +154,16 @@ impl InventoryStore {
             self.player_slot_identities[slot as usize] =
                 self.player_slot_identities[slot as usize].wrapping_add(1);
         }
-        if let Some(menu) = self.active.as_mut().filter(|m| m.kind != MenuKind::Lectern) {
-            if (9..45).contains(&slot) {
-                let first = if menu.kind == MenuKind::Crafter {
-                    9
-                } else {
-                    menu.slots.len().saturating_sub(36)
-                };
-                if first + 36 <= menu.slots.len() {
-                    menu.slots[first + slot as usize - 9] =
-                        self.player.slots[slot as usize].clone();
-                }
+        if let Some(menu) = self.active.as_mut().filter(|m| m.kind != MenuKind::Lectern)
+            && (9..45).contains(&slot)
+        {
+            let first = if menu.kind == MenuKind::Crafter {
+                9
+            } else {
+                menu.slots.len().saturating_sub(36)
+            };
+            if first + 36 <= menu.slots.len() {
+                menu.slots[first + slot as usize - 9] = self.player.slots[slot as usize].clone();
             }
         }
         self.revision += 1;
@@ -244,7 +243,7 @@ impl InventoryStore {
                     data(index as i16).is_some_and(|cost| {
                         cost > 0
                             && (self.game_mode == 1
-                                || (self.experience_level >= cost as i32
+                                || (self.experience_level >= cost
                                     && self.experience_level >= required
                                     && menu
                                         .slots
@@ -639,7 +638,10 @@ impl InventoryStore {
         self.sync_player();
         self.experience_level = experience_level;
         self.player_slot_identities = player_slot_identities;
-        if commands.last().is_some_and(|command| command.id == sb::CONTAINER_CLOSE) {
+        if commands
+            .last()
+            .is_some_and(|command| command.id == sb::CONTAINER_CLOSE)
+        {
             self.close();
         } else {
             self.revision += 1;
@@ -914,16 +916,15 @@ impl Prediction<'_> {
                 if !effects[..5].iter().any(|(n, t)| *n == name && levels >= *t) {
                     return Err("beacon primary unavailable".into());
                 }
-                if let Some(secondary) = secondary {
-                    if levels < 4
+                if let Some(secondary) = secondary
+                    && (levels < 4
                         || (*secondary != primary
                             && self
                                 .content
                                 .registry_name("minecraft:mob_effect", *secondary)?
-                                != "minecraft:regeneration")
-                    {
-                        return Err("beacon secondary unavailable".into());
-                    }
+                                != "minecraft:regeneration"))
+                {
+                    return Err("beacon secondary unavailable".into());
                 }
                 w.byte(1);
                 w.var(primary);

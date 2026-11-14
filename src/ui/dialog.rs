@@ -17,8 +17,8 @@
 //!
 //! Not implemented (vanilla extras): the "custom screen" warning button, button tooltips and
 //! title hover tooltips.
-use crate::protocol::packet_ids::play::clientbound as cb;
 use super::state::{NodeAction, Paint, Screen, UiCommand, UiEffects, UiState};
+use crate::protocol::packet_ids::play::clientbound as cb;
 use crate::protocol::{Reader, Result, nbt::Nbt};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -616,7 +616,7 @@ pub(crate) fn compute_scaled_value(
     let steps = java_round((in_range - initial) / step);
     let result = initial + steps * step;
     let slider_pos = scaled_to_slider(start, end, result);
-    if !(slider_pos < 0. || slider_pos > 1.) {
+    if !!(0. ..=1.).contains(&slider_pos) {
         return result;
     }
     let sign = if steps > 0. {
@@ -950,7 +950,7 @@ impl UiState {
             .is_some_and(|shown| shown.waiting_since.is_some())
         {
             let ticks = self.dialog_wait_ticks();
-            if ticks % 20 == 0 || ticks >= WAIT_BACK_ACTIVE_TICKS {
+            if ticks.is_multiple_of(20) || ticks >= WAIT_BACK_ACTIVE_TICKS {
                 self.dirty = true;
             }
         }
@@ -1089,10 +1089,7 @@ impl UiState {
         e: &mut UiEffects,
     ) -> Result<()> {
         let shown = self.dialogs.shown.as_ref().ok_or("dialog_not_open")?;
-        let action = match event["action"]
-            .as_str()
-            .ok_or("component_click_action")?
-        {
+        let action = match event["action"].as_str().ok_or("component_click_action")? {
             "custom" => DialogAction::Custom {
                 id: identifier(event["id"].as_str().ok_or("component_custom_id_required")?)?,
                 payload: match event.get("payload_slot") {

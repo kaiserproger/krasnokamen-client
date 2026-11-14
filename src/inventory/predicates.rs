@@ -200,10 +200,10 @@ impl BlockPredicate {
         Ok(H::Map(f))
     }
     pub fn matches_adventure(&self, block: &AdventureBlock<'_>, content: &Content) -> Result<bool> {
-        if let Some(holders) = &self.blocks {
-            if !content.holder_set_matches_block(&holders.json()?, block.state)? {
-                return Ok(false);
-            }
+        if let Some(holders) = &self.blocks
+            && !content.holder_set_matches_block(&holders.json()?, block.state)?
+        {
+            return Ok(false);
         }
         if let Some(properties) = &self.state {
             let Some(actual) = content.state_properties(block.state) else {
@@ -244,13 +244,12 @@ impl BlockPredicate {
                 }
             }
         }
-        if let Some(pattern) = &self.nbt {
-            if !block
+        if let Some(pattern) = &self.nbt
+            && !block
                 .nbt
                 .is_some_and(|actual| nbt::matches(pattern, actual))
-            {
-                return Ok(false);
-            }
+        {
+            return Ok(false);
         }
         Ok(true)
     }
@@ -295,36 +294,29 @@ fn normalize_predicate(name: &str, mut value: H) -> Result<H> {
             _ => Err("custom data predicate NBT".into()),
         };
     }
-    if name == "minecraft:written_book_content" {
-        if let H::Map(fields) = &mut value {
-            if let Some((_, H::Map(collection))) = fields
-                .iter_mut()
-                .find(|(key, _)| *key == H::string("pages"))
+    if name == "minecraft:written_book_content"
+        && let H::Map(fields) = &mut value
+        && let Some((_, H::Map(collection))) = fields
+            .iter_mut()
+            .find(|(key, _)| *key == H::string("pages"))
+    {
+        for (key, values) in collection {
+            if *key == H::string("contains")
+                && let H::List(values) = values
             {
-                for (key, values) in collection {
-                    if *key == H::string("contains") {
-                        if let H::List(values) = values {
-                            for value in values {
-                                *value =
-                                    components::normalize_text(std::mem::replace(value, H::Empty))?;
-                            }
-                        }
-                    }
-                    if *key == H::string("count") {
-                        if let H::List(values) = values {
-                            for value in values {
-                                if let H::Map(fields) = value {
-                                    if let Some((_, value)) =
-                                        fields.iter_mut().find(|(key, _)| *key == H::string("test"))
-                                    {
-                                        *value = components::normalize_text(std::mem::replace(
-                                            value,
-                                            H::Empty,
-                                        ))?;
-                                    }
-                                }
-                            }
-                        }
+                for value in values {
+                    *value = components::normalize_text(std::mem::replace(value, H::Empty))?;
+                }
+            }
+            if *key == H::string("count")
+                && let H::List(values) = values
+            {
+                for value in values {
+                    if let H::Map(fields) = value
+                        && let Some((_, value)) =
+                            fields.iter_mut().find(|(key, _)| *key == H::string("test"))
+                    {
+                        *value = components::normalize_text(std::mem::replace(value, H::Empty))?;
                     }
                 }
             }
@@ -539,7 +531,7 @@ fn match_component(
             collection(
                 field(predicate, "explosions"),
                 field(value, "explosions"),
-                |p, v| match_explosion(p, v),
+                match_explosion,
             )
         }
         "minecraft:container" | "minecraft:bundle_contents" => {
@@ -594,10 +586,10 @@ fn match_component(
                     }
                 }
                 for key in ["id", "operation", "slot"] {
-                    if let Some(p) = field(p, key) {
-                        if field(v, key) != Some(p) {
-                            return Ok(false);
-                        }
+                    if let Some(p) = field(p, key)
+                        && field(v, key) != Some(p)
+                    {
+                        return Ok(false);
                     }
                 }
                 bound(
@@ -677,10 +669,10 @@ fn collection(
 }
 fn match_item(predicate: &H, item: &H, content: &Content, depth: u8) -> Result<bool> {
     let id = field(item, "id").ok_or("item template ID")?;
-    if let Some(holders) = field(predicate, "items") {
-        if !holder_matches(holders, id, "minecraft:item", content)? {
-            return Ok(false);
-        }
+    if let Some(holders) = field(predicate, "items")
+        && !holder_matches(holders, id, "minecraft:item", content)?
+    {
+        return Ok(false);
     }
     if !bound(
         field(predicate, "count"),

@@ -136,7 +136,7 @@ impl TextureCache {
             total += meta.len();
             entries.push((meta.modified().ok(), meta.len(), entry.path()));
         }
-        entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        entries.sort_unstable_by_key(|a| a.0);
         let mut count = entries.len();
         for (_, size, path) in entries {
             if total + incoming <= MAX_DISK && count < MAX_ENTRIES {

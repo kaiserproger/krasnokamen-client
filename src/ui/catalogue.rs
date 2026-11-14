@@ -81,9 +81,8 @@ impl UiState {
             selected.iter().map(|(key, _, _)| *key).collect();
         self.creative_stacks.retain(|key, _| visible.contains(key));
         for (position, (key, template, label)) in selected.into_iter().enumerate() {
-            if !self.creative_stacks.contains_key(&key) {
-                self.creative_stacks
-                    .insert(key, crate::inventory::template_stack(&template, content)?);
+            if let std::collections::btree_map::Entry::Vacant(e) = self.creative_stacks.entry(key) {
+                e.insert(crate::inventory::template_stack(&template, content)?);
             }
             self.add(
                 format!("creative/item/{key}"),
@@ -159,7 +158,12 @@ impl UiState {
             self.compact_button(
                 &format!("recipe/category/{category}"),
                 label,
-                [x - RECIPE_CATEGORY_WIDTH - 2., y + index as f32 * 22., RECIPE_CATEGORY_WIDTH, 20.],
+                [
+                    x - RECIPE_CATEGORY_WIDTH - 2.,
+                    y + index as f32 * 22.,
+                    RECIPE_CATEGORY_WIDTH,
+                    20.,
+                ],
                 NodeAction::RecipeCategory(category.clone()),
                 true,
                 None,

@@ -1,7 +1,14 @@
 use super::*;
-use crate::computer::{Frame, audio::AudioSource, relay::{self, Encoder, Id, Request}};
+use crate::computer::{
+    Frame,
+    audio::AudioSource,
+    relay::{self, Encoder, Id, Request},
+};
 use crate::voice::{self, FRAME};
-use std::{collections::{BTreeMap, BTreeSet}, time::{Duration, Instant}};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{Duration, Instant},
+};
 
 #[derive(Default)]
 pub(super) struct Sharing {
@@ -66,11 +73,25 @@ impl Sharing {
         let request = self.pending.as_ref()?;
         Some(DesktopDialog {
             title: "Allow screen and audio sharing?".into(),
-            body: vec![format!("{} wants to view your screens.", request.name),
-                "Includes app audio, only while looking. No remote input.".into()],
+            body: vec![
+                format!("{} wants to view your screens.", request.name),
+                "Includes app audio, only while looking. No remote input.".into(),
+            ],
             entries: vec![
-                ("Deny".into(), DesktopAction::ViewPermission { request: request.number, allow: false }),
-                ("Allow all my open screens and their app audio".into(), DesktopAction::ViewPermission { request: request.number, allow: true }),
+                (
+                    "Deny".into(),
+                    DesktopAction::ViewPermission {
+                        request: request.number,
+                        allow: false,
+                    },
+                ),
+                (
+                    "Allow all my open screens and their app audio".into(),
+                    DesktopAction::ViewPermission {
+                        request: request.number,
+                        allow: true,
+                    },
+                ),
             ],
             selected,
         })
@@ -78,14 +99,25 @@ impl Sharing {
 }
 impl App {
     pub(super) fn answer_screen_request(&mut self, number: u32, allow: bool) -> Result<(), String> {
-        if self.computer.sharing.pending.as_ref().is_none_or(|request| request.number != number) {
+        if self
+            .computer
+            .sharing
+            .pending
+            .as_ref()
+            .is_none_or(|request| request.number != number)
+        {
             return Err("no_pending_screen_request".into());
         }
         let request = self.computer.sharing.pending.take().unwrap();
         self.computer.selection = 0;
         match self.session.send_screen(request.answer(allow)) {
             Ok(()) => {
-                if allow { self.computer.sharing.viewers.insert(request.viewer, request.name); }
+                if allow {
+                    self.computer
+                        .sharing
+                        .viewers
+                        .insert(request.viewer, request.name);
+                }
                 self.computer.message = if allow {
                     "Screens and app audio shared while they look. F8 revokes ALL viewers; Shift+Esc closes"
                 } else { "Viewing denied; desktop remains private" }.into();
@@ -98,7 +130,9 @@ impl App {
         }
     }
     pub(super) fn revoke_screen_viewer(&mut self, viewer: [u8; 16]) {
-        if self.computer.sharing.viewers.remove(&viewer).is_none() { return; }
+        if self.computer.sharing.viewers.remove(&viewer).is_none() {
+            return;
+        }
         if let Some(id) = self.computer.sharing.announced {
             let mut packet = id.packet(5);
             packet.extend(viewer);
@@ -130,8 +164,13 @@ impl App {
             self.computer.message = error;
         }
         let current = if live && self.computer.source.is_some() && self.computer.size != [0; 2] {
-            self.computer.face.zip(self.session.screen_dimension()).map(|(face, dimension)| Id { face, dimension })
-        } else { None };
+            self.computer
+                .face
+                .zip(self.session.screen_dimension())
+                .map(|(face, dimension)| Id { face, dimension })
+        } else {
+            None
+        };
         if current != self.computer.sharing.announced {
             if let Some(old) = self.computer.sharing.announced.take() {
                 let _ = self.session.send_screen(old.packet(1));
@@ -196,11 +235,17 @@ impl App {
         if let Some(renderer) = &mut self.renderer {
             let own = self.computer.sharing.announced;
             let dimension = self.session.screen_dimension();
-            renderer.retain_shared_screens(|id| live && Some(id.dimension) == dimension
-                && Some(id) != own && self.session.screen_relay.active.contains_key(&id));
+            renderer.retain_shared_screens(|id| {
+                live && Some(id.dimension) == dimension
+                    && Some(id) != own
+                    && self.session.screen_relay.active.contains_key(&id)
+            });
             for (id, remote) in &mut self.session.screen_relay.active {
-                if live && Some(id.dimension) == dimension && Some(*id) != own
-                    && (remote.dirty || !renderer.has_shared_screen(*id)) {
+                if live
+                    && Some(id.dimension) == dimension
+                    && Some(*id) != own
+                    && (remote.dirty || !renderer.has_shared_screen(*id))
+                {
                     let frame = remote.frame.take().unwrap_or_else(relay::on_frame);
                     renderer.update_shared_screen(*id, &frame);
                     remote.dirty = false;
@@ -218,37 +263,59 @@ impl App {
     /// `frame` is a fresh capture, or `None` when the source had nothing new (a static window):
     /// then only an owed key frame is answered, from the last picture sent.
     pub(super) fn publish_screen_frame(&mut self, frame: Option<&Frame>) {
-        let Some(id) = self.computer.sharing.announced else { return; };
+        let Some(id) = self.computer.sharing.announced else {
+            return;
+        };
         // Local approval is required as well as server demand. Never trust a
         // demand alone to authorize disclosure of desktop bytes.
-        if self.computer.sharing.viewers.is_empty() { return; }
-        let Some(demand) = self.session.screen_relay.demand.get(&id).copied() else { return; };
-        if frame.is_none() && !self.session.screen_relay.key_wanted.contains(&id) { return; }
+        if self.computer.sharing.viewers.is_empty() {
+            return;
+        }
+        let Some(demand) = self.session.screen_relay.demand.get(&id).copied() else {
+            return;
+        };
+        if frame.is_none() && !self.session.screen_relay.key_wanted.contains(&id) {
+            return;
+        }
         // A requested key frame (new viewer, resync) is answered at once, not at the next frame slot.
         let key = self.session.screen_relay.key_wanted.remove(&id);
         let now = Instant::now();
-        if !key && self.computer.sharing.next_frame.is_some_and(|next| now < next) { return; }
-        self.computer.sharing.next_frame = Some(now + Duration::from_secs_f64(1. / f64::from(demand.fps)));
-        if key { self.computer.sharing.encoder.want_key(); }
+        if !key
+            && self
+                .computer
+                .sharing
+                .next_frame
+                .is_some_and(|next| now < next)
+        {
+            return;
+        }
+        self.computer.sharing.next_frame =
+            Some(now + Duration::from_secs_f64(1. / f64::from(demand.fps)));
+        if key {
+            self.computer.sharing.encoder.want_key();
+        }
         let encoder = &mut self.computer.sharing.encoder;
         let result = match frame {
             Some(frame) => encoder.encode(id, frame, demand.width),
             None => encoder.repeat_key(id, demand.width),
         }
-            .and_then(|packets| {
-                // An identical picture produced no packets: nothing is sent.
-                let sent = !packets.is_empty();
-                let key_sent = packets.first().is_some_and(|packet| packet[27] == 1);
-                for packet in packets {
-                    relay::stats::TX_BYTES.fetch_add(packet.len() as u64, std::sync::atomic::Ordering::Relaxed);
-                    self.session.send_screen(packet)?;
+        .and_then(|packets| {
+            // An identical picture produced no packets: nothing is sent.
+            let sent = !packets.is_empty();
+            let key_sent = packets.first().is_some_and(|packet| packet[27] == 1);
+            for packet in packets {
+                relay::stats::TX_BYTES
+                    .fetch_add(packet.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                self.session.send_screen(packet)?;
+            }
+            if sent {
+                relay::stats::TX_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if key_sent {
+                    relay::stats::TX_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                if sent {
-                    relay::stats::TX_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if key_sent { relay::stats::TX_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
-                }
-                Ok(())
-            });
+            }
+            Ok(())
+        });
         if let Err(error) = result {
             // The encoder's reference chain and what viewers have may differ now: restart with a key frame.
             self.computer.sharing.encoder.want_key();
@@ -261,9 +328,14 @@ impl App {
         let announced = self.computer.sharing.announced;
         let demanded = self.session.voice_net.enabled
             && announced.is_some_and(|id| {
-                !self.computer.sharing.viewers.is_empty() && self.session.screen_relay.demand.contains_key(&id)
+                !self.computer.sharing.viewers.is_empty()
+                    && self.session.screen_relay.demand.contains_key(&id)
             });
-        let private = self.computer.source.as_ref().is_some_and(|source| source.private_audio());
+        let private = self
+            .computer
+            .source
+            .as_ref()
+            .is_some_and(|source| source.private_audio());
         let now = Instant::now();
         let sharing = &mut self.computer.sharing;
         if announced.is_none() || self.computer.source.is_none() {
@@ -272,28 +344,48 @@ impl App {
             return;
         }
         if demanded || private {
-            if let Some(capture) = &mut sharing.audio { capture.idle_since = None; }
+            if let Some(capture) = &mut sharing.audio {
+                capture.idle_since = None;
+            }
         } else if let Some(capture) = &mut sharing.audio
             && now.duration_since(*capture.idle_since.get_or_insert(now)) >= AUDIO_GRACE
         {
             sharing.audio = None;
         }
         if sharing.audio.is_none() && (demanded || private) && !sharing.audio_unavailable {
-            let native = self.computer.source.as_mut().and_then(|source| source.audio());
-            match (crate::computer::audio::resolve(native), voice::Encoder::with_bitrate(APP_BITRATE, true)) {
+            let native = self
+                .computer
+                .source
+                .as_mut()
+                .and_then(|source| source.audio());
+            match (
+                crate::computer::audio::resolve(native),
+                voice::Encoder::with_bitrate(APP_BITRATE, true),
+            ) {
                 (Some(source), Ok(encoder)) => {
-                    sharing.audio = Some(AudioCapture { source, encoder, pcm: Vec::new(), seq: 0, sent: 0, idle_since: None });
+                    sharing.audio = Some(AudioCapture {
+                        source,
+                        encoder,
+                        pcm: Vec::new(),
+                        seq: 0,
+                        sent: 0,
+                        idle_since: None,
+                    });
                 }
                 (_, encoder) => {
                     sharing.audio_unavailable = true;
-                    if let Err(error) = encoder { eprintln!("screen audio: {error}"); }
+                    if let Err(error) = encoder {
+                        eprintln!("screen audio: {error}");
+                    }
                 }
             }
         }
         let owner = &mut self.session.screen_audio_owner;
         owner.capturing = sharing.audio.is_some();
         owner.unavailable = sharing.audio_unavailable;
-        let (Some(id), Some(capture)) = (announced, &mut sharing.audio) else { return };
+        let (Some(id), Some(capture)) = (announced, &mut sharing.audio) else {
+            return;
+        };
         let (packets, failure) = capture.step();
         owner.packets_sent = capture.sent;
         let local = private;
@@ -318,17 +410,24 @@ impl App {
         }
     }
     pub(super) fn request_shared_screen(&mut self, face: Face) -> bool {
-        let Some(dimension) = self.session.screen_dimension() else { return false; };
+        let Some(dimension) = self.session.screen_dimension() else {
+            return false;
+        };
         let id = Id { face, dimension };
-        if Some(id) == self.computer.sharing.announced || !self.session.screen_relay.active.contains_key(&id) {
+        if Some(id) == self.computer.sharing.announced
+            || !self.session.screen_relay.active.contains_key(&id)
+        {
             return false;
         }
         self.computer.release_input();
-        let _ = self.session.command(Command::Input(InputIntent::ReleaseAll));
+        let _ = self
+            .session
+            .command(Command::Input(InputIntent::ReleaseAll));
         match self.session.send_screen(id.packet(3)) {
             Ok(()) => {
                 self.computer.sharing.watching.insert(id);
-                self.computer.message = "Viewing requested. Waiting for the owner; F8 cancels/leaves".into();
+                self.computer.message =
+                    "Viewing requested. Waiting for the owner; F8 cancels/leaves".into();
             }
             Err(error) => self.computer.message = error,
         }
@@ -338,7 +437,8 @@ impl App {
     pub(super) fn sharing_event(&mut self, event: &WindowEvent) -> bool {
         if let WindowEvent::KeyboardInput { event, .. } = event
             && event.physical_key == PhysicalKey::Code(KeyCode::F8)
-            && event.state == ElementState::Pressed && !event.repeat
+            && event.state == ElementState::Pressed
+            && !event.repeat
         {
             self.leave_screen_sharing();
             return true;
@@ -350,7 +450,8 @@ impl App {
     fn leave_screen_sharing(&mut self) {
         if let Some(id) = self.computer.sharing.announced {
             for (viewer, _) in std::mem::take(&mut self.computer.sharing.viewers) {
-                let mut packet = id.packet(5); packet.extend(viewer);
+                let mut packet = id.packet(5);
+                packet.extend(viewer);
                 let _ = self.session.send_screen(packet);
             }
             self.session.screen_relay.demand.remove(&id);
@@ -362,14 +463,19 @@ impl App {
         // Clear already-rendered pictures immediately rather than waiting
         // for STOP to return through the network.
         for remote in self.session.screen_relay.active.values_mut() {
-            remote.frame = None; remote.dirty = true;
+            remote.frame = None;
+            remote.dirty = true;
         }
-        self.computer.message = "Screen sharing revoked; viewing ended. Local capture continues".into();
+        self.computer.message =
+            "Screen sharing revoked; viewing ended. Local capture continues".into();
         self.publish_session();
     }
     /// Automation `client_screen_share`: the same paths as the player's right-click on a
     /// remote monitor (`request`), the owner's consent dialog (`answer`) and F8 (`leave`).
-    pub(crate) fn screen_share_command(&mut self, arguments: &serde_json::Value) -> Result<serde_json::Value, String> {
+    pub(crate) fn screen_share_command(
+        &mut self,
+        arguments: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         use serde_json::json;
         let result = match arguments["action"].as_str() {
             Some("request") => {
@@ -378,7 +484,10 @@ impl App {
                 }
                 let hit = self.computer_hit().ok_or("not_looking_at_a_monitor")?;
                 let face = self.monitor_face(&hit)?;
-                let dimension = self.session.screen_dimension().ok_or("no_screen_dimension")?;
+                let dimension = self
+                    .session
+                    .screen_dimension()
+                    .ok_or("no_screen_dimension")?;
                 let id = Id { face, dimension };
                 if !self.request_shared_screen(face) {
                     return Err("not_an_active_remote_screen".into());
@@ -390,8 +499,15 @@ impl App {
                     "width": face.width, "height": face.height, "dimension": dimension})
             }
             Some("answer") => {
-                let allow = arguments["allow"].as_bool().ok_or("allow_required_for_answer")?;
-                let request = self.computer.sharing.pending.as_ref().ok_or("no_pending_screen_request")?;
+                let allow = arguments["allow"]
+                    .as_bool()
+                    .ok_or("allow_required_for_answer")?;
+                let request = self
+                    .computer
+                    .sharing
+                    .pending
+                    .as_ref()
+                    .ok_or("no_pending_screen_request")?;
                 let (number, viewer) = (request.number, request.name.clone());
                 self.answer_screen_request(number, allow)?;
                 json!({"action": "answer", "request": number, "viewer": viewer, "allow": allow})
@@ -402,7 +518,11 @@ impl App {
                 self.leave_screen_sharing();
                 json!({"action": "leave", "left_screens": watching, "revoked_viewers": viewers})
             }
-            _ => return Err("invalid_arguments: arguments.action is outside the declared enum".into()),
+            _ => {
+                return Err(
+                    "invalid_arguments: arguments.action is outside the declared enum".into(),
+                );
+            }
         };
         self.publish_session();
         Ok(result)
@@ -429,13 +549,32 @@ mod tests {
         let mut capture = capture(WavSource::tone(440., 1.).advanced(Duration::from_millis(100)));
         let (packets, failure) = capture.step();
         assert!(failure.is_none());
-        assert!((4..=6).contains(&packets.len()), "100 ms is five 20 ms packets, got {}", packets.len());
-        assert_eq!(packets.iter().map(|p| p.0).collect::<Vec<_>>(), (1..=packets.len() as u32).collect::<Vec<_>>());
-        assert!(packets.iter().all(|(_, opus)| (1..=relay::MAX_OPUS).contains(&opus.len())));
+        assert!(
+            (4..=6).contains(&packets.len()),
+            "100 ms is five 20 ms packets, got {}",
+            packets.len()
+        );
+        assert_eq!(
+            packets.iter().map(|p| p.0).collect::<Vec<_>>(),
+            (1..=packets.len() as u32).collect::<Vec<_>>()
+        );
+        assert!(
+            packets
+                .iter()
+                .all(|(_, opus)| (1..=relay::MAX_OPUS).contains(&opus.len()))
+        );
         let mut decoder = voice::Decoder::new().unwrap();
-        let peak = packets.iter().skip(1).map(|(_, opus)| {
-            decoder.decode(Some(opus)).unwrap().iter().fold(0f32, |m, s| m.max(s.abs()))
-        }).fold(0f32, f32::max);
+        let peak = packets
+            .iter()
+            .skip(1)
+            .map(|(_, opus)| {
+                decoder
+                    .decode(Some(opus))
+                    .unwrap()
+                    .iter()
+                    .fold(0f32, |m, s| m.max(s.abs()))
+            })
+            .fold(0f32, f32::max);
         assert!(peak > 0.2, "decoded tone is audible: {peak}");
         assert_eq!(capture.sent, packets.len() as u64);
         // Nothing new has been captured yet: no packets, no failure.
@@ -453,8 +592,18 @@ mod tests {
     fn permission_prompt_defaults_to_deny_and_discloses_scope() {
         let sharing = Sharing {
             pending: Some(Request {
-                screen: Id { face: Face { block: [0, 1, 2], side: 2, width: 1, height: 1 }, dimension: 0 },
-                number: 7, viewer: [0; 16], name: "Viewer".into(),
+                screen: Id {
+                    face: Face {
+                        block: [0, 1, 2],
+                        side: 2,
+                        width: 1,
+                        height: 1,
+                    },
+                    dimension: 0,
+                },
+                number: 7,
+                viewer: [0; 16],
+                name: "Viewer".into(),
             }),
             ..Default::default()
         };
@@ -463,21 +612,54 @@ mod tests {
         assert_eq!(dialog.selected, 0);
         assert!(dialog.entries[1].0.contains("all my open screens"));
         assert_eq!(dialog.title, "Allow screen and audio sharing?");
-        assert_eq!(dialog.body[1], "Includes app audio, only while looking. No remote input.");
-        assert_eq!(dialog.entries[1].0, "Allow all my open screens and their app audio");
-        assert_eq!(dialog.entries[1].1, crate::ui::desktop::DesktopAction::ViewPermission { request: 7, allow: true });
-        assert_eq!(dialog.entries[0].1, crate::ui::desktop::DesktopAction::ViewPermission { request: 7, allow: false });
+        assert_eq!(
+            dialog.body[1],
+            "Includes app audio, only while looking. No remote input."
+        );
+        assert_eq!(
+            dialog.entries[1].0,
+            "Allow all my open screens and their app audio"
+        );
+        assert_eq!(
+            dialog.entries[1].1,
+            crate::ui::desktop::DesktopAction::ViewPermission {
+                request: 7,
+                allow: true
+            }
+        );
+        assert_eq!(
+            dialog.entries[0].1,
+            crate::ui::desktop::DesktopAction::ViewPermission {
+                request: 7,
+                allow: false
+            }
+        );
     }
     fn screen() -> Id {
-        Id { face: Face { block: [0, 1, 2], side: 2, width: 1, height: 1 }, dimension: 0 }
+        Id {
+            face: Face {
+                block: [0, 1, 2],
+                side: 2,
+                width: 1,
+                height: 1,
+            },
+            dimension: 0,
+        }
     }
     fn playing_app(name: &str) -> App {
         let options = crate::Options {
-            automation: false, bind: "127.0.0.1:0".parse().unwrap(),
-            artifacts: format!(".analysis/{name}").into(), headless: Some(true),
+            automation: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            artifacts: format!(".analysis/{name}").into(),
+            headless: Some(true),
             runtime_dir: format!(".analysis/{name}/runtime").into(),
-            profile: "fixture".into(), server: None, direct_join: false, username: None,
-            width: 1280, height: 720, fullscreen: false,
+            profile: "fixture".into(),
+            server: None,
+            direct_join: false,
+            username: None,
+            width: 1280,
+            height: 720,
+            fullscreen: false,
         };
         let mut app = App::new(options, std::sync::Arc::new(|| {})).unwrap();
         app.session.enter_offline_play_for_test();
@@ -494,29 +676,64 @@ mod tests {
     fn screen_share_answer_runs_the_consent_dialog_path() {
         let mut app = playing_app("screen-share-answer");
         let viewer = [9; 16];
-        app.computer.sharing.pending = Some(Request { screen: screen(), number: 7, viewer, name: "Viewer".into() });
-        assert_eq!(app.screen_share_command(&json!({"action": "answer"})), Err("allow_required_for_answer".into()));
-        assert!(app.computer.sharing.pending.is_some(), "a refused call leaves the dialog open");
+        app.computer.sharing.pending = Some(Request {
+            screen: screen(),
+            number: 7,
+            viewer,
+            name: "Viewer".into(),
+        });
+        assert_eq!(
+            app.screen_share_command(&json!({"action": "answer"})),
+            Err("allow_required_for_answer".into())
+        );
+        assert!(
+            app.computer.sharing.pending.is_some(),
+            "a refused call leaves the dialog open"
+        );
         assert_eq!(
             app.screen_share_command(&json!({"action": "answer", "allow": true})),
             Ok(json!({"action": "answer", "request": 7, "viewer": "Viewer", "allow": true}))
         );
         assert!(app.computer.sharing.pending.is_none());
-        assert_eq!(app.computer.sharing.viewers.get(&viewer).map(String::as_str), Some("Viewer"));
-        assert!(app.computer.message.starts_with("Screens and app audio shared"));
+        assert_eq!(
+            app.computer
+                .sharing
+                .viewers
+                .get(&viewer)
+                .map(String::as_str),
+            Some("Viewer")
+        );
+        assert!(
+            app.computer
+                .message
+                .starts_with("Screens and app audio shared")
+        );
         assert_eq!(
             app.screen_share_command(&json!({"action": "answer", "allow": false})),
             Err("no_pending_screen_request".into())
         );
-        assert!(app.screen_share_command(&json!({"action": "watch"})).is_err());
+        assert!(
+            app.screen_share_command(&json!({"action": "watch"}))
+                .is_err()
+        );
     }
     #[test]
     fn screen_share_request_targets_only_an_active_remote_screen() {
         let mut app = playing_app("screen-share-request");
-        assert!(app.screen_share_command(&json!({"action": "request"})).is_err(), "no monitor under the crosshair");
+        assert!(
+            app.screen_share_command(&json!({"action": "request"}))
+                .is_err(),
+            "no monitor under the crosshair"
+        );
         assert!(app.computer.sharing.watching.is_empty());
-        assert!(!app.request_shared_screen(screen().face), "an inactive screen is not requested");
-        app.session.screen_relay.active.insert(screen(), Default::default());
+        assert!(
+            !app.request_shared_screen(screen().face),
+            "an inactive screen is not requested"
+        );
+        app.session
+            .screen_relay
+            .active
+            .insert(screen(), Default::default());
         assert!(app.request_shared_screen(screen().face));
         assert!(app.computer.sharing.watching.contains(&screen()));
         assert!(app.computer.message.contains("F8 cancels/leaves"));
@@ -524,30 +741,47 @@ mod tests {
     #[test]
     fn screen_share_leave_is_f8_and_a_later_allow_is_counted_and_left() {
         let mut app = playing_app("screen-share-leave");
-        app.session.screen_relay.active.insert(screen(), Default::default());
+        app.session
+            .screen_relay
+            .active
+            .insert(screen(), Default::default());
         assert!(app.request_shared_screen(screen().face));
         assert_eq!(
             app.screen_share_command(&json!({"action": "leave"})),
             Ok(json!({"action": "leave", "left_screens": 1, "revoked_viewers": 0}))
         );
-        assert!(app.computer.sharing.watching.is_empty(), "F8 cancels the unanswered request");
-        assert_eq!(app.computer.message, "Screen sharing revoked; viewing ended. Local capture continues");
+        assert!(
+            app.computer.sharing.watching.is_empty(),
+            "F8 cancels the unanswered request"
+        );
+        assert_eq!(
+            app.computer.message,
+            "Screen sharing revoked; viewing ended. Local capture continues"
+        );
         // A server that still grants the cancelled request delivers the owner's Allow.
         app.session.screen_relay.receive(&answer(true)).unwrap();
         app.sync_screen_sharing(true);
         assert_eq!(app.session.screen_relay.cancelled_grants_left, 1);
         assert_eq!(app.session.screen_relay.permission_answers, [1, 0]);
-        assert_eq!(app.computer.message, "Screen sharing revoked; viewing ended. Local capture continues",
-            "a cancelled request never announces viewing");
+        assert_eq!(
+            app.computer.message, "Screen sharing revoked; viewing ended. Local capture continues",
+            "a cancelled request never announces viewing"
+        );
         let sharing = &app.session.minecraft_observation()["screen_sharing"];
         assert_eq!(sharing["cancelled_grants_left"], 1);
-        assert_eq!(sharing["permission_answers"], json!({"allowed": 1, "denied": 0}));
+        assert_eq!(
+            sharing["permission_answers"],
+            json!({"allowed": 1, "denied": 0})
+        );
         assert!(sharing["received_frames"].is_u64() && sharing["decoded_frames"].is_u64());
         // An answer to a request still wanted is announced, not left.
         assert!(app.request_shared_screen(screen().face));
         app.session.screen_relay.receive(&answer(true)).unwrap();
         app.sync_screen_sharing(true);
         assert_eq!(app.session.screen_relay.cancelled_grants_left, 1);
-        assert_eq!(app.computer.message, "Viewing allowed — look at the screen; F8 leaves");
+        assert_eq!(
+            app.computer.message,
+            "Viewing allowed — look at the screen; F8 leaves"
+        );
     }
 }

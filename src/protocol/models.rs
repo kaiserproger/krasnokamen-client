@@ -3,8 +3,8 @@ pub mod lighting;
 pub(crate) mod mipmaps;
 pub(crate) mod shapes;
 use super::{
-    content::{ResourceSource, TextureRegion},
     Result,
+    content::{ResourceSource, TextureRegion},
 };
 use crate::api::RenderLayer;
 use glam::{Mat3, Vec3};
@@ -603,8 +603,9 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
         let max = vector(&element["to"])?;
         let light_emission = match element.get("light_emission") {
             None => 0,
-            Some(value) => value.as_u64().filter(|level| *level <= 15)
-                .ok_or_else(|| format!("element light_emission must be an integer 0..=15, got {value}"))? as u8,
+            Some(value) => value.as_u64().filter(|level| *level <= 15).ok_or_else(|| {
+                format!("element light_emission must be an integer 0..=15, got {value}")
+            })? as u8,
         };
         let shade_direction = shade_direction_override(element)?;
         let mut er = Mat3::IDENTITY;
@@ -622,7 +623,11 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
                 };
             } else {
                 let angles = if r["angles"].is_null() {
-                    Vec3::new(coordinate(&r["x"])?, coordinate(&r["y"])?, coordinate(&r["z"])?)
+                    Vec3::new(
+                        coordinate(&r["x"])?,
+                        coordinate(&r["y"])?,
+                        coordinate(&r["z"])?,
+                    )
                 } else {
                     vector(&r["angles"])?
                 };
@@ -945,7 +950,7 @@ fn tint_kind(block: &str, properties: &Value) -> TintKind {
                 .as_str()
                 .and_then(|v| v.parse::<u32>().ok())
                 .unwrap_or(0);
-            TintKind::Constant(color((age * 32) << 16 | (255 - age * 8) << 8 | age * 4))
+            TintKind::Constant(color((age * 32) << 16 | (255 - age * 8) << 8 | (age * 4)))
         }
         _ => TintKind::None,
     }
@@ -1020,10 +1025,11 @@ mod tests {
         )
         .unwrap();
         assert!(qs.iter().any(|q| q.quad.cullface == Some(0)));
-        assert!(qs
-            .iter()
-            .flat_map(|q| q.quad.positions)
-            .all(|p| p[1] >= 0.49999));
+        assert!(
+            qs.iter()
+                .flat_map(|q| q.quad.positions)
+                .all(|p| p[1] >= 0.49999)
+        );
         // Vanilla `Quadrant.fromXYAngles` composes `y.compose(x)`, i.e. the X
         // rotation applies first: for {x:180,y:90} north maps to WEST (face 4),
         // verified against decompiled `OctahedralGroup`/`SymmetricGroup3`
@@ -1069,7 +1075,8 @@ mod tests {
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
         v["elements"][0]["rotation"]["angle"] = serde_json::json!(-90);
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
-        v["elements"][0]["rotation"] = serde_json::json!({"origin":[8,0,8],"axis":"y","angle":0.0001});
+        v["elements"][0]["rotation"] =
+            serde_json::json!({"origin":[8,0,8],"axis":"y","angle":0.0001});
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
         v["elements"][0]["rotation"]["angle"] = serde_json::json!(-112.5);
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
@@ -1080,7 +1087,8 @@ mod tests {
     #[test]
     fn baked_faces_retain_resolved_gui_light_mode() {
         let mut model = slab();
-        let bake = |model: &Value| bake_elements(model, &serde_json::json!({}), TintKind::None).unwrap();
+        let bake =
+            |model: &Value| bake_elements(model, &serde_json::json!({}), TintKind::None).unwrap();
         assert!(bake(&model).iter().all(|q| q.quad.gui_light_side));
         model["gui_light"] = serde_json::json!("front");
         assert!(bake(&model).iter().all(|q| !q.quad.gui_light_side));
@@ -1089,11 +1097,13 @@ mod tests {
     }
     #[test]
     fn cyclic_texture_is_rejected() {
-        assert!(texture_ref(
-            &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
-            "#a".into()
-        )
-        .is_err());
+        assert!(
+            texture_ref(
+                &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
+                "#a".into()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn java_random_weight_choice_matches_known_jdk_sequence() {
@@ -1272,13 +1282,24 @@ mod tests {
         let mut model = override_model(serde_json::json!("up"));
         model["elements"][0]["light_emission"] = serde_json::json!(7);
         let quads = bake_elements(&model, &serde_json::json!({"y": 90}), TintKind::None).unwrap();
-        assert_eq!(quads.iter().filter(|q| q.quad.light_emission == 7).count(), 3);
-        assert_eq!(quads.iter().filter(|q| q.quad.light_emission == 0).count(), 2);
+        assert_eq!(
+            quads.iter().filter(|q| q.quad.light_emission == 7).count(),
+            3
+        );
+        assert_eq!(
+            quads.iter().filter(|q| q.quad.light_emission == 0).count(),
+            2
+        );
         let lit = &quads[0].quad;
         assert_eq!(lit.light_with_emission([2., 11.]), [7., 11.]);
         assert_eq!(lit.light_with_emission([12., 1.]), [12., 7.]);
         assert_eq!(lit.light_with_emission([-1.; 2]), [-1.; 2]);
-        for invalid in [serde_json::json!(-1), serde_json::json!(16), serde_json::json!(1.5), serde_json::json!("7")] {
+        for invalid in [
+            serde_json::json!(-1),
+            serde_json::json!(16),
+            serde_json::json!(1.5),
+            serde_json::json!("7"),
+        ] {
             model["elements"][0]["light_emission"] = invalid;
             assert!(bake_elements(&model, &serde_json::json!({}), TintKind::None).is_err());
         }
@@ -1308,7 +1329,13 @@ mod tests {
             .collect();
         assert_eq!(
             pairs,
-            BTreeSet::from([(1, Some(1)), (2, Some(1)), (5, Some(1)), (1, None), (2, None)])
+            BTreeSet::from([
+                (1, Some(1)),
+                (2, Some(1)),
+                (5, Some(1)),
+                (1, None),
+                (2, None)
+            ])
         );
         // The legacy flag is untouched: the override does not masquerade as `shade: false`.
         assert!(qs.iter().all(|q| q.quad.shade));
@@ -1341,9 +1368,10 @@ mod tests {
         // The geometry did rotate (y=90 sends the north face to east) while the
         // override keeps naming world north.
         let qs = bake_elements(&model, &serde_json::json!({"y":90}), TintKind::None).unwrap();
-        assert!(qs
-            .iter()
-            .any(|q| q.quad.face == 5 && q.quad.shade_direction == Some(2)));
+        assert!(
+            qs.iter()
+                .any(|q| q.quad.face == 5 && q.quad.shade_direction == Some(2))
+        );
     }
     #[test]
     fn legacy_shade_flag_still_parses_next_to_the_override() {
@@ -1353,13 +1381,17 @@ mod tests {
         let qs = bake_elements(&model, &serde_json::json!({}), TintKind::None).unwrap();
         assert!(qs.iter().all(|q| !q.quad.shade));
         assert_eq!(
-            qs.iter().filter(|q| q.quad.shade_direction == Some(1)).count(),
+            qs.iter()
+                .filter(|q| q.quad.shade_direction == Some(1))
+                .count(),
             3
         );
         let plain = bake_elements(&slab(), &serde_json::json!({}), TintKind::None).unwrap();
-        assert!(plain
-            .iter()
-            .all(|q| q.quad.shade && q.quad.shade_direction.is_none()));
+        assert!(
+            plain
+                .iter()
+                .all(|q| q.quad.shade && q.quad.shade_direction.is_none())
+        );
     }
     #[test]
     fn invalid_shade_direction_override_is_a_model_error() {
@@ -1378,7 +1410,10 @@ mod tests {
             )
             .err()
             .unwrap_or_else(|| panic!("{value} must be rejected"));
-            assert!(error.contains("shade_direction_override"), "{value}: {error}");
+            assert!(
+                error.contains("shade_direction_override"),
+                "{value}: {error}"
+            );
         }
     }
     #[test]
@@ -1455,10 +1490,32 @@ mod tests {
         };
         // Rotated inherited emissive faces retain their own lighting; an ordinary
         // element alongside them and a child replacing elements do not glow.
-        assert_eq!(faces(child), BTreeSet::from([(5, Some(1)), (4, Some(1)), (5, None), (4, None)]));
+        assert_eq!(
+            faces(child),
+            BTreeSet::from([(5, Some(1)), (4, Some(1)), (5, None), (4, None)])
+        );
         assert_eq!(faces(replaced), BTreeSet::from([(5, None), (4, None)]));
-        assert_eq!(models[child].quads.iter().filter(|q| q.quad.light_emission == 15).count(), 2);
-        assert_eq!(models[child].quads.iter().filter(|q| q.quad.light_emission == 0).count(), 2);
-        assert!(models[replaced].quads.iter().all(|q| q.quad.light_emission == 0));
+        assert_eq!(
+            models[child]
+                .quads
+                .iter()
+                .filter(|q| q.quad.light_emission == 15)
+                .count(),
+            2
+        );
+        assert_eq!(
+            models[child]
+                .quads
+                .iter()
+                .filter(|q| q.quad.light_emission == 0)
+                .count(),
+            2
+        );
+        assert!(
+            models[replaced]
+                .quads
+                .iter()
+                .all(|q| q.quad.light_emission == 0)
+        );
     }
 }

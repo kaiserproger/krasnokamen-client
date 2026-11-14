@@ -1,8 +1,8 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
-use crate::protocol::packet_ids::play::clientbound as cb;
-use crate::protocol::packet_ids::{login, configuration};
 use super::*;
-use crate::protocol::{self, world::Chunk, Reader};
+use crate::protocol::packet_ids::play::clientbound as cb;
+use crate::protocol::packet_ids::play::serverbound as sb;
+use crate::protocol::packet_ids::{configuration, login};
+use crate::protocol::{self, Reader, world::Chunk};
 use sha1::Digest as _;
 impl Session {
     fn initialize_player_attributes(&mut self) -> Result<()> {
@@ -23,22 +23,38 @@ impl Session {
         let mut r = Reader::new(bytes);
         match phase {
             Phase::Login => match id {
-                login::clientbound::LOGIN_DISCONNECT => return Err(format!("login disconnect: {}", r.string(32767)?)),
+                login::clientbound::LOGIN_DISCONNECT => {
+                    return Err(format!("login disconnect: {}", r.string(32767)?));
+                }
                 login::clientbound::LOGIN_FINISHED => {
-                    let uuid = uuid::Uuid::from_slice(r.take(16)?).map_err(|error| error.to_string())?.to_string();
+                    let uuid = uuid::Uuid::from_slice(r.take(16)?)
+                        .map_err(|error| error.to_string())?
+                        .to_string();
                     self.player.uuid = Some(Arc::from(uuid));
                     r.string(16)?;
-                    for _ in 0..r.count(16)? { r.string(32767)?; r.string(32767)?; if r.bool()? { r.string(32767)?; } }
+                    for _ in 0..r.count(16)? {
+                        r.string(32767)?;
+                        r.string(32767)?;
+                        if r.bool()? {
+                            r.string(32767)?;
+                        }
+                    }
                     uuid::Uuid::from_slice(r.take(16)?).map_err(|error| error.to_string())?;
-                    r.done()?; self.phase = "configuration".into();
+                    r.done()?;
+                    self.phase = "configuration".into();
                     eprintln!("session startup: configuration");
                 }
-                login::clientbound::LOGIN_COMPRESSION => { r.count(protocol::MAX_FRAME)?; r.done()?; }
+                login::clientbound::LOGIN_COMPRESSION => {
+                    r.count(protocol::MAX_FRAME)?;
+                    r.done()?;
+                }
                 login::clientbound::CUSTOM_QUERY | login::clientbound::COOKIE_REQUEST => {}
                 _ => return Err(format!("unsupported mandatory Login packet {id}")),
             },
             Phase::Configuration => match id {
-                configuration::clientbound::DISCONNECT => return Err(format!("configuration disconnect: {}", r.nbt()?)),
+                configuration::clientbound::DISCONNECT => {
+                    return Err(format!("configuration disconnect: {}", r.nbt()?));
+                }
                 configuration::clientbound::FINISH_CONFIGURATION => {
                     r.done()?;
                     let content = self.content.as_mut().ok_or("content unavailable")?;
@@ -48,18 +64,26 @@ impl Session {
                     self.entities.configure_interaction_tags(content)?;
                     self.player.set_enabled_features(self.features.clone());
                     self.inventory.set_enabled_features(self.features.clone());
-                    if let Some(ui) = &mut self.ui { ui.set_enabled_features(self.features.clone()); }
+                    if let Some(ui) = &mut self.ui {
+                        ui.set_enabled_features(self.features.clone());
+                    }
                     self.phase = "play".into();
                     eprintln!("session startup: play");
                 }
                 configuration::clientbound::REGISTRY_DATA => {
                     let registry = r.string(32767)?;
                     let n = r.count(65536)?;
-                    if self.registries.len() >= 128 && !self.registries.contains_key(&registry) { return Err("registry collection bound".into()); }
+                    if self.registries.len() >= 128 && !self.registries.contains_key(&registry) {
+                        return Err("registry collection bound".into());
+                    }
                     let mut entries = Vec::with_capacity(n);
                     for _ in 0..n {
                         let name = r.string(32767)?;
-                        if !r.bool()? { return Err(format!("registry entry {name} omitted despite empty known-pack response")); }
+                        if !r.bool()? {
+                            return Err(format!(
+                                "registry entry {name} omitted despite empty known-pack response"
+                            ));
+                        }
                         entries.push((name, r.nbt()?));
                     }
                     r.done()?;
@@ -71,22 +95,47 @@ impl Session {
                     let mut features = BTreeSet::new();
                     for _ in 0..r.count(1024)? {
                         let feature = r.string(32767)?;
-                        if feature != "minecraft:vanilla" { return Err(format!("unsupported mandatory feature flag {feature}")); }
+                        if feature != "minecraft:vanilla" {
+                            return Err(format!("unsupported mandatory feature flag {feature}"));
+                        }
                         features.insert(feature);
                     }
-                    r.done()?; self.features = Arc::new(features);
+                    r.done()?;
+                    self.features = Arc::new(features);
                 }
                 configuration::clientbound::UPDATE_TAGS => {
                     let tags = protocol::read_registry_tags(&mut r)?;
-                    for (registry, values) in &tags { self.environment.configure_tags(registry, values)?; }
+                    for (registry, values) in &tags {
+                        self.environment.configure_tags(registry, values)?;
+                    }
                     self.registry_tags = tags;
                 }
-                configuration::clientbound::SELECT_KNOWN_PACKS => { for _ in 0..r.count(1024)? { r.string(32767)?; r.string(32767)?; r.string(32767)?; } r.done()?; }
-                configuration::clientbound::KEEP_ALIVE => { r.i64()?; r.done()?; }
-                configuration::clientbound::PING => { r.i32()?; r.done()?; }
-                configuration::clientbound::COOKIE_REQUEST | configuration::clientbound::RESET_CHAT => {}
+                configuration::clientbound::SELECT_KNOWN_PACKS => {
+                    for _ in 0..r.count(1024)? {
+                        r.string(32767)?;
+                        r.string(32767)?;
+                        r.string(32767)?;
+                    }
+                    r.done()?;
+                }
+                configuration::clientbound::KEEP_ALIVE => {
+                    r.i64()?;
+                    r.done()?;
+                }
+                configuration::clientbound::PING => {
+                    r.i32()?;
+                    r.done()?;
+                }
+                configuration::clientbound::COOKIE_REQUEST
+                | configuration::clientbound::RESET_CHAT => {}
                 configuration::clientbound::CUSTOM_PAYLOAD => self.custom_payload(&mut r)?,
-                configuration::clientbound::RESOURCE_PACK_POP | configuration::clientbound::STORE_COOKIE | configuration::clientbound::CUSTOM_REPORT_DETAILS | configuration::clientbound::SERVER_LINKS | configuration::clientbound::CLEAR_DIALOG => { *self.ignored_presentation.entry(id).or_default() += 1; }
+                configuration::clientbound::RESOURCE_PACK_POP
+                | configuration::clientbound::STORE_COOKIE
+                | configuration::clientbound::CUSTOM_REPORT_DETAILS
+                | configuration::clientbound::SERVER_LINKS
+                | configuration::clientbound::CLEAR_DIALOG => {
+                    *self.ignored_presentation.entry(id).or_default() += 1;
+                }
                 configuration::clientbound::POST_EFFECTS => {
                     for _ in 0..r.count(1024)? {
                         r.string(32767)?;
@@ -94,9 +143,18 @@ impl Session {
                     r.done()?;
                     *self.ignored_presentation.entry(id).or_default() += 1;
                 }
-                configuration::clientbound::RESOURCE_PACK_PUSH => self.resource_pack_push(&mut r, configuration::serverbound::RESOURCE_PACK)?,
-                configuration::clientbound::TRANSFER => return Err("server transfer unsupported".into()),
-                configuration::clientbound::SHOW_DIALOG | configuration::clientbound::CODE_OF_CONDUCT => return Err("configuration dialog/code-of-conduct requires unsupported human UI".into()),
+                configuration::clientbound::RESOURCE_PACK_PUSH => {
+                    self.resource_pack_push(&mut r, configuration::serverbound::RESOURCE_PACK)?
+                }
+                configuration::clientbound::TRANSFER => {
+                    return Err("server transfer unsupported".into());
+                }
+                configuration::clientbound::SHOW_DIALOG
+                | configuration::clientbound::CODE_OF_CONDUCT => {
+                    return Err(
+                        "configuration dialog/code-of-conduct requires unsupported human UI".into(),
+                    );
+                }
                 _ => return Err(format!("unknown mandatory Configuration packet {id}")),
             },
             Phase::Play => self.play(id, &mut r)?,
@@ -120,7 +178,9 @@ impl Session {
         let url = r.string(32767)?;
         let hash = r.string(40)?;
         let required = r.bool()?;
-        if r.bool()? { r.nbt()?; }
+        if r.bool()? {
+            r.nbt()?;
+        }
         r.done()?;
         let hex = |bytes: &[u8; 16]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
         let status = |this: &Session, action: i32| -> Result<()> {
@@ -135,8 +195,12 @@ impl Session {
             .filter(|u| matches!(u.scheme(), "http" | "https"));
         let Some(parsed) = parsed else {
             status(self, INVALID_URL)?;
-            self.event(json!({"type":"resource_pack_push_rejected","id":hex(&id),"reason":"invalid_url"}));
-            if required { return Err("required resource pack has an invalid URL".into()); }
+            self.event(
+                json!({"type":"resource_pack_push_rejected","id":hex(&id),"reason":"invalid_url"}),
+            );
+            if required {
+                return Err("required resource pack has an invalid URL".into());
+            }
             return Ok(());
         };
         status(self, ACCEPTED)?;
@@ -146,7 +210,7 @@ impl Session {
                 .timeout(std::time::Duration::from_secs(60))
                 .build()
                 .map_err(|e| e.to_string())?;
-            let mut response = client.get(url).send().map_err(|e| e.to_string())?;
+            let response = client.get(url).send().map_err(|e| e.to_string())?;
             if !response.status().is_success() {
                 return Err(format!("pack download HTTP {}", response.status()));
             }
@@ -165,7 +229,9 @@ impl Session {
             Err(error) => {
                 status(self, FAILED_DOWNLOAD)?;
                 self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"download","error":error}));
-                if required { return Err(format!("required resource pack download failed: {error}")); }
+                if required {
+                    return Err(format!("required resource pack download failed: {error}"));
+                }
                 return Ok(());
             }
         };
@@ -174,7 +240,9 @@ impl Session {
         if !hash.is_empty() && !hash.eq_ignore_ascii_case(&digest) {
             status(self, FAILED_DOWNLOAD)?;
             self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"hash","error":"sha1 mismatch"}));
-            if required { return Err("required resource pack hash mismatch".into()); }
+            if required {
+                return Err("required resource pack hash mismatch".into());
+            }
             return Ok(());
         }
         status(self, DOWNLOADED)?;
@@ -205,7 +273,9 @@ impl Session {
         if let Err(error) = extracted {
             status(self, FAILED_RELOAD)?;
             self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"extract","error":error}));
-            if required { return Err(format!("required resource pack extraction failed: {error}")); }
+            if required {
+                return Err(format!("required resource pack extraction failed: {error}"));
+            }
             return Ok(());
         }
         let applied = if self.presentation {
@@ -229,7 +299,9 @@ impl Session {
         } else {
             status(self, FAILED_RELOAD)?;
             self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"apply","error":"resource stack rejected the pack"}));
-            if required { return Err("required resource pack failed to apply".into()); }
+            if required {
+                return Err("required resource pack failed to apply".into());
+            }
             Ok(())
         }
     }
@@ -322,12 +394,16 @@ impl Session {
                             "origin":"received_optional_payload"})),
                     }
                 }
-                "krasnokamen:loader/manifest" | "krasnokamen:loader/artifact" | "krasnokamen:loader/view" => {
+                "krasnokamen:loader/manifest"
+                | "krasnokamen:loader/artifact"
+                | "krasnokamen:loader/view" => {
                     return Err(format!("unsupported Loader channel or phase: {channel}"));
                 }
                 // Unnegotiated/future plugin channels are optional custom payloads,
                 // including the server's capability probe. Never infer activation.
-                _ => self.event(json!({"type":"optional_custom_payload_ignored","channel":channel})),
+                _ => {
+                    self.event(json!({"type":"optional_custom_payload_ignored","channel":channel}))
+                }
             }
         } else if channel.starts_with("krasnokamen:lod/") && self.phase == "play" {
             let payload = r.take(r.bytes.len() - r.offset)?;
@@ -390,7 +466,8 @@ impl Session {
             let opened = match self.open_sign_editor(position, front) {
                 Ok(opened) => opened,
                 Err(error) => {
-                    self.player.warn_local_prediction(None, "Sign editor", &error);
+                    self.player
+                        .warn_local_prediction(None, "Sign editor", &error);
                     false
                 }
             };
@@ -411,7 +488,8 @@ impl Session {
         {
             self.environment.publish_world(&mut self.world)?;
             if id == cb::SET_TIME {
-                self.player.update_world_time(self.environment.game_time(), self.world_tick);
+                self.player
+                    .update_world_time(self.environment.game_time(), self.world_tick);
             }
             self.server_frozen = self.environment.frozen;
             if id == cb::TICKING_STEP {
@@ -434,22 +512,38 @@ impl Session {
             .apply(id, &mut Reader::new(r.bytes), content)?
         {
             if id == cb::MOUNT_SCREEN_OPEN {
-                let entity_id = self.inventory.menu().entity_id.ok_or("mount screen entity ID missing")?;
-                let entity = self.entities.get(entity_id).ok_or("mount screen entity not received")?;
-                self.inventory.configure_mount(entity_id, &entity.type_name)?;
+                let entity_id = self
+                    .inventory
+                    .menu()
+                    .entity_id
+                    .ok_or("mount screen entity ID missing")?;
+                let entity = self
+                    .entities
+                    .get(entity_id)
+                    .ok_or("mount screen entity not received")?;
+                self.inventory
+                    .configure_mount(entity_id, &entity.type_name)?;
             }
             self.container_packet_version += 1;
             handled = true;
         }
         if id == cb::BLOCK_ENTITY_DATA {
             let position = protocol::unpack_pos(Reader::new(r.bytes).i64()?);
-            let snapshot = self.predicted_blocks.get_mut(&position)
+            let snapshot = self
+                .predicted_blocks
+                .get_mut(&position)
                 .and_then(|prediction| prediction.block_entity.as_mut());
             self.entities.receive_block_entity_data(
-                &mut Reader::new(r.bytes), content, self.world_tick, snapshot,
+                &mut Reader::new(r.bytes),
+                content,
+                self.world_tick,
+                snapshot,
             )?;
             handled = true;
-        } else if self.entities.apply(id, &mut Reader::new(r.bytes), content, self.world_tick)? {
+        } else if self
+            .entities
+            .apply(id, &mut Reader::new(r.bytes), content, self.world_tick)?
+        {
             handled = true;
         }
         if let Some(ui) = &mut self.ui {
@@ -499,7 +593,10 @@ impl Session {
                 self.item_spawn = Some(crate::ui::item_dynamic::GlobalPos { dimension, pos });
             }
             cb::BUNDLE_DELIMITER | cb::CHUNK_BATCH_START | cb::KEEP_ALIVE => {}
-            cb::PING => { r.i32()?; r.done()?; } // Pong is sent immediately by the socket owner.
+            cb::PING => {
+                r.i32()?;
+                r.done()?;
+            } // Pong is sent immediately by the socket owner.
             cb::DISCONNECT => return Err(format!("Play disconnect: {}", r.nbt()?)),
             cb::LOGIN => {
                 self.player.entity_id = r.i32()?;
@@ -1033,16 +1130,20 @@ impl Session {
         if let Some(prediction) = self.predicted_blocks.get_mut(&position) {
             // ClientLevel.setServerVerifiedBlockState retains the local block
             // until endPredictionsUpTo acknowledges this prediction sequence.
-            let local_block = self.world.block(position)
-                .map(|local| content.info(local).map(|info| info.block)).transpose()?;
+            let local_block = self
+                .world
+                .block(position)
+                .map(|local| content.info(local).map(|info| info.block))
+                .transpose()?;
             if let Some(entity) = &prediction.block_entity
                 && !entity.matches_state(state, content)?
             {
                 prediction.block_entity = None;
             }
-            if prediction.block_entity.is_none() && local_block != Some(new_block)
-            {
-                prediction.block_entity = self.entities.new_block_entity_snapshot(position, state, content)?;
+            if prediction.block_entity.is_none() && local_block != Some(new_block) {
+                prediction.block_entity = self
+                    .entities
+                    .new_block_entity_snapshot(position, state, content)?;
             }
             prediction.received = state;
             self.received_blocks.insert(position, self.packet_sequence);
@@ -1051,10 +1152,10 @@ impl Session {
         }
         let old = self.world.block(position);
         let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
-        if let Some(old_state) = self.world.block(position) {
-            if content.info(old_state)?.block != new_block {
-                self.entities.remove_block_entity(position);
-            }
+        if let Some(old_state) = self.world.block(position)
+            && content.info(old_state)?.block != new_block
+        {
+            self.entities.remove_block_entity(position);
         }
         self.world
             .set(position, state, |id| content.block_is_air(id))?;
@@ -1090,10 +1191,10 @@ impl Session {
         for (position, block) in &mut blocks {
             if block.sequence <= sequence {
                 let new_block = content.info(block.received)?.block;
-                if let Some(old_state) = self.world.block(*position) {
-                    if content.info(old_state)?.block != new_block {
-                        self.entities.remove_block_entity(*position);
-                    }
+                if let Some(old_state) = self.world.block(*position)
+                    && content.info(old_state)?.block != new_block
+                {
+                    self.entities.remove_block_entity(*position);
                 }
                 let old = self.world.block(*position);
                 self.world.set(*position, block.received, |state| {
@@ -1165,14 +1266,20 @@ mod tests {
             w.byte(1);
             w.0
         };
-        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld")).unwrap();
+        session
+            .apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld"))
+            .unwrap();
         let mut active = vec![1, 6];
         active.extend_from_slice(&[0; 12]);
         active.extend_from_slice(&[2, 1, 1, 0, 1]);
         session.screen_relay.receive(&active).unwrap();
-        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld")).unwrap();
+        session
+            .apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:overworld"))
+            .unwrap();
         assert_eq!(session.screen_relay.active.len(), 1);
-        session.apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:the_nether")).unwrap();
+        session
+            .apply(Phase::Play, cb::RESPAWN, &respawn("minecraft:the_nether"))
+            .unwrap();
         assert!(session.screen_relay.active.is_empty());
     }
 
@@ -1192,45 +1299,75 @@ mod tests {
             let mut content = Content::test_cube();
             content.entity_names.insert(1, kind.into());
             content.item_names.insert(1, "minecraft:iron_ingot".into());
-            content.insert_test_item_components(1, BTreeMap::from([
-                ("minecraft:max_stack_size".into(), json!(64)),
-            ]));
+            content.insert_test_item_components(
+                1,
+                BTreeMap::from([("minecraft:max_stack_size".into(), json!(64))]),
+            );
             content.set_registries(BTreeMap::from([(
                 "minecraft:item".into(),
-                vec![("minecraft:air".into(), json!({})), ("minecraft:iron_ingot".into(), json!({}))],
+                vec![
+                    ("minecraft:air".into(), json!({})),
+                    ("minecraft:iron_ingot".into(), json!({})),
+                ],
             )]));
-            content.set_tags(BTreeMap::from([(
-                "minecraft:item".into(),
-                BTreeMap::from([("minecraft:bundles".into(), vec![])]),
-            )])).unwrap();
+            content
+                .set_tags(BTreeMap::from([(
+                    "minecraft:item".into(),
+                    BTreeMap::from([("minecraft:bundles".into(), vec![])]),
+                )]))
+                .unwrap();
             session.content = Some(content);
             let mut spawn = Writer::default();
             spawn.var(42);
             spawn.0.extend([0; 16]);
             spawn.var(1);
-            for _ in 0..3 { spawn.f64(0.); }
+            for _ in 0..3 {
+                spawn.f64(0.);
+            }
             spawn.0.extend([0; 5]);
-            session.apply(Phase::Play, cb::ADD_ENTITY, &spawn.0).unwrap();
-            session.apply(Phase::Play, cb::MOUNT_SCREEN_OPEN, &[1, columns, 0, 0, 0, 42]).unwrap();
+            session
+                .apply(Phase::Play, cb::ADD_ENTITY, &spawn.0)
+                .unwrap();
+            session
+                .apply(
+                    Phase::Play,
+                    cb::MOUNT_SCREEN_OPEN,
+                    &[1, columns, 0, 0, 0, 42],
+                )
+                .unwrap();
             let start = 2 + 3 * usize::from(columns);
             let mut image = vec![1, 0, (start + 36) as u8];
             image.extend(vec![0; start]);
             image.extend([1, 1, 0, 0]);
             image.extend(vec![0; 35]);
             image.push(0);
-            session.apply(Phase::Play, cb::CONTAINER_SET_CONTENT, &image).unwrap();
+            session
+                .apply(Phase::Play, cb::CONTAINER_SET_CONTENT, &image)
+                .unwrap();
             let intent = UiIntent::ClickSlot {
                 context: session.inventory.context(),
                 slot: start as i16,
                 button: 0,
                 mode: ClickMode::QuickMove,
             };
-            let packets = session.inventory.execute(&intent, session.content.as_ref().unwrap())
+            let packets = session
+                .inventory
+                .execute(&intent, session.content.as_ref().unwrap())
                 .unwrap_or_else(|error| panic!("{kind}: {error}"));
             assert_eq!(packets.len(), 1, "{kind}");
             let target = if columns == 0 { start + 27 } else { 2 };
-            assert_eq!(session.inventory.menu().slots[target].as_ref().unwrap().id, 1, "{kind}");
-            assert!(session.inventory.menu().slots[start].as_ref().unwrap().empty(), "{kind}");
+            assert_eq!(
+                session.inventory.menu().slots[target].as_ref().unwrap().id,
+                1,
+                "{kind}"
+            );
+            assert!(
+                session.inventory.menu().slots[start]
+                    .as_ref()
+                    .unwrap()
+                    .empty(),
+                "{kind}"
+            );
         }
     }
 
@@ -1239,7 +1376,8 @@ mod tests {
         let options = zip::write::SimpleFileOptions::default();
         zip.start_file("pack.mcmeta", options).unwrap();
         std::io::Write::write_all(&mut zip, br#"{"pack":{"pack_format":84,"min_format":[84,0],"max_format":[84,0],"description":"pack-push test"}}"#).unwrap();
-        zip.start_file("assets/test_pack/marker.txt", options).unwrap();
+        zip.start_file("assets/test_pack/marker.txt", options)
+            .unwrap();
         std::io::Write::write_all(&mut zip, b"battle armour").unwrap();
         zip.finish().unwrap().into_inner()
     }
@@ -1269,7 +1407,9 @@ mod tests {
                 let mut byte = [0];
                 socket.read_exact(&mut byte).unwrap();
                 header.push(byte[0]);
-                if byte[0] & 128 == 0 { break; }
+                if byte[0] & 128 == 0 {
+                    break;
+                }
             }
             let mut body = vec![0; Reader::new(&header).count(1024).unwrap()];
             socket.read_exact(&mut body).unwrap();
@@ -1284,9 +1424,13 @@ mod tests {
                 let mut request = Vec::new();
                 let mut byte = [0];
                 loop {
-                    if socket.read_exact(&mut byte).is_err() { break; }
+                    if socket.read_exact(&mut byte).is_err() {
+                        break;
+                    }
                     request.push(byte[0]);
-                    if request.ends_with(b"\r\n\r\n") { break; }
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
                 }
                 let head = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -1304,12 +1448,16 @@ mod tests {
         let peer = thread::spawn(move || {
             let (mut login, _) = listener.accept().unwrap();
             let (mut status, _) = listener.accept().unwrap();
-            login.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
             packet(&mut status);
             packet(&mut status);
             let mut response = Writer::default();
             response.string(r#"{"version":{"protocol":777}}"#);
-            status.write_all(&protocol::frame(0, &response.0, None).unwrap()).unwrap();
+            status
+                .write_all(&protocol::frame(0, &response.0, None).unwrap())
+                .unwrap();
             packet(&mut login);
             packet(&mut login);
             ready.send(()).unwrap();
@@ -1336,7 +1484,18 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&cache);
         session.pack_cache = Some(cache);
-        session.network = Some(Network::connect(address.to_string(), "PackTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap());
+        session.network = Some(
+            Network::connect(
+                address.to_string(),
+                "PackTest".into(),
+                8,
+                true,
+                "en_us",
+                Arc::new(|| {}),
+                None,
+            )
+            .unwrap(),
+        );
         wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
         let mut push = Writer((0..16).collect());
         push.string(&format!("http://{http_address}/pack.zip"));
@@ -1344,18 +1503,27 @@ mod tests {
         push.byte(0); // not required
         push.byte(0); // no prompt
         for (phase, id) in [
-            (Phase::Configuration, configuration::clientbound::RESOURCE_PACK_PUSH),
+            (
+                Phase::Configuration,
+                configuration::clientbound::RESOURCE_PACK_PUSH,
+            ),
             (Phase::Play, cb::RESOURCE_PACK_PUSH),
         ] {
             session.apply(phase, id, &push.0).unwrap();
             // A later packet is still processed, not a local disconnect.
             let mut ping = Writer::default();
             ping.i32(123);
-            session.apply(phase, if phase == Phase::Configuration {
-                configuration::clientbound::PING
-            } else {
-                cb::PING
-            }, &ping.0).unwrap();
+            session
+                .apply(
+                    phase,
+                    if phase == Phase::Configuration {
+                        configuration::clientbound::PING
+                    } else {
+                        cb::PING
+                    },
+                    &ping.0,
+                )
+                .unwrap();
         }
         assert!(session.error.is_none());
         (session, got, finish, peer)
@@ -1376,7 +1544,11 @@ mod tests {
         // Accepted(3) -> Downloaded(4) -> SuccessfullyLoaded(0), once per phase.
         assert_eq!(actions, vec![3, 4, 0, 3, 4, 0], "{actions:?}");
         let roots = session.content.as_ref().unwrap().pack_roots();
-        assert_eq!(roots.len(), 1, "the pushed pack is the only extra root: {roots:?}");
+        assert_eq!(
+            roots.len(),
+            1,
+            "the pushed pack is the only extra root: {roots:?}"
+        );
         assert!(
             roots[0].join("assets/test_pack/marker.txt").exists(),
             "the verified pack is extracted under the cache: {roots:?}"
@@ -1408,7 +1580,13 @@ mod tests {
     fn resource_pack_live_optional_join() {
         use std::{thread, time::Instant};
         let address = std::env::var("KRASNOKAMEN_PACK_SMOKE_SERVER").unwrap();
-        assert!(address.parse::<std::net::SocketAddr>().unwrap().ip().is_loopback());
+        assert!(
+            address
+                .parse::<std::net::SocketAddr>()
+                .unwrap()
+                .ip()
+                .is_loopback()
+        );
         let mut session = Session::new_mode("pack-live".into(), false);
         let owner = thread::current();
         session.set_wake(Arc::new(move || owner.unpark()));
@@ -1418,12 +1596,23 @@ mod tests {
             session.process_events();
             assert!(session.error.is_none(), "{:?}", session.error);
             if session.phase == "play" && session.play_world_presentation_ready() {
-                assert!(session.packet_counts.get(&configuration::clientbound::RESOURCE_PACK_PUSH).copied().unwrap_or(0) > 0);
+                assert!(
+                    session
+                        .packet_counts
+                        .get(&configuration::clientbound::RESOURCE_PACK_PUSH)
+                        .copied()
+                        .unwrap_or(0)
+                        > 0
+                );
                 eprintln!("optional_pack_seen=true play_world_ready=true");
                 break;
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
-            assert!(!remaining.is_zero(), "live join deadline: {}", session.phase);
+            assert!(
+                !remaining.is_zero(),
+                "live join deadline: {}",
+                session.phase
+            );
             thread::park_timeout(remaining);
         }
     }
@@ -1446,15 +1635,28 @@ mod tests {
             } else {
                 Nbt::Compound(vec![
                     ("text".into(), Nbt::String("Kicked".into())),
-                    ("extra".into(), Nbt::List(10, vec![Nbt::Compound(vec![
-                        ("text".into(), Nbt::String(": maintenance".into())),
-                    ])])),
-                ]).write_root(&mut packet).unwrap();
+                    (
+                        "extra".into(),
+                        Nbt::List(
+                            10,
+                            vec![Nbt::Compound(vec![(
+                                "text".into(),
+                                Nbt::String(": maintenance".into()),
+                            )])],
+                        ),
+                    ),
+                ])
+                .write_root(&mut packet)
+                .unwrap();
             }
             let error = session.apply(phase, id, &packet.0).unwrap_err();
             let mut ui = UiState::new_state(&content).unwrap();
             ui.show_disconnected(format!("{phase:?} packet 0x{id:02x} sequence 1: {error}"));
-            assert_eq!(ui.title_error_text().as_deref(), Some("Kicked: maintenance"), "{phase:?}");
+            assert_eq!(
+                ui.title_error_text().as_deref(),
+                Some("Kicked: maintenance"),
+                "{phase:?}"
+            );
         }
     }
 
@@ -1479,13 +1681,19 @@ mod tests {
         writer.i64(protocol::pack_pos([-31, 70, 42]));
         writer.f32(10.);
         writer.f32(20.);
-        session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &writer.0).unwrap();
+        session
+            .apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &writer.0)
+            .unwrap();
         let spawn = session.item_spawn.as_ref().unwrap();
         assert_eq!(spawn.dimension, "minecraft:the_nether");
         assert_eq!(spawn.pos, [-31, 70, 42]);
         let mut malformed = writer.0;
         malformed.push(0);
-        assert!(session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &malformed).is_err());
+        assert!(
+            session
+                .apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &malformed)
+                .is_err()
+        );
         assert_eq!(session.item_spawn.as_ref().unwrap().pos, [-31, 70, 42]);
     }
 
@@ -1550,14 +1758,22 @@ mod tests {
 
     #[test]
     fn block_burst_answers_keepalive_before_consumption_and_drains_in_one_frame() {
-        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, sync::mpsc, thread, time::{Duration, Instant}};
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            sync::mpsc,
+            thread,
+            time::{Duration, Instant},
+        };
         fn packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
             let mut header = Vec::new();
             loop {
                 let mut byte = [0];
                 socket.read_exact(&mut byte).unwrap();
                 header.push(byte[0]);
-                if byte[0] & 128 == 0 { break; }
+                if byte[0] & 128 == 0 {
+                    break;
+                }
                 assert!(header.len() < 5);
             }
             let mut body = vec![0; Reader::new(&header).count(1024).unwrap()];
@@ -1567,7 +1783,9 @@ mod tests {
             (id, body[r.offset..].to_vec())
         }
         fn send(socket: &mut TcpStream, id: i32, body: &[u8]) {
-            socket.write_all(&protocol::frame(id, body, None).unwrap()).unwrap();
+            socket
+                .write_all(&protocol::frame(id, body, None).unwrap())
+                .unwrap();
         }
         const COUNT: i32 = 80_000;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1577,8 +1795,12 @@ mod tests {
         let peer = thread::spawn(move || {
             let (mut login, _) = listener.accept().unwrap();
             let (mut status, _) = listener.accept().unwrap();
-            login.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            login.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            login
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             packet(&mut status);
             packet(&mut status);
             let mut response = Writer::default();
@@ -1613,11 +1835,25 @@ mod tests {
         for x in 1..=COUNT / 4096 {
             session.world.insert([x, 0], template.clone()).unwrap();
         }
-        session.network = Some(Network::connect(address.to_string(), "BurstTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap());
+        session.network = Some(
+            Network::connect(
+                address.to_string(),
+                "BurstTest".into(),
+                8,
+                true,
+                "en_us",
+                Arc::new(|| {}),
+                None,
+            )
+            .unwrap(),
+        );
         // No consumer runs until the peer observes the echo: a full world-event
         // queue must never stop the socket owner from reading the keepalive.
         let elapsed = answer.recv_timeout(Duration::from_secs(1));
-        assert!(elapsed.is_ok(), "keepalive starved behind 80k block events: {elapsed:?}");
+        assert!(
+            elapsed.is_ok(),
+            "keepalive starved behind 80k block events: {elapsed:?}"
+        );
         assert!(elapsed.unwrap() < Duration::from_secs(1));
         // The fixture installed content already; start at the wire Configuration
         // boundary without running content activation a second time.
@@ -1685,10 +1921,12 @@ mod tests {
             geometry.indices[crate::api::EntityMaterial::EntityCutout as usize].len(),
             64 * 6
         );
-        assert!(geometry
-            .vertices
-            .iter()
-            .all(|vertex| vertex.light == [15., 0.]));
+        assert!(
+            geometry
+                .vertices
+                .iter()
+                .all(|vertex| vertex.light == [15., 0.])
+        );
         let a = glam::Vec3::from_array(geometry.vertices[0].position);
         let b = glam::Vec3::from_array(geometry.vertices[1].position);
         let c = glam::Vec3::from_array(geometry.vertices[2].position);
@@ -1789,8 +2027,18 @@ mod tests {
         let content = session.content.as_mut().unwrap();
         content.configure_test_comparator();
         content.insert_test_placement_metadata(1, json!({"block_entity_type": null}));
-        session.predicted_blocks.insert(position, PredictedBlock { received: 1, sequence: 7, block_entity: None });
-        session.world.set(position, 2, |state| Ok(state == 0)).unwrap();
+        session.predicted_blocks.insert(
+            position,
+            PredictedBlock {
+                received: 1,
+                sequence: 7,
+                block_entity: None,
+            },
+        );
+        session
+            .world
+            .set(position, 2, |state| Ok(state == 0))
+            .unwrap();
         session.reconcile_ack(6).unwrap();
         assert_eq!(session.world.block(position), Some(2));
         session.reconcile_ack(7).unwrap();
@@ -1903,19 +2151,31 @@ mod tests {
             .unwrap()
             .synchronize(&session.inventory, session.content.as_ref().unwrap())
             .unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Menu);
+        assert_eq!(
+            session.ui.as_ref().unwrap().screen(),
+            crate::ui::Screen::Menu
+        );
         let mut close = Writer::default();
         close.var(0);
-        session.apply(Phase::Play, cb::CONTAINER_CLOSE, &close.0).unwrap();
         session
-            .apply(Phase::Play, cb::SHOW_DIALOG, &notice_dialog_bytes("Settlement"))
+            .apply(Phase::Play, cb::CONTAINER_CLOSE, &close.0)
+            .unwrap();
+        session
+            .apply(
+                Phase::Play,
+                cb::SHOW_DIALOG,
+                &notice_dialog_bytes("Settlement"),
+            )
             .unwrap();
         assert_eq!(
             session.ui.as_ref().unwrap().screen(),
             crate::ui::Screen::ServerDialog
         );
         session.apply(Phase::Play, cb::CLEAR_DIALOG, &[]).unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Game);
+        assert_eq!(
+            session.ui.as_ref().unwrap().screen(),
+            crate::ui::Screen::Game
+        );
     }
 
     #[test]
@@ -1925,12 +2185,18 @@ mod tests {
         session.receive_block(position, 1).unwrap();
         session.ui = None;
         let body = open_sign_bytes(position, true);
-        session.apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &body).unwrap();
+        session
+            .apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &body)
+            .unwrap();
         assert_eq!(session.phase, "play");
         assert!(session.error.is_none());
         let mut malformed = body;
         malformed.push(0);
-        assert!(session.apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &malformed).is_err());
+        assert!(
+            session
+                .apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &malformed)
+                .is_err()
+        );
     }
 
     #[test]
@@ -2062,7 +2328,7 @@ mod tests {
     }
 
     fn sign_data_bytes(position: [i32; 3], kind: i32) -> Vec<u8> {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let text = |line: &str| {
             Tag::record([
                 (
@@ -2165,9 +2431,11 @@ mod tests {
             },
         );
         session.reconcile_ack(6).unwrap();
-        assert!(session.entities.block_entities[&position]
-            .predicted_data
-            .is_some());
+        assert!(
+            session.entities.block_entities[&position]
+                .predicted_data
+                .is_some()
+        );
         session.reconcile_ack(7).unwrap();
         assert_eq!(session.world.block(position), Some(0));
         assert_eq!(session.entities.block_entity_data(position), None);
@@ -2297,7 +2565,7 @@ mod tests {
 
     #[test]
     fn p1_review_non_sign_editor_preserves_open_menu_and_admission() {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let position = [-1, 3, -1];
         let mut session = sign_session(position, "minecraft:sign");
         session.receive_block(position, 0).unwrap();

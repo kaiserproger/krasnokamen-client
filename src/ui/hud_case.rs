@@ -13,7 +13,7 @@ fn fold(cp: u32) -> u32 {
         return cp;
     }
     let (start, end, step, delta) = FOLDS[i - 1];
-    if cp <= end && (cp - start) % step == 0 {
+    if cp <= end && (cp - start).is_multiple_of(step) {
         (cp as i32 + delta) as u32
     } else {
         cp

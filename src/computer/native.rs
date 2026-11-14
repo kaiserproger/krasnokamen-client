@@ -40,37 +40,61 @@ impl Computer {
     }
     pub(crate) fn dialog(&self) -> Option<crate::ui::desktop::DesktopDialog> {
         use crate::ui::desktop::{DesktopAction, DesktopDialog};
-        if let Some(dialog) = self.sharing.dialog(self.selection) { return Some(dialog); }
+        if let Some(dialog) = self.sharing.dialog(self.selection) {
+            return Some(dialog);
+        }
         if self.managing {
             let mut entries = vec![
                 ("Change window".into(), DesktopAction::ChangeWindow),
                 ("Stop sharing".into(), DesktopAction::StopCapture),
             ];
-            if self.source.as_ref().is_some_and(|source| source.control_granted()) {
+            if self
+                .source
+                .as_ref()
+                .is_some_and(|source| source.control_granted())
+            {
                 entries.insert(0, ("Control".into(), DesktopAction::Control));
             }
-            entries.extend(self.sharing.viewers.iter().map(|(viewer, name)| (
-                format!("Revoke: {name}"), DesktopAction::RevokeViewer(*viewer)
-            )));
+            entries.extend(self.sharing.viewers.iter().map(|(viewer, name)| {
+                (
+                    format!("Revoke: {name}"),
+                    DesktopAction::RevokeViewer(*viewer),
+                )
+            }));
             entries.push(("Done".into(), DesktopAction::DismissMenu));
             return Some(DesktopDialog {
                 title: "Your monitor".into(),
                 body: vec!["Change its window or manage viewer permissions.".into()],
-                entries, selected: self.selection,
+                entries,
+                selected: self.selection,
             });
         }
-        if self.picker.is_empty() { return None; }
-        let mut entries = self.picker.iter().map(|window| (window.title.clone(), DesktopAction::PickWindow(window.id))).collect::<Vec<_>>();
+        if self.picker.is_empty() {
+            return None;
+        }
+        let mut entries = self
+            .picker
+            .iter()
+            .map(|window| (window.title.clone(), DesktopAction::PickWindow(window.id)))
+            .collect::<Vec<_>>();
         entries.push(("Cancel".into(), DesktopAction::CancelPicker));
         Some(DesktopDialog {
-            title: format!("Desktop window — {} monitor block(s)", self.face.map_or(1, |face| u16::from(face.width) * u16::from(face.height))),
+            title: format!(
+                "Desktop window — {} monitor block(s)",
+                self.face
+                    .map_or(1, |face| u16::from(face.width) * u16::from(face.height))
+            ),
             body: vec!["Choose a window to display on this monitor.".into()],
             entries,
             selected: self.selection,
         })
     }
     pub fn lines(&self) -> Vec<String> {
-        if self.has_modal() || self.message.is_empty() { Vec::new() } else { vec![self.message.clone()] }
+        if self.has_modal() || self.message.is_empty() {
+            Vec::new()
+        } else {
+            vec![self.message.clone()]
+        }
     }
     pub fn release_input(&mut self) {
         let mut failed = false;
@@ -126,11 +150,14 @@ impl Computer {
         match source {
             Ok(source) => {
                 self.release_input();
-                if let Some(mut previous) = self.source.take() { previous.close(); }
+                if let Some(mut previous) = self.source.take() {
+                    previous.close();
+                }
                 self.managing = false;
                 self.waiting = true;
                 self.source = Some(source);
-                self.message="Opening selected source. Shift+Esc while looking closes capture.".into();
+                self.message =
+                    "Opening selected source. Shift+Esc while looking closes capture.".into();
             }
             Err(error) => self.fail(error),
         }
@@ -138,14 +165,17 @@ impl Computer {
     fn open_choice(&self, id: u64) -> Result<Box<dyn DesktopSource>, String> {
         #[cfg(target_os = "linux")]
         if id & (1 << 63) != 0 {
-            let argv = self.apps.get((id & !(1 << 63)) as usize)
+            let argv = self
+                .apps
+                .get((id & !(1 << 63)) as usize)
                 .ok_or("Monitor app selection expired")?;
             let face = self.face.ok_or("No monitor selected")?;
-            let aspect = (f64::from(face.width) - 0.125)
-                / (f64::from(face.height) - 0.125);
+            let aspect = (f64::from(face.width) - 0.125) / (f64::from(face.height) - 0.125);
             return super::nested::launch(argv, aspect);
         }
-        if id == super::testsource::ID { return super::testsource::open(); }
+        if id == super::testsource::ID {
+            return super::testsource::open();
+        }
         super::open(id)
     }
     #[cfg(target_os = "linux")]
@@ -154,7 +184,10 @@ impl Computer {
         for (name, argv) in super::nested::apps(setting) {
             let id = (1 << 63) | self.apps.len() as u64;
             self.apps.push(argv);
-            self.picker.push(WindowInfo { id, title: format!("Launch app: {name}") });
+            self.picker.push(WindowInfo {
+                id,
+                title: format!("Launch app: {name}"),
+            });
         }
     }
     fn fail(&mut self, error: String) {
@@ -182,16 +215,26 @@ impl App {
             )
             .ok()??;
         match hit {
-            Hit::Block(hit) if content.loader_block(hit.state) == Some(("computer:monitor", hit.face)) => Some(hit),
+            Hit::Block(hit)
+                if content.loader_block(hit.state) == Some(("computer:monitor", hit.face)) =>
+            {
+                Some(hit)
+            }
             _ => None,
         }
     }
     /// The whole monitor rectangle a crosshair hit belongs to, or the message telling the
     /// player why it is not one (missing blocks, wrong side).
     fn monitor_face(&self, hit: &BlockHit) -> Result<Face, String> {
-        Face::rectangle(hit.position, hit.face, |p| self.session.world.block(p) == Some(hit.state)).map_err(|error| {
+        Face::rectangle(hit.position, hit.face, |p| {
+            self.session.world.block(p) == Some(hit.state)
+        })
+        .map_err(|error| {
             let actual_side = match error {
-                super::RectangleError::Missing(position) => self.session.world.block(position)
+                super::RectangleError::Missing(position) => self
+                    .session
+                    .world
+                    .block(position)
                     .and_then(|state| self.session.content.as_ref()?.loader_block(state))
                     .filter(|(name, _)| *name == "computer:monitor")
                     .map(|(_, side)| side),
@@ -216,9 +259,13 @@ impl App {
             self.computer.close();
         }
         if let (Some(binding), Some(face)) = (self.computer.binding, self.computer.face) {
-            if let Ok(rectangle) = Face::rectangle(binding, face.side, |p| self.session.world.block(p) == self.computer.state) {
+            if let Ok(rectangle) = Face::rectangle(binding, face.side, |p| {
+                self.session.world.block(p) == self.computer.state
+            }) {
                 self.computer.face = Some(rectangle);
-                if let Some(renderer) = &mut self.renderer { renderer.set_desktop_face(rectangle); }
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_desktop_face(rectangle);
+                }
             } else {
                 self.computer.close();
             }
@@ -290,7 +337,11 @@ impl App {
         }
     }
     fn consume_computer_dialog_action(&mut self) {
-        if let Some(action) = self.session.ui_mut().and_then(|ui| ui.take_desktop_action()) {
+        if let Some(action) = self
+            .session
+            .ui_mut()
+            .and_then(|ui| ui.take_desktop_action())
+        {
             self.apply_computer_dialog_action(action);
         }
     }
@@ -298,42 +349,78 @@ impl App {
         self.computer.managing = false;
         self.computer.selection = 0;
         let error = match super::list_windows() {
-            Ok(windows) => { self.computer.picker = windows; None }
-            Err(error) => { self.computer.picker.clear(); Some(error) }
+            Ok(windows) => {
+                self.computer.picker = windows;
+                None
+            }
+            Err(error) => {
+                self.computer.picker.clear();
+                Some(error)
+            }
         };
         #[cfg(target_os = "linux")]
-        self.computer.append_apps(self.session.native_setting("monitor_apps"));
+        self.computer
+            .append_apps(self.session.native_setting("monitor_apps"));
         if super::testsource::enabled() {
-            self.computer.picker.insert(0, WindowInfo { id: super::testsource::ID, title: "Test pattern".into() });
+            self.computer.picker.insert(
+                0,
+                WindowInfo {
+                    id: super::testsource::ID,
+                    title: "Test pattern".into(),
+                },
+            );
         }
         if self.computer.picker.is_empty() {
-            self.computer.fail(error.unwrap_or_else(|| "No capturable windows or monitor apps".into()));
+            self.computer
+                .fail(error.unwrap_or_else(|| "No capturable windows or monitor apps".into()));
         }
     }
     fn apply_computer_dialog_action(&mut self, action: crate::ui::desktop::DesktopAction) {
         use crate::ui::desktop::DesktopAction;
         match action {
-            DesktopAction::PickWindow(id) if self.computer.picker.iter().any(|window| window.id == id) => self.computer.start(id),
+            DesktopAction::PickWindow(id)
+                if self.computer.picker.iter().any(|window| window.id == id) =>
+            {
+                self.computer.start(id)
+            }
             DesktopAction::CancelPicker if !self.computer.picker.is_empty() => {
-                if self.computer.source.is_some() { self.computer.picker.clear(); } else { self.computer.close(); }
+                if self.computer.source.is_some() {
+                    self.computer.picker.clear();
+                } else {
+                    self.computer.close();
+                }
             }
             // The dialog shows a failure through the computer message.
-            DesktopAction::ViewPermission { request, allow } => { let _ = self.answer_screen_request(request, allow); }
+            DesktopAction::ViewPermission { request, allow } => {
+                let _ = self.answer_screen_request(request, allow);
+            }
             DesktopAction::DismissMenu => self.computer.managing = false,
             DesktopAction::ChangeWindow if self.computer.managing => self.pick_computer_window(),
             DesktopAction::StopCapture if self.computer.managing => self.computer.close(),
-            DesktopAction::RevokeViewer(viewer) if self.computer.managing => self.revoke_screen_viewer(viewer),
-            DesktopAction::Control if self.computer.managing
-                && self.computer.source.as_ref().is_some_and(|source| source.control_granted()) => {
+            DesktopAction::RevokeViewer(viewer) if self.computer.managing => {
+                self.revoke_screen_viewer(viewer)
+            }
+            DesktopAction::Control
+                if self.computer.managing
+                    && self
+                        .computer
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.control_granted()) =>
+            {
                 let _ = self.session.input(InputIntent::ReleaseAll);
                 self.voice_focus_lost();
                 self.computer.managing = false;
                 self.computer.controlling = true;
-                self.computer.message = "CONTROLLING LOCAL DESKTOP — Esc releases; Shift+Esc closes".into();
+                self.computer.message =
+                    "CONTROLLING LOCAL DESKTOP — Esc releases; Shift+Esc closes".into();
                 if let Some(window) = &self.window {
                     use winit::window::CursorGrabMode;
-                    if window.set_cursor_grab(CursorGrabMode::Locked)
-                        .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined)).is_ok() {
+                    if window
+                        .set_cursor_grab(CursorGrabMode::Locked)
+                        .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                        .is_ok()
+                    {
                         window.set_cursor_visible(false);
                         self.cursor_locked = true;
                     }
@@ -363,32 +450,54 @@ impl App {
                     self.last_cursor = Some((position.x, position.y));
                     Some((crate::ui::PointerPhase::Move, position.x, position.y))
                 }
-                WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } =>
-                    self.last_cursor.map(|(x, y)| (crate::ui::PointerPhase::Down, x, y)),
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => self
+                    .last_cursor
+                    .map(|(x, y)| (crate::ui::PointerPhase::Down, x, y)),
                 _ => None,
             };
             if let Some((phase, x, y)) = pointer {
                 let _ = self.session.execute_ui(crate::ui::UiIntent::Pointer {
-                    phase, x, y, button: Some(crate::ui::PointerButton::Left), modifiers: Default::default(),
+                    phase,
+                    x,
+                    y,
+                    button: Some(crate::ui::PointerButton::Left),
+                    modifiers: Default::default(),
                 });
                 if matches!(phase, crate::ui::PointerPhase::Down) {
                     let _ = self.session.execute_ui(crate::ui::UiIntent::Pointer {
-                        phase: crate::ui::PointerPhase::Up, x, y, button: Some(crate::ui::PointerButton::Left), modifiers: Default::default(),
+                        phase: crate::ui::PointerPhase::Up,
+                        x,
+                        y,
+                        button: Some(crate::ui::PointerButton::Left),
+                        modifiers: Default::default(),
                     });
                 }
                 self.consume_computer_dialog_action();
                 self.publish_session();
                 return true;
             }
-            if matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }) { return true; }
+            if matches!(
+                event,
+                WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
+            ) {
+                return true;
+            }
             if let WindowEvent::KeyboardInput { event, .. } = event {
                 if event.state == ElementState::Pressed && !event.repeat {
                     use crate::ui::desktop::DesktopAction;
                     let dialog = self.computer.dialog().unwrap();
                     let count = dialog.entries.len();
                     match event.physical_key {
-                        PhysicalKey::Code(KeyCode::ArrowDown) => self.computer.selection = (self.computer.selection + 1) % count,
-                        PhysicalKey::Code(KeyCode::ArrowUp) => self.computer.selection = (self.computer.selection + count - 1) % count,
+                        PhysicalKey::Code(KeyCode::ArrowDown) => {
+                            self.computer.selection = (self.computer.selection + 1) % count
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowUp) => {
+                            self.computer.selection = (self.computer.selection + count - 1) % count
+                        }
                         PhysicalKey::Code(KeyCode::Enter) => {
                             if let Some((_, action)) = dialog.entries.get(self.computer.selection) {
                                 self.apply_computer_dialog_action(action.clone());
@@ -396,8 +505,15 @@ impl App {
                         }
                         PhysicalKey::Code(KeyCode::Escape) => {
                             let action = if let Some(request) = &self.computer.sharing.pending {
-                                DesktopAction::ViewPermission { request: request.number, allow: false }
-                            } else if self.computer.managing { DesktopAction::DismissMenu } else { DesktopAction::CancelPicker };
+                                DesktopAction::ViewPermission {
+                                    request: request.number,
+                                    allow: false,
+                                }
+                            } else if self.computer.managing {
+                                DesktopAction::DismissMenu
+                            } else {
+                                DesktopAction::CancelPicker
+                            };
                             self.apply_computer_dialog_action(action);
                         }
                         _ => {}
@@ -407,12 +523,18 @@ impl App {
                 return true;
             }
         }
-        if self.sharing_event(event) { return true; }
+        if self.sharing_event(event) {
+            return true;
+        }
         if let WindowEvent::KeyboardInput { event, .. } = event {
             let pressed = event.state == ElementState::Pressed;
             if event.physical_key == PhysicalKey::Code(KeyCode::Escape) && pressed {
-                let close = self.shift_held && self.computer_hit().is_some_and(|hit|
-                    self.computer.face.is_some_and(|face| face.contains(hit.position, hit.face)));
+                let close = self.shift_held
+                    && self.computer_hit().is_some_and(|hit| {
+                        self.computer
+                            .face
+                            .is_some_and(|face| face.contains(hit.position, hit.face))
+                    });
                 if self.computer.escape(close) {
                     self.publish_session();
                     return true;
@@ -505,7 +627,9 @@ impl App {
                         return true;
                     }
                 };
-                if self.request_shared_screen(face) { return true; }
+                if self.request_shared_screen(face) {
+                    return true;
+                }
                 let _ = self
                     .session
                     .command(Command::Input(InputIntent::ReleaseAll));
@@ -808,7 +932,12 @@ mod tests {
         let log = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
         let mut computer = Computer {
             source: Some(Box::new(RecordingSource(log.clone()))),
-            face: Some(Face { block: [1, 2, 3], side: 2, width: 1, height: 1 }),
+            face: Some(Face {
+                block: [1, 2, 3],
+                side: 2,
+                width: 1,
+                height: 1,
+            }),
             binding: Some([1, 2, 3]),
             state: Some(10),
             epochs: (9, 3),
@@ -839,7 +968,10 @@ mod tests {
     #[test]
     fn app_picker_snapshots_arguments_and_keeps_capture_choices() {
         let mut computer = Computer::default();
-        computer.picker.push(WindowInfo { id: 0, title: "Desktop window".into() });
+        computer.picker.push(WindowInfo {
+            id: 0,
+            title: "Desktop window".into(),
+        });
         let mut setting = serde_json::json!([["ptyxis", "-s"]]);
         computer.append_apps(Some(&setting));
         setting[0][0] = serde_json::json!("changed");
@@ -857,13 +989,24 @@ mod tests {
     #[test]
     fn single_window_picker_displays_bound_row_before_capture() {
         let mut computer = Computer::default();
-        computer.face = Some(Face { block: [1, 2, 3], side: 2, width: 3, height: 1 });
-        computer.picker.push(WindowInfo { id: 0, title: "NEW window".into() });
+        computer.face = Some(Face {
+            block: [1, 2, 3],
+            side: 2,
+            width: 3,
+            height: 1,
+        });
+        computer.picker.push(WindowInfo {
+            id: 0,
+            title: "NEW window".into(),
+        });
         assert!(computer.has_overlay());
         let dialog = computer.dialog().unwrap();
         assert!(dialog.title.contains("3 monitor block(s)"));
         assert_eq!(dialog.entries[0].0, "NEW window");
-        assert_eq!(dialog.entries[1].1, crate::ui::desktop::DesktopAction::CancelPicker);
+        assert_eq!(
+            dialog.entries[1].1,
+            crate::ui::desktop::DesktopAction::CancelPicker
+        );
         assert!(computer.source.is_none());
     }
     #[test]
@@ -890,7 +1033,13 @@ mod tests {
         use crate::ui::desktop::DesktopAction;
         assert_eq!(dialog.entries[0].1, DesktopAction::ChangeWindow);
         assert_eq!(dialog.entries[1].1, DesktopAction::StopCapture);
-        assert!(dialog.entries.iter().any(|(name, action)| name == "Revoke: Viewer" && *action == DesktopAction::RevokeViewer([7; 16])));
+        assert!(
+            dialog
+                .entries
+                .iter()
+                .any(|(name, action)| name == "Revoke: Viewer"
+                    && *action == DesktopAction::RevokeViewer([7; 16]))
+        );
     }
     #[test]
     fn physical_keys_preserve_shortcuts_and_modifier_sides() {

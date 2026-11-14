@@ -1,5 +1,5 @@
-use crate::protocol::packet_ids::play::clientbound as cb;
 use super::{InventoryStore, Menu, MenuKind, StonecutterRecipe, Trades, components, menu_data};
+use crate::protocol::packet_ids::play::clientbound as cb;
 use crate::protocol::{Reader, Result, content::Content};
 use serde_json::json;
 use std::collections::BTreeMap;

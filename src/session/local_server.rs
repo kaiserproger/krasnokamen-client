@@ -277,7 +277,10 @@ mod tests {
     use super::*;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("krasnokamen-sp-session-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "krasnokamen-sp-session-{tag}-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -334,7 +337,9 @@ mod tests {
         assert!(session.local_server.is_none());
         drop(session);
         assert_eq!(
-            std::fs::read_to_string(root.join("checkpoint")).unwrap().trim(),
+            std::fs::read_to_string(root.join("checkpoint"))
+                .unwrap()
+                .trim(),
             "done"
         );
         let _ = std::fs::remove_dir_all(root);

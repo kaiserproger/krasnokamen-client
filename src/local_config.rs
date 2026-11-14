@@ -37,7 +37,10 @@ const RESOURCE_VARS: &[(&str, &str)] = &[
         "item_placement_facts",
         "KRASNOKAMEN_CLIENT_ITEM_PLACEMENT_FACTS",
     ),
-    ("action_state_facts", "KRASNOKAMEN_CLIENT_ACTION_STATE_FACTS"),
+    (
+        "action_state_facts",
+        "KRASNOKAMEN_CLIENT_ACTION_STATE_FACTS",
+    ),
     ("entity_use_static", "KRASNOKAMEN_CLIENT_ENTITY_USE_STATIC"),
     ("resource_packs", "KRASNOKAMEN_CLIENT_RESOURCE_PACKS"),
 ];
@@ -125,19 +128,18 @@ pub fn apply_exe_defaults() -> LocalDefaults {
         if std::env::var_os(var).is_some() {
             continue;
         }
-        if let Some(value) = config.get(&format!("resources.{key}")) {
-            if !value.is_empty() {
-                unsafe { std::env::set_var(var, resolve(&dir, value)) };
-            }
+        if let Some(value) = config.get(&format!("resources.{key}"))
+            && !value.is_empty()
+        {
+            unsafe { std::env::set_var(var, resolve(&dir, value)) };
         }
     }
     // Non-path scalar passthrough (env still wins).
-    if std::env::var_os("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS").is_none() {
-        if let Some(value) = config.get("resources.loader_permissions") {
-            if !value.is_empty() {
-                unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS", value) };
-            }
-        }
+    if std::env::var_os("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS").is_none()
+        && let Some(value) = config.get("resources.loader_permissions")
+        && !value.is_empty()
+    {
+        unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS", value) };
     }
     let plain = |key: &str| config.get(key).filter(|v| !v.is_empty()).cloned();
     LocalDefaults {
@@ -156,26 +158,36 @@ pub fn apply_exe_defaults() -> LocalDefaults {
 pub(crate) fn language_override() -> Result<Option<String>, String> {
     parse_language_override(std::env::var("KRASNOKAMEN_CLIENT_LANGUAGE"))
 }
-fn parse_language_override(value: Result<String, std::env::VarError>) -> Result<Option<String>, String> {
+fn parse_language_override(
+    value: Result<String, std::env::VarError>,
+) -> Result<Option<String>, String> {
     match value {
         Ok(id) if id.is_empty() => Ok(None),
         Ok(id) if crate::ui::text::valid_language_id(&id) => Ok(Some(id)),
-        Ok(id) => Err(format!("KRASNOKAMEN_CLIENT_LANGUAGE={id:?} is not a language ID such as en_us")),
+        Ok(id) => Err(format!(
+            "KRASNOKAMEN_CLIENT_LANGUAGE={id:?} is not a language ID such as en_us"
+        )),
         Err(std::env::VarError::NotPresent) => Ok(None),
         Err(error) => Err(format!("KRASNOKAMEN_CLIENT_LANGUAGE: {error}")),
     }
 }
 /// Options use the selected data root unless explicitly overridden.
 pub fn client_settings_path() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("KRASNOKAMEN_CLIENT_SETTINGS").filter(|v| !v.is_empty()) {
+    if let Some(explicit) =
+        std::env::var_os("KRASNOKAMEN_CLIENT_SETTINGS").filter(|v| !v.is_empty())
+    {
         return Some(PathBuf::from(explicit));
     }
-    crate::content_paths::selected_root().ok().map(|root| root.join("client-settings.json"))
+    crate::content_paths::selected_root()
+        .ok()
+        .map(|root| root.join("client-settings.json"))
 }
 
 /// Server lists always belong to the selected data root, independent of settings overrides.
 pub(crate) fn servers_path() -> Option<PathBuf> {
-    crate::content_paths::selected_root().ok().map(|root| root.join("servers.json"))
+    crate::content_paths::selected_root()
+        .ok()
+        .map(|root| root.join("servers.json"))
 }
 /// Load persisted managed settings. Missing file/keys/parse errors yield an
 /// empty map; callers fill defaults via `UiState::default_setting_value`.
@@ -244,7 +256,9 @@ pub fn save_client_settings_to(
     let Ok(text) = serde_json::to_string_pretty(&kept) else {
         return;
     };
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty())
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
         && std::fs::create_dir_all(parent).is_err()
     {
         return;
@@ -265,7 +279,10 @@ mod tests {
         use std::env::VarError::NotPresent;
         assert_eq!(parse_language_override(Err(NotPresent)), Ok(None));
         assert_eq!(parse_language_override(Ok(String::new())), Ok(None));
-        assert_eq!(parse_language_override(Ok("ru_ru".into())), Ok(Some("ru_ru".into())));
+        assert_eq!(
+            parse_language_override(Ok("ru_ru".into())),
+            Ok(Some("ru_ru".into()))
+        );
         for bad in ["ru-RU", "ru_ru.json", "../ru_ru", " ru_ru"] {
             assert!(parse_language_override(Ok(bad.into())).is_err(), "{bad}");
         }
@@ -292,7 +309,11 @@ mod tests {
         }
         for case in ["explicit-root", "platform-root", "settings-override"] {
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child.args(["--exact", "local_config::tests::settings_follow_selected_data_root_and_explicit_override"])
+            child
+                .args([
+                    "--exact",
+                    "local_config::tests::settings_follow_selected_data_root_and_explicit_override",
+                ])
                 .env(CHILD, case)
                 .env("HOME", "/tmp/client-test-home")
                 .env("XDG_DATA_HOME", "/tmp/client-test-xdg")
@@ -303,7 +324,11 @@ mod tests {
                 child.env("KRASNOKAMEN_CLIENT_SETTINGS", "/tmp/custom-settings.json");
             }
             let output = child.output().unwrap();
-            assert!(output.status.success(), "{case}: {}", String::from_utf8_lossy(&output.stdout));
+            assert!(
+                output.status.success(),
+                "{case}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
     }
 
@@ -355,7 +380,10 @@ mod tests {
         assert_eq!(loaded["gamma"], serde_json::json!(0.25));
         assert_eq!(loaded.get("fullscreen"), Some(&serde_json::json!(true)));
         assert_eq!(loaded.get("vsync"), Some(&serde_json::json!(false)));
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("low")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("low"))
+        );
         assert_eq!(loaded.get("max_fps"), Some(&serde_json::json!(120)));
         assert_eq!(loaded.get("far_terrain"), Some(&serde_json::json!(768)));
         assert!(!loaded.contains_key("chat_key"));
@@ -380,14 +408,23 @@ mod tests {
         let path = dir.join("client-settings.json");
         std::fs::write(&path, r#"{"fancy_shaders":false,"volume":0.5}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("low")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("low"))
+        );
         assert!(!loaded.contains_key("fancy_shaders"));
         std::fs::write(&path, r#"{"fancy_shaders":true}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("medium")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("medium"))
+        );
         std::fs::write(&path, r#"{"fancy_shaders":false,"graphics_preset":"high"}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("high")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("high"))
+        );
         assert!(!loaded.contains_key("fancy_shaders"));
         let _ = std::fs::remove_dir_all(&dir);
     }

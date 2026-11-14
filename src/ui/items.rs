@@ -494,7 +494,12 @@ impl ItemModels {
 fn node_reads_stack(node: &Value) -> bool {
     short(node["type"].as_str().unwrap_or("")) != "model"
         || node["tints"].as_array().is_some_and(|tints| {
-            tints.iter().any(|tint| !matches!(short(tint["type"].as_str().unwrap_or("")), "constant" | "grass"))
+            tints.iter().any(|tint| {
+                !matches!(
+                    short(tint["type"].as_str().unwrap_or("")),
+                    "constant" | "grass"
+                )
+            })
         })
 }
 
@@ -510,7 +515,9 @@ fn context_reads(kind: &str, v: &Value) -> Reads {
         ("range_dispatch", Some("use_duration" | "use_cycle")) => {
             Reads(Reads::USING_ITEM.0 | Reads::USE_TICKS.0)
         }
-        ("range_dispatch", Some("crossbow/pull")) => Reads(Reads::USING_ITEM.0 | Reads::CROSSBOW_PULL.0),
+        ("range_dispatch", Some("crossbow/pull")) => {
+            Reads(Reads::USING_ITEM.0 | Reads::CROSSBOW_PULL.0)
+        }
         _ => Reads::VOLATILE,
     }
 }
@@ -636,7 +643,10 @@ fn evaluate<'a>(
         parent_transform * graph_transform(&v["transformation"])?
     };
     let kind = short(v["type"].as_str().ok_or("item graph type missing")?);
-    if matches!(kind, "condition" | "select" | "range_dispatch" | "bundle/selected_item") {
+    if matches!(
+        kind,
+        "condition" | "select" | "range_dispatch" | "bundle/selected_item"
+    ) {
         reads.insert(context_reads(kind, v));
     }
     match kind {
@@ -865,7 +875,7 @@ fn tint_color(c: &Content, v: &Value, s: &Stack) -> Result<[f32; 3]> {
                 }
                 ((sums[0] / xs.len() as u64) << 16
                     | (sums[1] / xs.len() as u64) << 8
-                    | sums[2] / xs.len() as u64) as u32
+                    | (sums[2] / xs.len() as u64)) as u32
             } else {
                 default
             }
@@ -923,17 +933,17 @@ fn graph_transform(t: &Value) -> Result<Mat4> {
             a[3].as_f64().ok_or("item quaternion")? as f32,
         ))
     }
-    // Vanilla parses item transforms in pixel units (translation * 1/16,
-    // clamped) and ItemTransform.apply ends with a -0.5 model-space centering.
-    let translation = vec3(t, "translation", [0.; 3])? * (1. / 16.);
+    // Per-node item-graph transformations apply in model units (the bed item shifts
+    // its foot half by a full block with translation [0, 0, 1]); display transforms
+    // are separate (display_matrix).
+    let translation = vec3(t, "translation", [0.; 3])?;
     let scale = vec3(t, "scale", [1.; 3])?;
     let left = quat(t, "left_rotation")?;
     let right = quat(t, "right_rotation")?;
     Ok(Mat4::from_translation(translation)
         * Mat4::from_quat(left)
         * Mat4::from_scale(scale)
-        * Mat4::from_quat(right)
-        * Mat4::from_translation(Vec3::splat(-0.5)))
+        * Mat4::from_quat(right))
 }
 
 fn apply_graph_transform(m: &mut BakedModel, transformation: Mat4) {
@@ -1012,7 +1022,16 @@ mod tests {
         for display in ["gui", "firstperson_righthand"] {
             ctx.display = display.into();
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
+            evaluate(
+                &graph,
+                &stack,
+                &ctx,
+                0,
+                Mat4::IDENTITY,
+                &mut nodes,
+                &mut Reads::default(),
+            )
+            .unwrap();
             assert_eq!(nodes[0].0["model"], "test:early");
         }
         let world = ctx.world.as_mut().unwrap();
@@ -1021,7 +1040,16 @@ mod tests {
         for display in ["gui", "firstperson_righthand"] {
             ctx.display = display.into();
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
+            evaluate(
+                &graph,
+                &stack,
+                &ctx,
+                0,
+                Mat4::IDENTITY,
+                &mut nodes,
+                &mut Reads::default(),
+            )
+            .unwrap();
             assert_eq!(nodes[0].0["model"], "test:late");
         }
     }
@@ -1162,7 +1190,16 @@ mod tests {
                 ..ItemContext::default()
             };
             let mut nodes = Vec::new();
-            evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes, &mut Reads::default()).unwrap();
+            evaluate(
+                &graph,
+                &stack,
+                &ctx,
+                0,
+                Mat4::IDENTITY,
+                &mut nodes,
+                &mut Reads::default(),
+            )
+            .unwrap();
             assert_eq!(nodes[0].0["model"], expected);
         }
     }
@@ -1236,16 +1273,12 @@ mod tests {
         for (index, quad) in source.quads.iter().enumerate() {
             for (vertex, position) in quad.positions.iter().enumerate() {
                 let [x, y, z] = *position;
-                // Vanilla ItemTransform: translation is in 1/16 units and apply()
-                // ends with a -0.5 centering, so parent S(1,-1,-1) * T(-0.5) over
-                // child T([0,2,3]/16) * T(-0.5) maps (x,y,z) to:
-                assert_eq!(
-                    model.quads[index].positions[vertex],
-                    [x - 1., 0.875 - y, 0.8125 - z]
-                );
+                // Per-node graph transformations apply in model units: parent
+                // S(1,-1,-1) over child T([0,2,3]) maps (x,y,z) to (x,-y-2,-z-3).
+                assert_eq!(model.quads[index].positions[vertex], [x, -y - 2., -z - 3.]);
                 assert_eq!(
                     model.quads[index + source.quads.len()].positions[vertex],
-                    [x - 0.5, 0.5 - y, 0.5 - z]
+                    [x, -y, -z]
                 );
             }
         }
@@ -1256,7 +1289,7 @@ mod tests {
         let model = models.model_with(&content, &stack, &ctx).unwrap();
         assert_eq!(model.quads.len(), source.quads.len());
         let [x, y, z] = source.quads[0].positions[0];
-        assert_eq!(model.quads[0].positions[0], [x - 0.5, 0.5 - y, 0.5 - z]);
+        assert_eq!(model.quads[0].positions[0], [x, -y, -z]);
     }
 
     #[test]

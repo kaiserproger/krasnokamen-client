@@ -10,9 +10,16 @@ fn offscreen_padded_rows_and_mp4_pipe_round_trip() {
     let _gpu = crate::render::gpu_test_lock();
     let clock = crate::replay::clock::VirtualClock::new();
     let directory = std::env::var_os("KRASNOKAMEN_CAPTURE_TEST_ARTIFACTS")
-        .map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
-        .join(format!("capture-smoke-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(format!(
+            "capture-smoke-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
     std::fs::create_dir_all(&directory).unwrap();
     let mut session = crate::session::Session::new_mode("authored-capture-fixture".into(), false);
     let camera = camera::CameraPath::parse(

@@ -8,7 +8,7 @@ use crate::{
     ui::UiState,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -467,15 +467,15 @@ impl Loader {
             if count != 1 {
                 return Err("Loader action field must have exactly one typed value".into());
             }
-            if let Some(number) = field.get("number") {
-                if number.as_f64().is_none_or(|n| !n.is_finite()) {
-                    return Err("invalid Loader number".into());
-                }
+            if let Some(number) = field.get("number")
+                && number.as_f64().is_none_or(|n| !n.is_finite())
+            {
+                return Err("invalid Loader number".into());
             }
-            if let Some(text) = field.get("text") {
-                if text.as_str().is_none_or(|s| s.len() > 256) {
-                    return Err("Loader text limit".into());
-                }
+            if let Some(text) = field.get("text")
+                && text.as_str().is_none_or(|s| s.len() > 256)
+            {
+                return Err("Loader text limit".into());
             }
             if field.get("selected").is_some() {
                 identifier(field, "selected")?;
@@ -495,12 +495,11 @@ impl Loader {
         Ok(out)
     }
     pub fn clear_view(&mut self, ui: Option<&mut UiState>) -> Result<()> {
-        if let Some(view) = self.view.take() {
-            if let Some(ui) = ui {
-                if ui.screen() == crate::ui::Screen::Loader {
-                    ui.close_loader(&view.id)?;
-                }
-            }
+        if let Some(view) = self.view.take()
+            && let Some(ui) = ui
+            && ui.screen() == crate::ui::Screen::Loader
+        {
+            ui.close_loader(&view.id)?;
         }
         Ok(())
     }
@@ -711,7 +710,9 @@ fn activate(
         return Err("Loader archive entry limit".into());
     }
     let mut first = zip.by_index(0).map_err(|e| e.to_string())?;
-    if first.name() != "krasnokamen-client.json" || first.is_dir() || first.size() > MAX_MESSAGE as u64
+    if first.name() != "krasnokamen-client.json"
+        || first.is_dir()
+        || first.size() > MAX_MESSAGE as u64
     {
         return Err("Loader archive must begin with bounded krasnokamen-client.json".into());
     }
@@ -791,7 +792,8 @@ fn activate(
         owned(&block.drop_item, &bundle.owner)?;
         // Block and its inventory item intentionally share one resource identity.
         if existing_ids.contains(&block.id)
-            || (ids.contains(&block.id) && !index.items.iter().any(|item| item["id"] == block.id)) {
+            || (ids.contains(&block.id) && !index.items.iter().any(|item| item["id"] == block.id))
+        {
             return Err(format!("duplicate activated Loader block {}", block.id));
         }
         ids.insert(block.id);
@@ -969,9 +971,11 @@ mod tests {
         assert!(loader.artifact(&chunk(&value, &corrupt)).is_err());
         assert!(!loader.acknowledged);
         let mut loader = begin(&value).unwrap();
-        assert!(loader
-            .artifact(&chunk(&value, &bytes[..bytes.len() - 1]))
-            .is_err());
+        assert!(
+            loader
+                .artifact(&chunk(&value, &bytes[..bytes.len() - 1]))
+                .is_err()
+        );
         assert!(!loader.acknowledged);
     }
     #[test]

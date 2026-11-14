@@ -26,6 +26,7 @@ fn main() {
         .unwrap();
     }
     out.push_str("];\n");
-    let target = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("krasnokamen_models_embedded.rs");
+    let target =
+        PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("krasnokamen_models_embedded.rs");
     fs::write(target, out).unwrap();
 }

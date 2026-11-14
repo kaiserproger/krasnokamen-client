@@ -509,7 +509,7 @@ fn respond_bytes(
     }
     stream
         .write_all(b"\r\n")
-        .and_then(|_| stream.write_all(&bytes))
+        .and_then(|_| stream.write_all(bytes))
         .map_err(|e| e.to_string())
 }
 fn error(id: Value, code: i32, message: &str) -> Value {
@@ -526,20 +526,19 @@ impl Transport {
     fn log(&self, request: &Value, response: Option<&Value>) {
         let record = json!({"timestamp_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().to_string(),
             "request":redact(request.clone()),"response":response.map(|v|redact(v.clone()))});
-        if let Ok(bytes) = serde_json::to_vec(&record) {
-            if self
+        if let Ok(bytes) = serde_json::to_vec(&record)
+            && self
                 .transcript_bytes
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
                     used.checked_add(bytes.len() + 1)
                         .filter(|next| *next <= 16 * 1024 * 1024)
                 })
                 .is_ok()
-            {
-                let mut file = self.transcript.lock();
-                let _ = file.write_all(&bytes);
-                let _ = file.write_all(b"\n");
-                let _ = file.flush();
-            }
+        {
+            let mut file = self.transcript.lock();
+            let _ = file.write_all(&bytes);
+            let _ = file.write_all(b"\n");
+            let _ = file.flush();
         }
     }
     fn serve(
@@ -597,7 +596,10 @@ impl Transport {
             return respond(
                 stream,
                 401,
-                &[("WWW-Authenticate", "Bearer realm=\"krasnokamen-client-local\"")],
+                &[(
+                    "WWW-Authenticate",
+                    "Bearer realm=\"krasnokamen-client-local\"",
+                )],
                 Some(&error(Value::Null, -32600, "unauthorized")),
             );
         }
@@ -939,9 +941,22 @@ impl Transport {
                 "protocol_versions":["2025-11-25"],"unsupported_protocol_versions":["2025-06-18","2026-07-28"],
                 "authorization":"local_preshared_credential_not_oauth","control_locally_authorized":self.core.allow_control,
                 "controller":self.core.controller(),"tools":self.core.tools()});
-                let observation = self.core.shared.observation.lock().unwrap_or_else(|e| e.into_inner());
-                value["renderer"] = observation.data.get("render").cloned().unwrap_or(Value::Null);
-                value["window"] = observation.data.get("window").cloned().unwrap_or(Value::Null);
+                let observation = self
+                    .core
+                    .shared
+                    .observation
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                value["renderer"] = observation
+                    .data
+                    .get("render")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                value["window"] = observation
+                    .data
+                    .get("window")
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 Some(value)
             }
             "krasnokamen-client://instances" => Some(
@@ -987,10 +1002,10 @@ fn redact(mut v: Value) -> Value {
             }
         }
         Value::String(text) => {
-            if let Ok(encoded) = serde_json::from_str::<Value>(text) {
-                if encoded.is_object() || encoded.is_array() {
-                    *text = redact(encoded).to_string();
-                }
+            if let Ok(encoded) = serde_json::from_str::<Value>(text)
+                && (encoded.is_object() || encoded.is_array())
+            {
+                *text = redact(encoded).to_string();
             }
         }
         _ => {}
@@ -1629,11 +1644,18 @@ mod tests {
     fn test_server() -> (Server, mpsc::Receiver<Request>, PathBuf) {
         let (core, receiver) = super::super::tests::client();
         let directory = std::env::temp_dir().join(format!("krasnokamen-http-{}", nonce().unwrap()));
-        let server = start(core.shared.clone(), core.sender.clone(), Config {
-            bind: "127.0.0.1:0".parse().unwrap(),
-            runtime_dir: directory.join("runtime"), artifact_dir: directory.join("artifacts"),
-            profile: "test".into(), allow_control: true,
-        }).unwrap();
+        let server = start(
+            core.shared.clone(),
+            core.sender.clone(),
+            Config {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                runtime_dir: directory.join("runtime"),
+                artifact_dir: directory.join("artifacts"),
+                profile: "test".into(),
+                allow_control: true,
+            },
+        )
+        .unwrap();
         (server, receiver, directory)
     }
     fn response(stream: &mut TcpStream) -> String {

@@ -34,12 +34,13 @@ impl SignatureCache {
             len -= 1;
             let value = queue[(head + len) % 21].take();
             let previous = std::mem::replace(entry, value);
-            if let Some(previous) = previous {
-                if !last_seen.contains(&previous) && signature != Some(&previous) {
-                    head = (head + 20) % 21;
-                    queue[head] = Some(previous);
-                    len += 1;
-                }
+            if let Some(previous) = previous
+                && !last_seen.contains(&previous)
+                && signature != Some(&previous)
+            {
+                head = (head + 20) % 21;
+                queue[head] = Some(previous);
+                len += 1;
             }
         }
     }

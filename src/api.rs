@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

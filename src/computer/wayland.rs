@@ -35,7 +35,9 @@ pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
 }
 pub fn open(id: u64) -> Result<Box<dyn DesktopSource>, String> {
     list_windows()?;
-    if id != 0 { return Err("Select NEW window for fresh system consent".into()); }
+    if id != 0 {
+        return Err("Select NEW window for fresh system consent".into());
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -146,9 +148,10 @@ impl Drop for WaylandSource {
     }
 }
 
-
 async fn portal_connection() -> Result<ashpd::zbus::Connection, String> {
-    ashpd::zbus::Connection::session().await.map_err(|e|format!("Connect desktop portal: {e}"))
+    ashpd::zbus::Connection::session()
+        .await
+        .map_err(|e| format!("Connect desktop portal: {e}"))
 }
 
 #[cfg(test)]
@@ -158,7 +161,10 @@ mod tests {
     #[ignore = "run under dbus-run-session for an isolated real bus"]
     fn reopening_capture_uses_a_live_connection_after_runtime_drop() {
         let connect = || {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             runtime.block_on(async {
                 let connection = portal_connection().await.unwrap();
                 let name = connection.unique_name().unwrap().to_string();

@@ -18,13 +18,19 @@ pub(super) fn tools() -> &'static Vec<Value> {
                 "Read received block states in y/z/x order. Responses are byte-bounded; when truncated, repeat unchanged bounds with offset=next_offset. count is returned rows; total_count is requested volume."
             );
         }
-        if let Some(inputs) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_press_inputs") {
+        if let Some(inputs) = tools
+            .iter_mut()
+            .find(|tool| tool["name"] == "minecraft_press_inputs")
+        {
             inputs["inputSchema"]["properties"]["hold"] = serde_json::json!({
                 "type": "boolean",
                 "description": "Press (true) or release (false) keys until the next explicit release or controller revocation."
             });
         }
-        if let Some(entities) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_list_entities") {
+        if let Some(entities) = tools
+            .iter_mut()
+            .find(|tool| tool["name"] == "minecraft_list_entities")
+        {
             entities["inputSchema"]["properties"]["entity_type"] = serde_json::json!({
                 "type":"string","minLength":1,"maxLength":128,
                 "description":"Filter received entity types before limiting the page."
@@ -122,18 +128,17 @@ pub(super) fn validate(name: &str, arguments: &Value) -> Result<&'static Value, 
 
 fn validate_value(schema: &Value, value: &Value, path: &str) -> Result<(), String> {
     let invalid = |reason: &str| format!("invalid_arguments: {path} {reason}");
-    if let Some(variants) = schema["anyOf"].as_array() {
-        if !variants
+    if let Some(variants) = schema["anyOf"].as_array()
+        && !variants
             .iter()
             .any(|variant| validate_value(variant, value, path).is_ok())
-        {
-            return Err(invalid("does not match a declared alternative"));
-        }
+    {
+        return Err(invalid("does not match a declared alternative"));
     }
-    if let Some(variants) = schema["enum"].as_array() {
-        if !variants.contains(value) {
-            return Err(invalid("is outside the declared enum"));
-        }
+    if let Some(variants) = schema["enum"].as_array()
+        && !variants.contains(value)
+    {
+        return Err(invalid("is outside the declared enum"));
     }
     match schema["type"].as_str() {
         Some("object") => {
@@ -148,10 +153,10 @@ fn validate_value(schema: &Value, value: &Value, path: &str) -> Result<(), Strin
                     }
                 }
             }
-            if let Some(limit) = schema["maxProperties"].as_u64() {
-                if object.len() as u64 > limit {
-                    return Err(invalid("has too many properties"));
-                }
+            if let Some(limit) = schema["maxProperties"].as_u64()
+                && object.len() as u64 > limit
+            {
+                return Err(invalid("has too many properties"));
             }
             if let Some(dependencies) = schema["dependentRequired"].as_object() {
                 for (key, required) in dependencies {
@@ -189,12 +194,11 @@ fn validate_value(schema: &Value, value: &Value, path: &str) -> Result<(), Strin
                 .as_array()
                 .ok_or_else(|| invalid("must be an array"))?;
             for (bound, minimum) in [("minItems", true), ("maxItems", false)] {
-                if let Some(limit) = schema[bound].as_u64() {
-                    if (minimum && (array.len() as u64) < limit)
-                        || (!minimum && (array.len() as u64) > limit)
-                    {
-                        return Err(invalid("violates the declared item count"));
-                    }
+                if let Some(limit) = schema[bound].as_u64()
+                    && ((minimum && (array.len() as u64) < limit)
+                        || (!minimum && (array.len() as u64) > limit))
+                {
+                    return Err(invalid("violates the declared item count"));
                 }
             }
             if schema.get("items").is_some() {

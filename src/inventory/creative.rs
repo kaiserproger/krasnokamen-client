@@ -1,6 +1,6 @@
 //! The creative screen uses ordinary set-slot packets, never container-click hashes.
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::{InventoryStore, Prediction, normalized};
+use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     inventory::{PacketCommand, Stack, UiContext},
     protocol::{Result, Writer, content::Content},

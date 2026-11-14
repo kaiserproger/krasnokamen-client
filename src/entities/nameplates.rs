@@ -6,7 +6,7 @@
 //! EntityAttachments.transformPoint (attributes-attachments.javap). ItemFrameRenderer,
 //! ItemStack.getCustomName/getHoverName and EnderDragonRenderer were checked against
 //! /home/kaiserroman/research/client-26.1.2.jar. No original/derived Java bytes are included.
-use super::{presentation, Entity, Handle, Metadata, Models, Store};
+use super::{Entity, Handle, Metadata, Models, Store, presentation};
 use crate::{
     protocol::Result,
     ui::{ScoreTeam, ScoreboardState, TeamParameters, TeamVisibility},
@@ -82,27 +82,27 @@ fn living_visible(
     let visible = view.viewer_spectator || same_team && friendly_invisibles || flags & 32 == 0;
     // LivingEntityRenderer's team branches return before the ordinary camera,
     // renderNames and isVehicle gates. They do not apply to the local player.
-    if store.local_entity_id != Some(entity.handle.network_id) {
-        if let Some(team) = team {
-            return match team.parameters.visibility {
-                TeamVisibility::Always => visible,
-                TeamVisibility::Never => false,
-                TeamVisibility::HideForOtherTeams => {
-                    if viewer_team.is_none() {
-                        visible
-                    } else {
-                        same_team && (friendly_invisibles || visible)
-                    }
+    if store.local_entity_id != Some(entity.handle.network_id)
+        && let Some(team) = team
+    {
+        return match team.parameters.visibility {
+            TeamVisibility::Always => visible,
+            TeamVisibility::Never => false,
+            TeamVisibility::HideForOtherTeams => {
+                if viewer_team.is_none() {
+                    visible
+                } else {
+                    same_team && (friendly_invisibles || visible)
                 }
-                TeamVisibility::HideForOwnTeam => {
-                    if viewer_team.is_none() {
-                        visible
-                    } else {
-                        !same_team && visible
-                    }
+            }
+            TeamVisibility::HideForOwnTeam => {
+                if viewer_team.is_none() {
+                    visible
+                } else {
+                    !same_team && visible
                 }
-            };
-        }
+            }
+        };
     }
     view.render_names
         && view.camera_entity != Some(entity.handle.network_id)
@@ -275,7 +275,7 @@ pub(crate) fn nameplate<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{physical, resources, PlayerProfile, Transform};
+    use super::super::{PlayerProfile, Transform, physical, resources};
     use super::*;
     use crate::{
         inventory::Stack,
@@ -472,14 +472,16 @@ mod tests {
         let (generic_store, generic_models, mut generic) =
             fixture("minecraft:marker", &["net.minecraft.world.entity.Entity"]);
         visible_name(&mut generic);
-        assert!(selected(
-            &generic_store,
-            &generic_models,
-            &generic,
-            &view,
-            4096. - 0.001
-        )
-        .is_some());
+        assert!(
+            selected(
+                &generic_store,
+                &generic_models,
+                &generic,
+                &view,
+                4096. - 0.001
+            )
+            .is_some()
+        );
         for distance in [4096., 4096. + 0.001, f64::NAN] {
             assert!(selected(&generic_store, &generic_models, &generic, &view, distance).is_none());
         }

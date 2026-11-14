@@ -35,44 +35,48 @@ impl Texture {
             view_formats: &[],
         });
         let (layout, sampler, pipeline) = if let Some(shared) = shared {
-            (shared.layout.clone(), shared.sampler.clone(), shared.pipeline.clone())
+            (
+                shared.layout.clone(),
+                shared.sampler.clone(),
+                shared.pipeline.clone(),
+            )
         } else {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("desktop texture"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("desktop texture"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("desktop face"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("desktop face"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
-        });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("desktop face"),
+                source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("desktop face"),
+                bind_group_layouts: &[&layout],
+                push_constant_ranges: &[],
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("desktop face"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -217,11 +221,14 @@ fn face_vertices(face: Face, size: [u32; 2], camera: [f64; 3], matrix: glam::Mat
     let image = [
         ((bounds[0] - extent[0]) * 0.5) as f32,
         ((bounds[1] - extent[1]) * 0.5) as f32,
-        extent[0] as f32, extent[1] as f32,
+        extent[0] as f32,
+        extent[1] as f32,
     ];
     [[0., 0.], [0., 1.], [1., 1.], [0., 0.], [1., 1.], [1., 0.]].map(|corner| {
         let uv = [corner[0] * bounds[0], corner[1] * bounds[1]];
-        let point = std::array::from_fn(|i| (origin[i] - camera[i] + right[i] * uv[0] + down[i] * uv[1]) as f32);
+        let point = std::array::from_fn(|i| {
+            (origin[i] - camera[i] + right[i] * uv[0] + down[i] * uv[1]) as f32
+        });
         Vertex {
             position: (matrix * glam::Vec3::from_array(point).extend(1.)).to_array(),
             uv: uv.map(|value| value as f32),
@@ -252,20 +259,30 @@ mod tests {
     fn full_surface_shader_validates_without_nonuniform_derivatives() {
         let module = wgpu::naga::front::wgsl::parse_str(SHADER).unwrap();
         wgpu::naga::valid::Validator::new(
-            wgpu::naga::valid::ValidationFlags::all(), wgpu::naga::valid::Capabilities::empty()
-        ).validate(&module).unwrap();
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .unwrap();
     }
     #[test]
     fn a_single_quad_covers_the_entire_rectangle_including_letterbox() {
         for side in 2..=5 {
-            let face = Face { block: [10, 20, 30], side, width: 4, height: 2 };
+            let face = Face {
+                block: [10, 20, 30],
+                side,
+                width: 4,
+                height: 2,
+            };
             let vertices = face_vertices(face, [1920, 1080], [0.; 3], glam::Mat4::IDENTITY);
             let (origin, right, down) = face.basis();
             for vertex in vertices {
                 assert!(vertex.uv[0] == 0. || vertex.uv[0] == 4.);
                 assert!(vertex.uv[1] == 0. || vertex.uv[1] == 2.);
                 for axis in 0..3 {
-                    let expected = origin[axis] + right[axis] * f64::from(vertex.uv[0]) + down[axis] * f64::from(vertex.uv[1]);
+                    let expected = origin[axis]
+                        + right[axis] * f64::from(vertex.uv[0])
+                        + down[axis] * f64::from(vertex.uv[1]);
                     assert!((f64::from(vertex.position[axis]) - expected).abs() < 0.00001);
                 }
                 assert!((2. * vertex.image[0] + vertex.image[2] - 4.).abs() < 0.00001);

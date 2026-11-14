@@ -2,13 +2,17 @@
 //! tab-separated line per submitted frame, read from the same render metrics
 //! the observation publishes. Unset (the default) costs nothing.
 
-use std::collections::BTreeMap;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::{
     fmt::Write as _,
     fs::File,
     io::{BufRead, BufReader, LineWriter, Write},
-    sync::{Arc, atomic::{AtomicU64, Ordering}, mpsc::{self, SyncSender}},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, SyncSender},
+    },
     thread::JoinHandle,
     time::Instant,
 };
@@ -82,15 +86,18 @@ impl Summary {
         }
         self.frames += 1;
         for (index, name) in COLUMNS.iter().enumerate() {
-            if name.ends_with("_ms") && *name != "terrain_mesh_cpu_total_ms"
-                && let Ok(value) = cells[index + 2].parse::<f64>() {
+            if name.ends_with("_ms")
+                && *name != "terrain_mesh_cpu_total_ms"
+                && let Ok(value) = cells[index + 2].parse::<f64>()
+            {
                 self.add(name, value);
             }
         }
         if let Some(index) = COLUMNS.iter().position(|name| *name == "gpu_timestamps")
             && let Ok(gpu) = serde_json::from_str::<Value>(cells[index + 2])
             && let Some(frame) = gpu["frame_id"].as_str()
-            && self.last_gpu_frame.as_deref() != Some(frame) {
+            && self.last_gpu_frame.as_deref() != Some(frame)
+        {
             self.last_gpu_frame = Some(frame.to_owned());
             if let Some(passes) = gpu["passes_ms"].as_object() {
                 for (name, value) in passes {
@@ -103,8 +110,15 @@ impl Summary {
     }
 
     fn value(&self) -> Value {
-        let timings: BTreeMap<_, _> = self.timings.iter().map(|(name, (sum, count, max))|
-            (name, serde_json::json!({"mean_ms":sum / *count as f64,"max_ms":max,"samples":count})))
+        let timings: BTreeMap<_, _> = self
+            .timings
+            .iter()
+            .map(|(name, (sum, count, max))| {
+                (
+                    name,
+                    serde_json::json!({"mean_ms":sum / *count as f64,"max_ms":max,"samples":count}),
+                )
+            })
             .collect();
         serde_json::json!({"frames":self.frames,"complete":self.complete,
             "dropped_rows":self.dropped_rows,"timings":timings})
@@ -118,7 +132,11 @@ pub(crate) fn summarize(path: &std::path::Path) -> Result<Value, String> {
     let mut summary = Summary::default();
     loop {
         line.clear();
-        if reader.read_line(&mut line).map_err(|e| format!("reading profile {}: {e}", path.display()))? == 0 {
+        if reader
+            .read_line(&mut line)
+            .map_err(|e| format!("reading profile {}: {e}", path.display()))?
+            == 0
+        {
             break;
         }
         if !line.ends_with('\n') {
@@ -127,7 +145,10 @@ pub(crate) fn summarize(path: &std::path::Path) -> Result<Value, String> {
         summary.line(&line);
     }
     if summary.frames == 0 {
-        return Err(format!("profile {} contains no complete frame rows", path.display()));
+        return Err(format!(
+            "profile {} contains no complete frame rows",
+            path.display()
+        ));
     }
     Ok(summary.value())
 }
@@ -159,7 +180,7 @@ impl FrameTrace {
             Ok(mut trace) => {
                 trace.needs_metadata = true;
                 Some(trace)
-            },
+            }
             Err(error) => {
                 eprintln!("frame trace {}: {error}", path.to_string_lossy());
                 None
@@ -168,7 +189,10 @@ impl FrameTrace {
     }
 
     fn new(out: File) -> std::io::Result<Self> {
-        Self::with_header(out, serde_json::json!({"version": env!("CARGO_PKG_VERSION")}))
+        Self::with_header(
+            out,
+            serde_json::json!({"version": env!("CARGO_PKG_VERSION")}),
+        )
     }
 
     fn with_header(out: File, header: Value) -> std::io::Result<Self> {
@@ -191,16 +215,24 @@ impl FrameTrace {
             out.flush()
         })?;
         Ok(Self {
-            out: Some(sender), writer: Some(writer), dropped,
-            start: Instant::now(), last_frame: None, previous_record_ms: 0.,
-            skipped_draws: 0, skipped_draw_ms: 0., skipped_advance_ms: 0.,
+            out: Some(sender),
+            writer: Some(writer),
+            dropped,
+            start: Instant::now(),
+            last_frame: None,
+            previous_record_ms: 0.,
+            skipped_draws: 0,
+            skipped_draw_ms: 0.,
+            skipped_advance_ms: 0.,
             needs_metadata: false,
         })
     }
 
     fn metadata(&mut self, header: &Value) {
-        if self.out.as_ref().is_some_and(|out|
-            out.try_send(format!("# metadata\t{header}\n")).is_ok())
+        if self
+            .out
+            .as_ref()
+            .is_some_and(|out| out.try_send(format!("# metadata\t{header}\n")).is_ok())
         {
             self.needs_metadata = false;
         }
@@ -239,9 +271,19 @@ impl FrameTrace {
                 _ => line.push('-'),
             }
         }
-        let _ = writeln!(line, "\t{look_events}\t{}\t{}\t{}\t{}",
-            self.previous_record_ms, self.skipped_draws, self.skipped_draw_ms, self.skipped_advance_ms);
-        if self.out.as_ref().is_some_and(|out| out.try_send(line).is_err()) {
+        let _ = writeln!(
+            line,
+            "\t{look_events}\t{}\t{}\t{}\t{}",
+            self.previous_record_ms,
+            self.skipped_draws,
+            self.skipped_draw_ms,
+            self.skipped_advance_ms
+        );
+        if self
+            .out
+            .as_ref()
+            .is_some_and(|out| out.try_send(line).is_err())
+        {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
         // Serialization/enqueue belongs to the NEXT submission interval.
@@ -260,13 +302,27 @@ impl FrameTrace {
     }
 }
 
-pub(crate) fn is_toggle_key(code: winit::keyboard::KeyCode, pressed: bool, repeat: bool, screen: &str) -> bool {
+pub(crate) fn is_toggle_key(
+    code: winit::keyboard::KeyCode,
+    pressed: bool,
+    repeat: bool,
+    screen: &str,
+) -> bool {
     code == winit::keyboard::KeyCode::F10 && pressed && !repeat && screen == "game"
 }
 
 fn header(app: &crate::App) -> Result<Value, String> {
-    let size = app.window.as_ref().ok_or("window unavailable")?.inner_size();
-    let adapter = app.renderer.as_ref().ok_or("renderer unavailable")?.metrics()["adapter"].clone();
+    let size = app
+        .window
+        .as_ref()
+        .ok_or("window unavailable")?
+        .inner_size();
+    let adapter = app
+        .renderer
+        .as_ref()
+        .ok_or("renderer unavailable")?
+        .metrics()["adapter"]
+        .clone();
     Ok(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"), "adapter": adapter,
         "resolution": [size.width, size.height],
@@ -276,9 +332,13 @@ fn header(app: &crate::App) -> Result<Value, String> {
 }
 
 pub(crate) fn supply_metadata(app: &mut crate::App) {
-    if app.frame_trace.as_ref().is_some_and(|trace| trace.needs_metadata)
+    if app
+        .frame_trace
+        .as_ref()
+        .is_some_and(|trace| trace.needs_metadata)
         && let Ok(header) = header(app)
-        && let Some(trace) = &mut app.frame_trace {
+        && let Some(trace) = &mut app.frame_trace
+    {
         trace.metadata(&header);
     }
 }
@@ -312,7 +372,10 @@ pub(crate) fn toggle(app: &mut crate::App) {
         let dir = crate::singleplayer::data_root()?.join("profiles");
         std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
         let path = dir.join(format!("frame-{}.tsv", uuid::Uuid::new_v4()));
-        let file = File::options().write(true).create_new(true).open(&path)
+        let file = File::options()
+            .write(true)
+            .create_new(true)
+            .open(&path)
             .map_err(|e| format!("creating {}: {e}", path.display()))?;
         let header = header(app)?;
         let trace = FrameTrace::with_header(file, header).map_err(|e| e.to_string())?;
@@ -323,14 +386,22 @@ pub(crate) fn toggle(app: &mut crate::App) {
             app.profile_path = Some(path);
             app.session.enable_scene_profile(true);
             app.frame_trace = Some(trace);
-            notice(app, "Performance recording started. Press F10 again to save.");
+            notice(
+                app,
+                "Performance recording started. Press F10 again to save.",
+            );
         }
-        Err(error) => notice(app, &format!("Could not start performance recording: {error}")),
+        Err(error) => notice(
+            app,
+            &format!("Could not start performance recording: {error}"),
+        ),
     }
 }
 
 pub(crate) fn complete(app: &mut crate::App) {
-    let Some(receiver) = &app.profile_save else { return; };
+    let Some(receiver) = &app.profile_save else {
+        return;
+    };
     let result = match receiver.try_recv() {
         Ok(result) => result,
         Err(mpsc::TryRecvError::Empty) => return,
@@ -343,14 +414,18 @@ pub(crate) fn complete(app: &mut crate::App) {
     app.profile_save = None;
     let message = match result {
         (path, Ok(())) => format!("Saved performance profile: {}", path.display()),
-        (path, Err(error)) => format!("Could not save performance profile {}: {error}", path.display()),
+        (path, Err(error)) => format!(
+            "Could not save performance profile {}: {error}",
+            path.display()
+        ),
     };
     notice(app, &message);
 }
 
 fn notice(app: &mut crate::App, message: &str) {
     if let Some(ui) = app.session.ui_mut()
-        && let Err(error) = ui.local_message(message) {
+        && let Err(error) = ui.local_message(message)
+    {
         eprintln!("performance profile chat: {error}");
     }
     app.publish_session();
@@ -362,7 +437,7 @@ impl Drop for FrameTrace {
         self.out.take();
         if let Some(writer) = self.writer.take() {
             match writer.join() {
-                Ok(Ok(())) => {},
+                Ok(Ok(())) => {}
                 Ok(Err(error)) => eprintln!("frame trace incomplete: {error}"),
                 Err(_) => eprintln!("frame trace incomplete: writer panicked"),
             }
@@ -377,10 +452,15 @@ mod tests {
 
     #[test]
     fn profile_header_identifies_format_and_version() {
-        let path = std::env::temp_dir().join(format!("krasnokamen-profile-header-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "krasnokamen-profile-header-{}.tsv",
+            std::process::id()
+        ));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
-        trace.metadata(&json!({"adapter":{"name":"test GPU","driver":"test driver"},
-            "resolution":[1920,1080],"graphics_preset":"high","render_distance":8}));
+        trace.metadata(
+            &json!({"adapter":{"name":"test GPU","driver":"test driver"},
+            "resolution":[1920,1080],"graphics_preset":"high","render_distance":8}),
+        );
         drop(trace);
         let text = std::fs::read_to_string(&path).unwrap();
         std::fs::remove_file(path).unwrap();
@@ -402,13 +482,23 @@ mod tests {
 
     #[test]
     fn truncated_profile_can_be_summarized() {
-        let path = std::env::temp_dir().join(format!("krasnokamen-truncated-profile-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "krasnokamen-truncated-profile-{}.tsv",
+            std::process::id()
+        ));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
-        trace.record(&json!({"submitted_frame_id":"1","frame_wall_ms":8.0,
-            "gpu_timestamps":{"frame_id":"1","passes_ms":{"opaque":2.0}}}), 0);
+        trace.record(
+            &json!({"submitted_frame_id":"1","frame_wall_ms":8.0,
+            "gpu_timestamps":{"frame_id":"1","passes_ms":{"opaque":2.0}}}),
+            0,
+        );
         drop(trace);
         let text = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, format!("{}unfinished", text.split("# summary").next().unwrap())).unwrap();
+        std::fs::write(
+            &path,
+            format!("{}unfinished", text.split("# summary").next().unwrap()),
+        )
+        .unwrap();
         let summary = summarize(&path).unwrap();
         assert_eq!(summary["frames"], 1);
         assert_eq!(summary["complete"], false);
@@ -421,7 +511,10 @@ mod tests {
 
     #[test]
     fn trace_preserves_completed_gpu_frame_identity_and_draw_phases() {
-        let path = std::env::temp_dir().join(format!("krasnokamen-frame-trace-{}.tsv", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "krasnokamen-frame-trace-{}.tsv",
+            std::process::id()
+        ));
         let mut trace = FrameTrace::new(File::create(&path).unwrap()).unwrap();
         let gpu = json!({"frame_id":"39","passes_ms":{"opaque":2.5},"total_ms":2.5});
         let mut render = json!({
@@ -445,12 +538,19 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         std::fs::remove_file(path).unwrap();
         assert!(text.ends_with("# trace_complete\tdropped_rows=0\n"));
-        let lines: Vec<_> = text.lines().filter(|line| !line.starts_with('#')).skip(1).collect();
+        let lines: Vec<_> = text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .skip(1)
+            .collect();
         assert_eq!(lines.len(), 3);
         let cells: Vec<_> = lines[0].split('\t').collect();
         assert_eq!(cells.len(), COLUMNS.len() + 7);
         let cell = |name| cells[2 + COLUMNS.iter().position(|column| *column == name).unwrap()];
-        assert_eq!(serde_json::from_str::<Value>(cell("gpu_timestamps")).unwrap(), gpu);
+        assert_eq!(
+            serde_json::from_str::<Value>(cell("gpu_timestamps")).unwrap(),
+            gpu
+        );
         assert_eq!(cell("queue_submit_ms"), "51.0");
         assert_eq!(cell("render_thread_cpu_ms"), "3.0");
         assert_eq!(cell("cpu_session_events_ms"), "8.0");
@@ -468,16 +568,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn stalled_trace_sink_never_blocks_frame_recording() {
-        use std::{io::{BufRead, BufReader, Read}, os::{fd::OwnedFd, unix::net::UnixStream}, sync::mpsc, time::Duration};
+        use std::{
+            io::{BufRead, BufReader, Read},
+            os::{fd::OwnedFd, unix::net::UnixStream},
+            sync::mpsc,
+            time::Duration,
+        };
         let (mut producer, mut consumer) = UnixStream::pair().unwrap();
-        let mut trace = FrameTrace::new(File::from(OwnedFd::from(producer.try_clone().unwrap()))).unwrap();
+        let mut trace =
+            FrameTrace::new(File::from(OwnedFd::from(producer.try_clone().unwrap()))).unwrap();
         // Let the asynchronous header finish before changing descriptor flags.
-        BufReader::new(consumer.try_clone().unwrap()).read_line(&mut String::new()).unwrap();
+        BufReader::new(consumer.try_clone().unwrap())
+            .read_line(&mut String::new())
+            .unwrap();
         // Fill the actual sink: the next write cannot complete until we drain it.
         producer.set_nonblocking(true).unwrap();
         loop {
             match producer.write(&[b'x'; 8192]) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(error) => panic!("{error}"),
             }
@@ -497,10 +605,17 @@ mod tests {
         let mut bytes = Vec::new();
         consumer.read_to_end(&mut bytes).unwrap();
         owner.join().unwrap();
-        assert!(recorded.is_ok(), "a blocked trace sink stalled the frame owner");
+        assert!(
+            recorded.is_ok(),
+            "a blocked trace sink stalled the frame owner"
+        );
         let text = String::from_utf8(bytes).unwrap();
         let footer = text.lines().last().unwrap();
-        let lost: u64 = footer.strip_prefix("# trace_complete\tdropped_rows=").unwrap().parse().unwrap();
+        let lost: u64 = footer
+            .strip_prefix("# trace_complete\tdropped_rows=")
+            .unwrap()
+            .parse()
+            .unwrap();
         assert!(lost > 0, "overflow must explicitly invalidate the trace");
     }
 

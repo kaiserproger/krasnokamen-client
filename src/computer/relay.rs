@@ -4,7 +4,9 @@ use crate::protocol::Reader;
 use openh264::{
     OpenH264API,
     decoder::Decoder,
-    encoder::{BitRate, Encoder as H264, EncoderConfig, FrameRate, FrameType, RateControlMode, UsageType},
+    encoder::{
+        BitRate, Encoder as H264, EncoderConfig, FrameRate, FrameType, RateControlMode, UsageType,
+    },
     formats::{RgbSliceU8, YUVBuffer, YUVSource},
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -16,7 +18,10 @@ const PART: usize = 30_000;
 const BITRATE: u32 = 4_000_000;
 /// `KRASNOKAMEN_SCREEN_BITRATE` (bit/s) overrides the cap for measurements.
 fn bitrate() -> u32 {
-    std::env::var("KRASNOKAMEN_SCREEN_BITRATE").ok().and_then(|v| v.parse().ok()).unwrap_or(BITRATE)
+    std::env::var("KRASNOKAMEN_SCREEN_BITRATE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(BITRATE)
 }
 /// `FRAME` codec byte: H.264 Annex B (Constrained Baseline, OpenH264), one picture per frame.
 const H264_CODEC: u8 = 1;
@@ -35,10 +40,19 @@ pub(crate) mod stats {
     pub static RX_KEYS: AtomicU64 = AtomicU64::new(0);
     pub static RX_DECODED: AtomicU64 = AtomicU64::new(0);
     pub fn line() -> String {
-        format!("screen_stats unix={} tx_bytes={} tx_frames={} tx_keys={} rx_bytes={} rx_frames={} rx_keys={} rx_decoded={}",
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
-            TX_BYTES.load(Relaxed), TX_FRAMES.load(Relaxed), TX_KEYS.load(Relaxed),
-            RX_BYTES.load(Relaxed), RX_FRAMES.load(Relaxed), RX_KEYS.load(Relaxed), RX_DECODED.load(Relaxed))
+        format!(
+            "screen_stats unix={} tx_bytes={} tx_frames={} tx_keys={} rx_bytes={} rx_frames={} rx_keys={} rx_decoded={}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            TX_BYTES.load(Relaxed),
+            TX_FRAMES.load(Relaxed),
+            TX_KEYS.load(Relaxed),
+            RX_BYTES.load(Relaxed),
+            RX_FRAMES.load(Relaxed),
+            RX_KEYS.load(Relaxed),
+            RX_DECODED.load(Relaxed)
+        )
     }
 }
 
@@ -54,20 +68,41 @@ impl Id {
         let width = r.u8()?;
         let height = r.u8()?;
         let dimension = r.u8()?;
-        if !(2..=5).contains(&side) || !(1..=16).contains(&width) || !(1..=16).contains(&height) || dimension > 2 {
+        if !(2..=5).contains(&side)
+            || !(1..=16).contains(&width)
+            || !(1..=16).contains(&height)
+            || dimension > 2
+        {
             return Err("invalid shared screen identity".into());
         }
-        Ok(Self { face: Face { block, side, width, height }, dimension })
+        Ok(Self {
+            face: Face {
+                block,
+                side,
+                width,
+                height,
+            },
+            dimension,
+        })
     }
     /// The 16 identity bytes on the wire: the key of this screen's audio speaker.
     pub fn speaker(self) -> [u8; 16] {
-        self.packet(0)[2..18].try_into().expect("screen id is 16 bytes")
+        self.packet(0)[2..18]
+            .try_into()
+            .expect("screen id is 16 bytes")
     }
     pub fn packet(self, kind: u8) -> Vec<u8> {
         let mut out = Vec::with_capacity(32);
         out.extend([1, kind]);
-        for coordinate in self.face.block { out.extend(coordinate.to_be_bytes()); }
-        out.extend([self.face.side as u8, self.face.width, self.face.height, self.dimension]);
+        for coordinate in self.face.block {
+            out.extend(coordinate.to_be_bytes());
+        }
+        out.extend([
+            self.face.side as u8,
+            self.face.width,
+            self.face.height,
+            self.dimension,
+        ]);
         out
     }
 }
@@ -143,9 +178,13 @@ pub(crate) struct Relay {
 }
 impl Relay {
     pub fn receive(&mut self, bytes: &[u8]) -> Result<(), String> {
-        if bytes.len() > MAX_FRAME + 32 { return Err("shared screen payload bound".into()); }
+        if bytes.len() > MAX_FRAME + 32 {
+            return Err("shared screen payload bound".into());
+        }
         let mut r = Reader::new(bytes);
-        if r.u8()? != 1 { return Err("unsupported shared screen version".into()); }
+        if r.u8()? != 1 {
+            return Err("unsupported shared screen version".into());
+        }
         let kind = r.u8()?;
         let id = Id::read(&mut r)?;
         match kind {
@@ -158,7 +197,9 @@ impl Relay {
                     return Err("invalid shared screen demand".into());
                 }
                 if on {
-                    if self.demand.len() >= 4 && !self.demand.contains_key(&id) { return Err("screen demand bound".into()); }
+                    if self.demand.len() >= 4 && !self.demand.contains_key(&id) {
+                        return Err("screen demand bound".into());
+                    }
                     self.demand.insert(id, Demand { width, fps });
                     // A new demand starts a fresh picture stream: the first frame must be a key frame.
                     self.key_wanted.insert(id);
@@ -171,26 +212,44 @@ impl Relay {
                 let sequence = r.i32()? as u32;
                 let width = r.i16()? as u16;
                 let height = r.i16()? as u16;
-                if r.u8()? != H264_CODEC { return Err("unsupported screen image codec".into()); }
-                let key = match r.u8()? { 0 => false, 1 => true, _ => return Err("invalid screen key flag".into()) };
+                if r.u8()? != H264_CODEC {
+                    return Err("unsupported screen image codec".into());
+                }
+                let key = match r.u8()? {
+                    0 => false,
+                    1 => true,
+                    _ => return Err("invalid screen key flag".into()),
+                };
                 let data = r.take(r.bytes.len() - r.offset)?;
-                let remote = self.active.get_mut(&id).ok_or("frame for inactive screen")?;
-                if remote.sequence.is_some_and(|old| sequence.wrapping_sub(old) > i32::MAX as u32 || sequence == old) {
+                let remote = self
+                    .active
+                    .get_mut(&id)
+                    .ok_or("frame for inactive screen")?;
+                if remote.sequence.is_some_and(|old| {
+                    sequence.wrapping_sub(old) > i32::MAX as u32 || sequence == old
+                }) {
                     return Ok(());
                 }
                 stats::RX_BYTES.fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 stats::RX_FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if key { stats::RX_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+                if key {
+                    stats::RX_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 remote.sequence = Some(sequence);
                 if !key && !remote.synced {
                     // The server withholds deltas until a key frame; a stray one is simply not decodable.
-                    if !std::mem::replace(&mut remote.key_asked, true) { self.outbox.push(id.packet(KEY)); }
+                    if !std::mem::replace(&mut remote.key_asked, true) {
+                        self.outbox.push(id.packet(KEY));
+                    }
                     return Ok(());
                 }
                 match decode(&mut remote.decoder, data, width, height) {
                     Ok(picture) => {
                         if let Some(picture) = picture {
-                            if key { remote.synced = true; remote.key_asked = false; }
+                            if key {
+                                remote.synced = true;
+                                remote.key_asked = false;
+                            }
                             stats::RX_DECODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             remote.frame = Some(picture);
                             remote.dirty = true;
@@ -199,7 +258,9 @@ impl Relay {
                     Err(error) => {
                         remote.decoder = None;
                         remote.synced = false;
-                        if !std::mem::replace(&mut remote.key_asked, true) { self.outbox.push(id.packet(KEY)); }
+                        if !std::mem::replace(&mut remote.key_asked, true) {
+                            self.outbox.push(id.packet(KEY));
+                        }
                         return Err(error);
                     }
                 }
@@ -207,18 +268,29 @@ impl Relay {
             2 => {
                 let reason = r.u8()?;
                 r.done()?;
-                if reason > 3 { return Err("invalid screen stop reason".into()); }
+                if reason > 3 {
+                    return Err("invalid screen stop reason".into());
+                }
                 self.audio.retain(|packet| packet.screen != id);
-                if let Some(remote) = self.active.get_mut(&id) { remote.reset(); }
-                if reason != 0 { self.notice = Some("Screen viewing permission ended".into()); }
+                if let Some(remote) = self.active.get_mut(&id) {
+                    remote.reset();
+                }
+                if reason != 0 {
+                    self.notice = Some("Screen viewing permission ended".into());
+                }
             }
             3 => {
                 let reason = r.u8()?;
                 r.done()?;
                 let reason = match reason {
-                    0 => "not allowed", 1 => "monitor rectangle changed", 2 => "out of reach",
-                    3 => "screen limit", 4 => "another player's screen", 5 => "invalid picture",
-                    6 => "screen closed", 7 => "request rate limited",
+                    0 => "not allowed",
+                    1 => "monitor rectangle changed",
+                    2 => "out of reach",
+                    3 => "screen limit",
+                    4 => "another player's screen",
+                    5 => "invalid picture",
+                    6 => "screen closed",
+                    7 => "request rate limited",
                     _ => return Err("invalid screen refusal".into()),
                 };
                 self.demand.remove(&id);
@@ -229,13 +301,21 @@ impl Relay {
                 let number = r.i32()? as u32;
                 let viewer = r.take(16)?.try_into().map_err(|_| "invalid viewer UUID")?;
                 let length = usize::from(r.u8()?);
-                let name = std::str::from_utf8(r.take(length)?).map_err(|_| "invalid viewer name")?;
+                let name =
+                    std::str::from_utf8(r.take(length)?).map_err(|_| "invalid viewer name")?;
                 if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) {
                     return Err("invalid viewer name".into());
                 }
                 r.done()?;
-                if self.requests.len() >= 32 { return Err("screen permission request bound".into()); }
-                self.requests.push_back(Request { screen: id, number, viewer, name: name.into() });
+                if self.requests.len() >= 32 {
+                    return Err("screen permission request bound".into());
+                }
+                self.requests.push_back(Request {
+                    screen: id,
+                    number,
+                    viewer,
+                    name: name.into(),
+                });
             }
             5 => {
                 let allow = r.bool()?;
@@ -250,8 +330,13 @@ impl Relay {
                 let on = r.bool()?;
                 r.done()?;
                 if on {
-                    if self.active.len() >= 128 && !self.active.contains_key(&id) { return Err("active screen bound".into()); }
-                    self.active.entry(id).or_insert_with(|| Remote { dirty: true, ..Default::default() });
+                    if self.active.len() >= 128 && !self.active.contains_key(&id) {
+                        return Err("active screen bound".into());
+                    }
+                    self.active.entry(id).or_insert_with(|| Remote {
+                        dirty: true,
+                        ..Default::default()
+                    });
                 } else {
                     self.active.remove(&id);
                     self.demand.remove(&id);
@@ -262,16 +347,26 @@ impl Relay {
             7 => {
                 let seq = r.i32()? as u32;
                 let opus = r.take(r.bytes.len() - r.offset)?;
-                if opus.is_empty() || opus.len() > MAX_OPUS { return Err("invalid screen audio packet".into()); }
+                if opus.is_empty() || opus.len() > MAX_OPUS {
+                    return Err("invalid screen audio packet".into());
+                }
                 if self.active.contains_key(&id) {
-                    if self.audio.len() >= MAX_AUDIO_QUEUE { self.audio.pop_front(); }
-                    self.audio.push_back(AudioIn { screen: id, seq, opus: opus.to_vec() });
+                    if self.audio.len() >= MAX_AUDIO_QUEUE {
+                        self.audio.pop_front();
+                    }
+                    self.audio.push_back(AudioIn {
+                        screen: id,
+                        seq,
+                        opus: opus.to_vec(),
+                    });
                 }
             }
             KEY => {
                 r.done()?;
                 // Only an owner with a live demand has a picture stream to restart.
-                if self.demand.contains_key(&id) { self.key_wanted.insert(id); }
+                if self.demand.contains_key(&id) {
+                    self.key_wanted.insert(id);
+                }
             }
             _ => return Err("unknown screen relay message".into()),
         }
@@ -279,12 +374,30 @@ impl Relay {
     }
 }
 
-fn decode(decoder: &mut Option<Decoder>, data: &[u8], width: u16, height: u16) -> Result<Option<Frame>, String> {
-    if data.is_empty() || data.len() > MAX_FRAME || width == 0 || height == 0 || width > 640 || height > 640 {
+fn decode(
+    decoder: &mut Option<Decoder>,
+    data: &[u8],
+    width: u16,
+    height: u16,
+) -> Result<Option<Frame>, String> {
+    if data.is_empty()
+        || data.len() > MAX_FRAME
+        || width == 0
+        || height == 0
+        || width > 640
+        || height > 640
+    {
         return Err("shared image size bound".into());
     }
-    if decoder.is_none() { *decoder = Some(Decoder::new().map_err(|e| e.to_string())?); }
-    let Some(yuv) = decoder.as_mut().expect("created above").decode(data).map_err(|e| e.to_string())? else {
+    if decoder.is_none() {
+        *decoder = Some(Decoder::new().map_err(|e| e.to_string())?);
+    }
+    let Some(yuv) = decoder
+        .as_mut()
+        .expect("created above")
+        .decode(data)
+        .map_err(|e| e.to_string())?
+    else {
         return Ok(None);
     };
     let (w, h) = yuv.dimensions();
@@ -293,7 +406,11 @@ fn decode(decoder: &mut Option<Decoder>, data: &[u8], width: u16, height: u16) -
     }
     let mut rgba = vec![0; w * h * 4];
     yuv.write_rgba8(&mut rgba);
-    Ok(Some(Frame { width: u32::from(width), height: u32::from(height), rgba }))
+    Ok(Some(Frame {
+        width: u32::from(width),
+        height: u32::from(height),
+        rgba,
+    }))
 }
 
 #[derive(Default)]
@@ -311,7 +428,9 @@ pub(crate) struct Encoder {
 }
 impl Encoder {
     /// The next picture is a self-contained key frame (new viewer, resync, new DEMAND).
-    pub fn want_key(&mut self) { self.key_wanted = true; }
+    pub fn want_key(&mut self) {
+        self.key_wanted = true;
+    }
 
     /// Only invoked on an explicit server DEMAND and at most five times a second. Returns no
     /// packets when the picture is identical to the last one sent (and no key frame is owed).
@@ -323,35 +442,65 @@ impl Encoder {
     pub fn repeat_key(&mut self, id: Id, maximum: u16) -> Result<Vec<Vec<u8>>, String> {
         self.picture(id, None, maximum)
     }
-    fn picture(&mut self, id: Id, frame: Option<&Frame>, maximum: u16) -> Result<Vec<Vec<u8>>, String> {
+    fn picture(
+        &mut self,
+        id: Id,
+        frame: Option<&Frame>,
+        maximum: u16,
+    ) -> Result<Vec<Vec<u8>>, String> {
         if let Some(frame) = frame
-            && (frame.width == 0 || frame.height == 0 || frame.width > 8192 || frame.height > 8192
-                || frame.rgba.len() != frame.width as usize * frame.height as usize * 4) {
+            && (frame.width == 0
+                || frame.height == 0
+                || frame.width > 8192
+                || frame.height > 8192
+                || frame.rgba.len() != frame.width as usize * frame.height as usize * 4)
+        {
             return Err("invalid source frame".into());
         }
-        if frame.is_none() && (!self.key_wanted || self.previous.is_empty()) { return Ok(Vec::new()); }
+        if frame.is_none() && (!self.key_wanted || self.previous.is_empty()) {
+            return Ok(Vec::new());
+        }
         let mut maximum = u32::from(maximum.clamp(2, 640));
-        if self.limit != 0 { maximum = maximum.min(self.limit); }
+        if self.limit != 0 {
+            maximum = maximum.min(self.limit);
+        }
         let (width, height, data, key) = loop {
             let (width, height) = if let Some(frame) = frame {
                 let largest = frame.width.max(frame.height);
                 let even = |v: u32| (v & !1).max(2);
-                let width = even(frame.width.min(frame.width.saturating_mul(maximum) / largest));
-                let height = even(frame.height.min(frame.height.saturating_mul(maximum) / largest));
+                let width = even(
+                    frame
+                        .width
+                        .min(frame.width.saturating_mul(maximum) / largest),
+                );
+                let height = even(
+                    frame
+                        .height
+                        .min(frame.height.saturating_mul(maximum) / largest),
+                );
                 self.scale(frame, width, height);
                 (width, height)
             } else {
                 self.rgb.clone_from(&self.previous);
                 self.previous_size
             };
-            if !self.key_wanted && self.previous_size == (width, height) && self.previous == self.rgb {
+            if !self.key_wanted
+                && self.previous_size == (width, height)
+                && self.previous == self.rgb
+            {
                 return Ok(Vec::new());
             }
-            let Some((data, key)) = self.compress(width, height)? else { return Ok(Vec::new()); };
-            if data.len() <= MAX_FRAME { break (width, height, data, key); }
+            let Some((data, key)) = self.compress(width, height)? else {
+                return Ok(Vec::new());
+            };
+            if data.len() <= MAX_FRAME {
+                break (width, height, data, key);
+            }
             // The encoder already took this picture as its reference: restart the chain, smaller.
             maximum = width.max(height) * 3 / 4;
-            if maximum < 16 { return Err("picture does not fit the frame bound".into()); }
+            if maximum < 16 {
+                return Err("picture does not fit the frame bound".into());
+            }
             self.limit = maximum;
             self.key_wanted = true;
             if frame.is_none() {
@@ -360,7 +509,9 @@ impl Encoder {
                 return Ok(Vec::new());
             }
         };
-        if key { self.key_wanted = false; }
+        if key {
+            self.key_wanted = false;
+        }
         std::mem::swap(&mut self.previous, &mut self.rgb);
         self.previous_size = (width, height);
         self.sequence = self.sequence.wrapping_add(1);
@@ -382,7 +533,8 @@ impl Encoder {
         for y in 0..height {
             for x in 0..width {
                 let source = ((y * frame.height / height) as usize * frame.width as usize
-                    + (x * frame.width / width) as usize) * 4;
+                    + (x * frame.width / width) as usize)
+                    * 4;
                 let target = (y as usize * width as usize + x as usize) * 3;
                 self.rgb[target..target + 3].copy_from_slice(&frame.rgba[source..source + 3]);
             }
@@ -399,11 +551,19 @@ impl Encoder {
                 // Without frame skipping OpenH264 ignores the bitrate in Quality mode.
                 .skip_frames(true)
                 .num_threads(1);
-            self.h264 = Some(H264::with_api_config(OpenH264API::from_source(), config).map_err(|e| e.to_string())?);
+            self.h264 = Some(
+                H264::with_api_config(OpenH264API::from_source(), config)
+                    .map_err(|e| e.to_string())?,
+            );
         }
         let h264 = self.h264.as_mut().expect("created above");
-        if self.key_wanted && self.started { h264.force_intra_frame(); }
-        let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(&self.rgb, (width as usize, height as usize)));
+        if self.key_wanted && self.started {
+            h264.force_intra_frame();
+        }
+        let yuv = YUVBuffer::from_rgb8_source(RgbSliceU8::new(
+            &self.rgb,
+            (width as usize, height as usize),
+        ));
         let stream = h264.encode(&yuv).map_err(|e| e.to_string())?;
         self.started = true;
         match stream.frame_type() {
@@ -418,26 +578,50 @@ impl Encoder {
 pub(crate) fn on_frame() -> Frame {
     // No desktop content: a plain illuminated panel and central green power mark.
     let mut rgba = vec![0; 32 * 16 * 4];
-    for y in 0..16 { for x in 0..32 {
-        let i = (y * 32 + x) * 4;
-        let lit = (14..18).contains(&x) && (5..11).contains(&y);
-        rgba[i..i + 4].copy_from_slice(if lit { &[30, 230, 90, 255] } else { &[12, 22, 28, 255] });
-    }}
-    Frame { width: 32, height: 16, rgba }
+    for y in 0..16 {
+        for x in 0..32 {
+            let i = (y * 32 + x) * 4;
+            let lit = (14..18).contains(&x) && (5..11).contains(&y);
+            rgba[i..i + 4].copy_from_slice(if lit {
+                &[30, 230, 90, 255]
+            } else {
+                &[12, 22, 28, 255]
+            });
+        }
+    }
+    Frame {
+        width: 32,
+        height: 16,
+        rgba,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn id() -> Id { Id { face: Face { block: [-2, 4, 9], side: 2, width: 3, height: 2 }, dimension: 0 } }
+    fn id() -> Id {
+        Id {
+            face: Face {
+                block: [-2, 4, 9],
+                side: 2,
+                width: 3,
+                height: 2,
+            },
+            dimension: 0,
+        }
+    }
     #[test]
     fn wire_consent_and_active_do_not_create_picture_data() {
         let mut relay = Relay::default();
-        let mut active = id().packet(6); active.push(1);
+        let mut active = id().packet(6);
+        active.push(1);
         relay.receive(&active).unwrap();
         assert!(relay.active[&id()].frame.is_none());
         let mut request = id().packet(4);
-        request.extend(17u32.to_be_bytes()); request.extend([9; 16]); request.push(3); request.extend(b"Bob");
+        request.extend(17u32.to_be_bytes());
+        request.extend([9; 16]);
+        request.push(3);
+        request.extend(b"Bob");
         relay.receive(&request).unwrap();
         let request = relay.requests.pop_front().unwrap();
         assert_eq!(request.answer(false), [1, 4, 0, 0, 0, 17, 0]);
@@ -449,43 +633,71 @@ mod tests {
     #[test]
     fn owner_answers_are_queued_with_their_screen_and_counted() {
         let mut relay = Relay::default();
-        let answer = |allow: u8| { let mut packet = id().packet(5); packet.push(allow); packet };
+        let answer = |allow: u8| {
+            let mut packet = id().packet(5);
+            packet.push(allow);
+            packet
+        };
         relay.receive(&answer(1)).unwrap();
         relay.receive(&answer(0)).unwrap();
         relay.receive(&answer(1)).unwrap();
         assert_eq!(relay.answers.pop_front(), Some((id(), true)));
         assert_eq!(relay.answers.pop_front(), Some((id(), false)));
-        assert_eq!(relay.permission_answers, [2, 1], "[allowed, denied] delivered by the server");
-        assert!(relay.notice.is_none(), "the app decides whether an answer is still wanted");
-        assert!(relay.receive(&id().packet(5)).is_err(), "an answer carries its allow byte");
+        assert_eq!(
+            relay.permission_answers,
+            [2, 1],
+            "[allowed, denied] delivered by the server"
+        );
+        assert!(
+            relay.notice.is_none(),
+            "the app decides whether an answer is still wanted"
+        );
+        assert!(
+            relay.receive(&id().packet(5)).is_err(),
+            "an answer carries its allow byte"
+        );
         assert_eq!(relay.permission_answers, [2, 1]);
     }
     /// The server forwards owner parts as one FRAME: id, seq/size/codec/key header, joined data.
     fn relayed(packets: &[Vec<u8>]) -> Vec<u8> {
         let mut frame = id().packet(1);
         frame.extend_from_slice(&packets[0][18..28]);
-        for part in packets { frame.extend_from_slice(&part[30..]); }
+        for part in packets {
+            frame.extend_from_slice(&part[30..]);
+        }
         frame
     }
     fn page(offset: usize) -> Frame {
         let (width, height) = (640usize, 360usize);
         let mut rgba = vec![255; width * height * 4];
-        for y in 0..height { for x in 0..width {
-            let row = y + offset;
-            if row % 12 < 8 && (x / 7 + row / 12 * 5) % 4 < 2 {
-                rgba[(y * width + x) * 4..][..3].fill(25);
+        for y in 0..height {
+            for x in 0..width {
+                let row = y + offset;
+                if row % 12 < 8 && (x / 7 + row / 12 * 5) % 4 < 2 {
+                    rgba[(y * width + x) * 4..][..3].fill(25);
+                }
             }
-        }}
-        Frame { width: width as u32, height: height as u32, rgba }
+        }
+        Frame {
+            width: width as u32,
+            height: height as u32,
+            rgba,
+        }
     }
     fn active() -> Relay {
         let mut relay = Relay::default();
-        let mut active = id().packet(6); active.push(1); relay.receive(&active).unwrap();
+        let mut active = id().packet(6);
+        active.push(1);
+        relay.receive(&active).unwrap();
         relay
     }
     #[test]
     fn pictures_are_bounded_decoded_and_removed_on_stop() {
-        let frame = Frame { width: 900, height: 700, rgba: vec![180; 900 * 700 * 4] };
+        let frame = Frame {
+            width: 900,
+            height: 700,
+            rgba: vec![180; 900 * 700 * 4],
+        };
         let packets = Encoder::default().encode(id(), &frame, 640).unwrap();
         assert!(!packets.is_empty() && packets.len() <= 5);
         assert!(packets.iter().all(|p| p.len() <= PART + 30));
@@ -495,7 +707,9 @@ mod tests {
         relay.receive(&received).unwrap();
         let decoded = relay.active[&id()].frame.as_ref().unwrap();
         assert_eq!((decoded.width, decoded.height), (640, 496));
-        let mut stop = id().packet(2); stop.push(2); relay.receive(&stop).unwrap();
+        let mut stop = id().packet(2);
+        stop.push(2);
+        relay.receive(&stop).unwrap();
         assert!(relay.active[&id()].frame.is_none());
         let mut corrupt = received;
         corrupt[22..24].copy_from_slice(&641u16.to_be_bytes());
@@ -503,7 +717,11 @@ mod tests {
         corrupt[18..22].copy_from_slice(&2u32.to_be_bytes());
         assert!(relay.receive(&corrupt).is_err());
         assert!(relay.active[&id()].frame.is_none());
-        assert_eq!(relay.outbox, [id().packet(KEY)], "a failed decode asks for a key frame, once");
+        assert_eq!(
+            relay.outbox,
+            [id().packet(KEY)],
+            "a failed decode asks for a key frame, once"
+        );
     }
     #[test]
     fn scrolling_text_decodes_close_to_the_source_and_deltas_are_small() {
@@ -516,12 +734,28 @@ mod tests {
             sizes.push(packets.iter().map(|p| p.len() - 30).sum::<usize>());
             relay.receive(&relayed(&packets)).unwrap();
             let decoded = relay.active[&id()].frame.as_ref().unwrap();
-            let error: u64 = decoded.rgba.chunks_exact(4).zip(encoder.previous.chunks_exact(3))
-                .map(|(a, b)| a[..3].iter().zip(b).map(|(x, y)| u64::from(x.abs_diff(*y))).sum::<u64>()).sum();
-            assert!(error / (640 * 360 * 3) < 12, "decoded picture differs from the encoded one: {error}");
+            let error: u64 = decoded
+                .rgba
+                .chunks_exact(4)
+                .zip(encoder.previous.chunks_exact(3))
+                .map(|(a, b)| {
+                    a[..3]
+                        .iter()
+                        .zip(b)
+                        .map(|(x, y)| u64::from(x.abs_diff(*y)))
+                        .sum::<u64>()
+                })
+                .sum();
+            assert!(
+                error / (640 * 360 * 3) < 12,
+                "decoded picture differs from the encoded one: {error}"
+            );
         }
         assert!(relay.outbox.is_empty());
-        assert!(sizes[1..].iter().all(|size| *size < sizes[0]), "deltas must be smaller than the key frame: {sizes:?}");
+        assert!(
+            sizes[1..].iter().all(|size| *size < sizes[0]),
+            "deltas must be smaller than the key frame: {sizes:?}"
+        );
     }
     #[test]
     fn an_unchanged_picture_sends_nothing_until_a_key_frame_is_wanted() {
@@ -532,7 +766,10 @@ mod tests {
         encoder.want_key();
         let key = encoder.encode(id(), &page(6), 640).unwrap();
         assert_eq!(key[0][26], H264_CODEC);
-        assert_eq!(key[0][27], 1, "a requested key frame is sent even for an unchanged picture");
+        assert_eq!(
+            key[0][27], 1,
+            "a requested key frame is sent even for an unchanged picture"
+        );
         // A viewer that joined mid-stream decodes it without any earlier frame.
         let mut late = active();
         late.receive(&relayed(&key)).unwrap();
@@ -553,7 +790,8 @@ mod tests {
         late.receive(&relayed(&again)).unwrap();
         assert_eq!(late.outbox.len(), 1, "one outstanding request is enough");
         encoder.want_key();
-        late.receive(&relayed(&encoder.encode(id(), &page(18), 640).unwrap())).unwrap();
+        late.receive(&relayed(&encoder.encode(id(), &page(18), 640).unwrap()))
+            .unwrap();
         assert!(late.active[&id()].frame.is_some());
         assert!(late.active[&id()].synced && !late.active[&id()].key_asked);
     }
@@ -562,8 +800,12 @@ mod tests {
         let mut relay = Relay::default();
         let mut request = id().packet(KEY);
         relay.receive(&request).unwrap();
-        assert!(relay.key_wanted.is_empty(), "no demand, no picture stream to restart");
-        let mut demand = id().packet(0); demand.extend([1, 2, 128, 5]);
+        assert!(
+            relay.key_wanted.is_empty(),
+            "no demand, no picture stream to restart"
+        );
+        let mut demand = id().packet(0);
+        demand.extend([1, 2, 128, 5]);
         relay.receive(&demand).unwrap();
         assert!(relay.key_wanted.remove(&id()));
         relay.receive(&request).unwrap();
@@ -581,16 +823,25 @@ mod tests {
             packet
         };
         relay.receive(&audio(1, b"early")).unwrap();
-        assert!(relay.audio.is_empty(), "no ACTIVE screen: ignored, not an error");
-        let mut active = id().packet(6); active.push(1); relay.receive(&active).unwrap();
-        for seq in 0..70 { relay.receive(&audio(seq, &[seq as u8; 20])).unwrap(); }
+        assert!(
+            relay.audio.is_empty(),
+            "no ACTIVE screen: ignored, not an error"
+        );
+        let mut active = id().packet(6);
+        active.push(1);
+        relay.receive(&active).unwrap();
+        for seq in 0..70 {
+            relay.receive(&audio(seq, &[seq as u8; 20])).unwrap();
+        }
         assert_eq!(relay.audio.len(), MAX_AUDIO_QUEUE);
         assert_eq!(relay.audio.front().unwrap().seq, 6, "oldest dropped");
         assert_eq!(relay.audio.back().unwrap().opus, [69; 20]);
         assert_eq!(relay.audio[0].screen.speaker(), id().packet(0)[2..18]);
         assert!(relay.receive(&audio(1, b"")).is_err());
         assert!(relay.receive(&audio(1, &[0; MAX_OPUS + 1])).is_err());
-        let mut stop = id().packet(2); stop.push(0); relay.receive(&stop).unwrap();
+        let mut stop = id().packet(2);
+        stop.push(0);
+        relay.receive(&stop).unwrap();
         assert!(relay.audio.is_empty(), "STOP discards queued audio");
     }
     #[test]

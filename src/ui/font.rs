@@ -178,7 +178,7 @@ impl Font {
             if data.len() > 1024 * 1024 {
                 return Err("font definition byte bound".into());
             }
-            let root: Value = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+            let root: Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
             let providers = root["providers"]
                 .as_array()
                 .ok_or("font providers array missing")?;
@@ -432,7 +432,7 @@ impl Font {
                             right: right as u8,
                             width: width as u8,
                         }),
-                        advance: ((right - left + 1) / 2 + 1) as f32,
+                        advance: ((right - left).div_ceil(2) + 1) as f32,
                         width: glyph_width,
                         height: 8.,
                         ascent: 7.,
