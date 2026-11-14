@@ -60,6 +60,9 @@ fn dispatch(
             UiCommand::InventoryGesture(intents) => {
                 packets.extend(inv.execute_gesture(&intents, content).unwrap())
             }
+            UiCommand::InventoryBulk { context, slot, stack } => {
+                packets.extend(inv.execute_bulk_quick_move(&context, slot, &stack, content).unwrap())
+            }
             _ => {}
         }
     }
@@ -99,6 +102,224 @@ fn pointer(
             modifiers: Modifiers::default(),
         },
     )
+}
+fn shift_pointer(
+    ui: &mut UiState,
+    inv: &mut InventoryStore,
+    content: &Content,
+    slot: usize,
+    phase: PointerPhase,
+) -> Vec<PacketCommand> {
+    let (x, y) = point(ui, slot);
+    dispatch(ui, inv, content, UiIntent::Pointer {
+        phase,
+        x,
+        y,
+        button: Some(PointerButton::Left),
+        modifiers: Modifiers { shift: true, ..Modifiers::default() },
+    })
+}
+
+#[test]
+fn shift_double_click_empty_second_slot_does_not_collect() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    assert!(release.is_empty());
+    assert_eq!(inv.player.slots[10].as_ref().unwrap().count, 20);
+}
+
+#[test]
+fn shift_double_click_nonempty_second_slot_scans_matching_player_stacks() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    for slot in 36..45 {
+        inv.player.slots[slot] = Some(stack(64));
+    }
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    assert!(release.iter().any(|packet| {
+        let mut r = Reader::new(&packet.payload.0);
+        r.var().unwrap();
+        r.var().unwrap();
+        r.i16().unwrap() == 10
+    }), "the matching slot must be scanned on release");
+}
+
+#[test]
+fn shift_double_click_scans_only_the_clicked_chest_side() {
+    use crate::protocol::packet_ids::play::clientbound as cb;
+    let (content, mut inv, mut ui) = fixture();
+    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    let menu = inv.active.as_mut().unwrap();
+    menu.slots.fill(Some(Stack::default()));
+    menu.slots[0] = Some(stack(10));
+    menu.slots[1] = Some(stack(20));
+    let mut distinct = stack(5);
+    Arc::make_mut(&mut distinct.components).insert("test:different".into(), serde_json::json!(true));
+    menu.slots[2] = Some(distinct);
+    for index in 9..45 {
+        menu.slots[index] = Some(stack(64));
+    }
+    ui.synchronize(&inv, &content).unwrap();
+    ui.rebuild_for_test(&inv, &content).unwrap();
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
+    let release = shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
+    let slots: Vec<_> = release.iter().map(|packet| {
+        let mut reader = Reader::new(&packet.payload.0);
+        reader.var().unwrap();
+        reader.var().unwrap();
+        reader.i16().unwrap()
+    }).collect();
+    assert_eq!(slots, vec![0, 1]);
+}
+
+#[test]
+fn shift_double_click_moves_remaining_chest_stack_after_server_correction() {
+    use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
+    let (content, mut inv, mut ui) = fixture();
+    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    let menu = inv.active.as_mut().unwrap();
+    menu.slots.fill(Some(Stack::default()));
+    menu.slots[0] = Some(stack(10));
+    menu.slots[1] = Some(stack(20));
+    for index in 9..45 {
+        menu.slots[index] = Some(stack(64));
+    }
+    ui.synchronize(&inv, &content).unwrap();
+    ui.rebuild_for_test(&inv, &content).unwrap();
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
+    let mut packet = Writer::default();
+    packet.var(1);
+    packet.var(1);
+    packet.0.extend(44_i16.to_be_bytes());
+    packet.var(0);
+    assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
+    let release = shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
+    assert_eq!(release.len(), 1);
+    assert!(inv.menu().slots[0].as_ref().unwrap().empty());
+    assert!(inv.menu().slots[1].as_ref().unwrap().empty());
+    assert_eq!(inv.menu().slots[44].as_ref().unwrap().count, 30);
+}
+
+#[test]
+fn shift_double_click_scans_only_the_player_side_of_chest() {
+    use crate::protocol::packet_ids::play::clientbound as cb;
+    let (content, mut inv, mut ui) = fixture();
+    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    let menu = inv.active.as_mut().unwrap();
+    menu.slots.fill(Some(Stack::default()));
+    for index in 0..9 {
+        menu.slots[index] = Some(stack(64));
+    }
+    menu.slots[9] = Some(stack(10));
+    menu.slots[10] = Some(stack(20));
+    ui.synchronize(&inv, &content).unwrap();
+    ui.rebuild_for_test(&inv, &content).unwrap();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    let slots: Vec<_> = release.iter().map(|packet| {
+        let mut reader = Reader::new(&packet.payload.0);
+        reader.var().unwrap();
+        reader.var().unwrap();
+        reader.i16().unwrap()
+    }).collect();
+    assert_eq!(slots, vec![9, 10]);
+}
+
+#[test]
+fn shift_double_click_history_does_not_cross_menu_instances() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    for index in 36..45 {
+        inv.player.slots[index] = Some(stack(64));
+    }
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    inv.close();
+    ui.synchronize(&inv, &content).unwrap();
+    inv.open_inventory().unwrap();
+    ui.synchronize(&inv, &content).unwrap();
+    ui.rebuild_for_test(&inv, &content).unwrap();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    assert!(shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up).is_empty());
+}
+
+#[test]
+fn shift_double_click_uses_server_corrected_second_press_slot() {
+    use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    for index in 36..45 {
+        inv.player.slots[index] = Some(stack(64));
+    }
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    let mut packet = Writer::default();
+    packet.var(0);
+    packet.var(1);
+    packet.0.extend(9_i16.to_be_bytes());
+    packet.var(0);
+    assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    assert!(shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up).is_empty());
+    assert!(inv.received_player_slot(9).unwrap().unwrap().empty());
+}
+
+#[test]
+fn shift_double_click_with_carried_stack_uses_previous_quick_move_template() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    for index in 36..45 {
+        inv.player.slots[index] = Some(stack(64));
+    }
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    inv.cursor = Some(stack(1));
+    ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
+    let down = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    assert!(down.is_empty(), "a carried stack starts the gesture on press");
+    let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    assert!(!release.is_empty(), "release must scan the matching player container");
+    assert_eq!(inv.cursor.as_ref().unwrap().count, 1);
+}
+
+#[test]
+fn shift_double_click_outside_interval_is_not_a_bulk_gesture() {
+    let (content, mut inv, mut ui) = fixture();
+    inv.player.slots[9] = Some(stack(10));
+    inv.player.slots[10] = Some(stack(20));
+    for index in 36..45 {
+        inv.player.slots[index] = Some(stack(64));
+    }
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
+    ui.last_slot_click.as_mut().unwrap().2 =
+        std::time::Instant::now() - std::time::Duration::from_millis(251);
+    shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
+    assert!(shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up).is_empty());
 }
 fn hashed(r: &mut Reader<'_>) -> EncodedStack {
     if !r.bool().unwrap() {

@@ -109,6 +109,7 @@ pub enum UiCommand {
     },
     Inventory(UiIntent),
     InventoryGesture(Vec<UiIntent>),
+    InventoryBulk { context: UiContext, slot: i16, stack: crate::inventory::Stack },
     CreativePick {
         context: UiContext,
         stack: crate::inventory::Stack,
@@ -453,7 +454,9 @@ pub struct UiState {
     pub(crate) drag_origin: Option<i16>,
     pub(crate) drag_expected: Option<crate::inventory::Stack>,
     pub(crate) drag_fence: Option<UiContext>,
-    last_slot_click: Option<(i16, u8, Instant)>,
+    pub(super) last_slot_click: Option<(i16, u8, Instant)>,
+    last_quick_moved: Option<crate::inventory::Stack>,
+    double_slot_click: bool,
     collect_on_release: bool,
     pub(crate) release_pending: bool,
     pub(crate) chat: VecDeque<super::packets::ChatLine>,
@@ -618,6 +621,8 @@ impl UiState {
             bundle_scroll: [0.; 2],
             bundle_hover: None,
             last_slot_click: None,
+            last_quick_moved: None,
+            double_slot_click: false,
             collect_on_release: false,
             selected_slot: 0,
             selected_name_tick: u64::MAX,
@@ -1167,6 +1172,8 @@ impl UiState {
         self.drag_expected = None;
         self.drag_fence = None;
         self.last_slot_click = None;
+        self.last_quick_moved = None;
+        self.double_slot_click = false;
         self.collect_on_release = false;
         self.clipboard_fence = None;
         for f in self.fields.values_mut() {
@@ -2077,6 +2084,11 @@ impl UiState {
                                     _ => 0,
                                 };
                                 let now = Instant::now();
+                                self.double_slot_click = button == 0
+                                    && previous_click.is_some_and(|(old_slot, old_button, time)| {
+                                        old_slot == slot && old_button == button
+                                            && now.duration_since(time) < Duration::from_millis(250)
+                                    });
                                 self.collect_on_release = button == 0
                                     && !modifiers.shift
                                     && self.drag_carrying
@@ -2092,7 +2104,14 @@ impl UiState {
                                 } else {
                                     ClickMode::Pickup
                                 };
-                                if !self.drag_carrying || modifiers.shift || button == 2 {
+                                if modifiers.shift && !self.drag_carrying {
+                                    self.last_quick_moved = inventory.menu().slots
+                                        .get(slot as usize)
+                                        .and_then(Option::as_ref)
+                                        .filter(|stack| !stack.empty())
+                                        .cloned();
+                                }
+                                if !self.drag_carrying || button == 2 {
                                     self.execute_inner(
                                         UiIntent::ClickSlot {
                                             context: self.context(inventory),
@@ -2104,7 +2123,7 @@ impl UiState {
                                         content,
                                         effects,
                                     )?;
-                                    if modifiers.shift || button == 2 {
+                                    if button == 2 {
                                         self.drag_origin = None;
                                     }
                                     self.drag_slots.clear();
@@ -2208,7 +2227,21 @@ impl UiState {
                         let same_cursor = self.drag_expected.as_ref().is_some_and(|expected| {
                             inventory.cursor.as_ref() == Some(expected)
                         });
-                        if same_menu && same_cursor && self.drag_origin.is_some() {
+                        let bulk = same_menu && self.double_slot_click && modifiers.shift
+                            && matches!(self.drag, Some(PointerButton::Left))
+                            && matches!(target.as_ref(), Some((_, NodeAction::Slot(slot), true)) if inventory.can_take_all_from(*slot));
+                        if bulk {
+                            if let (Some((_, NodeAction::Slot(slot), true)), Some(stack)) =
+                                (target.as_ref(), self.last_quick_moved.as_ref())
+                            {
+                                effects.commands.push(UiCommand::InventoryBulk {
+                                    context: self.context(inventory),
+                                    slot: *slot,
+                                    stack: stack.clone(),
+                                });
+                            }
+                        }
+                        if !bulk && same_menu && same_cursor && self.drag_origin.is_some() {
                             let b = u8::from(matches!(self.drag, Some(PointerButton::Right)));
                             let fence = self.context(inventory);
                             // A drag that only ever touched its origin slot is a plain
@@ -2248,18 +2281,24 @@ impl UiState {
                                     _ => None,
                                 };
                                 if let Some(slot) = destination {
+                                    let mode = if modifiers.shift && slot != -999 {
+                                        self.last_quick_moved = inventory.menu().slots
+                                            .get(slot as usize)
+                                            .and_then(Option::as_ref)
+                                            .filter(|stack| !stack.empty())
+                                            .cloned();
+                                        ClickMode::QuickMove
+                                    } else if self.collect_on_release && Some(slot) == self.drag_origin {
+                                        ClickMode::PickupAll
+                                    } else {
+                                        ClickMode::Pickup
+                                    };
                                     self.execute_inner(
                                         UiIntent::ClickSlot {
                                             context: fence,
                                             slot,
                                             button: b,
-                                            mode: if self.collect_on_release
-                                                && Some(slot) == self.drag_origin
-                                            {
-                                                ClickMode::PickupAll
-                                            } else {
-                                                ClickMode::Pickup
-                                            },
+                                            mode,
                                         },
                                         inventory,
                                         content,
@@ -2275,6 +2314,7 @@ impl UiState {
                         self.drag_expected = None;
                         self.drag_fence = None;
                         self.collect_on_release = false;
+                        self.double_slot_click = false;
                     }
                 }
             }

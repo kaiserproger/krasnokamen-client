@@ -88,12 +88,14 @@ surface and is labeled accordingly.
 
 ## CLIENT-INV-001 — Shift-double-click bulk quick move (open)
 
-The RC.1 inventory-input review found that Shift-click quick-moves the hovered
-stack, but Shift-double-click does not bulk-move the other matching stacks from
-the same container. This is distinct from s6-03's plain double-click collection
-onto the cursor (`PICKUP_ALL`). The local 26.3
-`AbstractContainerScreen.mouseReleased` bytecode iterates matching slots for
-the Shift variant and emits `QUICK_MOVE`. The client pointer path still only
-emits the individual Shift-clicks. No fix or live verification is claimed for
-this inherited shortcut gap.
+The RC.1 review's blanket claim that vanilla moves other stacks after a first
+Shift-click empties the clicked slot was incorrect for the pinned 26.3 client.
+`AbstractContainerScreen.mouseClicked` replaces `lastQuickMoved` when the
+cursor is empty, even when the second Shift-down sees an empty slot;
+`mouseReleased` skips the bulk loop when that value is empty. If the second
+down sees a nonempty stack with an empty cursor, vanilla instead scans
+matching stacks in the released slot's backing container and
+quick-moves them in menu order. This remains distinct from `PICKUP_ALL`.
+The `shift_double_click_*` regressions document both cases; real-client,
+authoritative server-state and Java-oracle scenario verification remain open.
 

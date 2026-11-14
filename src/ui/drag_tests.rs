@@ -163,20 +163,37 @@ fn right_drag_whole_virtual_result_then_place_one() {
 }
 
 #[test]
-fn modified_click_does_not_issue_a_second_release_action() {
-    for (button, shift) in [(PointerButton::Left, true), (PointerButton::Middle, false)] {
-        let (content, mut inventory, mut ui) = fixture();
-        inventory.cursor = inventory.player.slots[9].clone();
-        let mut down = UiEffects::default();
-        ui.execute_inner(UiIntent::Pointer {
-            phase: PointerPhase::Down, x: 65., y: 25., button: Some(button),
-            modifiers: Modifiers { shift, ..Modifiers::default() },
-        }, &mut inventory, &content, &mut down).unwrap();
-        assert_eq!(down.commands.len(), 1);
-        pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Move, 85., button);
-        let up = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Up, 85., button);
-        assert_eq!(deliver(up, &mut inventory, &content), 0);
-    }
+fn middle_click_does_not_issue_a_second_release_action() {
+    let (content, mut inventory, mut ui) = fixture();
+    inventory.cursor = inventory.player.slots[9].clone();
+    let mut down = UiEffects::default();
+    ui.execute_inner(UiIntent::Pointer {
+        phase: PointerPhase::Down, x: 65., y: 25., button: Some(PointerButton::Middle),
+        modifiers: Modifiers::default(),
+    }, &mut inventory, &content, &mut down).unwrap();
+    assert_eq!(down.commands.len(), 1);
+    pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Move, 85., PointerButton::Middle);
+    let up = pointer_button(&mut ui, &mut inventory, &content, PointerPhase::Up, 85., PointerButton::Middle);
+    assert_eq!(deliver(up, &mut inventory, &content), 0);
+}
+
+#[test]
+fn shift_with_carried_stack_dispatches_on_release() {
+    let (content, mut inventory, mut ui) = fixture();
+    inventory.cursor = inventory.player.slots[9].clone();
+    let mut down = UiEffects::default();
+    let modifiers = Modifiers { shift: true, ..Modifiers::default() };
+    ui.execute_inner(UiIntent::Pointer {
+        phase: PointerPhase::Down, x: 65., y: 25., button: Some(PointerButton::Left),
+        modifiers: modifiers.clone(),
+    }, &mut inventory, &content, &mut down).unwrap();
+    assert!(down.commands.is_empty());
+    let mut up = UiEffects::default();
+    ui.execute_inner(UiIntent::Pointer {
+        phase: PointerPhase::Up, x: 65., y: 25., button: Some(PointerButton::Left),
+        modifiers,
+    }, &mut inventory, &content, &mut up).unwrap();
+    assert_eq!(up.commands.len(), 1);
 }
 
 #[test]
