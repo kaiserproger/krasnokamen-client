@@ -218,12 +218,39 @@ pub(super) fn entity_light(
         }
         return Ok(best);
     }
+    // Vanilla AbstractArrow.onHitBlock retracts a stuck projectile by
+    // signum(deltaMovement) * 0.05 per axis, and EntityRenderer then samples
+    // light at BlockPos.containing(getLightProbePosition(partial)) = eye
+    // height above that retracted position. The server reports the raw impact
+    // point, so apply the same retraction to the probe: without it a
+    // projectile stuck on a block face samples the opaque cell and renders
+    // black instead of the lit cell in front of the face.
+    let mut position = t.position;
+    if models.schemas[&e.type_name]
+        .hierarchy
+        .iter()
+        .any(|class| class == "net.minecraft.world.entity.projectile.arrow.AbstractArrow")
+        && boolean(models, e, "IN_GROUND")
+    {
+        for axis in 0..3 {
+            // Java Math.signum maps zero to zero (f64::signum(0.0) is 1.0).
+            let velocity = e.velocity[axis];
+            let signum = if velocity > 0. {
+                1.
+            } else if velocity < 0. {
+                -1.
+            } else {
+                0.
+            };
+            position[axis] -= signum * 0.05;
+        }
+    }
     sampled(
         light,
         [
-            t.position[0],
-            t.position[1] + f64::from(dimensions.eye_height * scale),
-            t.position[2],
+            position[0],
+            position[1] + f64::from(dimensions.eye_height * scale),
+            position[2],
         ],
     )
 }
