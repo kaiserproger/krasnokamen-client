@@ -1369,6 +1369,10 @@ mod tests {
         "minecraft:entity/cushion/lime_cushion",
         "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer_small",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner_small",
     ];
     fn fixture_layer(texture: &str) -> u32 {
         7 + FIXTURE_TEXTURES

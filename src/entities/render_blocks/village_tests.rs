@@ -1695,6 +1695,242 @@ fn static_shelf_renders_and_clears_received_item_slots() {
 }
 
 #[test]
+fn shelf_clock_uses_received_world_time_at_the_block() {
+    use crate::ui::item_dynamic::ItemWorldContext;
+    use crate::ui::items::ItemContext;
+    use std::cell::Cell;
+
+    let mut content = village_content(
+        "minecraft:oak_shelf",
+        "minecraft:shelf",
+        BTreeMap::from([("facing".into(), "north".into())]),
+        vec![],
+    );
+    content.item_names.insert(1, "minecraft:clock".into());
+    content.insert_test_item_components(
+        1,
+        BTreeMap::from([
+            ("minecraft:max_stack_size".into(), serde_json::json!(64)),
+            (
+                "minecraft:item_model".into(),
+                serde_json::json!("minecraft:clock"),
+            ),
+        ]),
+    );
+    let graph = serde_json::json!({
+        "type": "minecraft:range_dispatch", "property": "minecraft:time", "source": "daytime",
+        "fallback": {"type": "minecraft:model", "model": "test:early"},
+        "entries": [{"threshold": 0.125, "model": {"type": "minecraft:model", "model": "test:late"}}]
+    });
+    content.insert_test_resource(
+        "assets/minecraft/items/clock.json",
+        serde_json::json!({"model": graph.clone()})
+            .to_string()
+            .as_bytes(),
+    );
+    let mut store = super::super::Store::new();
+    store.activate_models(Arc::new(models_with(vec![])));
+    for (name, layer) in [("test:early", 11), ("test:late", 22)] {
+        let mut model = content.models[0].clone();
+        for quad in &mut model.quads {
+            quad.texture_layer = layer;
+        }
+        store.items.insert_test_model(name, model);
+    }
+    store.items.insert_test_graph("minecraft:clock", graph);
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    store
+        .apply_block_entity(
+            position,
+            7,
+            Arc::new(serde_json::json!({
+                "Items": [{"Slot": 1, "id": "minecraft:clock", "count": 1}]
+            })),
+            Arc::from(&[10, 0][..]),
+            None,
+            &content,
+            2,
+        )
+        .unwrap();
+    let (origin, camera) = camera_for(position);
+    let world = World::new(0, 256);
+    let mut context = ItemContext {
+        world: Some(ItemWorldContext {
+            dimension: "minecraft:overworld".into(),
+            position: [0.; 3],
+            yaw: 0.,
+            game_tick: 0,
+            sun_angle: 0.,
+            moon_phase: 0.,
+            spawn: None,
+            death: None,
+            needles: Arc::default(),
+        }),
+        ..Default::default()
+    };
+    let angle = Cell::new(0.);
+    let at = |point| {
+        assert_eq!(point, [8.5, 64.5, -11.5]);
+        Ok((angle.get(), 0.))
+    };
+    let mut render = |context: &ItemContext| {
+        let mut out = DynamicGeometry::default();
+        let stats = store
+            .append_static_block_geometry(
+                StaticBlockSceneFrame {
+                    content: &content,
+                    world: &world,
+                    origin,
+                    camera,
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    scoping: false,
+                    text_filtering: false,
+                    operator_overlay_visible: false,
+                    game_time: 0,
+                    partial: 0.,
+                    clock_environment: Some((context, &at)),
+                    sample_light: &|_| Ok(Some([15.; 2])),
+                },
+                &mut out,
+            )
+            .unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        out.vertices
+            .iter()
+            .map(|vertex| vertex.texture_layer)
+            .collect::<Vec<_>>()
+    };
+    let before = render(&context);
+    assert!(!before.is_empty() && before.iter().all(|&layer| layer == 11));
+    angle.set(90.);
+    for tick in 1..=100 {
+        context.world.as_mut().unwrap().game_tick = tick;
+        render(&context);
+    }
+    let after = render(&context);
+    assert!(!after.is_empty() && after.iter().all(|&layer| layer == 22));
+}
+
+#[test]
+fn shelf_compass_points_from_the_block_to_received_spawn() {
+    use crate::ui::item_dynamic::{GlobalPos, ItemWorldContext};
+    use crate::ui::items::ItemContext;
+
+    let mut content = village_content(
+        "minecraft:oak_shelf",
+        "minecraft:shelf",
+        BTreeMap::from([("facing".into(), "north".into())]),
+        vec![],
+    );
+    content.item_names.insert(1, "minecraft:compass".into());
+    content.insert_test_item_components(
+        1,
+        BTreeMap::from([
+            ("minecraft:max_stack_size".into(), serde_json::json!(64)),
+            (
+                "minecraft:item_model".into(),
+                serde_json::json!("minecraft:compass"),
+            ),
+        ]),
+    );
+    let graph = serde_json::json!({
+        "type": "minecraft:range_dispatch", "property": "minecraft:compass",
+        "target": "spawn", "wobble": false,
+        "fallback": {"type": "minecraft:model", "model": "test:west"},
+        "entries": [{"threshold": 0.5, "model": {"type": "minecraft:model", "model": "test:east"}}]
+    });
+    content.insert_test_resource(
+        "assets/minecraft/items/compass.json",
+        serde_json::json!({"model": graph.clone()})
+            .to_string()
+            .as_bytes(),
+    );
+    let mut store = super::super::Store::new();
+    store.activate_models(Arc::new(models_with(vec![])));
+    for (name, layer) in [("test:west", 11), ("test:east", 22)] {
+        let mut model = content.models[0].clone();
+        for quad in &mut model.quads {
+            quad.texture_layer = layer;
+        }
+        store.items.insert_test_model(name, model);
+    }
+    store.items.insert_test_graph("minecraft:compass", graph);
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    store
+        .apply_block_entity(
+            position,
+            7,
+            Arc::new(serde_json::json!({
+                "Items": [{"Slot": 1, "id": "minecraft:compass", "count": 1}]
+            })),
+            Arc::from(&[10, 0][..]),
+            None,
+            &content,
+            2,
+        )
+        .unwrap();
+    let (origin, camera) = camera_for(position);
+    let world = World::new(0, 256);
+    let mut context = ItemContext {
+        world: Some(ItemWorldContext {
+            dimension: "minecraft:overworld".into(),
+            position: [100.; 3],
+            yaw: 0.,
+            game_tick: 0,
+            sun_angle: 0.,
+            moon_phase: 0.,
+            spawn: Some(GlobalPos {
+                dimension: "minecraft:overworld".into(),
+                pos: [18, 64, -12],
+            }),
+            death: None,
+            needles: Arc::default(),
+        }),
+        ..Default::default()
+    };
+    let at = |point| {
+        assert_eq!(point, [8.5, 64.5, -11.5]);
+        Ok((0., 0.))
+    };
+    let mut render = |context: &ItemContext| {
+        let mut out = DynamicGeometry::default();
+        let stats = store
+            .append_static_block_geometry(
+                StaticBlockSceneFrame {
+                    content: &content,
+                    world: &world,
+                    origin,
+                    camera,
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    scoping: false,
+                    text_filtering: false,
+                    operator_overlay_visible: false,
+                    game_time: 0,
+                    partial: 0.,
+                    clock_environment: Some((context, &at)),
+                    sample_light: &|_| Ok(Some([15.; 2])),
+                },
+                &mut out,
+            )
+            .unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        out.vertices
+            .iter()
+            .map(|vertex| vertex.texture_layer)
+            .collect::<Vec<_>>()
+    };
+    let east = render(&context);
+    assert!(!east.is_empty() && east.iter().all(|&layer| layer == 11));
+    context.world.as_mut().unwrap().spawn.as_mut().unwrap().pos[0] = -2;
+    let west = render(&context);
+    assert!(!west.is_empty() && west.iter().all(|&layer| layer == 22));
+}
+
+#[test]
 fn static_brushable_renders_received_item_with_adjacent_light_and_clears() {
     let mut content = village_content(
         "minecraft:suspicious_sand",

@@ -56,6 +56,7 @@ impl Store {
         self.predicted_block_data.remove(&position);
         let active = self.block_active.remove(&position);
         self.block_render_cache.remove(position);
+        self.special_render_cache.remove_block(position);
         self.revision += 1;
         Some(BlockEntitySnapshot { entity, active })
     }

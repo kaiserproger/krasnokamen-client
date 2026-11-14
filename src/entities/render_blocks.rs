@@ -129,6 +129,7 @@ pub(crate) struct StaticBlockSceneFrame<'a> {
     pub operator_overlay_visible: bool,
     pub game_time: i64,
     pub partial: f32,
+    pub clock_environment: Option<super::ClockEnvironment<'a>>,
     pub sample_light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
 }
 

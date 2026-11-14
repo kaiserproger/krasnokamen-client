@@ -347,3 +347,26 @@ pub(crate) fn append(
     result
 }
 pub(super) use items::observed_stack;
+
+#[cfg(test)]
+mod block_needle_tests {
+    use super::Cache;
+
+    #[test]
+    fn removing_blocks_and_chunks_drops_only_their_needles() {
+        let mut cache = Cache::default();
+        for key in [
+            ([-1, 64, -1], 0),
+            ([-1, 64, -1], 1),
+            ([-17, 64, -1], 0),
+            ([0, 64, 0], 0),
+        ] {
+            cache.block_clock_needles.insert(key, Default::default());
+        }
+        cache.remove_block([-1, 64, -1]);
+        assert_eq!(cache.block_clock_needles.len(), 2);
+        cache.unload_chunk([-2, -1]);
+        assert_eq!(cache.block_clock_needles.len(), 1);
+        assert!(cache.block_clock_needles.contains_key(&([0, 64, 0], 0)));
+    }
+}

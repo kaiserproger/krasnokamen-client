@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "id": "sulfur_cube_inner",
+  "texture": {
+    "path": "entity/sulfur_cube/sulfur_cube_inner.png",
+    "size": [
+      128,
+      128
+    ]
+  },
+  "bones": [
+    {
+      "name": "cube",
+      "pivot": [
+        0,
+        15,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -8,
+            -8,
+            -8
+          ],
+          "size": [
+            16,
+            16,
+            16
+          ],
+          "uv": [
+            0,
+            36
+          ]
+        }
+      ]
+    }
+  ]
+}

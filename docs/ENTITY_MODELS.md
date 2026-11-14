@@ -445,8 +445,11 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
   parity remain unverified.
   The same pass renders received shelf items and exposed brushable-block items.
   A native scene showed three items in a south-facing shelf and an edge-on item
-  on dusted sand, with empty controls. This verifies static presentation only;
-  brushing, reload persistence and vanilla visual parity were not checked.
+  on dusted sand, with empty controls. Observed block items now receive their
+  block position, facing and world clock context for dynamic clock and compass
+  models; a synthetic shelf clock test exercises changing world time. Dynamic
+  block-item visuals, brushing, reload persistence and vanilla visual parity
+  have not been verified in a native scene.
   `sheep_wool` / `sheep_wool_baby` are the dyed coat drawn by `src/entities/sheep.rs`
   (undercoat tinted body once sheared).
   Tamed cats and wolves render their age-specific collar texture, dyed from received collar
@@ -509,21 +512,15 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
   outer shell. The magma cube's orange and yellow eye rows use adjacent texture slices;
   a size-four native-client screenshot confirms contiguous eyes, not exact vanilla parity or motion.
   Pig and slime visual parity remains unverified.
-  26.3 families: `cushion` is the `CushionModel` slab, turned to the nearest horizontal
-  facing (`Direction.fromYRot`) and textured from the received dye colour. Poplar boats
-  reuse the shared `boat`/`chest_boat` hulls with `entity/boat|chest_boat/poplar`.
-  Sulfur cube geometry is four rigs: adult and baby outer shells, drawn translucent, and inner cubes.
-  Their `cube` bone carries the renderer's age downscale and vertical offset, so the inner
-  layer, the swallowed body-slot block (X 180 degrees, (-0.5, -0.518, -0.5), half size for
-  babies, worldless `BlockColors` tints) and worn skulls or head items (custom-head transform,
-  16/19 counter-scale) share one frame. A body skull, else a head-slot skull, hides the inner
-  layer and the block. The received fuse swells the cube in its last ten ticks. Babies use
-  the size alone for dimensions, as `AbstractCubeMob.getDefaultDimensions` does. The white fuse
-  flash and hurt overlay on the inner layer and block are not drawn. Squish, the 0.999 downscale,
-  special-renderer blocks (reported unrendered) and profiled player heads are not modelled.
-  Native-client scenes showed adult sulfur-cube shells and selected contents, white
-  cushions and a poplar boat. Baby and empty-inner cubes, other cushion colors,
-  the chest boat and matched-vanilla appearance remain unverified.
+  26.3 families: `cushion` uses an authored slab with the received dye colour
+  and its yaw quantized to a horizontal facing. Poplar boats reuse the shared
+  `boat`/`chest_boat` hulls with `entity/boat|chest_boat/poplar`.
+  Sulfur cubes use adult and baby authored outer shells and inner cubes with
+  the received size and runtime vanilla textures. Swallowed blocks, worn heads,
+  fuse flashing and swelling, and squish animation are not modelled by these
+  rigs. The `native-263-entity-rigs` graphical fixture checks a white cushion,
+  an adult sulfur cube and both poplar boats; the baby cube and lime cushion
+  have packet-to-geometry unit coverage but still need graphical parity checks.
   Humanoid armor emits received trim patterns using registry-resolved material palettes,
   equipment-asset overrides and the slot's normal or leggings rig; vanilla's baby layer
   omits trim. Post-build worn-trim visual validation remains pending.
