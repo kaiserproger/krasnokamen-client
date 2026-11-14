@@ -25,6 +25,33 @@ const CONTACT_LINK: f64 = 4.0;
 const CAVALRY_LINK: f64 = 6.0;
 const MAX_CONTACTS: usize = 8;
 const IDS_PER_SIDE: usize = 6;
+/// Attackers window: a fighter is an attacker while his last main-hand melee
+/// swing is within the last 40 ticks (2 s) ending at the sample's tick.
+const ATTACK_WINDOW: u64 = 40;
+/// The server's fight window: a contact fighter is fighting if he acted within this many ticks.
+const FIGHT_WINDOW: u64 = 25;
+/// Entity types the scan treats as fighters.
+const FIGHTER_KINDS: [&str; 5] = [
+    "minecraft:husk",
+    "minecraft:zombie",
+    "minecraft:skeleton",
+    "minecraft:pillager",
+    "minecraft:vindicator",
+];
+/// Field definitions, repeated in the header row so receipts are self-describing.
+const SWING_DEFINITIONS: &str = "events.melee_attack_swings: main-hand melee swings in this interval by fighters not holding a bow or crossbow \
+    (SWING_ANIMATION hand 0 with swing type whack/stab; ANIMATE is never an attack on 26.3, where its action 0 is wake-up; off-hand swings, i.e. shield parries, and type none, i.e. staggers, are not attacks). \
+    events.melee_attackers_2s: distinct such fighters with an attack swing in the 40 ticks ending at the sample tick.";
+const COMBAT_DEFINITIONS: &str = "reach: per fighter, the melee range [min, max] of the main-hand item by vanilla 26.3 Mob.isWithinMeleeAttackRange (javap): \
+    [min_reach*mob_factor, max_reach*mob_factor] of the minecraft:attack_range component (stack components, item defaults merged; no hitbox margin), \
+    without the component [0, Mob.DEFAULT_ATTACK_REACH = sqrt(2.04) - 0.6]. contact_fighters: fighters with an enemy-side fighter in range: the fighter's body box \
+    (joined sideways with his horse's box when mounted) grown in x and z by max touches the target's body box (hitbox size from the entity facts; riders and horses are at the horse position), \
+    and with min > 0 the box grown by min does not. The rule is the shared mc-melee-range crate (`in_melee_range`). \
+    contact_fighters_legacy: the old symmetric 2.5-block count (contact_reach); `contacts` clusters still use contact_reach. \
+    events.fighting_25t: contact_fighters that made a main-hand attack swing or had a raised shield in the last 25 ticks (the server's fight window); events.fighting_2s: the same over 40 ticks. \
+    The scanner sees only visible actions (SWING_ANIMATION attack swings and raised shields), not the server's internal Windup, Strike and Guard states. \
+    events.shields_raised: fighters at the sample tick using an item (DATA_LIVING_ENTITY_FLAGS bit 1) whose hand (bit 2: off hand) holds minecraft:shield. \
+    events.shield_blocks: SOUND_ENTITY minecraft:item.shield.block on a fighter in this interval (the server announces a block with that sound, not with an entity event).";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Side {
@@ -308,6 +335,100 @@ struct Tracked {
     spawn_tick: u64,
     first_contact: Option<u64>,
     death_tick: Option<u64>,
+    combat: Combat,
+}
+
+/// Per fighter: melee range, body size and shield state (see `COMBAT_DEFINITIONS`).
+#[derive(Debug)]
+struct Combat {
+    /// Melee reach of the main-hand item (see `attack_range`).
+    range: MeleeReach,
+    /// Hitbox `[width, height]` from the entity facts.
+    dims: [f64; 2],
+    /// Heights of the entity's PASSENGER attachment (where a rider sits on it) and its own VEHICLE
+    /// attachment (the point of the rider that sits on the vehicle), from the entity facts.
+    attach: [f64; 2],
+    /// Item in the off hand (SET_EQUIPMENT slot 1).
+    offhand: Option<String>,
+    /// DATA_LIVING_ENTITY_FLAGS: bit 1 using an item, bit 2 the hand is the off hand.
+    flags: i32,
+    shield_was_up: bool,
+    /// Last tick the shield was seen raised or being lowered.
+    shield_tick: Option<u64>,
+}
+impl Default for Combat {
+    fn default() -> Self {
+        Self {
+            range: MeleeReach::mob(None),
+            dims: [0.; 2],
+            attach: [0.; 2],
+            offhand: None,
+            flags: 0,
+            shield_was_up: false,
+            shield_tick: None,
+        }
+    }
+}
+
+/// Melee reach of a mob wielding the stack (`MeleeReach::mob`): the item's `minecraft:attack_range`
+/// (item defaults merged into `components`; omitted fields take the codec defaults min 0, max 3,
+/// mob_factor 1), or the default reach without the component.
+fn attack_range(components: &BTreeMap<String, Value>) -> MeleeReach {
+    let Some(range) = components.get("minecraft:attack_range") else {
+        return MeleeReach::mob(None);
+    };
+    let field = |key: &str, default: f32| {
+        range
+            .get(key)
+            .and_then(Value::as_f64)
+            .map_or(default, |v| v as f32)
+    };
+    MeleeReach::mob(Some((
+        field("min_reach", 0.),
+        field("max_reach", 3.),
+        field("mob_factor", 1.),
+    )))
+}
+
+/// A rider's own box and attack box. A rider sits at the mount's x and z and at the mount's PASSENGER
+/// attachment height minus his own VEHICLE attachment height (`Entity.positionRider`:
+/// `getPassengerRidingPosition` minus `getVehicleAttachmentPoint`, javap of 26.3; attachment heights
+/// from the entity facts, the horse's rearing offset ignored). The attack box joins it with the
+/// mount's box sideways and keeps the rider's y (`mc_melee_range::attack_box`). The client does not
+/// stream a rider's position, so it is derived from the mount's.
+fn mounted_boxes(mount_position: [f64; 3], mount: &Combat, rider: &Combat) -> (Aabb, Aabb) {
+    let seat = [
+        mount_position[0],
+        mount_position[1] + mount.attach[0] - rider.attach[1],
+        mount_position[2],
+    ];
+    let own = Aabb::at(seat, rider.dims[0], rider.dims[1]);
+    (
+        own,
+        attack_box(
+            own,
+            Some(Aabb::at(mount_position, mount.dims[0], mount.dims[1])),
+        ),
+    )
+}
+
+impl Tracked {
+    /// Using the item in the hand named by the flags, and that item is a shield.
+    fn shield_up(&self) -> bool {
+        let item = if self.combat.flags & 2 != 0 {
+            self.combat.offhand.as_deref()
+        } else {
+            self.weapon.as_deref()
+        };
+        self.combat.flags & 1 != 0 && item == Some("minecraft:shield")
+    }
+    fn note_shield(&mut self, tick: u64) {
+        let up = self.shield_up();
+        if up || self.combat.shield_was_up {
+            self.combat.shield_tick = Some(tick);
+        }
+        self.combat.shield_was_up = up;
+    }
 }
 
 /// Vanilla arrow flight per tick (move, 0.99 drag, 0.05 gravity) for `ticks`
@@ -366,6 +487,8 @@ fn surface_top(chunks: &HashMap<(i32, i32), Box<[[i16; 256]; 2]>>, x: f64, z: f6
 #[derive(Default)]
 struct Interval {
     swings: Vec<i32>,
+    attack_swings: u32,
+    shield_blocks: u32,
     hurts: u32,
     deaths: u32,
     launches: Vec<([f64; 3], Option<Side>)>,
@@ -383,6 +506,11 @@ pub(crate) struct Scan {
     pub(crate) first_tick: Option<u64>,
     pub(crate) tick: Option<u64>,
     component_sides: u64,
+    /// Tick of each fighter's last main-hand melee swing (entries older than `ATTACK_WINDOW` are dropped at samples).
+    last_attack: HashMap<i32, u64>,
+    /// Entity metadata schema, and the DATA_LIVING_ENTITY_FLAGS index every fighter type shares.
+    models: Option<crate::entities::Models>,
+    living_flags: Option<u8>,
     samples: u64,
     last_sample_t: f64,
     /// Dimension layout (overworld default); chunk sections decode against it.
@@ -690,7 +818,8 @@ impl Scan {
             cb::SET_EQUIPMENT => {
                 let target = r.var()?;
                 let mut seen = 0u16;
-                let (mut side, mut weapon) = (None, None);
+                let (mut side, mut weapon, mut range) = (None, None, None);
+                let mut offhand: Option<Option<String>> = None;
                 loop {
                     let b = r.u8()?;
                     let slot = b & 127;
@@ -716,6 +845,13 @@ impl Scan {
                     }
                     e.side = side.or(e.side);
                     e.weapon = weapon.or(e.weapon.take());
+                    if let Some(range) = range {
+                        e.combat.range = range;
+                    }
+                    if let Some(offhand) = offhand {
+                        e.combat.offhand = offhand;
+                    }
+                    e.note_shield(tick);
                 }
             }
             cb::SET_PASSENGERS => {
@@ -743,6 +879,8 @@ impl Scan {
                     (e.position, e.velocity, e.base_tick) = (position, velocity, tick);
                 }
             }
+            // ANIMATE: VarInt entity id, u8 action. On 26.3 (protocol 777) action 0 is wake-up, not a swing (arm
+            // swings moved to SWING_ANIMATION), so it never counts as an attack; `swings` keeps its old 0|3 rule.
             cb::ANIMATE => {
                 let target = r.var()?;
                 let action = r.u8()?;
@@ -751,6 +889,8 @@ impl Scan {
                     self.interval.swings.push(target);
                 }
             }
+            // 26.3 SWING_ANIMATION: VarInt entity id, VarInt hand (0 main, 1 off), VarInt swing
+            // type (0 none, 1 whack, 2 stab), VarInt duration (see Store::apply in entities.rs).
             cb::SWING_ANIMATION => {
                 let target = r.var()?;
                 if self.entities.contains_key(&target) {
@@ -832,6 +972,30 @@ impl Scan {
         }
     }
 
+    /// Distinct attackers of the `ATTACK_WINDOW` ticks ending at `tick` (see
+    /// `SWING_DEFINITIONS`); drops the swings no later window can use.
+    fn attackers_in_window(&mut self, tick: u64) -> usize {
+        self.last_attack.retain(|_, t| *t + ATTACK_WINDOW > tick);
+        self.last_attack.len()
+    }
+
+    /// Loads the entity metadata schema: SET_ENTITY_DATA of fighters is decoded with it, for the
+    /// shield state. Every fighter kind must put DATA_LIVING_ENTITY_FLAGS at the same index.
+    pub(crate) fn activate(&mut self, models: crate::entities::Models) -> Result<()> {
+        let mut index = None;
+        for kind in FIGHTER_KINDS {
+            let i = models
+                .accessor(kind, "DATA_LIVING_ENTITY_FLAGS")
+                .ok_or_else(|| format!("no DATA_LIVING_ENTITY_FLAGS accessor for {kind}"))?;
+            if *index.get_or_insert(i) != i {
+                return Err("fighter kinds disagree on the DATA_LIVING_ENTITY_FLAGS index".into());
+            }
+        }
+        self.living_flags = index;
+        self.models = Some(models);
+        Ok(())
+    }
+
     /// One timeline row for the state after every packet of `tick`.
     pub(crate) fn sample(&mut self, tick: u64, seconds: f64) -> Value {
         self.refresh_split();
@@ -864,6 +1028,58 @@ impl Scan {
         }
         fighters.sort_by_key(|f| f.id);
         let clusters = contact_clusters(&fighters, CONTACT_REACH, CONTACT_LINK);
+        // Contact by weapon: an enemy-side fighter within the fighter's own melee range (`mc_melee_range`).
+        // (own box, attack box, reach, holds a bow or crossbow: ranged fighters do not melee)
+        let bodies: Vec<(Aabb, Aabb, MeleeReach, bool)> = fighters
+            .iter()
+            .map(|f| {
+                let e = &self.entities[&f.id];
+                let (own, strike) = match e.vehicle.and_then(|v| self.entities.get(&v)) {
+                    Some(mount) => mounted_boxes(mount.position, &mount.combat, &e.combat),
+                    None => {
+                        let own = Aabb::at(f.position, e.combat.dims[0], e.combat.dims[1]);
+                        (own, attack_box(own, None))
+                    }
+                };
+                (
+                    own,
+                    strike,
+                    e.combat.range,
+                    matches!(
+                        e.weapon.as_deref(),
+                        Some("minecraft:bow" | "minecraft:crossbow")
+                    ),
+                )
+            })
+            .collect();
+        // Centre distance bound of a touching pair: reach plus both half widths (a horse is at most 0.75 wide each side).
+        let cell = bodies
+            .iter()
+            .map(|b| b.2.max)
+            .fold(DEFAULT_ATTACK_REACH, f64::max)
+            + 1.5;
+        let cells = grid(fighters.iter().map(|f| f.position), cell);
+        let (mut contact_by_weapon, mut fighting_25t, mut fighting_2s, mut shields_raised) =
+            (0usize, 0usize, 0usize, 0usize);
+        for (i, f) in fighters.iter().enumerate() {
+            let in_reach = !bodies[i].3
+                && near(&cells, f.position, cell).any(|j| {
+                    fighters[j].side != f.side
+                        && in_melee_range(bodies[i].1, bodies[j].0, bodies[i].2)
+                });
+            let e = self.entities.get_mut(&f.id).unwrap();
+            e.note_shield(tick);
+            shields_raised += usize::from(e.shield_up());
+            if in_reach {
+                contact_by_weapon += 1;
+                let acted = |window: u64| {
+                    let recent = |t: Option<u64>| t.is_some_and(|t| t + window > tick);
+                    recent(self.last_attack.get(&f.id).copied()) || recent(e.combat.shield_tick)
+                };
+                fighting_25t += usize::from(acted(FIGHT_WINDOW));
+                fighting_2s += usize::from(acted(ATTACK_WINDOW));
+            }
+        }
         let swings: std::collections::HashSet<i32> = self.interval.swings.iter().copied().collect();
         let mut contacts = Vec::new();
         for cluster in &clusters {
@@ -966,6 +1182,7 @@ impl Scan {
                 "flight":area(&f),"launch":area(&l),"impact":area(&i)}),
             );
         }
+        let attackers_2s = self.attackers_in_window(tick);
         let (mut melee_swings, mut bow_swings) = (0usize, 0usize);
         for id in &self.interval.swings {
             match self.entities.get(id).and_then(|e| e.weapon.as_deref()) {
@@ -1023,8 +1240,11 @@ impl Scan {
         let interval = std::mem::take(&mut self.interval);
         self.last_sample_t = seconds;
         json!({"kind":"sample","t":seconds,"tick":tick,"live":live,
-            "events":{"swings":interval.swings.len(),"melee_swings":melee_swings,"bow_swings":bow_swings,"hurts":interval.hurts,"deaths":interval.deaths},
-            "contact_fighters":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
+            "events":{"swings":interval.swings.len(),"melee_swings":melee_swings,"bow_swings":bow_swings,"hurts":interval.hurts,"deaths":interval.deaths,
+                "melee_attack_swings":interval.attack_swings,"melee_attackers_2s":attackers_2s,
+                "fighting_25t":fighting_25t,"fighting_2s":fighting_2s,"shields_raised":shields_raised,"shield_blocks":interval.shield_blocks},
+            "contact_fighters":contact_by_weapon,
+            "contact_fighters_legacy":clusters.iter().map(|c| c.members.len()).sum::<usize>(),
             "contacts":contacts,"arrows":arrows,"cavalry":cavalry,"armies":armies})
     }
 
@@ -1032,7 +1252,7 @@ impl Scan {
         let row = |id: i32, e: &Tracked, removed: Option<u64>| {
             json!({"kind":"entity","id":id,
             "role":if e.role == Role::Horse { "horse" } else { "fighter" },
-            "side":self.side(e).map(Side::name),"weapon":e.weapon,"vehicle":e.vehicle,
+            "side":self.side(e).map(Side::name),"weapon":e.weapon,"reach":[e.combat.range.min,e.combat.range.max],"vehicle":e.vehicle,
             "spawn_t":self.t(e.spawn_tick),"first_contact_t":e.first_contact.map(|t| self.t(t)),
             "death_t":e.death_tick.map(|t| self.t(t)),"removed_t":removed.map(|t| self.t(t))})
         };
@@ -1106,6 +1326,7 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<()> {
         "interval_ticks":every,"contact_reach":CONTACT_REACH,"contact_link":CONTACT_LINK,"min_y":min_y,"height":height}),
     )?;
     let (mut scan, mut phase, mut packets) = (Scan::new(min_y, height), Phase::Login, 0u64);
+    scan.activate(crate::entities::Models::load_state(&content)?)?;
     while let Some(packet) = input.next_packet()? {
         packets += 1;
         let (id, body) = packet.split()?;

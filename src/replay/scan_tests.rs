@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::Writer;
 
 fn components(entries: &[(&str, Value)]) -> BTreeMap<String, Value> {
     entries
