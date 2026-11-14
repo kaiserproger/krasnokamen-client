@@ -1,4 +1,4 @@
-//! Far terrain beyond the server view distance (Solaris `[lod]`, overworld).
+//! Far terrain beyond the server view distance (Krasnokamen `[lod]`, overworld).
 //!
 //! The world is cut into tiles of 16x16 point samples spaced `1 << level`
 //! blocks (levels 0..=6: 1 to 64 blocks). Tiles nearer the camera are finer:
@@ -20,13 +20,13 @@ pub(crate) mod program;
 
 use crate::api::{FarGeneration, FarScene, FarTileDraw};
 use crate::protocol::{
+    Reader, Result,
     content::{Content, FluidKind, TintKind},
     world::Chunk,
-    Reader, Result,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 pub(crate) const EDGE: usize = 16;
@@ -161,11 +161,16 @@ pub(crate) fn desired_tiles(
         // Keep a block-resolution band beside resident chunks, independent
         // of the camera distance (including a 32-chunk view). Coarser tiles
         // elsewhere retain the regular quadtree budget.
-        let borders_loaded = key.level <= 3 && key.level > MIN_LEVEL
+        let borders_loaded = key.level <= 3
+            && key.level > MIN_LEVEL
             && (-1..=1).any(|dx| {
                 (-1..=1).any(|dz| {
                     (dx != 0 || dz != 0)
-                        && covered(TileKey { x: key.x + dx, z: key.z + dz, ..key })
+                        && covered(TileKey {
+                            x: key.x + dx,
+                            z: key.z + dz,
+                            ..key
+                        })
                 })
             });
         if key.level > MIN_LEVEL && (d < SPLIT * key.size() as f64 || borders_loaded) {
@@ -242,7 +247,7 @@ impl Tile {
     }
 }
 
-/// What the server announced in `solaris:lod/hello`.
+/// What the server announced in `krasnokamen:lod/hello`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ServerLod {
     pub max_distance: u32,
@@ -722,7 +727,7 @@ impl Far {
         self.tiles.get_mut(&key).expect("inserted above")
     }
 
-    /// One `solaris:lod/tile` answer.
+    /// One `krasnokamen:lod/tile` answer.
     pub(crate) fn tile(&mut self, payload: &[u8], content: &Content) -> Result<()> {
         let (key, samples) = decode_tile(payload)?;
         self.inflight.remove(&key);
@@ -1134,10 +1139,13 @@ mod tests {
             };
             let tiles = desired_tiles([8., 8.], 2048., &covered);
             let edge = i64::from(radius + 1) * 16;
-            let tile = tiles.iter().find(|tile| {
-                let [x, z] = tile.origin();
-                x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
-            }).expect("far terrain just outside loaded chunks");
+            let tile = tiles
+                .iter()
+                .find(|tile| {
+                    let [x, z] = tile.origin();
+                    x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
+                })
+                .expect("far terrain just outside loaded chunks");
             assert_eq!(tile.level, 0, "radius {radius}: {tile:?}");
             assert!(tiles.len() < 4096, "radius {radius}: {} tiles", tiles.len());
         }

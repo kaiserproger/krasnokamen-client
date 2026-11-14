@@ -1,13 +1,13 @@
 //! Bounded entity tools use received identity/state and the ordinary player action path.
-use super::{lifecycle, Outcome};
+use super::{Outcome, lifecycle};
 use crate::{
     api::InputIntent,
     entities::{Entity, Handle, Metadata},
     player::{Bounds, InteractionIntent},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     session::Session,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) const SUPPORTED_TOOLS: &[&str] = &[
@@ -238,7 +238,10 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
         Some(Err(error)) => ("error", None, Some(error.as_str())),
     };
     let mut value = entity_value(session, entity)?;
-    let walk = entity.source.as_ref().and_then(|source| source.living.as_ref());
+    let walk = entity
+        .source
+        .as_ref()
+        .and_then(|source| source.living.as_ref());
     extend(
         value.as_object_mut().unwrap(),
         json!({
@@ -458,17 +461,32 @@ pub(super) fn start(
         "minecraft_list_entities" => {
             let radius = number(args, "radius", Some(32.), 0., 128.)?;
             let limit = integer(args, "limit", Some(128), 1, 512)? as usize;
-            let kind = args.get("entity_type").map(|_| text(args, "entity_type", 128)).transpose()?;
-            let cursor = args.get("cursor").map(|value| value.as_str().ok_or("invalid_cursor")).transpose()?;
-            let after = cursor.filter(|value| !value.is_empty())
-                .map(str::parse::<i32>).transpose().map_err(|_| "invalid_cursor")?;
+            let kind = args
+                .get("entity_type")
+                .map(|_| text(args, "entity_type", 128))
+                .transpose()?;
+            let cursor = args
+                .get("cursor")
+                .map(|value| value.as_str().ok_or("invalid_cursor"))
+                .transpose()?;
+            let after = cursor
+                .filter(|value| !value.is_empty())
+                .map(str::parse::<i32>)
+                .transpose()
+                .map_err(|_| "invalid_cursor")?;
             let (page, total, remaining) = entity_page(
-                session.entities.received_entities().map(|entity| (
-                    distance_squared(entity.position, session.player.position),
-                    entity.handle.network_id,
-                    entity.type_name.as_str(),
-                )),
-                radius, limit, kind, cursor.is_some(), after,
+                session.entities.received_entities().map(|entity| {
+                    (
+                        distance_squared(entity.position, session.player.position),
+                        entity.handle.network_id,
+                        entity.type_name.as_str(),
+                    )
+                }),
+                radius,
+                limit,
+                kind,
+                cursor.is_some(),
+                after,
             );
             let next_cursor = (cursor.is_some() && remaining > page.len())
                 .then(|| page.last().unwrap().1.to_string());
@@ -858,12 +876,22 @@ mod observation_tests {
             (17000., 11, "minecraft:villager"),
         ];
         let (first, total, remaining) = entity_page(
-            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, None,
+            entities.into_iter(),
+            128.,
+            2,
+            Some("minecraft:villager"),
+            true,
+            None,
         );
         assert_eq!(first.iter().map(|row| row.1).collect::<Vec<_>>(), [5, 7]);
         assert_eq!((total, remaining), (3, 3));
         let (last, total, remaining) = entity_page(
-            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, Some(7),
+            entities.into_iter(),
+            128.,
+            2,
+            Some("minecraft:villager"),
+            true,
+            Some(7),
         );
         assert_eq!(last.iter().map(|row| row.1).collect::<Vec<_>>(), [9]);
         assert_eq!((total, remaining), (3, 1));
@@ -871,8 +899,11 @@ mod observation_tests {
 
     #[test]
     fn entity_census_cursor_order_survives_motion_and_packet_order() {
-        let entities = [(1., 9, "minecraft:villager"), (100., 5, "minecraft:villager"),
-                        (81., 7, "minecraft:villager")];
+        let entities = [
+            (1., 9, "minecraft:villager"),
+            (100., 5, "minecraft:villager"),
+            (81., 7, "minecraft:villager"),
+        ];
         let (page, _, _) = entity_page(entities.into_iter(), 128., 2, None, true, Some(5));
         assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9]);
         let (nearest, _, _) = entity_page(entities.into_iter(), 128., 2, None, false, None);

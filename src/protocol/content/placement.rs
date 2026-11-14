@@ -125,25 +125,25 @@ impl PlacementFacts {
     ) -> Result<Self> {
         let placement: PlacementReport = report(
             data,
-            "SOLARIS_CLIENT_PLACEMENT_FACTS",
+            "KRASNOKAMEN_CLIENT_PLACEMENT_FACTS",
             "placement_state_facts.json",
             32 << 20,
         )?;
         let items: ItemPlacementReport = report(
             data,
-            "SOLARIS_CLIENT_ITEM_PLACEMENT_FACTS",
+            "KRASNOKAMEN_CLIENT_ITEM_PLACEMENT_FACTS",
             "item_placement_facts.json",
             2 << 20,
         )?;
         let actions: ActionReport = report(
             data,
-            "SOLARIS_CLIENT_ACTION_STATE_FACTS",
+            "KRASNOKAMEN_CLIENT_ACTION_STATE_FACTS",
             "action_state_facts.json",
             16 << 20,
         )?;
         let entity_use: Value = report(
             data,
-            "SOLARIS_CLIENT_ENTITY_USE_STATIC",
+            "KRASNOKAMEN_CLIENT_ENTITY_USE_STATIC",
             "entity_use_static.json",
             2 << 20,
         )?;
@@ -326,7 +326,9 @@ impl Content {
     #[cfg(test)]
     pub(crate) fn insert_test_placement_solid(&mut self, state: u32, solid: bool) {
         let required = self.placement.states.len().max(state as usize + 1);
-        self.placement.states.resize_with(required, StateFacts::default);
+        self.placement
+            .states
+            .resize_with(required, StateFacts::default);
         self.placement.states[state as usize].is_solid = solid;
     }
     #[cfg(test)]
@@ -349,26 +351,29 @@ impl Content {
     }
     #[cfg(test)]
     pub(crate) fn insert_test_solid_states(&mut self) {
-        self.placement.states = [false, true].into_iter().map(|solid| StateFacts {
-            is_solid: solid,
-            blocks_motion: solid,
-            liquid: false,
-            can_burn: false,
-            instrument: String::new(),
-            instrument_above: false,
-            static_support_cache: false,
-            supports: None,
-            collision_face_full: None,
-            support_face_full: None,
-            collision_boxes: None,
-            support_boxes: None,
-            empty_supports: None,
-            empty_collision_face_full: None,
-            empty_support_face_full: None,
-            empty_collision_boxes: None,
-            empty_support_boxes: None,
-            candle_offsets: Vec::new(),
-        }).collect();
+        self.placement.states = [false, true]
+            .into_iter()
+            .map(|solid| StateFacts {
+                is_solid: solid,
+                blocks_motion: solid,
+                liquid: false,
+                can_burn: false,
+                instrument: String::new(),
+                instrument_above: false,
+                static_support_cache: false,
+                supports: None,
+                collision_face_full: None,
+                support_face_full: None,
+                collision_boxes: None,
+                support_boxes: None,
+                empty_supports: None,
+                empty_collision_face_full: None,
+                empty_support_face_full: None,
+                empty_collision_boxes: None,
+                empty_support_boxes: None,
+                candle_offsets: Vec::new(),
+            })
+            .collect();
     }
     #[cfg(test)]
     pub(crate) fn insert_test_entity_dimensions(&mut self, name: &str, dimensions: [f32; 2]) {

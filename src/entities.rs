@@ -1,6 +1,10 @@
 //! Native protocol-777 remote presentation. Session remains the local physics/health owner.
 //! Derived model data is explicitly activated; no Java process is used by the client.
 use crate::protocol::packet_ids::play::clientbound as cb;
+#[cfg(test)]
+mod animation_tests;
+#[cfg(test)]
+mod asset_model_regression_tests;
 mod block_components;
 mod blocks;
 mod creaking_eyes;
@@ -9,11 +13,8 @@ mod display;
 mod dragon;
 mod drowned_outer;
 mod equipment;
+mod krasnokamen_models;
 mod local;
-#[cfg(test)]
-mod animation_tests;
-#[cfg(test)]
-mod asset_model_regression_tests;
 mod metadata;
 mod nameplates;
 mod physical;
@@ -26,24 +27,23 @@ mod render_living;
 mod render_nameplates;
 mod render_special;
 mod resources;
+mod shadows;
+mod sheep;
 mod source_commands;
 mod source_state;
-mod sheep;
-mod shadows;
-mod solaris_models;
 mod villagers;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
-    protocol::{content::Content, Reader, Result},
+    protocol::{Reader, Result, content::Content},
 };
-use glam::Mat4;
 pub(crate) use blocks::BlockEntitySnapshot;
+use glam::Mat4;
 pub use metadata::Metadata;
 pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
-pub use presentation::{special_item, PresentationStats};
+pub use presentation::{PresentationStats, special_item};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
@@ -53,7 +53,7 @@ pub(crate) use render_blocks::{
 };
 pub use resources::Models;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::Path,
@@ -679,7 +679,11 @@ impl Store {
         let old = self.get(id).map(|e| cell(e.position));
         let new = cell(target.position);
         let revision = self.revision;
-        let phase = if self.frame_tick == tick { self.frame_partial } else { 0. };
+        let phase = if self.frame_tick == tick {
+            self.frame_partial
+        } else {
+            0.
+        };
         let old_span = self.get(id).map_or(0, |e| e.physical.lerp_span);
         self.remove_motion_span(old_span);
         if let Some(e) = self.get_mut(id) {
@@ -1569,7 +1573,8 @@ impl Store {
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.predicted_block_data
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
-        self.preview_cache.retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
+        self.preview_cache
+            .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.block_active
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.revision += 1;
@@ -1581,7 +1586,9 @@ impl Store {
     ) -> Result<PresentationStats> {
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
-        if self.render_local_avatar && let Some(avatar) = self.local_avatar.take() {
+        if self.render_local_avatar
+            && let Some(avatar) = self.local_avatar.take()
+        {
             self.local_render_slot = Some(self.slots.len());
             self.slots.push(avatar);
         }
