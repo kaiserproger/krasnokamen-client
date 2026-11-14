@@ -1,8 +1,8 @@
 //! Source-derived controlled mounts. Minecarts and non-controlling passengers use received
 //! entity interpolation; they are never run through a guessed boat/horse simulator.
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::*;
 use crate::entities::Metadata;
+use crate::protocol::packet_ids::play::serverbound as sb;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -372,8 +372,13 @@ impl Player {
         }
         if self.sprinting != self.sent_sprinting {
             self.entity_command(
-                if self.sprinting { PlayerCommand::StartSprinting } else { PlayerCommand::StopSprinting },
-                0, out,
+                if self.sprinting {
+                    PlayerCommand::StartSprinting
+                } else {
+                    PlayerCommand::StopSprinting
+                },
+                0,
+                out,
             );
             self.sent_sprinting = self.sprinting;
         }

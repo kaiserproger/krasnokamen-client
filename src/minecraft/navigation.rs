@@ -3,12 +3,12 @@ mod planner;
 use super::Outcome;
 use crate::{
     api::InputIntent,
-    player::{collision, Bounds},
+    player::{Bounds, collision},
     protocol::Result,
     session::Session,
 };
 use planner::{Planner, Space};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) struct Task {

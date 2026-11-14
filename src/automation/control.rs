@@ -1,9 +1,10 @@
 use crate::api::{Command, InputIntent, Request, SharedState};
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{
+    Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc,
 };
 use std::time::{Duration, Instant};
 

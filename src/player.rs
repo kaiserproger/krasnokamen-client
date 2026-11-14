@@ -2,8 +2,8 @@
 //! Source pin: verified 26.1.2 client archive, ignored `.analysis/player-research/*.javap`,
 //! C02 LocalPlayer/LivingEntity bytecode and entity-models PositionMoveRotation/Relative.
 //! Prediction never writes received world blocks, inventory or remote entities.
-use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::protocol::packet_ids::play::clientbound as cb;
+use crate::protocol::packet_ids::play::serverbound as sb;
 mod adventure;
 mod block_sounds;
 pub(crate) mod collision;
@@ -17,10 +17,9 @@ use crate::{
     entities::{Handle, Store as EntityStore},
     inventory::{InventoryStore, PacketCommand},
     protocol::{
-        self,
+        self, Reader, Result, Writer,
         content::{Content, FluidKind},
         world::World,
-        Reader, Result, Writer,
     },
 };
 pub use collision::Bounds;
@@ -32,7 +31,7 @@ use std::{
 };
 pub(crate) use use_on::EntityUseState;
 pub use use_on::{UiTrigger, UsePrediction};
-pub(crate) use visual::{camera_distance, FirstPersonFrame};
+pub(crate) use visual::{FirstPersonFrame, camera_distance};
 
 #[derive(Clone, Copy)]
 pub struct InteractionWorld<'a> {
@@ -663,7 +662,10 @@ impl Player {
                     return Err("negative_ability_speed".into());
                 }
             }
-            cb::SET_ENTITY_MOTION | cb::UPDATE_ATTRIBUTES | cb::UPDATE_MOB_EFFECT | cb::REMOVE_MOB_EFFECT => {
+            cb::SET_ENTITY_MOTION
+            | cb::UPDATE_ATTRIBUTES
+            | cb::UPDATE_MOB_EFFECT
+            | cb::REMOVE_MOB_EFFECT => {
                 if r.var()? != self.entity_id {
                     r.offset = start;
                     return Ok(false);
@@ -960,7 +962,12 @@ impl Player {
         world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
-        let InteractionWorld { world, content, inventory, entities } = resources;
+        let InteractionWorld {
+            world,
+            content,
+            inventory,
+            entities,
+        } = resources;
         self.drain_commands(out);
         if !self.pose_known {
             return Ok(());
@@ -974,16 +981,22 @@ impl Player {
         self.sync_input(input, out);
         let previous_position = self.position;
         self.movement_blocked = None;
-        if let Err(e) = self.predict(world, content, inventory, entities, input, tick, world_tick, out) {
+        if let Err(e) = self.predict(
+            world, content, inventory, entities, input, tick, world_tick, out,
+        ) {
             self.movement_blocked = Some(e);
             self.velocity = [0.; 3];
         }
         let item_id = self.using.as_ref().map(|using| using.item_id);
-        let owner = item_id.and_then(|id| content.item_use_owner(id, false).ok())
+        let owner = item_id
+            .and_then(|id| content.item_use_owner(id, false).ok())
             .unwrap_or("interaction tick");
-        if self.local_prediction(item_id, owner, |player| {
-            player.interaction_tick(resources, input, tick, world_tick, out)
-        }).is_none() {
+        if self
+            .local_prediction(item_id, owner, |player| {
+                player.interaction_tick(resources, input, tick, world_tick, out)
+            })
+            .is_none()
+        {
             self.stop_using(out)?;
             self.pending_use_release = None;
         }
@@ -1236,9 +1249,11 @@ mod tests {
         let mut packet = Writer::default();
         packet.var(7);
         packet.f32(90.);
-        assert!(player
-            .apply(43, &mut Reader::new(&packet.0), &content, 100)
-            .unwrap());
+        assert!(
+            player
+                .apply(43, &mut Reader::new(&packet.0), &content, 100)
+                .unwrap()
+        );
         assert_eq!(player.hurt_tick, Some(100));
         assert_eq!(player.hurt_direction, 90.);
         assert_eq!((player.yaw, player.pitch), (30., 12.));
@@ -1250,14 +1265,18 @@ mod tests {
         assert_eq!(reader.offset, 0);
         assert_eq!(player.hurt_tick, Some(100));
         packet.0.push(0);
-        assert!(player
-            .apply(43, &mut Reader::new(&packet.0), &content, 102)
-            .is_err());
+        assert!(
+            player
+                .apply(43, &mut Reader::new(&packet.0), &content, 102)
+                .is_err()
+        );
         assert_eq!(player.hurt_tick, Some(100));
         packet.0.pop();
-        assert!(player
-            .apply(43, &mut Reader::new(&packet.0), &content, 107)
-            .unwrap());
+        assert!(
+            player
+                .apply(43, &mut Reader::new(&packet.0), &content, 107)
+                .unwrap()
+        );
         assert_eq!(player.hurt_tick, Some(107));
     }
     #[test]
@@ -1270,7 +1289,14 @@ mod tests {
         assert_eq!(acknowledgement.id, 0);
         let mut reader = Reader::new(&acknowledgement.payload.0);
         assert_eq!(reader.var().unwrap(), 17);
-        assert_eq!([reader.f64().unwrap(), reader.f64().unwrap(), reader.f64().unwrap()], [1.5, 64., -2.25]);
+        assert_eq!(
+            [
+                reader.f64().unwrap(),
+                reader.f64().unwrap(),
+                reader.f64().unwrap()
+            ],
+            [1.5, 64., -2.25]
+        );
         assert_eq!((reader.f32().unwrap(), reader.f32().unwrap()), (90., -30.));
         reader.done().unwrap();
     }

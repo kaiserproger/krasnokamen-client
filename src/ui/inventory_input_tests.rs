@@ -115,12 +115,7 @@ fn hashed(r: &mut Reader<'_>) -> EncodedStack {
     }
     Some((item, count))
 }
-fn click(
-    packet: &PacketCommand,
-    slot: i16,
-    button: u8,
-    mode: i32,
-) -> (SlotChanges, EncodedStack) {
+fn click(packet: &PacketCommand, slot: i16, button: u8, mode: i32) -> (SlotChanges, EncodedStack) {
     assert_eq!(packet.id, sb::CONTAINER_CLICK);
     let mut r = Reader::new(&packet.payload.0);
     assert_eq!(r.var().unwrap(), 0);
@@ -170,7 +165,13 @@ fn inventory_native_number_keys_and_offhand_swap_hovered_stack() {
         let (content, mut inv, mut ui) = fixture();
         inv.player.slots[9] = Some(stack(10));
         pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
-        let native = crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(code), true, Modifiers::default(), true);
+        let native = crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(code),
+            true,
+            Modifiers::default(),
+            true,
+        );
         let mut packets = Vec::new();
         if let Some(crate::api::InputIntent::Ui { intent }) = native {
             packets = dispatch(&mut ui, &mut inv, &content, intent);
@@ -199,9 +200,13 @@ fn inventory_native_q_and_control_q_throw_hovered_items() {
             ..Modifiers::default()
         };
         let mut packets = Vec::new();
-        if let Some(crate::api::InputIntent::Ui { intent }) =
-            crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::KeyQ), true, modifiers, true)
-        {
+        if let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(KeyCode::KeyQ),
+            true,
+            modifiers,
+            true,
+        ) {
             packets = dispatch(&mut ui, &mut inv, &content, intent);
         }
         assert_eq!(
@@ -250,7 +255,13 @@ fn inventory_recipe_book_button_opens_shared_panel_and_sends_settings() {
 #[test]
 fn inventory_native_shortcuts_preserve_gameplay_and_ignore_releases() {
     assert!(matches!(
-        crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit2), true, Modifiers::default(), false),
+        crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(KeyCode::Digit2),
+            true,
+            Modifiers::default(),
+            false
+        ),
         Some(crate::api::InputIntent::Hotbar { slot: 1 })
     ));
     assert!(matches!(
@@ -258,7 +269,16 @@ fn inventory_native_shortcuts_preserve_gameplay_and_ignore_releases() {
         Some(crate::api::InputIntent::Key { key, pressed: true }) if key == "drop"
     ));
     for key in [KeyCode::Digit1, KeyCode::KeyQ, KeyCode::KeyF] {
-        assert!(crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(key), false, Modifiers::default(), true).is_none());
+        assert!(
+            crate::native_item_key(
+                &crate::controls::Bindings::default(),
+                crate::controls::Binding::Key(key),
+                false,
+                Modifiers::default(),
+                true
+            )
+            .is_none()
+        );
     }
 }
 
@@ -283,9 +303,13 @@ fn inventory_swapping_while_carrying_does_not_change_slots() {
     inv.player.slots[9] = Some(stack(10));
     inv.cursor = Some(stack(3));
     pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
-    let Some(crate::api::InputIntent::Ui { intent }) =
-        crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit2), true, Modifiers::default(), true)
-    else {
+    let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
+        &crate::controls::Bindings::default(),
+        crate::controls::Binding::Key(KeyCode::Digit2),
+        true,
+        Modifiers::default(),
+        true,
+    ) else {
         panic!("inventory key must reach UI");
     };
     assert!(dispatch(&mut ui, &mut inv, &content, intent).is_empty());
@@ -325,7 +349,10 @@ fn focus_loss_cancels_pointer_gesture_and_slider_capture() {
     ui.set_focus_active(false);
     assert!(ui.slider_drag.is_none());
     let packets = pointer(&mut ui, &mut inv, &content, 11, PointerPhase::Up);
-    assert!(packets.is_empty(), "focus loss must cancel the pending transfer");
+    assert!(
+        packets.is_empty(),
+        "focus loss must cancel the pending transfer"
+    );
     assert_eq!(inv.cursor.as_ref().unwrap().count, 10);
     assert!(inv.player.slots[10].as_ref().unwrap().empty());
     assert!(inv.player.slots[11].as_ref().unwrap().empty());
@@ -338,9 +365,14 @@ fn hovered_hotbar_swap_reconciles_server_rejection() {
     inv.player.slots[9] = Some(stack(10));
     pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
     let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
-        &crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit1),
-        true, Modifiers::default(), true,
-    ) else { panic!("number key must target hovered slot") };
+        &crate::controls::Bindings::default(),
+        crate::controls::Binding::Key(KeyCode::Digit1),
+        true,
+        Modifiers::default(),
+        true,
+    ) else {
+        panic!("number key must target hovered slot")
+    };
     assert_eq!(dispatch(&mut ui, &mut inv, &content, intent).len(), 1);
     assert_eq!(inv.player.slots[36].as_ref().unwrap().count, 10);
     for (slot, count) in [(9_i16, 10), (36_i16, 0)] {
@@ -354,7 +386,14 @@ fn hovered_hotbar_swap_reconciles_server_rejection() {
             packet.var(0);
             packet.var(0);
         }
-        assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+        assert!(
+            inv.apply(
+                cb::CONTAINER_SET_SLOT,
+                &mut Reader::new(&packet.0),
+                &content
+            )
+            .unwrap()
+        );
     }
     assert_eq!(inv.player.slots[9].as_ref().unwrap().count, 10);
     assert!(inv.player.slots[36].as_ref().unwrap().empty());
