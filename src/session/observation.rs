@@ -465,21 +465,15 @@ impl Session {
         if !self.player.pose_known || self.dimension.is_none() {
             return false;
         }
-        let camera = self.player.eye_position();
-        let block = camera.map(|coordinate| coordinate.floor() as i32);
-        if self.world.block(block).is_none()
-            || self.world.light_levels(block).iter().any(Option::is_none)
-        {
-            return false;
-        }
-        // The environment renderer samples biome columns around the camera.
-        // Keep the loading screen up until this required neighborhood is known.
-        let floor = camera.map(|coordinate| (coordinate * 0.25 - 0.5).floor() as i32);
-        let x_range = ((floor[0] - 2) * 4).div_euclid(16)..=((floor[0] + 3) * 4).div_euclid(16);
-        x_range.into_iter().all(|x| {
-            (((floor[2] - 2) * 4).div_euclid(16)..=((floor[2] + 3) * 4).div_euclid(16))
-                .all(|z| self.world.chunk([x, z]).is_some())
-        })
+        // Vanilla enters play once the level exists and the player is placed; a
+        // refused or not-yet-received chunk — including the camera's own — is a
+        // hole in the world, not a reason to hold the loading screen forever.
+        // Requiring the camera block and its light, or the biome-neighbour
+        // chunks, kept the native client out of play beside a refused chunk
+        // (NATIVE-INPLAY-BLOCKED-BY-MISSING-CHUNK, SP-PREPARING-TERRAIN-STUCK).
+        // Absent columns stay unknown to the lightmap and the environment
+        // blend; both already drop them instead of failing.
+        self.world.chunks().next().is_some()
     }
     fn sync_ui_state(&mut self, world_ready: bool) -> Result<()> {
         let player_dead = self.player.death_message.is_some()
@@ -1806,6 +1800,35 @@ mod destruction_tests {
     use super::*;
     use crate::protocol::content::TextureRegion;
     use std::sync::Arc;
+
+    /// Regression (NATIVE-INPLAY-BLOCKED-BY-MISSING-CHUNK, SP-PREPARING-TERRAIN-STUCK):
+    /// the client enters play as soon as the level exists and the player is
+    /// placed. A refused or missing chunk under the camera is a hole in the
+    /// world, as it is for a vanilla client, not a permanent loading screen.
+    #[test]
+    fn a_hole_under_the_camera_does_not_hold_the_play_loading_screen() {
+        let mut session = crate::session::mining_start_tests::session();
+        assert!(
+            !session.play_world_presentation_ready(),
+            "a session without a received chunk is not play-ready"
+        );
+        session.dimension = Some("minecraft:overworld".into());
+        assert!(
+            session.play_world_presentation_ready(),
+            "one received chunk proves the level is live"
+        );
+        session.player.position = [40.5, 4., 4.5];
+        let camera = session.player.eye_position();
+        let block = camera.map(|coordinate| coordinate.floor() as i32);
+        assert!(
+            session.world.block(block).is_none(),
+            "the camera must stand over an absent chunk for this regression"
+        );
+        assert!(
+            session.play_world_presentation_ready(),
+            "a hole under the camera must not hold loading"
+        );
+    }
 
     #[test]
     fn portal_scene_binds_required_atlas_sprites_only_for_portal_geometry() {
