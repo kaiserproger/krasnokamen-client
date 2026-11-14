@@ -923,16 +923,44 @@ pub(super) fn root_matrix(
     let clip = layers.iter().any(Option::is_some)
         .then(|| super::clip_pose::library().delta(&layers, super::clip_pose::Channel::Root))
         .flatten();
-    if let Some(death) = entity.death_tick {
-        let a = ((tick.saturating_sub(death) as f32 + partial) / 20.).clamp(0., 1.);
+    if let Some(death) = entity.death_tick.filter(|_| matches!(binding.style, RootStyle::Living)) {
         let vanilla = 1. - clip.map_or(0., |clip| clip.replace);
-        matrix *= Mat4::from_rotation_z(a.sqrt() * std::f32::consts::FRAC_PI_2 * vanilla);
+        matrix *= death_tilt(&entity.type_name, tick.saturating_sub(death), partial, vanilla);
     }
     if let Some(clip) = clip {
         matrix *= clip.about(super::clip_pose::FEET);
     }
     if let Some(parent) = parent { matrix = parent * matrix; }
     matrix
+}
+
+/// The living root's feet in model space: the root ends with `scale(-1, -1, 1)` and
+/// `translate(0, -1.501, 0)`, so this point lands on the received position.
+const LIVING_FEET: Vec3 = Vec3::new(0., 1.501, 0.);
+
+/// Vanilla death tip-over, post-multiplied onto a living root (`strength` 1 = vanilla).
+///
+/// 26.3 `LivingEntityRenderer.setupRotations` (javap) turns `rotate(Z, min(sqrt((deathTime
+/// - 1) / 20 * 1.6), 1) * getFlipDegrees())` after the body yaw and before the model flip
+/// and `-1.501` translate, i.e. about the feet. `extractRenderState` renders
+/// `deathTime + partial` once the entity has ticked dead (`tickDeath` increments it each
+/// tick from the death on), else 0; `elapsed` is ticks since the received death event.
+/// `getFlipDegrees` is 90, or 180 for `SpiderRenderer` (spider, cave spider),
+/// `SilverfishRenderer` and `EndermiteRenderer`. The flip is a turn about Z, so the same
+/// angle about [`LIVING_FEET`] here equals vanilla's turn before it.
+pub(super) fn death_tilt(type_name: &str, elapsed: u64, partial: f32, strength: f32) -> Mat4 {
+    if elapsed == 0 {
+        return Mat4::IDENTITY;
+    }
+    let death_time = elapsed as f32 + partial;
+    let progress = ((death_time - 1.) / 20. * 1.6).sqrt().min(1.);
+    let flip: f32 = match type_name {
+        "minecraft:spider" | "minecraft:cave_spider" | "minecraft:silverfish" | "minecraft:endermite" => 180.,
+        _ => 90.,
+    };
+    Mat4::from_translation(LIVING_FEET)
+        * Mat4::from_rotation_z((progress * flip * strength).to_radians())
+        * Mat4::from_translation(-LIVING_FEET)
 }
 
 pub(super) fn draw_entity(

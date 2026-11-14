@@ -435,6 +435,48 @@ fn riding_passengers_pose_their_legs_like_the_cpu_pose() {
     assert!(!standing[leg].abs_diff_eq(gpu[leg], 1e-3), "the riding flag moves the legs");
 }
 
+/// NATIVE-DEATH-TILT-PIVOT on the crowd path: a dying soldier's instance carries the vanilla
+/// death tilt about its feet (render deathTime 8.25: sqrt(7.25 / 20 * 1.6) * 90 = 68.54
+/// degrees), and the bone pass still equals the CPU pose.
+#[test]
+fn dying_crowd_instances_tilt_about_the_feet_like_the_cpu_pose() {
+    let (mut store, content) = fixture();
+    store.slots[0].death_tick = Some(TICK - 8);
+    let (_, stats) = render(&mut store, &content, true);
+    assert_eq!(stats.crowd, 1, "a dying zombie stays on the crowd path");
+    let instance = store.crowd.instances()[0];
+    let entity = &store.slots[0];
+    let models = store.models.clone().unwrap();
+    let Some(Ok(bound)) = entity.binding.as_ref() else { panic!("bound") };
+    let frame = p::EntityDrawFrame {
+        origin: [0.; 3],
+        transform: entity.presented_transform(TICK, PARTIAL),
+        tick: TICK,
+        partial: PARTIAL,
+        light: [12., 3.],
+        parent: None,
+    };
+    let [r0, r1, r2] = instance.root;
+    let instanced = Mat4::from_cols_array_2d(&[
+        [r0[0], r1[0], r2[0], 0.], [r0[1], r1[1], r2[1], 0.], [r0[2], r1[2], r2[2], 0.], [r0[3], r1[3], r2[3], 1.],
+    ]);
+    let root = p::root_matrix(entity, &models, bound, frame, &|_| None);
+    assert!(instanced.abs_diff_eq(root, 1e-5), "{instanced:?} != {root:?}");
+    let position = frame.transform.position.map(|v| v as f32);
+    let feet = instanced.transform_point3(Vec3::new(0., 1.501, 0.));
+    assert!(feet.abs_diff_eq(Vec3::from(position), 1e-4), "the feet stay on the ground: {feet:?}");
+    let up = instanced.transform_vector3(Vec3::NEG_Y);
+    assert!((up.y - 0.365_82).abs() < 1e-4, "68.54 degrees from upright: {up:?}");
+    let library = clip_pose::library();
+    let gpu = evaluate(store.crowd.meshes(), &instance, &library);
+    let pose = p::role_pose(entity, &models, &content, TICK, PARTIAL);
+    let mut transforms = Vec::new();
+    p::evaluate_posed_rig(models.rig(&bound.rig), entity, &models, (TICK, PARTIAL), &pose, &library, root, &mut transforms);
+    for (index, expected) in transforms.iter().enumerate() {
+        assert!(gpu[index].abs_diff_eq(*expected, 1e-4), "bone {index}: {:?} != {expected:?}", gpu[index]);
+    }
+}
+
 #[test]
 fn detail_levels_drop_thin_item_quads_then_trims() {
     let template = Content::test_cube().models[0].quads[0].clone();

@@ -109,7 +109,8 @@ impl Store {
         e.observed_tick = tick;
         e.damage_tick = player.hurt_tick;
         e.animation = player.visual_swing(tick);
-        e.death_tick = player.health.filter(|h| *h <= 0.).map(|_| tick);
+        // The first dead tick, kept while dead, so the death tilt advances (vanilla deathTime).
+        e.death_tick = player.health.filter(|h| *h <= 0.).map(|_| e.death_tick.unwrap_or(tick));
         let pose = match player.pose {
             Pose::Standing => 0,
             Pose::FallFlying => 1,

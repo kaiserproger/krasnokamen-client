@@ -303,6 +303,10 @@ sampled by both entity render paths through `entities/clip_pose.rs`.
 * **Reactions.** An entity that has played a clip adds the `hurt` flinch on hurt packets and
   plays the held `death` clip instead of the vanilla tip-over; its mount does the same with
   `horse.hurt` / `horse.death`. An entity that never received a swing keeps the vanilla look.
+  That vanilla tip-over (`presentation::death_tilt`, 26.3 `LivingEntityRenderer.setupRotations`)
+  turns the body about its feet by `min(sqrt((deathTime - 1) / 20 * 1.6), 1)` times 90
+  degrees (180 for spiders, cave spiders, silverfish and endermites), level from deathTime
+  13.5; the CPU and crowd paths share it through `root_matrix`.
 * **Tests.** `entities::animation::tests` covers parsing, interpolation, baking, selection,
   the received-packet path and every shipped clip's contract (lengths, contact frames, legs
   following the gait during attacks, mounted clips keeping the seat).
