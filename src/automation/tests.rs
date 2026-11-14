@@ -3,8 +3,9 @@ use crate::api::{Observation, Shared};
 use parking_lot::Mutex;
 use serde_json::json;
 use std::sync::{
+    Arc, Condvar,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Condvar,
+    mpsc,
 };
 use std::time::{Duration, Instant};
 
@@ -47,15 +48,28 @@ fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
 fn entity_census_schema_export_matches_live_validation() {
     let args = json!({"radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":""});
     super::catalog::validate("minecraft_list_entities", &args).unwrap();
-    super::catalog::validate("minecraft_list_entities", &json!({
-        "radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":"2147483647"
-    })).unwrap();
-    assert!(super::catalog::validate("minecraft_list_entities", &json!({"entity_type":""})).is_err());
+    super::catalog::validate(
+        "minecraft_list_entities",
+        &json!({
+            "radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":"2147483647"
+        }),
+    )
+    .unwrap();
+    assert!(
+        super::catalog::validate("minecraft_list_entities", &json!({"entity_type":""})).is_err()
+    );
     let exported = super::schema();
     for catalog in ["tools", "headless_tools"] {
-        let tool = exported[catalog].as_array().unwrap().iter()
-            .find(|tool| tool["name"] == "minecraft_list_entities").unwrap();
-        assert_eq!(tool, super::catalog::validate("minecraft_list_entities", &args).unwrap());
+        let tool = exported[catalog]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "minecraft_list_entities")
+            .unwrap();
+        assert_eq!(
+            tool,
+            super::catalog::validate("minecraft_list_entities", &args).unwrap()
+        );
         assert_eq!(tool["inputSchema"]["properties"]["cursor"]["minLength"], 0);
     }
 }
@@ -145,7 +159,10 @@ fn ui_respawn_click_preserves_lease_until_one_dimension_handoff() {
     owner.join().unwrap();
     let (verdict, _) = Core::lease_verdict(&mut core.control.lock(), "1", "3");
     assert!(verdict.is_none(), "respawn must preserve the controller");
-    assert!(Arc::ptr_eq(&live, &core.admit("a", "1", "3").unwrap().fence));
+    assert!(Arc::ptr_eq(
+        &live,
+        &core.admit("a", "1", "3").unwrap().fence
+    ));
     let (verdict, _) = Core::lease_verdict(&mut core.control.lock(), "1", "4");
     assert_eq!(verdict.unwrap().0, "context_changed");
 }
@@ -160,10 +177,19 @@ fn observe_queued_before_respawn_reads_the_new_dimension() {
         let click = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         click.reply.send(Ok(json!({"status": "ok"}))).unwrap();
         let observe = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
-        owner_core.shared.observation.lock().unwrap().dimension_epoch = "3".into();
+        owner_core
+            .shared
+            .observation
+            .lock()
+            .unwrap()
+            .dimension_epoch = "3".into();
         let (verdict, _) = Core::lease_verdict(&mut owner_core.control.lock(), "1", "3");
         assert!(verdict.is_none());
-        let result = if observe.expected_dimension_epoch.as_deref().is_some_and(|epoch| epoch != "3") {
+        let result = if observe
+            .expected_dimension_epoch
+            .as_deref()
+            .is_some_and(|epoch| epoch != "3")
+        {
             Err("stale_dimension_epoch".to_string())
         } else {
             Ok(json!({"dimension_epoch": "3"}))
@@ -181,7 +207,8 @@ fn observe_queued_before_respawn_reads_the_new_dimension() {
             "button_label": "Respawn"
         }),
         &cancelled,
-    ).unwrap();
+    )
+    .unwrap();
     let result = super::tools::execute(&core, "a", "minecraft_observe", &json!({}), &cancelled)
         .expect("observe must return the current dimension after the queued handoff");
     assert_eq!(result["dimension_epoch"], "3");
@@ -194,12 +221,19 @@ fn writer_queued_before_dimension_change_remains_epoch_fenced() {
     let owner = std::thread::spawn(move || {
         let write = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         assert_eq!(write.expected_dimension_epoch.as_deref(), Some("2"));
-        write.reply.send(Err("stale_dimension_epoch".into())).unwrap();
+        write
+            .reply
+            .send(Err("stale_dimension_epoch".into()))
+            .unwrap();
     });
     let error = super::tools::execute(
-        &core, "a", "minecraft_send_chat", &json!({"message": "hello"}),
+        &core,
+        "a",
+        "minecraft_send_chat",
+        &json!({"message": "hello"}),
         &Arc::new(AtomicBool::new(false)),
-    ).unwrap_err();
+    )
+    .unwrap_err();
     assert_eq!(error, "stale_dimension_epoch");
     owner.join().unwrap();
 }
@@ -207,12 +241,54 @@ fn writer_queued_before_dimension_change_remains_epoch_fenced() {
 #[test]
 fn ui_respawn_authorization_expires_on_next_writer_and_rejects_other_clicks() {
     for (class, label, succeeds, next_writer, connection, dimension) in [
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, true, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", false, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Quit", true, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.PauseScreen", "Respawn", true, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, false, "1", "4"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, false, "2", "3"),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            true,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            false,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Quit",
+            true,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.PauseScreen",
+            "Respawn",
+            true,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            false,
+            "1",
+            "4",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            false,
+            "2",
+            "3",
+        ),
     ] {
         let (core, receiver) = client();
         core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
@@ -379,7 +455,9 @@ fn dead_session_lease_is_reclaimable_by_a_new_session() {
     core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
     let new = core
         .admit("b", "1", "2")
-        .expect("a new session must reclaim a clock-expired lease").fence.clone();
+        .expect("a new session must reclaim a clock-expired lease")
+        .fence
+        .clone();
     assert!(!old.load(Ordering::Acquire));
     assert!(!Arc::ptr_eq(&old, &new));
     assert!(new.load(Ordering::Acquire));
@@ -445,7 +523,12 @@ fn reclaim_with_a_full_owner_queue_refuses_until_release_all_is_delivered() {
     while core.control.lock().releasing != 0 {
         std::thread::yield_now();
     }
-    assert!(core.admit("b", "1", "2").unwrap().fence.load(Ordering::Acquire));
+    assert!(
+        core.admit("b", "1", "2")
+            .unwrap()
+            .fence
+            .load(Ordering::Acquire)
+    );
 }
 
 #[test]
@@ -472,7 +555,6 @@ fn deferred_expiry_revoke_never_hits_a_writer_admitted_after_the_check() {
     assert!(!new.load(Ordering::Acquire));
     assert!(is_release_all(&receiver.try_recv().unwrap()));
 }
-
 
 #[test]
 fn validation_error_before_dispatch_never_touches_lease_or_queue() {
@@ -577,14 +659,18 @@ fn stale_container_state_keeps_lease_for_retry() {
     );
 }
 
-
 #[test]
 fn active_writer_action_survives_idle_expiry_then_returns_to_idle() {
     let (core, receiver) = client();
     let caller = core.clone();
     let worker = std::thread::spawn(move || {
-        super::tools::execute(&caller, "a", "minecraft_send_chat",
-            &json!({"message": "activity"}), &Arc::new(AtomicBool::new(false)))
+        super::tools::execute(
+            &caller,
+            "a",
+            "minecraft_send_chat",
+            &json!({"message": "activity"}),
+            &Arc::new(AtomicBool::new(false)),
+        )
     });
     let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
     let fence = request.automation_fence.as_ref().unwrap().clone();
@@ -592,12 +678,21 @@ fn active_writer_action_survives_idle_expiry_then_returns_to_idle() {
         let mut control = core.control.lock();
         control.lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
         let (revoke, deadline) = Core::lease_verdict(&mut control, "1", "2");
-        assert!(revoke.is_none(), "an admitted owner action is not an idle writer");
-        assert!(deadline.is_none(), "wait for completion, not an elapsed idle deadline");
+        assert!(
+            revoke.is_none(),
+            "an admitted owner action is not an idle writer"
+        );
+        assert!(
+            deadline.is_none(),
+            "wait for completion, not an elapsed idle deadline"
+        );
     }
     assert_eq!(core.controller()["active"], true);
     assert_eq!(core.admit("b", "1", "2").unwrap_err(), "controller_busy");
-    request.reply.send(Err("target is unreachable".into())).unwrap();
+    request
+        .reply
+        .send(Err("target is unreachable".into()))
+        .unwrap();
     assert_eq!(worker.join().unwrap().unwrap_err(), "target is unreachable");
     let (reason, checked) = {
         let mut control = core.control.lock();
@@ -638,7 +733,10 @@ fn active_writer_still_obeys_context_and_manual_preemption() {
             let control = core.control.lock();
             let lease = control.lease.as_ref().unwrap();
             assert_eq!(lease.active_actions, 1);
-            assert_eq!(lease.expires, deadline, "old completion must not renew a replacement");
+            assert_eq!(
+                lease.expires, deadline,
+                "old completion must not renew a replacement"
+            );
             assert!(Arc::ptr_eq(&lease.live, &new.fence));
         }
         assert!(new.fence.load(Ordering::Acquire));
@@ -651,8 +749,7 @@ fn last_writer_action_ends_activity_not_an_earlier_concurrent_reply() {
     let first = core.admit("a", "1", "2").unwrap();
     let second = core.admit("a", "1", "2").unwrap();
     assert!(Arc::ptr_eq(&first.fence, &second.fence));
-    core.control.lock().lease.as_mut().unwrap().expires =
-        Instant::now() - Duration::from_secs(1);
+    core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
     drop(second);
     let (revoke, deadline) = Core::lease_verdict(&mut core.control.lock(), "1", "2");
     assert!(revoke.is_none());
@@ -670,15 +767,20 @@ fn readonly_request_does_not_keep_an_idle_writer_alive() {
     let fence = core.admit("a", "1", "2").unwrap().fence.clone();
     let caller = core.clone();
     let worker = std::thread::spawn(move || {
-        super::tools::execute(&caller, "a", "minecraft_observe", &json!({}),
-            &Arc::new(AtomicBool::new(false)))
+        super::tools::execute(
+            &caller,
+            "a",
+            "minecraft_observe",
+            &json!({}),
+            &Arc::new(AtomicBool::new(false)),
+        )
     });
     let request = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
     assert!(request.automation_fence.is_none());
-    core.control.lock().lease.as_mut().unwrap().expires =
-        Instant::now() - Duration::from_secs(1);
-    let (reason, checked) =
-        Core::lease_verdict(&mut core.control.lock(), "1", "2").0.unwrap();
+    core.control.lock().lease.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+    let (reason, checked) = Core::lease_verdict(&mut core.control.lock(), "1", "2")
+        .0
+        .unwrap();
     assert_eq!(reason, "lease_expired");
     core.revoke_lease(reason, Some(&checked));
     assert!(!fence.load(Ordering::Acquire));

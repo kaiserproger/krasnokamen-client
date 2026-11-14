@@ -137,7 +137,10 @@ pub(super) enum Outcome {
     TryEmptyHand,
     /// The wire action was sent, but no local outcome could be predicted.
     ServerAuthoritative,
-    Success { swing: bool, item_interaction: bool },
+    Success {
+        swing: bool,
+        item_interaction: bool,
+    },
 }
 impl Outcome {
     pub(super) const CLIENT: Self = Self::Success {
@@ -1345,93 +1348,112 @@ impl Player {
             .ok_or_else(|| "source_rain_column_not_available".into())
     }
 }
-    fn value_effect(effect: &Value, level: i32, input: f32, depth: u8, sample: &mut impl FnMut(EffectSample) -> f64) -> Result<f32> {
-        if depth >= 64 {
-            return Err("enchantment_effect_depth".into());
-        }
-        let calculate = |key| level_value(field(effect, key)?, level, 0);
-        Ok(
-            match field(effect, "type")?
-                .as_str()
-                .ok_or("invalid enchantment effect type")?
-            {
-                "minecraft:add" => input + calculate("value")?,
-                "minecraft:multiply" => input * calculate("factor")?,
-                "minecraft:set" => calculate("value")?,
-                "minecraft:exponential" => {
-                    (f64::from(input)
-                        * f64::from(calculate("base")?).powf(f64::from(calculate("exponent")?)))
-                        as f32
-                }
-                "minecraft:all_of" => {
-                    let mut result = input;
-                    for effect in field(effect, "effects")?
-                        .as_array()
-                        .ok_or("invalid all_of effects")?
-                    {
-                        result = value_effect(effect, level, result, depth + 1, sample)?
-                    }
-                    result
-                }
-                "minecraft:remove_binomial" => {
-                    let probability = calculate("chance")?;
-                    let mut removed = 0;
-                    if input <= 128.
-                        || input * probability < 20.
-                        || input * (1. - probability) < 20.
-                    {
-                        let mut index = 0;
-                        while (index as f32) < input {
-                            if (sample(EffectSample::Uniform) as f32) < probability {
-                                removed += 1
-                            }
-                            index += 1;
-                        }
-                    } else {
-                        let mean = f64::from(input * probability).floor();
-                        let sigma = f64::from(input * probability * (1. - probability)).sqrt();
-                        removed = ((mean + sample(EffectSample::Gaussian) * sigma + 0.5).floor() as i32)
-                            .clamp(0, input as i32);
-                    }
-                    input - removed as f32
-                }
-                kind => return Err(format!("unregistered source numeric effect type {kind}")),
-            },
-        )
+fn value_effect(
+    effect: &Value,
+    level: i32,
+    input: f32,
+    depth: u8,
+    sample: &mut impl FnMut(EffectSample) -> f64,
+) -> Result<f32> {
+    if depth >= 64 {
+        return Err("enchantment_effect_depth".into());
     }
-    pub(crate) fn crossbow_charge_ticks(item: &Stack, content: &Content, sample: &mut impl FnMut(EffectSample) -> f64) -> Result<f32> {
-        let mut seconds = 1.25;
-        if let Some(values) = item.component("minecraft:enchantments").and_then(Value::as_object) {
-            for (name, level) in values {
-                let level = level.as_i64().and_then(|value| i32::try_from(value).ok())
-                    .ok_or("invalid enchantment level")?;
-                if let Some(effect) = enchantment(content, name)?
-                    .get("effects")
-                    .and_then(|effects| effects.get("minecraft:crossbow_charge_time"))
+    let calculate = |key| level_value(field(effect, key)?, level, 0);
+    Ok(
+        match field(effect, "type")?
+            .as_str()
+            .ok_or("invalid enchantment effect type")?
+        {
+            "minecraft:add" => input + calculate("value")?,
+            "minecraft:multiply" => input * calculate("factor")?,
+            "minecraft:set" => calculate("value")?,
+            "minecraft:exponential" => {
+                (f64::from(input)
+                    * f64::from(calculate("base")?).powf(f64::from(calculate("exponent")?)))
+                    as f32
+            }
+            "minecraft:all_of" => {
+                let mut result = input;
+                for effect in field(effect, "effects")?
+                    .as_array()
+                    .ok_or("invalid all_of effects")?
                 {
-                    seconds = value_effect(effect, level, seconds, 0, sample)?;
+                    result = value_effect(effect, level, result, depth + 1, sample)?
                 }
+                result
+            }
+            "minecraft:remove_binomial" => {
+                let probability = calculate("chance")?;
+                let mut removed = 0;
+                if input <= 128. || input * probability < 20. || input * (1. - probability) < 20. {
+                    let mut index = 0;
+                    while (index as f32) < input {
+                        if (sample(EffectSample::Uniform) as f32) < probability {
+                            removed += 1
+                        }
+                        index += 1;
+                    }
+                } else {
+                    let mean = f64::from(input * probability).floor();
+                    let sigma = f64::from(input * probability * (1. - probability)).sqrt();
+                    removed = ((mean + sample(EffectSample::Gaussian) * sigma + 0.5).floor()
+                        as i32)
+                        .clamp(0, input as i32);
+                }
+                input - removed as f32
+            }
+            kind => return Err(format!("unregistered source numeric effect type {kind}")),
+        },
+    )
+}
+pub(crate) fn crossbow_charge_ticks(
+    item: &Stack,
+    content: &Content,
+    sample: &mut impl FnMut(EffectSample) -> f64,
+) -> Result<f32> {
+    let mut seconds = 1.25;
+    if let Some(values) = item
+        .component("minecraft:enchantments")
+        .and_then(Value::as_object)
+    {
+        for (name, level) in values {
+            let level = level
+                .as_i64()
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or("invalid enchantment level")?;
+            if let Some(effect) = enchantment(content, name)?
+                .get("effects")
+                .and_then(|effects| effects.get("minecraft:crossbow_charge_time"))
+            {
+                seconds = value_effect(effect, level, seconds, 0, sample)?;
             }
         }
-        Ok((seconds * 20.).floor().max(1.))
     }
+    Ok((seconds * 20.).floor().max(1.))
+}
 
 #[derive(Clone, Copy)]
-pub(crate) enum EffectSample { Uniform, Gaussian }
+pub(crate) enum EffectSample {
+    Uniform,
+    Gaussian,
+}
 
 pub(crate) fn sample_gaussian(spare: &mut Option<f64>, uniform: &mut impl FnMut() -> f64) -> f64 {
-    if let Some(value) = spare.take() { return value; }
+    if let Some(value) = spare.take() {
+        return value;
+    }
     loop {
         let x = 2. * uniform() - 1.;
         let y = 2. * uniform() - 1.;
         let square = x * x + y * y;
-        if square >= 1. || square == 0. { continue; }
+        if square >= 1. || square == 0. {
+            continue;
+        }
         let multiplier = (-2. * square.ln() / square).sqrt();
         *spare = Some(y * multiplier);
         return x * multiplier;
     }
 }
-
 
 impl Player {
     pub fn apply_pending_use_release(

@@ -1,4 +1,4 @@
-//! Independently authored world effects. Public behavior references and Solaris
+//! Independently authored world effects. Public behavior references and Krasnokamen
 //! approximation constants are recorded in the WorldFx provenance receipt.
 use super::{Entity, Handled, Metadata, Models, Store, p, translation};
 use crate::{
@@ -105,8 +105,14 @@ pub(super) fn append_block(
         match p::value(models, entity, "DATA_START_POS") {
             Some(Metadata::BlockPosition(position)) => *position,
             Some(_) => return Err("invalid falling block start position metadata".into()),
-            None => entity.source.as_ref()
-                .ok_or("falling block timeline unavailable")?.special.falling_start,
+            None => {
+                entity
+                    .source
+                    .as_ref()
+                    .ok_or("falling block timeline unavailable")?
+                    .special
+                    .falling_start
+            }
         }
     };
     let seed = crate::protocol::models::position_seed(seed_position);
@@ -175,7 +181,7 @@ pub(super) fn append_bolt(
 
 // A local xorshift stream makes the shape stable within a timeline flash without
 // consuming the simulation RNG. Geometry, branches, segment count and radii are
-// Solaris-authored; the 128-block total height is from the public wiki infobox.
+// Krasnokamen-authored; the 128-block total height is from the public wiki infobox.
 fn bolt_noise(state: &mut u64) -> f32 {
     *state ^= *state << 13;
     *state ^= *state >> 7;
