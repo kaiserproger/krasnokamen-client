@@ -1830,6 +1830,30 @@ mod destruction_tests {
         );
     }
 
+    /// Regression (P5): the server's `krasnokamen:lod/hello` offer is accepted and
+    /// the client asks for tiles instead of ignoring the service.
+    #[test]
+    fn server_lod_offer_makes_the_client_request_tiles() {
+        let mut session = ready_presentation_session();
+        assert_eq!(session.far.metrics()["requests_sent"], json!(0));
+        session.far.enter_dimension("minecraft:overworld", None);
+        let mut offer = vec![1, 0];
+        offer.extend(2048u32.to_be_bytes());
+        offer.extend(4u16.to_be_bytes());
+        for value in [0i32, 16, 8, 1] {
+            offer.extend(value.to_be_bytes());
+        }
+        session.far.hello(&offer).unwrap();
+        assert_eq!(session.far.metrics()["server_offer"], json!(true));
+        session.refresh_scene().unwrap();
+        let metrics = session.far.metrics();
+        assert!(
+            metrics["requests_sent"].as_u64().unwrap_or(0) > 0,
+            "an accepted offer must produce lod/request writes: {metrics}"
+        );
+        assert!(session.scene.far.distance > 0.);
+    }
+
     #[test]
     fn portal_scene_binds_required_atlas_sprites_only_for_portal_geometry() {
         let mut content = Content::test_cube();
