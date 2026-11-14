@@ -12,6 +12,8 @@ mod equipment;
 mod local;
 #[cfg(test)]
 mod animation_tests;
+#[cfg(test)]
+mod asset_model_regression_tests;
 mod metadata;
 mod nameplates;
 mod physical;
