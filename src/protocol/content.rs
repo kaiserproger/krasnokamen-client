@@ -2136,6 +2136,12 @@ impl Content {
         self.texture_materials.entry(name.to_owned()).or_insert(RenderLayer::Opaque);
     }
     #[cfg(test)]
+    pub(crate) fn set_test_collision(&mut self, state: u32, boxes: Vec<[f64; 6]>) {
+        self.states[state as usize].collision = Collision::Shape(self.shapes.len());
+        self.shapes.push(boxes);
+    }
+
+    #[cfg(test)]
     pub(crate) fn insert_test_state_properties(
         &mut self,
         state: u32,
