@@ -638,7 +638,9 @@ pub fn append(
         let transform = match &entry.transform {
             Ok(transform) => *transform,
             Err(reason) => {
-                stats.unrendered.insert(entity.type_name.clone(), reason.clone());
+                if store.slots[slot].physical.shown_tick != store.frame_tick {
+                    stats.unrendered.insert(entity.type_name.clone(), reason.clone());
+                }
                 store.mark_shown(slot, tick, &models, content)?;
                 continue;
             }
@@ -2457,12 +2459,12 @@ pub fn special_item(
         // Source CopperGolemStatueSpecialRenderer.Unbaked: `pose` is a required field
         // that selects one of the four golem layers, as the placed statue does.
         "copper_golem_statue" => (
-            match special["pose"].as_str() {
-                Some("standing") => "minecraft:copper_golem#main",
-                Some("running") => "minecraft:copper_golem_running#main",
-                Some("sitting") => "minecraft:copper_golem_sitting#main",
-                Some("star") => "minecraft:copper_golem_star#main",
-                _ => return Err("copper golem statue item pose missing or invalid".into()),
+            match special["pose"].as_str().unwrap_or("standing") {
+                "standing" => "minecraft:copper_golem#main",
+                "running" => "minecraft:copper_golem_running#main",
+                "sitting" => "minecraft:copper_golem_sitting#main",
+                "star" => "minecraft:copper_golem_star#main",
+                _ => return Err("invalid copper statue item pose".into()),
             },
             special["texture"]
                 .as_str()

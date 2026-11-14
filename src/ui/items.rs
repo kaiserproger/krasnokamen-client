@@ -1509,6 +1509,15 @@ mod tests {
                 height: 64,
             },
         );
+        content.insert_test_texture(
+            "krasnokamen_battle:item/iron_kite_shield",
+            crate::protocol::content::TextureRegion {
+                layer: 10,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
         for (name, graph, geometry) in [
             (
                 "iron_kite_shield",

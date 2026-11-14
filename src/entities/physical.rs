@@ -295,13 +295,11 @@ impl Store {
             .filter_map(|(cell, id)| Some((Place::Bucket(cell), *self.ids.get(&id)?)))
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat: their raw body bucket
-            // cannot decide whether the presentation exists, their root vehicle's does.
+            // cannot decide whether the presentation exists, so they are always gathered
+            // and the frame's distance/verdict checks decide (a broken seat rule is
+            // reported as unrendered even when the seat itself is out of range).
             .chain(self.passenger_vehicles.iter().filter_map(move |(id, vehicle)| {
-                let place = Place::Seat(self.root_cell(*vehicle));
-                if !place.within(&cells) {
-                    return None;
-                }
-                Some((place, *self.ids.get(id)?))
+                Some((Place::Seat(self.root_cell(*vehicle)), *self.ids.get(id)?))
             }))
             .filter(|(_, slot)| {
                 !self.slots[*slot]

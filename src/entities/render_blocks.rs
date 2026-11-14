@@ -639,6 +639,7 @@ pub(crate) fn source_no_factory(name: &str) -> bool {
             | "minecraft:chiseled_bookshelf"
             | "minecraft:crafter"
             | "minecraft:test_block"
+            | "minecraft:potent_sulfur"
     )
 }
 fn prop<'a>(e: &BlockEntity, c: &'a Content, key: &str) -> Option<&'a str> {
