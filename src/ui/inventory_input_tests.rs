@@ -60,9 +60,14 @@ fn dispatch(
             UiCommand::InventoryGesture(intents) => {
                 packets.extend(inv.execute_gesture(&intents, content).unwrap())
             }
-            UiCommand::InventoryBulk { context, slot, stack } => {
-                packets.extend(inv.execute_bulk_quick_move(&context, slot, &stack, content).unwrap())
-            }
+            UiCommand::InventoryBulk {
+                context,
+                slot,
+                stack,
+            } => packets.extend(
+                inv.execute_bulk_quick_move(&context, slot, &stack, content)
+                    .unwrap(),
+            ),
             _ => {}
         }
     }
@@ -111,13 +116,21 @@ fn shift_pointer(
     phase: PointerPhase,
 ) -> Vec<PacketCommand> {
     let (x, y) = point(ui, slot);
-    dispatch(ui, inv, content, UiIntent::Pointer {
-        phase,
-        x,
-        y,
-        button: Some(PointerButton::Left),
-        modifiers: Modifiers { shift: true, ..Modifiers::default() },
-    })
+    dispatch(
+        ui,
+        inv,
+        content,
+        UiIntent::Pointer {
+            phase,
+            x,
+            y,
+            button: Some(PointerButton::Left),
+            modifiers: Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+        },
+    )
 }
 
 #[test]
@@ -147,25 +160,36 @@ fn shift_double_click_nonempty_second_slot_scans_matching_player_stacks() {
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
     let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
-    assert!(release.iter().any(|packet| {
-        let mut r = Reader::new(&packet.payload.0);
-        r.var().unwrap();
-        r.var().unwrap();
-        r.i16().unwrap() == 10
-    }), "the matching slot must be scanned on release");
+    assert!(
+        release.iter().any(|packet| {
+            let mut r = Reader::new(&packet.payload.0);
+            r.var().unwrap();
+            r.var().unwrap();
+            r.i16().unwrap() == 10
+        }),
+        "the matching slot must be scanned on release"
+    );
 }
 
 #[test]
 fn shift_double_click_scans_only_the_clicked_chest_side() {
     use crate::protocol::packet_ids::play::clientbound as cb;
     let (content, mut inv, mut ui) = fixture();
-    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    assert!(
+        inv.apply(
+            cb::OPEN_SCREEN,
+            &mut Reader::new(&[1, 0, 8, 0, 1, b'C']),
+            &content
+        )
+        .unwrap()
+    );
     let menu = inv.active.as_mut().unwrap();
     menu.slots.fill(Some(Stack::default()));
     menu.slots[0] = Some(stack(10));
     menu.slots[1] = Some(stack(20));
     let mut distinct = stack(5);
-    Arc::make_mut(&mut distinct.components).insert("test:different".into(), serde_json::json!(true));
+    Arc::make_mut(&mut distinct.components)
+        .insert("test:different".into(), serde_json::json!(true));
     menu.slots[2] = Some(distinct);
     for index in 9..45 {
         menu.slots[index] = Some(stack(64));
@@ -177,12 +201,15 @@ fn shift_double_click_scans_only_the_clicked_chest_side() {
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
     let release = shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
-    let slots: Vec<_> = release.iter().map(|packet| {
-        let mut reader = Reader::new(&packet.payload.0);
-        reader.var().unwrap();
-        reader.var().unwrap();
-        reader.i16().unwrap()
-    }).collect();
+    let slots: Vec<_> = release
+        .iter()
+        .map(|packet| {
+            let mut reader = Reader::new(&packet.payload.0);
+            reader.var().unwrap();
+            reader.var().unwrap();
+            reader.i16().unwrap()
+        })
+        .collect();
     assert_eq!(slots, vec![0, 1]);
 }
 
@@ -190,7 +217,14 @@ fn shift_double_click_scans_only_the_clicked_chest_side() {
 fn shift_double_click_moves_remaining_chest_stack_after_server_correction() {
     use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
     let (content, mut inv, mut ui) = fixture();
-    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    assert!(
+        inv.apply(
+            cb::OPEN_SCREEN,
+            &mut Reader::new(&[1, 0, 8, 0, 1, b'C']),
+            &content
+        )
+        .unwrap()
+    );
     let menu = inv.active.as_mut().unwrap();
     menu.slots.fill(Some(Stack::default()));
     menu.slots[0] = Some(stack(10));
@@ -207,7 +241,14 @@ fn shift_double_click_moves_remaining_chest_stack_after_server_correction() {
     packet.var(1);
     packet.0.extend(44_i16.to_be_bytes());
     packet.var(0);
-    assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+    assert!(
+        inv.apply(
+            cb::CONTAINER_SET_SLOT,
+            &mut Reader::new(&packet.0),
+            &content
+        )
+        .unwrap()
+    );
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Down);
     let release = shift_pointer(&mut ui, &mut inv, &content, 0, PointerPhase::Up);
@@ -221,7 +262,14 @@ fn shift_double_click_moves_remaining_chest_stack_after_server_correction() {
 fn shift_double_click_scans_only_the_player_side_of_chest() {
     use crate::protocol::packet_ids::play::clientbound as cb;
     let (content, mut inv, mut ui) = fixture();
-    assert!(inv.apply(cb::OPEN_SCREEN, &mut Reader::new(&[1, 0, 8, 0, 1, b'C']), &content).unwrap());
+    assert!(
+        inv.apply(
+            cb::OPEN_SCREEN,
+            &mut Reader::new(&[1, 0, 8, 0, 1, b'C']),
+            &content
+        )
+        .unwrap()
+    );
     let menu = inv.active.as_mut().unwrap();
     menu.slots.fill(Some(Stack::default()));
     for index in 0..9 {
@@ -236,12 +284,15 @@ fn shift_double_click_scans_only_the_player_side_of_chest() {
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
     let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
-    let slots: Vec<_> = release.iter().map(|packet| {
-        let mut reader = Reader::new(&packet.payload.0);
-        reader.var().unwrap();
-        reader.var().unwrap();
-        reader.i16().unwrap()
-    }).collect();
+    let slots: Vec<_> = release
+        .iter()
+        .map(|packet| {
+            let mut reader = Reader::new(&packet.payload.0);
+            reader.var().unwrap();
+            reader.var().unwrap();
+            reader.i16().unwrap()
+        })
+        .collect();
     assert_eq!(slots, vec![9, 10]);
 }
 
@@ -280,7 +331,14 @@ fn shift_double_click_uses_server_corrected_second_press_slot() {
     packet.var(1);
     packet.0.extend(9_i16.to_be_bytes());
     packet.var(0);
-    assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+    assert!(
+        inv.apply(
+            cb::CONTAINER_SET_SLOT,
+            &mut Reader::new(&packet.0),
+            &content
+        )
+        .unwrap()
+    );
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
     assert!(shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up).is_empty());
@@ -300,9 +358,15 @@ fn shift_double_click_with_carried_stack_uses_previous_quick_move_template() {
     inv.cursor = Some(stack(1));
     ui.last_slot_click.as_mut().unwrap().2 = std::time::Instant::now();
     let down = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Down);
-    assert!(down.is_empty(), "a carried stack starts the gesture on press");
+    assert!(
+        down.is_empty(),
+        "a carried stack starts the gesture on press"
+    );
     let release = shift_pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Up);
-    assert!(!release.is_empty(), "release must scan the matching player container");
+    assert!(
+        !release.is_empty(),
+        "release must scan the matching player container"
+    );
     assert_eq!(inv.cursor.as_ref().unwrap().count, 1);
 }
 
@@ -336,12 +400,7 @@ fn hashed(r: &mut Reader<'_>) -> EncodedStack {
     }
     Some((item, count))
 }
-fn click(
-    packet: &PacketCommand,
-    slot: i16,
-    button: u8,
-    mode: i32,
-) -> (SlotChanges, EncodedStack) {
+fn click(packet: &PacketCommand, slot: i16, button: u8, mode: i32) -> (SlotChanges, EncodedStack) {
     assert_eq!(packet.id, sb::CONTAINER_CLICK);
     let mut r = Reader::new(&packet.payload.0);
     assert_eq!(r.var().unwrap(), 0);
@@ -391,7 +450,13 @@ fn inventory_native_number_keys_and_offhand_swap_hovered_stack() {
         let (content, mut inv, mut ui) = fixture();
         inv.player.slots[9] = Some(stack(10));
         pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
-        let native = crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(code), true, Modifiers::default(), true);
+        let native = crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(code),
+            true,
+            Modifiers::default(),
+            true,
+        );
         let mut packets = Vec::new();
         if let Some(crate::api::InputIntent::Ui { intent }) = native {
             packets = dispatch(&mut ui, &mut inv, &content, intent);
@@ -420,9 +485,13 @@ fn inventory_native_q_and_control_q_throw_hovered_items() {
             ..Modifiers::default()
         };
         let mut packets = Vec::new();
-        if let Some(crate::api::InputIntent::Ui { intent }) =
-            crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::KeyQ), true, modifiers, true)
-        {
+        if let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(KeyCode::KeyQ),
+            true,
+            modifiers,
+            true,
+        ) {
             packets = dispatch(&mut ui, &mut inv, &content, intent);
         }
         assert_eq!(
@@ -471,7 +540,13 @@ fn inventory_recipe_book_button_opens_shared_panel_and_sends_settings() {
 #[test]
 fn inventory_native_shortcuts_preserve_gameplay_and_ignore_releases() {
     assert!(matches!(
-        crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit2), true, Modifiers::default(), false),
+        crate::native_item_key(
+            &crate::controls::Bindings::default(),
+            crate::controls::Binding::Key(KeyCode::Digit2),
+            true,
+            Modifiers::default(),
+            false
+        ),
         Some(crate::api::InputIntent::Hotbar { slot: 1 })
     ));
     assert!(matches!(
@@ -479,7 +554,16 @@ fn inventory_native_shortcuts_preserve_gameplay_and_ignore_releases() {
         Some(crate::api::InputIntent::Key { key, pressed: true }) if key == "drop"
     ));
     for key in [KeyCode::Digit1, KeyCode::KeyQ, KeyCode::KeyF] {
-        assert!(crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(key), false, Modifiers::default(), true).is_none());
+        assert!(
+            crate::native_item_key(
+                &crate::controls::Bindings::default(),
+                crate::controls::Binding::Key(key),
+                false,
+                Modifiers::default(),
+                true
+            )
+            .is_none()
+        );
     }
 }
 
@@ -504,9 +588,13 @@ fn inventory_swapping_while_carrying_does_not_change_slots() {
     inv.player.slots[9] = Some(stack(10));
     inv.cursor = Some(stack(3));
     pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
-    let Some(crate::api::InputIntent::Ui { intent }) =
-        crate::native_item_key(&crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit2), true, Modifiers::default(), true)
-    else {
+    let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
+        &crate::controls::Bindings::default(),
+        crate::controls::Binding::Key(KeyCode::Digit2),
+        true,
+        Modifiers::default(),
+        true,
+    ) else {
         panic!("inventory key must reach UI");
     };
     assert!(dispatch(&mut ui, &mut inv, &content, intent).is_empty());
@@ -546,7 +634,10 @@ fn focus_loss_cancels_pointer_gesture_and_slider_capture() {
     ui.set_focus_active(false);
     assert!(ui.slider_drag.is_none());
     let packets = pointer(&mut ui, &mut inv, &content, 11, PointerPhase::Up);
-    assert!(packets.is_empty(), "focus loss must cancel the pending transfer");
+    assert!(
+        packets.is_empty(),
+        "focus loss must cancel the pending transfer"
+    );
     assert_eq!(inv.cursor.as_ref().unwrap().count, 10);
     assert!(inv.player.slots[10].as_ref().unwrap().empty());
     assert!(inv.player.slots[11].as_ref().unwrap().empty());
@@ -559,9 +650,14 @@ fn hovered_hotbar_swap_reconciles_server_rejection() {
     inv.player.slots[9] = Some(stack(10));
     pointer(&mut ui, &mut inv, &content, 9, PointerPhase::Move);
     let Some(crate::api::InputIntent::Ui { intent }) = crate::native_item_key(
-        &crate::controls::Bindings::default(), crate::controls::Binding::Key(KeyCode::Digit1),
-        true, Modifiers::default(), true,
-    ) else { panic!("number key must target hovered slot") };
+        &crate::controls::Bindings::default(),
+        crate::controls::Binding::Key(KeyCode::Digit1),
+        true,
+        Modifiers::default(),
+        true,
+    ) else {
+        panic!("number key must target hovered slot")
+    };
     assert_eq!(dispatch(&mut ui, &mut inv, &content, intent).len(), 1);
     assert_eq!(inv.player.slots[36].as_ref().unwrap().count, 10);
     for (slot, count) in [(9_i16, 10), (36_i16, 0)] {
@@ -575,7 +671,14 @@ fn hovered_hotbar_swap_reconciles_server_rejection() {
             packet.var(0);
             packet.var(0);
         }
-        assert!(inv.apply(cb::CONTAINER_SET_SLOT, &mut Reader::new(&packet.0), &content).unwrap());
+        assert!(
+            inv.apply(
+                cb::CONTAINER_SET_SLOT,
+                &mut Reader::new(&packet.0),
+                &content
+            )
+            .unwrap()
+        );
     }
     assert_eq!(inv.player.slots[9].as_ref().unwrap().count, 10);
     assert!(inv.player.slots[36].as_ref().unwrap().empty());

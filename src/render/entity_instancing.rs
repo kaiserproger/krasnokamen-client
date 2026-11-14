@@ -8,7 +8,7 @@
 //! per-instance vertex buffer. Vertices leave through the same `source_out` and Source
 //! material pipelines as CPU-emitted entities.
 use super::material::MATERIALS as DESCRIPTORS;
-use crate::entities::{crowd as model, CrowdScene};
+use crate::entities::{CrowdScene, crowd as model};
 use glam::{Mat4, Vec3, Vec4};
 use std::sync::Arc;
 
@@ -41,14 +41,14 @@ struct Params {
     tables: [u32; 4],
 }
 
-/// Whether an adapter can run the crowd renderer (and `SOLARIS_CLIENT_CROWD` is not 0).
+/// Whether an adapter can run the crowd renderer (and `KRASNOKAMEN_CLIENT_CROWD` is not 0).
 pub(super) fn supported(downlevel: wgpu::DownlevelFlags, limits: &wgpu::Limits) -> bool {
     downlevel.contains(
         wgpu::DownlevelFlags::COMPUTE_SHADERS
             | wgpu::DownlevelFlags::INDIRECT_EXECUTION
             | wgpu::DownlevelFlags::VERTEX_STORAGE,
     ) && limits.max_storage_buffers_per_shader_stage >= 8
-        && std::env::var_os("SOLARIS_CLIENT_CROWD").is_none_or(|value| value != "0")
+        && std::env::var_os("KRASNOKAMEN_CLIENT_CROWD").is_none_or(|value| value != "0")
 }
 
 /// Six normalized planes `(n, d)` with `n·p + d >= 0` inside the clip volume of `m`
@@ -80,17 +80,36 @@ struct Grow {
 impl Grow {
     fn new(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages) -> Self {
         let usage = usage | wgpu::BufferUsages::COPY_DST;
-        Self { buffer: Self::create(device, label, usage, 256), usage, label }
+        Self {
+            buffer: Self::create(device, label, usage, 256),
+            usage,
+            label,
+        }
     }
-    fn create(device: &wgpu::Device, label: &'static str, usage: wgpu::BufferUsages, size: u64) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+    fn create(
+        device: &wgpu::Device,
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+        size: u64,
+    ) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
     }
     /// Makes room for `size` bytes; `true` when the buffer was replaced.
     fn ensure(&mut self, device: &wgpu::Device, size: u64) -> bool {
         if size <= self.buffer.size() {
             return false;
         }
-        self.buffer = Self::create(device, self.label, self.usage, size.next_power_of_two().max(256));
+        self.buffer = Self::create(
+            device,
+            self.label,
+            self.usage,
+            size.next_power_of_two().max(256),
+        );
         true
     }
 }
@@ -142,7 +161,11 @@ pub(super) struct Crowd {
     pub uploaded_bytes: u64,
 }
 
-fn storage(binding: u32, visibility: wgpu::ShaderStages, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+fn storage(
+    binding: u32,
+    visibility: wgpu::ShaderStages,
+    read_only: bool,
+) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility,
@@ -170,11 +193,19 @@ fn uniform(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayou
 
 /// Main-shader source of the crowd vertex stages, appended by `main_shader_source`.
 pub(super) fn vertex_source() -> String {
-    format!("{}\n{}", include_str!("entity_instancing_types.wgsl"), include_str!("entity_instancing.wgsl"))
+    format!(
+        "{}\n{}",
+        include_str!("entity_instancing_types.wgsl"),
+        include_str!("entity_instancing.wgsl")
+    )
 }
 
 pub(super) fn prepare_source() -> String {
-    format!("{}\n{}", include_str!("entity_instancing_types.wgsl"), include_str!("entity_instancing_prepare.wgsl"))
+    format!(
+        "{}\n{}",
+        include_str!("entity_instancing_types.wgsl"),
+        include_str!("entity_instancing_prepare.wgsl")
+    )
 }
 
 impl Crowd {
@@ -184,14 +215,18 @@ impl Crowd {
         atlas_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solaris material shader with crowd vertex stages"),
+            label: Some("Krasnokamen material shader with crowd vertex stages"),
             source: wgpu::ShaderSource::Wgsl(super::graphics::main_shader_source().into()),
         });
         let vertex = wgpu::ShaderStages::VERTEX;
         let compute = wgpu::ShaderStages::COMPUTE;
         let draw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("crowd instances and bone matrices"),
-            entries: &[uniform(0, vertex), storage(1, vertex, true), storage(2, vertex, true)],
+            entries: &[
+                uniform(0, vertex),
+                storage(1, vertex, true),
+                storage(2, vertex, true),
+            ],
         });
         let prepare_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("crowd cull and bone pass"),
@@ -208,7 +243,11 @@ impl Crowd {
         });
         let args_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("crowd indirect arguments"),
-            entries: &[uniform(0, compute), storage(7, compute, false), storage(8, compute, false)],
+            entries: &[
+                uniform(0, compute),
+                storage(7, compute, false),
+                storage(8, compute, false),
+            ],
         });
         let empty_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("crowd shadow placeholder"),
@@ -233,7 +272,11 @@ impl Crowd {
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &attributes,
             },
-            wgpu::VertexBufferLayout { array_stride: 4, step_mode: wgpu::VertexStepMode::Instance, attributes: &instance },
+            wgpu::VertexBufferLayout {
+                array_stride: 4,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &instance,
+            },
         ];
         let pipelines = model::MATERIALS
             .iter()
@@ -270,13 +313,20 @@ impl Crowd {
                 compilation_options: Default::default(),
                 targets: &[],
             }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: super::DEPTH,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: Default::default(),
-                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2., clamp: 0. },
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.,
+                    clamp: 0.,
+                },
             }),
             multisample: Default::default(),
             multiview: None,
@@ -326,7 +376,11 @@ impl Crowd {
                 mapped_at_creation: false,
             }),
             mesh_revision: None,
-            vertices: Grow::new(device, "crowd composite vertices", wgpu::BufferUsages::VERTEX),
+            vertices: Grow::new(
+                device,
+                "crowd composite vertices",
+                wgpu::BufferUsages::VERTEX,
+            ),
             indices: Grow::new(device, "crowd composite indices", wgpu::BufferUsages::INDEX),
             bones: Grow::new(device, "crowd composite bones", storage),
             clip_revision: None,
@@ -335,9 +389,17 @@ impl Crowd {
             instances: Grow::new(device, "crowd instances", storage),
             groups: Grow::new(device, "crowd composite cull table", storage),
             matrices: Grow::new(device, "crowd bone matrices", storage),
-            visible: Grow::new(device, "crowd visible instances", storage | wgpu::BufferUsages::VERTEX),
+            visible: Grow::new(
+                device,
+                "crowd visible instances",
+                storage | wgpu::BufferUsages::VERTEX,
+            ),
             counts: Grow::new(device, "crowd visible counts", storage),
-            args: Grow::new(device, "crowd indirect draws", storage | wgpu::BufferUsages::INDIRECT),
+            args: Grow::new(
+                device,
+                "crowd indirect draws",
+                storage | wgpu::BufferUsages::INDIRECT,
+            ),
             binds: None,
             plan: Plan::default(),
             uploaded_bytes: 0,
@@ -386,8 +448,18 @@ impl Crowd {
             let mut table: Vec<[u32; 4]> = headers;
             self.clip_headers = table.len() as u32;
             for sample in &frames {
-                table.push(bytemuck::cast([sample.rotation[0], sample.rotation[1], sample.rotation[2], sample.weight]));
-                table.push(bytemuck::cast([sample.offset[0], sample.offset[1], sample.offset[2], 0_f32]));
+                table.push(bytemuck::cast([
+                    sample.rotation[0],
+                    sample.rotation[1],
+                    sample.rotation[2],
+                    sample.weight,
+                ]));
+                table.push(bytemuck::cast([
+                    sample.offset[0],
+                    sample.offset[1],
+                    sample.offset[2],
+                    0_f32,
+                ]));
             }
             if table.is_empty() {
                 table.push([0; 4]);
@@ -444,17 +516,36 @@ impl Crowd {
         for (view, matrix) in views.iter().take(MAX_VIEWS).enumerate() {
             params.planes[view * 6..view * 6 + 6].copy_from_slice(&planes(*matrix * shift));
         }
-        rebind |= self.instances.ensure(device, u64::from(instances) * std::mem::size_of::<model::CrowdInstance>() as u64);
-        rebind |= self.groups.ensure(device, (group_count * std::mem::size_of::<Group>()) as u64);
-        rebind |= self.matrices.ensure(device, u64::from(scene.bones.max(1)) * 48);
-        rebind |= self.visible.ensure(device, u64::from(views_count * 3 * instances) * 4);
-        rebind |= self.counts.ensure(device, u64::from(views_count * group_count as u32 * 3) * 4);
+        rebind |= self.instances.ensure(
+            device,
+            u64::from(instances) * std::mem::size_of::<model::CrowdInstance>() as u64,
+        );
+        rebind |= self
+            .groups
+            .ensure(device, (group_count * std::mem::size_of::<Group>()) as u64);
+        rebind |= self
+            .matrices
+            .ensure(device, u64::from(scene.bones.max(1)) * 48);
+        rebind |= self
+            .visible
+            .ensure(device, u64::from(views_count * 3 * instances) * 4);
+        rebind |= self
+            .counts
+            .ensure(device, u64::from(views_count * group_count as u32 * 3) * 4);
         rebind |= self.args.ensure(device, u64::from(entries) * ARGS_BYTES);
-        write(queue, &self.instances.buffer, bytemuck::cast_slice(&scene.instances));
+        write(
+            queue,
+            &self.instances.buffer,
+            bytemuck::cast_slice(&scene.instances),
+        );
         write(queue, &self.groups.buffer, bytemuck::cast_slice(&groups));
         write(queue, &self.args.buffer, bytemuck::cast_slice(&args));
         write(queue, &self.params, bytemuck::bytes_of(&params));
-        write(queue, &self.view, bytemuck::bytes_of(&origin.extend(0.).to_array()));
+        write(
+            queue,
+            &self.view,
+            bytemuck::bytes_of(&origin.extend(0.).to_array()),
+        );
         if rebind || self.binds.is_none() {
             self.binds = Some(self.bind(device));
         }
@@ -468,13 +559,20 @@ impl Crowd {
 
     fn bind(&self, device: &wgpu::Device) -> Binds {
         fn entry(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
-            wgpu::BindGroupEntry { binding, resource: buffer.as_entire_binding() }
+            wgpu::BindGroupEntry {
+                binding,
+                resource: buffer.as_entire_binding(),
+            }
         }
         Binds {
             draw: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("crowd instances and bone matrices"),
                 layout: &self.draw_layout,
-                entries: &[entry(0, &self.view), entry(1, &self.instances.buffer), entry(2, &self.matrices.buffer)],
+                entries: &[
+                    entry(0, &self.view),
+                    entry(1, &self.instances.buffer),
+                    entry(2, &self.matrices.buffer),
+                ],
             }),
             prepare: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("crowd cull and bone pass"),
@@ -493,16 +591,26 @@ impl Crowd {
             args: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("crowd indirect arguments"),
                 layout: &self.args_layout,
-                entries: &[entry(0, &self.params), entry(7, &self.counts.buffer), entry(8, &self.args.buffer)],
+                entries: &[
+                    entry(0, &self.params),
+                    entry(7, &self.counts.buffer),
+                    entry(8, &self.args.buffer),
+                ],
             }),
         }
     }
 
     /// Culls, picks detail levels, evaluates bones and writes the indirect draws.
     pub(super) fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        let (Some(binds), true) = (&self.binds, self.plan.instances > 0) else { return };
+        let (Some(binds), true) = (&self.binds, self.plan.instances > 0) else {
+            return;
+        };
         let groups = self.plan.groups.len() as u64;
-        encoder.clear_buffer(&self.counts.buffer, 0, Some(u64::from(self.plan.views) * groups * 3 * 4));
+        encoder.clear_buffer(
+            &self.counts.buffer,
+            0,
+            Some(u64::from(self.plan.views) * groups * 3 * 4),
+        );
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("crowd cull and bone pass"),
             timestamp_writes: None,
@@ -551,9 +659,17 @@ impl Crowd {
                     if group.counts[material][lod] == 0 {
                         continue;
                     }
-                    let region = view as u64 * 3 * total + 3 * u64::from(prefix) + lod as u64 * u64::from(count);
-                    let entry = ((view * group_count + g) * model::LODS + lod) * MATERIALS + material;
-                    pass.set_vertex_buffer(1, self.visible.buffer.slice(region * 4..(region + u64::from(count)) * 4));
+                    let region = view as u64 * 3 * total
+                        + 3 * u64::from(prefix)
+                        + lod as u64 * u64::from(count);
+                    let entry =
+                        ((view * group_count + g) * model::LODS + lod) * MATERIALS + material;
+                    pass.set_vertex_buffer(
+                        1,
+                        self.visible
+                            .buffer
+                            .slice(region * 4..(region + u64::from(count)) * 4),
+                    );
                     pass.draw_indexed_indirect(&self.args.buffer, entry as u64 * ARGS_BYTES);
                     calls += 1;
                 }

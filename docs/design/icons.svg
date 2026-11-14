@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1256" height="2014" viewBox="0 0 1256 2014" font-family="&#x27;IBM Plex Sans&#x27;,&#x27;Ubuntu Sans&#x27;,&#x27;Segoe UI&#x27;,sans-serif">
-<title>Solaris icon set sketch — 16x16 pixel grid</title>
+<title>Krasnokamen icon set sketch — 16x16 pixel grid</title>
 <style>
 @font-face{font-family:'IBM Plex Sans';font-weight:400;src:url(https://cdn.jsdelivr.net/fontsource/fonts/ibm-plex-sans@latest/latin-400-normal.woff2) format('woff2');}
 @font-face{font-family:'IBM Plex Sans';font-weight:500;src:url(https://cdn.jsdelivr.net/fontsource/fonts/ibm-plex-sans@latest/latin-500-normal.woff2) format('woff2');}
@@ -433,7 +433,7 @@
 <rect x="736" y="1322" width="40" height="40" fill="#181512" />
 <path d="M750 1328h2v2h-2zM760 1328h2v2h-2zM750 1330h2v2h-2zM760 1330h2v2h-2zM750 1332h2v2h-2zM760 1332h2v2h-2zM746 1334h20v2h-20zM746 1336h2v2h-2zM764 1336h2v2h-2zM746 1338h2v2h-2zM764 1338h2v2h-2zM746 1340h2v2h-2zM764 1340h2v2h-2zM748 1342h2v2h-2zM762 1342h2v2h-2zM750 1344h12v2h-12zM754 1346h4v2h-4zM754 1348h4v2h-4zM754 1350h4v2h-4zM754 1352h4v2h-4z" fill="#F2EADF"/>
 <text x="628" y="1406" font-size="12" font-weight="400" fill="#F2EADF" text-anchor="start" font-family="&#x27;IBM Plex Mono&#x27;,&#x27;Ubuntu Mono&#x27;,monospace" >plug</text>
-<text x="628" y="1424" font-size="12" font-weight="400" fill="#B9AD9C" text-anchor="start" >Addon / Solaris Loader content</text>
+<text x="628" y="1424" font-size="12" font-weight="400" fill="#B9AD9C" text-anchor="start" >Addon / Krasnokamen Loader content</text>
 <rect x="824" y="1322" width="64" height="64" fill="#181512" />
 <path d="M828 1322v64M824 1326h64M832 1322v64M824 1330h64M836 1322v64M824 1334h64M840 1322v64M824 1338h64M844 1322v64M824 1342h64M848 1322v64M824 1346h64M852 1322v64M824 1350h64M856 1322v64M824 1354h64M860 1322v64M824 1358h64M864 1322v64M824 1362h64M868 1322v64M824 1366h64M872 1322v64M824 1370h64M876 1322v64M824 1374h64M880 1322v64M824 1378h64M884 1322v64M824 1382h64" stroke="#3A332C" stroke-width="0.5" opacity="0.6"/>
 <path d="M832 1330h48v4h-48zM832 1334h4v4h-4zM840 1334h4v4h-4zM876 1334h4v4h-4zM832 1338h4v4h-4zM840 1338h4v4h-4zM876 1338h4v4h-4zM832 1342h4v4h-4zM840 1342h4v4h-4zM852 1342h20v4h-20zM876 1342h4v4h-4zM832 1346h4v4h-4zM840 1346h4v4h-4zM876 1346h4v4h-4zM832 1350h4v4h-4zM840 1350h4v4h-4zM852 1350h16v4h-16zM876 1350h4v4h-4zM832 1354h4v4h-4zM840 1354h4v4h-4zM876 1354h4v4h-4zM832 1358h4v4h-4zM840 1358h4v4h-4zM876 1358h4v4h-4zM832 1362h4v4h-4zM840 1362h4v4h-4zM876 1362h4v4h-4zM832 1366h4v4h-4zM840 1366h4v4h-4zM876 1366h4v4h-4zM832 1370h4v4h-4zM840 1370h4v4h-4zM876 1370h4v4h-4zM832 1374h48v4h-48z" fill="#F2EADF"/>
@@ -544,6 +544,6 @@
 <path d="M564 1764h8v2h-8zM556 1766h12v2h-12zM570 1766h2v2h-2zM556 1768h2v2h-2zM570 1768h2v2h-2zM556 1770h2v2h-2zM570 1770h2v2h-2zM556 1772h2v2h-2zM570 1772h2v2h-2zM556 1774h2v2h-2zM570 1774h2v2h-2zM556 1776h2v2h-2zM566 1776h6v2h-6zM556 1778h2v2h-2zM564 1778h8v2h-8zM550 1780h8v2h-8zM564 1780h6v2h-6zM548 1782h10v2h-10zM548 1784h8v2h-8z" fill="#F2EADF"/>
 <text x="432" y="1842" font-size="12" font-weight="400" fill="#F2EADF" text-anchor="start" font-family="&#x27;IBM Plex Mono&#x27;,&#x27;Ubuntu Mono&#x27;,monospace" >audio</text>
 <text x="432" y="1860" font-size="12" font-weight="400" fill="#B9AD9C" text-anchor="start" >Audio</text>
-<text x="40" y="1914" font-size="13" font-weight="400" fill="#8C8174" text-anchor="start" >In game, vanilla screens keep their vanilla sprites (recipe book, page arrows, tabs). These icons are for Solaris-owned surfaces only.</text>
+<text x="40" y="1914" font-size="13" font-weight="400" fill="#8C8174" text-anchor="start" >In game, vanilla screens keep their vanilla sprites (recipe book, page arrows, tabs). These icons are for Krasnokamen-owned surfaces only.</text>
 <text x="40" y="1936" font-size="13" font-weight="400" fill="#8C8174" text-anchor="start" >Original artwork by DesignOpus, 2026-10-23 — sketch quality; final set needs a pixel artist pass and a localisation/hit-target review.</text>
 </svg>

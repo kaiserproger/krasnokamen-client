@@ -35,14 +35,18 @@ pub(super) fn union_edges(boxes: &[[f64; 6]]) -> Vec<Segment> {
     let cells: [usize; 3] = std::array::from_fn(|axis| coords[axis].len() - 1);
     let index = |c: [usize; 3]| (c[0] * cells[1] + c[1]) * cells[2] + c[2];
     let mut solid = vec![false; cells[0] * cells[1] * cells[2]];
-    for cell in (0..cells[0]).flat_map(|x| (0..cells[1]).flat_map(move |y| (0..cells[2]).map(move |z| [x, y, z]))) {
-        let center: [f64; 3] = std::array::from_fn(|a| (coords[a][cell[a]] + coords[a][cell[a] + 1]) / 2.);
+    for cell in (0..cells[0])
+        .flat_map(|x| (0..cells[1]).flat_map(move |y| (0..cells[2]).map(move |z| [x, y, z])))
+    {
+        let center: [f64; 3] =
+            std::array::from_fn(|a| (coords[a][cell[a]] + coords[a][cell[a] + 1]) / 2.);
         solid[index(cell)] = boxes
             .iter()
             .any(|b| (0..3).all(|a| b[a] < center[a] && center[a] < b[a + 3]));
     }
     let is_solid = |c: [isize; 3]| {
-        (0..3).all(|a| c[a] >= 0 && (c[a] as usize) < cells[a]) && solid[index(c.map(|v| v as usize))]
+        (0..3).all(|a| c[a] >= 0 && (c[a] as usize) < cells[a])
+            && solid[index(c.map(|v| v as usize))]
     };
     let mut segments = Vec::new();
     for axis in 0..3 {
@@ -181,9 +185,18 @@ mod tests {
         append(&content, 1, [3, 4, 5], [0.; 3], &mut out).unwrap();
         assert_eq!(out.vertices.len(), 12 * 4);
         assert_eq!(out.indices[EntityMaterial::Lines as usize].len(), 12 * 6);
-        assert!(out.vertices.iter().all(|v| v.alpha == ALPHA && v.color == [0.; 3]));
-        assert!(out.vertices.iter().all(|v| v.texture_layer == 0), "line vertices must use a valid atlas layer");
-        let max = out.vertices.iter().fold([f32::MIN; 3], |m, v| std::array::from_fn(|i| m[i].max(v.position[i])));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| v.alpha == ALPHA && v.color == [0.; 3])
+        );
+        assert!(
+            out.vertices.iter().all(|v| v.texture_layer == 0),
+            "line vertices must use a valid atlas layer"
+        );
+        let max = out.vertices.iter().fold([f32::MIN; 3], |m, v| {
+            std::array::from_fn(|i| m[i].max(v.position[i]))
+        });
         assert_eq!(max, [4., 5., 6.]);
     }
 }

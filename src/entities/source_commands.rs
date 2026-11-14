@@ -225,5 +225,4 @@ impl Store {
         self.revision += 1;
         Ok(())
     }
-
 }

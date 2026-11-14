@@ -1,14 +1,14 @@
 [package]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 version = "1.0.0-rc.5"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Launcher for the Solaris native Minecraft client: downloads game content and starts the client"
+description = "Launcher for the Krasnokamen native Minecraft client: downloads game content and starts the client"
 publish = false
 
 [[bin]]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 path = "src/main.rs"
 
 [dependencies]
@@ -22,7 +22,7 @@ reqwest = { version = "=0.13.4", default-features = false, features = ["blocking
 tar = "0.4"
 zstd = "0.13"
 png = "=0.18.1"
-solaris-paths = { path = "../paths" }
+krasnokamen-paths = { path = "../paths" }
 flate2 = "=1.1.9"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
