@@ -136,6 +136,7 @@ LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
 FIGHT_DROP = 1   # blocks he may step down in a fight: a deeper drop cannot be climbed out of by jumping
 APPROACH = 14.0  # an enemy this close (blocks) that he has not been able to swing at for IDLE_ENGAGE seconds is walked up to
 IDLE_ENGAGE = 4.0
+STUCK_STEPS = 3  # such steps in a row after which he goes around instead of pushing on
 STAND_MOVED = 0.3  # blocks moved in a step below which he counts as standing
 STAND_LOG = 2.0  # seconds between `stand` lines while he does not move in a fight
 
@@ -743,6 +744,7 @@ def rank(args, client: Client):
     walked_last = True
     decision = None  # the sidestep decision of the last step, logged once its outcome is known
     episode = 0  # sidestep steps in the current detour
+    stuck = 0  # fight steps in a row that asked for a walk and got nowhere (a wall in the way)
     stand, last_stand = None, -1e9  # the last fight step's facts, and when a `stand` line was last written
     side_dir, side_from, sidestepping = 1.0, None, False  # sidestep: direction, where this way began, last step was one
     blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
@@ -788,6 +790,10 @@ def rank(args, client: Client):
                 and stepped - last_stand >= STAND_LOG:
             last_stand = stepped
             log(f"stand {stand['why']}")
+        if stand is not None:
+            stuck = stuck + 1 if stand["asked"] and math.dist(stand["before"], here) < STAND_MOVED and not stand["struck"] else 0
+        else:
+            stuck = 0
         stand = None
         if decision is not None:
             moved = math.dist(decision["before"], here)
@@ -898,12 +904,7 @@ def rank(args, client: Client):
         step_aside, flip = False, ""
         if contact:
             too_close = eye_distance(me, focus) < args.min_reach  # a spear misses inside its minimum reach
-            if focus["distance"] > args.engage + ENGAGE_SLACK or too_close:
-                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
-                gap = [here[0] - focus["x"], here[2] - focus["z"]]
-                length = math.hypot(*gap) or 1.0
-                steer = [focus["x"] + gap[0] / length * args.engage, focus["z"] + gap[1] / length * args.engage]
-            elif enemy is None or pilot.jam >= JAM_SKIPS:
+            if enemy is None or pilot.jam >= JAM_SKIPS or stuck >= STUCK_STEPS:
                 # A friend stands in the line (every enemy blocked, or swings skipped in a row): one step sideways,
                 # the other way when the guard refused it or this way went SIDESTEP_MAX; never stand still in a fight.
                 flip = ""
@@ -917,6 +918,11 @@ def rank(args, client: Client):
                 length = math.hypot(*line) or 1.0
                 steer = [here[0] - line[1] / length * SIDESTEP * side_dir, here[2] + line[0] / length * SIDESTEP * side_dir]
                 step_aside = True
+            elif focus["distance"] > args.engage + ENGAGE_SLACK or too_close:
+                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
+                gap = [here[0] - focus["x"], here[2] - focus["z"]]
+                length = math.hypot(*gap) or 1.0
+                steer = [focus["x"] + gap[0] / length * args.engage, focus["z"] + gap[1] / length * args.engage]
             else:
                 steer = [here[0], here[2]]  # close enough: hold the place
         elif target is not None:
@@ -960,7 +966,8 @@ def rank(args, client: Client):
             guard.refusals.clear()
         walked = move(client, pilot, guard, wanted, here, yaw, distance if steer is not None else 0.0, step_time)
         if step_aside:
-            reason = ("all enemies blocked" if enemy is None else f"jam {pilot.jam} skips: {pilot.jam_kind}")
+            reason = ("all enemies blocked" if enemy is None else f"jam {pilot.jam} skips: {pilot.jam_kind}" if pilot.jam >= JAM_SKIPS
+                      else f"stuck {stuck} steps: asked {asked} and did not get anywhere")
             decision = {"reason": reason, "flip": flip, "wanted": asked, "before": list(here),
                         "side": "right" if "right" in asked else "left" if "left" in asked else ("left" if side_dir > 0 else "right") + " (keys " + ",".join(asked) + ")",
                         "allowed": sorted(walked), "refused": ("; guard: " + " | ".join(dict.fromkeys(guard.refusals))) if guard is not None and guard.refusals else ""}
@@ -974,7 +981,7 @@ def rank(args, client: Client):
         if contact:
             nearest = enemies[0]
             strength = attack_strength(pilot.observed)
-            stand = {"before": list(here), "struck": strike, "why": (
+            stand = {"before": list(here), "struck": strike, "asked": bool(asked), "why": (
                 f"fight; nearest enemy {nearest['distance']:.1f} blocks (eye-to-box {eye_distance(me, nearest):.1f}, "
                 f"reach {args.min_reach}..{args.reach}, engage {args.engage}), side {sides.get(nearest['entity_id'])}, "
                 f"{'blocked by a friend (all enemies)' if enemy is None else 'targeted'}, jam {pilot.jam} {pilot.jam_kind}; "

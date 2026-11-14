@@ -79,8 +79,11 @@ class MarchingRank:
             norm = math.hypot(vx, vz)
             if norm:
                 speed = 5.6 if "sprint" in keys else 4.3
-                self.me[0] += speed * vx / norm * TICK
-                self.me[1] += speed * vz / norm * TICK
+                for axis, v in ((0, vx), (1, vz)):  # a wall (floor above his feet) stops him on that axis
+                    moved = list(self.me)
+                    moved[axis] += speed * v / norm * TICK
+                    if not self.solid_at(*moved):
+                        self.me = moved
             for appearing in [w for w in self.spawn if self.now >= w[0]]:
                 self.spawn.remove(appearing)
                 self.soldiers[appearing[1]] = list(appearing[2])
@@ -100,6 +103,10 @@ class MarchingRank:
             self.samples.append((self.now, self.me[1] - slot[1], math.dist(self.me, slot)))
         if self.now >= self.duration:
             raise Stop
+
+    def solid_at(self, x, z):
+        floor = self.floor(x, z)
+        return floor is not None and floor >= 64
 
     def strength(self):
         return min(1.0, self.since_attack / self.charge_full)
@@ -130,6 +137,13 @@ class MarchingRank:
                 near, far = max(near, min(t1, t2)), min(far, max(t1, t2))
             if near <= far and (best is None or near < best[0]):
                 best = (near, ident)
+        reach = best[0] if best is not None else self.reach_limit
+        for step in range(int(reach / 0.05)):  # the first wall cell on the ray
+            t = step * 0.05
+            x, y, z = (eye[0] + t * direction[0], eye[1] + t * direction[1], eye[2] + t * direction[2])
+            floor = self.floor(x, z)
+            if floor is not None and floor >= 64 and y < floor + 1:
+                return {"type": "block", "x": math.floor(x), "y": math.floor(y), "z": math.floor(z), "face": "north", "block_id": "minecraft:stone"}
         if best is None:
             return {"type": "none"}
         point = [eye[axis] + best[0] * direction[axis] for axis in range(3)]
@@ -996,7 +1010,7 @@ class Fight(unittest.TestCase):
         self.assertTrue(pulses)
         self.assertIn(len(lines), (len(pulses), len(pulses) - 1), "one decision line per sidestep, the last one still pending at the end")
         for line in lines:
-            self.assertRegex(line, r"^sidestep all enemies blocked; side (left|right)\b.*; wanted \['(left|right)'\] allowed \[.*\]; "
+            self.assertRegex(line, r"^sidestep all enemies blocked; side (left|right)\b.*; wanted \[.*\] allowed \[.*\]; "
                                    r"(moved|did not move) [\d.]+ blocks \[.*\] -> \[.*\]$")
         self.assertEqual(len([line for line in logs if line.startswith("sidestep ended")]), 1, "one reset line per detour")
         self.assertIn("jam cleared", [line for line in logs if line.startswith("sidestep ended")][0])
@@ -1044,6 +1058,12 @@ class Fight(unittest.TestCase):
         sim, logs = duel({1000: (0.0, 4.3, 64.0)}, duration=15.0, bare=True, floor=floor)
         self.assertLess(sim.me[1], 0.9, "he walked down into the pit")
         self.assertTrue(any(line.startswith("edge refused forward") and "drop deeper than 1" in line for line in logs), logs[-4:])
+
+    def test_an_enemy_behind_a_wall_is_walked_around_not_pushed_at_for_ever(self):
+        wall = lambda x, z: 65 if -0.8 < x < 0.8 and 1.0 < z < 1.6 else 63
+        sim, logs = duel({1000: (0.0, 4.3, 64.0)}, duration=40.0, bare=True, floor=wall)
+        self.assertTrue(sim.hits, logs[-6:])
+        self.assertTrue(any(line.startswith("sidestep stuck") for line in logs), [line for line in logs if "sidestep" in line][:4])
 
     def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
         for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
