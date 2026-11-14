@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{cell::Cell, sync::mpsc};
 
 pub(super) const PASSES: [&str; 27] = [

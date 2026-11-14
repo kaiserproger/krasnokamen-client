@@ -1,10 +1,10 @@
 //! The GPU crowd path against the CPU entity path on a real device (no mocks): the same
 //! armoured zombie, emitted as dynamic geometry or culled, posed and drawn instanced,
 //! must produce the same frame, shadows included.
-use super::entity_instancing::{lod, planes, LOD_PIXELS};
-use crate::api::{DynamicGeometry, Vertex};
+use super::entity_instancing::{LOD_PIXELS, lod, planes};
 use super::shader_tests::pixels;
 use super::*;
+use crate::api::{DynamicGeometry, Vertex};
 
 fn offscreen() -> (Renderer, std::sync::MutexGuard<'static, ()>) {
     sized(64)
@@ -21,11 +21,17 @@ fn sized(side: u32) -> (Renderer, std::sync::MutexGuard<'static, ()>) {
     (renderer, guard)
 }
 
-const SPRITE: crate::api::SkyTexture = crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 };
+const SPRITE: crate::api::SkyTexture = crate::api::SkyTexture {
+    uv: [0., 0., 1., 1.],
+    layer: 0,
+};
 
 fn base() -> Scene {
     Scene {
-        lightmap: Some(crate::api::LightmapTexture { revision: 1, rgba: Arc::new([255; 1024]) }),
+        lightmap: Some(crate::api::LightmapTexture {
+            revision: 1,
+            rgba: Arc::new([255; 1024]),
+        }),
         texture_rgba: Some(Arc::new(vec![255; 4])),
         texture_width: 1,
         texture_height: 1,
@@ -52,7 +58,10 @@ fn base() -> Scene {
 
 /// Pixels whose channels differ by more than 8 levels.
 fn differing(a: &[u8], b: &[u8]) -> usize {
-    a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a.iter().zip(*b).any(|(a, b)| a.abs_diff(*b) > 8)).count()
+    a.chunks(4)
+        .zip(b.chunks(4))
+        .filter(|(a, b)| a.iter().zip(*b).any(|(a, b)| a.abs_diff(*b) > 8))
+        .count()
 }
 
 #[test]
@@ -80,9 +89,15 @@ fn crowd_frames_match_cpu_entity_frames() {
         assert_eq!(renderer.stats.crowd_instances, 1, "{preset:?}");
         assert!(renderer.stats.crowd_draws > 0, "{preset:?}");
         let covered = differing(&blank, &expected);
-        assert!(covered > 200, "{preset:?}: the zombie covers the frame ({covered} px)");
+        assert!(
+            covered > 200,
+            "{preset:?}: the zombie covers the frame ({covered} px)"
+        );
         let wrong = differing(&expected, &actual);
-        assert!(wrong * 100 <= covered, "{preset:?}: {wrong} of {covered} entity pixels differ");
+        assert!(
+            wrong * 100 <= covered,
+            "{preset:?}: {wrong} of {covered} entity pixels differ"
+        );
     }
 }
 
@@ -95,7 +110,10 @@ fn crowd_grid_matches_cpu_grid() {
         return;
     }
     let (cpu, crowd) = crate::entities::crowd::tests::parity_grid(4, 1.2);
-    assert_eq!((crowd.instances.len(), crowd.counts.as_slice()), (16, &[8, 8][..]));
+    assert_eq!(
+        (crowd.instances.len(), crowd.counts.as_slice()),
+        (16, &[8, 8][..])
+    );
     renderer.set_graphics_preset(GraphicsPreset::Low);
     let mut empty = base();
     empty.revision = 1;
@@ -112,7 +130,10 @@ fn crowd_grid_matches_cpu_grid() {
     let covered = differing(&blank, &expected);
     assert!(covered > 4000, "the grid covers the frame ({covered} px)");
     let wrong = differing(&expected, &actual);
-    assert!(wrong * 100 <= covered, "{wrong} of {covered} entity pixels differ");
+    assert!(
+        wrong * 100 <= covered,
+        "{wrong} of {covered} entity pixels differ"
+    );
 }
 
 /// `a` followed by `b` moved by `dx` along x (one dynamic geometry).
@@ -154,7 +175,10 @@ fn crowd_and_cpu_entities_share_a_frame() {
     let actual = pixels(&mut renderer, &mixed);
     assert_eq!(renderer.stats.crowd_instances, 1);
     let covered = differing(&half, &expected);
-    assert!(covered > 200, "the instanced zombie covers the frame ({covered} px)");
+    assert!(
+        covered > 200,
+        "the instanced zombie covers the frame ({covered} px)"
+    );
     let wrong = differing(&expected, &actual);
     assert!(wrong * 100 <= covered, "{wrong} of {covered} pixels differ");
 }
@@ -176,18 +200,32 @@ fn culled_crowd_draws_nothing_and_leaves_the_frame_unchanged() {
     behind.crowd = crowd;
     let frame = pixels(&mut renderer, &behind);
     assert_eq!(renderer.stats.crowd_instances, 1);
-    assert_eq!(differing(&blank, &frame), 0, "an instance behind the camera is culled");
+    assert_eq!(
+        differing(&blank, &frame),
+        0,
+        "an instance behind the camera is culled"
+    );
 }
 
 #[test]
 fn cull_planes_and_detail_levels() {
     let projection = Mat4::perspective_rh(70_f32.to_radians(), 1., 0.05, 2048.);
     let planes = planes(projection);
-    let inside = |p: Vec3, r: f32| planes.iter().all(|plane| Vec3::from_slice(&plane[..3]).dot(p) + plane[3] >= -r);
-    assert!(inside(Vec3::new(0., 0., -10.), 0.1), "ahead of a right-handed camera");
+    let inside = |p: Vec3, r: f32| {
+        planes
+            .iter()
+            .all(|plane| Vec3::from_slice(&plane[..3]).dot(p) + plane[3] >= -r)
+    };
+    assert!(
+        inside(Vec3::new(0., 0., -10.), 0.1),
+        "ahead of a right-handed camera"
+    );
     assert!(!inside(Vec3::new(0., 0., 10.), 1.), "behind");
     assert!(!inside(Vec3::new(30., 0., -10.), 1.), "far to the side");
-    assert!(inside(Vec3::new(10.5, 0., -10.), 4.), "a sphere overlapping the side plane");
+    assert!(
+        inside(Vec3::new(10.5, 0., -10.), 4.),
+        "a sphere overlapping the side plane"
+    );
     let pixels_per_unit = projection.y_axis.y * 540.;
     assert_eq!(lod(1., 5., pixels_per_unit), 0);
     let at = |pixels: f32| 2. * pixels_per_unit / pixels;
