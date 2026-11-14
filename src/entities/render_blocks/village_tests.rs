@@ -92,7 +92,7 @@ fn render_static(
     partial: f32,
     out: &mut DynamicGeometry,
 ) -> super::super::PresentationStats {
-    store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content, world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial, sample_light: &|_| Ok(Some([7., 3.])) }, out)
+    store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content, world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial, sample_light: &|_| Ok(Some([7., 3.])) }, out)
         .unwrap()
 }
 
@@ -834,7 +834,7 @@ fn static_banner_renders_standing_and_wall_with_patterns_and_world_time() {
             assert_ne!(first.vertices[i].position, first.vertices[8 + i].position);
         }
         let mut later = DynamicGeometry::default();
-        let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 25, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut later)
+        let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 25, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut later)
             .unwrap();
         assert_eq!(stats.block_entities, 1);
         assert_ne!(first.vertices[6].position, later.vertices[6].position);
@@ -1009,7 +1009,7 @@ fn static_conduit_switches_shell_to_active_eye_and_faces_camera() {
     assert_eq!(active.vertices.len(), 16);
     assert!(active.vertices[12..].iter().all(|vertex| vertex.texture_layer == 5));
     let mut turned = DynamicGeometry::default();
-    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [90., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut turned).unwrap();
+    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [90., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut turned).unwrap();
     assert_eq!(stats.block_entities, 1);
     assert_ne!(active.vertices[13].position, turned.vertices[13].position);
 }
@@ -1229,7 +1229,7 @@ fn static_brushable_renders_received_item_with_adjacent_light_and_clears() {
         "hit_direction": 1, "item": {"id": "test:food", "count": 1}
     })), Arc::from(&[10, 0][..]), None, &content, 2).unwrap();
     let mut out = DynamicGeometry::default();
-    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|point| Ok(Some(if point == [8., 65., -12.] { [11., 4.] } else { [7., 3.] })) }, &mut out).unwrap();
+    let stats = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &world, origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: false, game_time: 0, partial: 0., sample_light: &|point| Ok(Some(if point == [8., 65., -12.] { [11., 4.] } else { [7., 3.] })) }, &mut out).unwrap();
     assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
     assert_eq!(out.vertices.len(), content.models[0].quads.len() * 4);
     assert!(out.vertices.iter().all(|vertex| vertex.light == [11., 4.]));
@@ -1534,4 +1534,97 @@ fn static_spawner_preview_renders_received_equipment_with_shared_painter() {
     let stats = render_static(&mut store, &content, &world, origin, camera, 0., &mut equipped);
     assert_eq!(stats.block_entities, 1, "{:?}", stats.unrendered);
     assert!(equipped.vertices.len() > bare.vertices.len());
+}
+
+#[test]
+fn structure_box_tracks_viewer_and_received_mode_and_size() {
+    let content = village_content(
+        "minecraft:structure_block", "minecraft:structure_block",
+        BTreeMap::from([("mode".into(), "save".into())]), vec![],
+    );
+    let mut store = super::super::Store::new();
+    store.activate_models(Arc::new(models_with(vec![])));
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    let (origin, camera) = camera_for(position);
+    let world = World::new(0, 256);
+    let render = |store: &mut super::super::Store, visible: bool| {
+        let mut out = DynamicGeometry::default();
+        let stats = store.append_static_block_geometry(StaticBlockSceneFrame {
+            content: &content, world: &world, origin, camera, camera_rotation: [0., 0.],
+            radius: 32., scoping: false, text_filtering: false,
+            operator_overlay_visible: visible, game_time: 0, partial: 0.,
+            sample_light: &|_| Ok(Some([7., 3.])),
+        }, &mut out).unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        out
+    };
+    store.apply_block_entity(position, 7, Arc::new(serde_json::json!({
+        "mode": "SAVE", "posX": 2, "posY": 1, "posZ": -2,
+        "sizeX": 3, "sizeY": 4, "sizeZ": 2
+    })), Arc::from(&[10, 0][..]), None, &content, 2).unwrap();
+    assert!(render(&mut store, false).vertices.is_empty());
+    let shown = render(&mut store, true);
+    assert_eq!(shown.indices[EntityMaterial::Lines as usize].len(), 72);
+    assert!(shown.vertices.iter().any(|v| v.position == [2., 1., -2.]));
+    assert!(shown.vertices.iter().any(|v| v.position == [5., 5., 0.]));
+    store.apply_block_entity(position, 7, Arc::new(serde_json::json!({
+        "mode": "LOAD", "showboundingbox": 0, "sizeX": 3, "sizeY": 4, "sizeZ": 2
+    })), Arc::from(&[10, 0][..]), None, &content, 3).unwrap();
+    assert!(render(&mut store, true).vertices.is_empty());
+}
+
+#[test]
+fn test_instance_scene_tracks_received_status_box_and_errors() {
+    let mut content = village_content(
+        "minecraft:test_instance_block", "minecraft:test_instance_block", BTreeMap::new(),
+        vec![("minecraft:entity/beacon/beacon_beam", 9)],
+    );
+    content.set_registries(BTreeMap::from([("minecraft:test_instance".into(), vec![(
+        "test:optional".into(), serde_json::json!({"required": false, "padding": 2, "rotation": "clockwise_90"})
+    )])]));
+    content.insert_test_font("minecraft:default", &serde_json::json!({"providers":[]}));
+    content.insert_test_resource("assets/minecraft/lang/en_us.json", b"{}");
+    let mut store = super::super::Store::new();
+    store.set_text_renderer(std::rc::Rc::new(TextRenderer::load(&content).unwrap()));
+    store.activate_models(Arc::new(models_with(vec![])));
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    let (origin, camera) = camera_for(position);
+    let world = World::new(0, 256);
+    let render = |store: &mut super::super::Store, visible: bool| {
+        let mut out = DynamicGeometry::default();
+        let stats = store.append_static_block_geometry(StaticBlockSceneFrame {
+            content: &content, world: &world, origin, camera, camera_rotation: [0., 0.],
+            radius: 32., scoping: false, text_filtering: false, operator_overlay_visible: visible,
+            game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])),
+        }, &mut out).unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        out
+    };
+    let update = |store: &mut super::super::Store, status: &str, error: Value, errors: Value, revision| {
+        store.apply_block_entity(position, 7, Arc::new(serde_json::json!({
+            "data": {"test": "test:optional", "size": [3, 4, 5],
+                     "rotation": "none", "status": status, "error_message": error},
+            "errors": errors,
+        })), Arc::from(&[10, 0][..]), None, &content, revision).unwrap();
+    };
+    update(&mut store, "cleared", Value::Null, serde_json::json!([]), 2);
+    assert!(render(&mut store, false).vertices.is_empty());
+    let boxed = render(&mut store, true);
+    assert_eq!(boxed.indices[EntityMaterial::Lines as usize].len(), 72);
+    assert!(boxed.vertices.iter().any(|v| v.position == [2., 3., 3.]));
+    assert!(boxed.vertices.iter().any(|v| v.position == [7., 7., 6.]));
+    update(&mut store, "running", Value::Null, serde_json::json!([]), 3);
+    let running = render(&mut store, false);
+    assert!(!running.indices[EntityMaterial::BeaconBeamOpaque as usize].is_empty());
+    assert!(running.vertices.iter().any(|v| v.texture_layer == 9 && v.color == [128. / 255.; 3]));
+    assert!(running.indices[EntityMaterial::Lines as usize].is_empty());
+    update(&mut store, "finished", serde_json::json!("failed"), serde_json::json!([
+        {"pos": [9, 65, -12], "text": "failure"}
+    ]), 4);
+    let failed = render(&mut store, false);
+    assert!(failed.vertices.iter().any(|v| v.texture_layer == 9 && v.color == [1., 128. / 255., 0.]));
+    assert!(!failed.indices[EntityMaterial::DebugFilledBox as usize].is_empty());
+    assert!(!failed.indices[EntityMaterial::TextSeeThrough as usize].is_empty());
 }

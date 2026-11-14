@@ -220,6 +220,23 @@ impl Samples<'_> {
         Ok(total.map(|v| (v / count) as f32 / 255.))
     }
 }
+/// Reuse the section mesher's exact biome blending and unloaded-neighbor policy
+/// for a dynamic block model without exposing or duplicating the catalog.
+pub(super) fn sample_tint(
+    world: &Neighborhood,
+    catalog: &Catalog,
+    tint: TintKind,
+    position: [i32; 3],
+    radius: u8,
+) -> Result<[f32; 3]> {
+    Samples {
+        world,
+        catalog,
+        unknown_light: 0,
+        unknown_biome: 0,
+        hidden: &[],
+    }.tint(tint, position, radius)
+}
 pub(super) fn geometry_bytes(geometry: &MeshGeometry) -> usize {
     geometry.vertices.len() * std::mem::size_of::<Vertex>()
         + geometry.indices.iter().map(|i| i.len() * 4).sum::<usize>()
@@ -303,7 +320,7 @@ fn model_quad(
             overlay_tint: [1.; 3],
             alpha: quad.alpha,
             texture_layer: quad.texture_layer,
-            light: light[i].light,
+            light: quad.light_with_emission(light[i].light),
             normal: tagged
                 .shader
                 .normal(normal_base, quad.positions[i][1], tagged.shader_upper),

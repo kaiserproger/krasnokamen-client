@@ -41,11 +41,22 @@ pub struct BakedQuad {
     /// Inherited item-model GUI lighting mode; retained per quad for composite graphs.
     pub gui_light_side: bool,
     pub ambient_occlusion: bool,
+    /// Authored per-element emission, distinct from the block state's world light.
+    pub light_emission: u8,
     pub layer: RenderLayer,
     /// Optional entity render type for special item layers; ordinary models use their layer.
     pub entity_material: Option<crate::api::EntityMaterial>,
     pub alpha: f32,
     pub texture_layer: u32,
+}
+impl BakedQuad {
+    /// Apply the 26.3 quad emission to both packed light channels, after sampling.
+    pub(crate) fn light_with_emission(&self, light: [f32; 2]) -> [f32; 2] {
+        if self.light_emission == 0 || light == [-1.; 2] {
+            return light;
+        }
+        light.map(|level| level.floor().max(f32::from(self.light_emission)))
+    }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct ModelTransform {
@@ -577,6 +588,11 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
     for element in elements {
         let min = vector(&element["from"])?;
         let max = vector(&element["to"])?;
+        let light_emission = match element.get("light_emission") {
+            None => 0,
+            Some(value) => value.as_u64().filter(|level| *level <= 15)
+                .ok_or_else(|| format!("element light_emission must be an integer 0..=15, got {value}"))? as u8,
+        };
         let shade_direction = shade_direction_override(element)?;
         let mut er = Mat3::IDENTITY;
         let mut origin = Vec3::ZERO;
@@ -690,6 +706,7 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
                     shade_direction,
                     gui_light_side,
                     ambient_occlusion: model["ambientocclusion"].as_bool().unwrap_or(true),
+                    light_emission,
                     layer: RenderLayer::Opaque,
                     entity_material: None,
                     alpha: 1.,
@@ -799,6 +816,7 @@ fn generated_elements(source: &ResourceSource, model: &Value) -> Result<Vec<RawQ
                     shade_direction: None,
                     gui_light_side,
                     ambient_occlusion: false,
+                    light_emission: 0,
                     layer: RenderLayer::Opaque,
                     entity_material: None,
                     alpha: 1.,
@@ -1236,6 +1254,23 @@ mod tests {
         assert_eq!(base_model.quads.len(), 6);
         assert!(base_model.parts.is_empty());
     }
+    #[test]
+    fn element_emission_is_baked_per_element_and_bounded() {
+        let mut model = override_model(serde_json::json!("up"));
+        model["elements"][0]["light_emission"] = serde_json::json!(7);
+        let quads = bake_elements(&model, &serde_json::json!({"y": 90}), TintKind::None).unwrap();
+        assert_eq!(quads.iter().filter(|q| q.quad.light_emission == 7).count(), 3);
+        assert_eq!(quads.iter().filter(|q| q.quad.light_emission == 0).count(), 2);
+        let lit = &quads[0].quad;
+        assert_eq!(lit.light_with_emission([2., 11.]), [7., 11.]);
+        assert_eq!(lit.light_with_emission([12., 1.]), [12., 7.]);
+        assert_eq!(lit.light_with_emission([-1.; 2]), [-1.; 2]);
+        for invalid in [serde_json::json!(-1), serde_json::json!(16), serde_json::json!(1.5), serde_json::json!("7")] {
+            model["elements"][0]["light_emission"] = invalid;
+            assert!(bake_elements(&model, &serde_json::json!({}), TintKind::None).is_err());
+        }
+    }
+
     /// Element 0 (lower half: up, north, east faces) carries the override value;
     /// element 1 (upper half: up, north faces) never does.
     fn override_model(value: Value) -> Value {
@@ -1362,9 +1397,11 @@ mod tests {
             }
             element
         };
+        let mut emitting = torch(serde_json::json!("up"));
+        emitting["light_emission"] = serde_json::json!(15);
         write(
             "assets/test/models/block/template.json",
-            serde_json::json!({"textures": {"all": "test:tex"}, "elements": [torch(serde_json::json!("up"))]}),
+            serde_json::json!({"textures": {"all": "test:tex"}, "elements": [emitting, torch(Value::Null)]}),
         );
         write(
             "assets/test/models/block/child.json",
@@ -1403,9 +1440,12 @@ mod tests {
                 .map(|q| (q.quad.face, q.quad.shade_direction))
                 .collect()
         };
-        // y=90 turns north to east and south to west; the inherited override stays "up".
-        assert_eq!(faces(child), BTreeSet::from([(5, Some(1)), (4, Some(1))]));
-        // A child that replaces `elements` replaces the override with them.
+        // Rotated inherited emissive faces retain their own lighting; an ordinary
+        // element alongside them and a child replacing elements do not glow.
+        assert_eq!(faces(child), BTreeSet::from([(5, Some(1)), (4, Some(1)), (5, None), (4, None)]));
         assert_eq!(faces(replaced), BTreeSet::from([(5, None), (4, None)]));
+        assert_eq!(models[child].quads.iter().filter(|q| q.quad.light_emission == 15).count(), 2);
+        assert_eq!(models[child].quads.iter().filter(|q| q.quad.light_emission == 0).count(), 2);
+        assert!(models[replaced].quads.iter().all(|q| q.quad.light_emission == 0));
     }
 }
