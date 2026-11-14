@@ -11,8 +11,8 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-pub const FALLBACK_HEAD_LABEL: &str = "Solaris avatar · original illustration (not your skin)";
-pub const DEFAULT_BACKGROUND_LABEL: &str = "Solaris landscape · original illustration";
+pub const FALLBACK_HEAD_LABEL: &str = "Krasnokamen avatar · original illustration (not your skin)";
+pub const DEFAULT_BACKGROUND_LABEL: &str = "Krasnokamen landscape · original illustration";
 pub const LOCAL_SKIN_NOTICE: &str = "Local preview only — does not change your in-game skin.";
 
 const MAX_PNG_BYTES: usize = 16 * 1024 * 1024;
@@ -264,7 +264,7 @@ impl MediaCache {
         cached_texture(slot, ctx, skin_path, ImageKind::Head)
     }
 
-    /// `None` returns the authored Solaris landscape, not a gameplay screenshot.
+    /// `None` returns the authored Krasnokamen landscape, not a gameplay screenshot.
     pub fn background(
         &mut self,
         ctx: &egui::Context,
@@ -701,7 +701,7 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let path = root.join(format!(
-                "solaris-media-{}-{nonce}-{}",
+                "krasnokamen-media-{}-{nonce}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ));
@@ -1146,7 +1146,7 @@ mod tests {
         assert_ne!(head.id(), background.id());
         assert!(FALLBACK_HEAD_LABEL.contains("original"));
         assert!(FALLBACK_HEAD_LABEL.contains("not your skin"));
-        assert!(DEFAULT_BACKGROUND_LABEL.contains("Solaris landscape"));
+        assert!(DEFAULT_BACKGROUND_LABEL.contains("Krasnokamen landscape"));
         assert!(LOCAL_SKIN_NOTICE.contains("does not change"));
     }
 }

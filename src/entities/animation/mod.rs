@@ -1,6 +1,6 @@
 //! Keyframe combat clips: files, baking and selection from received packets.
 //!
-//! * `assets/solaris/animations/*.animation.json` hold Solaris-authored clips in a
+//! * `assets/krasnokamen/animations/*.animation.json` hold Krasnokamen-authored clips in a
 //!   Bedrock-style keyframe format ([`format`]); they are embedded at build time, baked to
 //!   the renderer's fixed-rate tables ([`bake`]) and installed once into
 //!   [`clip_pose`](super::clip_pose), which both entity render paths sample with one rule.
@@ -35,11 +35,17 @@ const FLINCH: usize = 1;
 const SOURCES: [(&str, &str); 2] = [
     (
         "humanoid.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/solaris/animations/humanoid.animation.json")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/krasnokamen/animations/humanoid.animation.json"
+        )),
     ),
     (
         "horse.animation.json",
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/solaris/animations/horse.animation.json")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/krasnokamen/animations/horse.animation.json"
+        )),
     ),
 ];
 
@@ -67,13 +73,13 @@ impl Catalog {
             let clips = match format::parse(source) {
                 Ok(clips) => clips,
                 Err(error) => {
-                    eprintln!("solaris animation {file} rejected: {error}");
+                    eprintln!("krasnokamen animation {file} rejected: {error}");
                     continue;
                 }
             };
             for clip in clips {
                 if lengths.contains_key(&clip.name) {
-                    eprintln!("solaris animation {file}: duplicate clip {}", clip.name);
+                    eprintln!("krasnokamen animation {file}: duplicate clip {}", clip.name);
                     continue;
                 }
                 match bake::bake(&clip) {
@@ -81,12 +87,12 @@ impl Catalog {
                         lengths.insert(clip.name, clip.length);
                         baked.push(table);
                     }
-                    Err(error) => eprintln!("solaris animation {file} clip rejected: {error}"),
+                    Err(error) => eprintln!("krasnokamen animation {file} clip rejected: {error}"),
                 }
             }
         }
         if let Err(error) = clip_pose::ClipLibrary::new(baked).and_then(clip_pose::install) {
-            eprintln!("solaris animation library not installed: {error}");
+            eprintln!("krasnokamen animation library not installed: {error}");
         }
         let library = clip_pose::library();
         let clips = lengths
@@ -126,7 +132,12 @@ pub(crate) struct Selection {
 impl Default for Selection {
     fn default() -> Self {
         // `SwingAnimation.DEFAULT`: whack for 6 ticks.
-        Self { swings: 0, armed: false, vanilla_ticks: 6, swing_end: 0 }
+        Self {
+            swings: 0,
+            armed: false,
+            vanilla_ticks: 6,
+            swing_end: 0,
+        }
     }
 }
 
@@ -182,7 +193,8 @@ pub(crate) fn receive_swing(
         });
     match chosen {
         Some((family, name, entry)) => {
-            let left_handed = models.is_some_and(|models| super::presentation::left_main_arm(models, e));
+            let left_handed =
+                models.is_some_and(|models| super::presentation::left_main_arm(models, e));
             let arm = usize::from(hand) ^ usize::from(left_handed);
             e.clip.layers[ACTION] = ClipLayer {
                 clip: entry.id,
@@ -211,15 +223,24 @@ pub(crate) fn receive_swing(
 
 fn start(e: &mut Entity, layer: usize, name: &str, tick: u64) {
     if let Some(entry) = catalog().get(name) {
-        e.clip.layers[layer] =
-            ClipLayer { clip: entry.id, start_tick: tick, rate: 1., weight: 1., mirror: false };
+        e.clip.layers[layer] = ClipLayer {
+            clip: entry.id,
+            start_tick: tick,
+            rate: 1.,
+            weight: 1.,
+            mirror: false,
+        };
     }
 }
 
 /// A received hurt (`hurt_animation` / `damage_event`) adds the flinch to armed entities.
 pub(crate) fn on_hurt(e: &mut Entity, tick: u64) {
     if e.physical.combat.armed && e.death_tick.is_none() {
-        let clip = if select::horse_like(&e.type_name) { select::HORSE_HURT } else { select::HURT };
+        let clip = if select::horse_like(&e.type_name) {
+            select::HORSE_HURT
+        } else {
+            select::HURT
+        };
         start(e, FLINCH, clip, tick);
     }
 }
@@ -227,7 +248,11 @@ pub(crate) fn on_hurt(e: &mut Entity, tick: u64) {
 /// A received death (entity event 3) plays the death fall on armed entities.
 pub(crate) fn on_death(e: &mut Entity, tick: u64) {
     if e.physical.combat.armed {
-        let clip = if select::horse_like(&e.type_name) { select::HORSE_DEATH } else { select::DEATH };
+        let clip = if select::horse_like(&e.type_name) {
+            select::HORSE_DEATH
+        } else {
+            select::DEATH
+        };
         e.clip.layers[FLINCH] = ClipLayer::default();
         start(e, ACTION, clip, tick);
     }

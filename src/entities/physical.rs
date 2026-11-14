@@ -2,8 +2,8 @@
 //! not an approximate species list; server tags remain authoritative.
 use super::{Entity, Handle, Metadata, Models, Store};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -137,7 +137,10 @@ pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Re
 }
 pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
-    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    if matches!(
+        e.type_name.as_str(),
+        "minecraft:item_frame" | "minecraft:glow_item_frame"
+    ) {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
         let normal = direction(face)?;
@@ -232,7 +235,11 @@ impl Store {
             .filter(|entity| entity.vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
+            .chain(
+                self.passenger_vehicles
+                    .keys()
+                    .filter_map(|id| self.get(*id)),
+            )
             .filter(|entity| {
                 !entity
                     .source
@@ -496,7 +503,8 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area)
+            {
                 return Ok(false);
             }
         }
@@ -703,15 +711,20 @@ impl Store {
                 .saturating_add(1)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
-            if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
+            if matches!(
+                owner(&models, e, "getPassengerAttachmentPoint"),
                 "net.minecraft.world.entity.animal.equine.AbstractHorse"
-                    | "net.minecraft.world.entity.monster.Strider")
-            {
+                    | "net.minecraft.world.entity.monster.Strider"
+            ) {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = number(&models, e, "DATA_ID_FLAGS", 0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
-                    &mut e.physical.seat_motion, e.handle, position, tick,
-                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
+                    &mut e.physical.seat_motion,
+                    e.handle,
+                    position,
+                    tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(),
+                    standing,
                 );
             }
             e.physical.peek_old = e.physical.peek;
@@ -762,7 +775,10 @@ impl Store {
                 0
             };
             self.remove_motion_span(span);
-            if self.get(*id).is_some_and(|e| e.type_name == "minecraft:falling_block") {
+            if self
+                .get(*id)
+                .is_some_and(|e| e.type_name == "minecraft:falling_block")
+            {
                 self.fall_step(*id, &models, world, content, tick)?;
             }
             if effects.sky_flash || effects.lightning_sound_pitches.is_some() {
@@ -780,7 +796,9 @@ impl Store {
                     || super::display::is_display(e)
                     || matches!(
                         e.type_name.as_str(),
-                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon"
+                        "minecraft:shulker"
+                            | "minecraft:polar_bear"
+                            | "minecraft:ender_dragon"
                             | "minecraft:falling_block"
                     )
             })
@@ -791,7 +809,14 @@ impl Store {
     }
     /// FallingBlockEntity is SERVER_AND_CLIENT in 26.3: gravity, clipped move,
     /// then air drag. Keep the received position as the relative-packet base.
-    fn fall_step(&mut self, id: i32, models: &Models, world: &World, content: &Content, tick: u64) -> Result<()> {
+    fn fall_step(
+        &mut self,
+        id: i32,
+        models: &Models,
+        world: &World,
+        content: &Content,
+        tick: u64,
+    ) -> Result<()> {
         let entity = self.get(id).expect("active falling block");
         let mut velocity = entity.velocity;
         if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
@@ -804,7 +829,10 @@ impl Store {
         };
         let mut colliders = std::mem::take(&mut self.falling_colliders);
         let gathered = collision::gather(world, content, self, tick, swept, &mut colliders);
-        let moved = gathered.as_ref().ok().map(|_| collision::collide(body, &colliders, velocity));
+        let moved = gathered
+            .as_ref()
+            .ok()
+            .map(|_| collision::collide(body, &colliders, velocity));
         self.falling_colliders = colliders;
         let Some(moved) = moved else {
             // Do not predict into terrain the connection has not received.

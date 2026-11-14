@@ -333,7 +333,7 @@ impl Shared {
         let mut decoded = image::decode_png(&bytes, skin)?;
         let digest = hex(&Sha256::digest(&bytes));
         decoded.id = format!(
-            "solaris:profile/{}_{digest}",
+            "krasnokamen:profile/{}_{digest}",
             if skin { "skin" } else { "texture" }
         );
         let mut cache = self.cache.lock();
@@ -374,7 +374,7 @@ impl Resolver {
                         .redirect(Policy::none())
                         .connect_timeout(Duration::from_secs(5))
                         .timeout(Duration::from_secs(15))
-                        .user_agent("SolarisNativeClient/26.1.2")
+                        .user_agent("KrasnokamenNativeClient/26.1.2")
                         .build()
                         .map_err(|e| format!("profile texture TLS client: {e}"));
                     loop {

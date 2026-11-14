@@ -8,14 +8,14 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock};
 mod actions;
+#[cfg(test)]
+mod beacon_tests;
 mod components;
 mod menu_data;
 mod persistent;
 mod receive;
 #[cfg(test)]
 mod wire_263_tests;
-#[cfg(test)]
-mod beacon_tests;
 pub use actions::MenuButton;
 pub use menu_data::{DisplayStack, ItemCost, Recipe, StonecutterRecipe, Trade, Trades};
 pub mod nbt;
@@ -741,7 +741,8 @@ impl InventoryStore {
                     // inventory and shares the existing player inventory slots.
                     menu.slots[0] = Some(Stack::default());
                     for index in 1..37 {
-                        let player_slot = menu.player_slot_index(index).expect("beacon player slot");
+                        let player_slot =
+                            menu.player_slot_index(index).expect("beacon player slot");
                         menu.slots[index] = self.player.slots[player_slot].clone();
                     }
                 }
@@ -1230,9 +1231,21 @@ mod tests {
     #[test]
     fn set_held_slot_uses_26_3_play_id() {
         let mut store = InventoryStore::default();
-        assert!(store.apply(107, &mut Reader::new(&[3]), &Content::test_cube()).unwrap());
+        assert!(
+            store
+                .apply(107, &mut Reader::new(&[3]), &Content::test_cube())
+                .unwrap()
+        );
         assert_eq!(store.selected_slot, 3);
-        assert!(!store.apply(cb::SET_ENTITY_MOTION, &mut Reader::new(&[3]), &Content::test_cube()).unwrap());
+        assert!(
+            !store
+                .apply(
+                    cb::SET_ENTITY_MOTION,
+                    &mut Reader::new(&[3]),
+                    &Content::test_cube()
+                )
+                .unwrap()
+        );
     }
 
     #[test]
@@ -1240,15 +1253,18 @@ mod tests {
         use crate::ui::{ClickMode, UiIntent};
         let mut content = Content::test_cube();
         content.item_names.insert(1, "test:output".into());
-        content.insert_test_item_components(1, BTreeMap::from([
-            ("minecraft:max_stack_size".into(), json!(64)),
-        ]));
+        content.insert_test_item_components(
+            1,
+            BTreeMap::from([("minecraft:max_stack_size".into(), json!(64))]),
+        );
         let stack = read_stack(&mut Reader::new(&[4, 1, 0, 0]), &content).unwrap();
-        for (kind, slot, expected, left) in [
-            (MenuKind::Inventory, 0, 4, 0),
-            (MenuKind::Furnace, 2, 2, 2),
-        ] {
-            let mut store = InventoryStore { screen_open: true, ..Default::default() };
+        for (kind, slot, expected, left) in
+            [(MenuKind::Inventory, 0, 4, 0), (MenuKind::Furnace, 2, 2, 2)]
+        {
+            let mut store = InventoryStore {
+                screen_open: true,
+                ..Default::default()
+            };
             store.player.slots.fill(Some(Stack::default()));
             store.cursor = Some(Stack::default());
             if kind == MenuKind::Inventory {
@@ -1277,9 +1293,10 @@ mod tests {
         use crate::ui::{ClickMode, UiIntent};
         let mut content = Content::test_cube();
         content.item_names.insert(1, "test:cube".into());
-        content.insert_test_item_components(1, BTreeMap::from([
-            ("minecraft:max_stack_size".into(), json!(64)),
-        ]));
+        content.insert_test_item_components(
+            1,
+            BTreeMap::from([("minecraft:max_stack_size".into(), json!(64))]),
+        );
         let mut inventory = InventoryStore {
             game_mode: 1,
             cursor: Some(Stack::default()),
@@ -1289,17 +1306,33 @@ mod tests {
         inventory.player.slots[36] = Some(creative_stack(&content, 1, 3).unwrap());
         inventory.open_inventory().unwrap();
         for (slot, expected) in [(36, vec![0, 36, 0]), (37, vec![0, 37, 3, 1, 0, 0])] {
-            let packets = inventory.execute(&UiIntent::ClickSlot {
-                context: inventory.context(), slot, button: 0, mode: ClickMode::Pickup,
-            }, &content).unwrap();
+            let packets = inventory
+                .execute(
+                    &UiIntent::ClickSlot {
+                        context: inventory.context(),
+                        slot,
+                        button: 0,
+                        mode: ClickMode::Pickup,
+                    },
+                    &content,
+                )
+                .unwrap();
             assert_eq!(packets.len(), 1);
             assert_eq!(packets[0].id, sb::SET_CREATIVE_MODE_SLOT);
             assert_eq!(packets[0].payload.0, expected);
         }
         assert!(inventory.cursor.as_ref().unwrap().empty());
-        let dropped = inventory.execute(&UiIntent::ClickSlot {
-            context: inventory.context(), slot: 37, button: 0, mode: ClickMode::Throw,
-        }, &content).unwrap();
+        let dropped = inventory
+            .execute(
+                &UiIntent::ClickSlot {
+                    context: inventory.context(),
+                    slot: 37,
+                    button: 0,
+                    mode: ClickMode::Throw,
+                },
+                &content,
+            )
+            .unwrap();
         assert_eq!(dropped.len(), 2);
         assert!(dropped.iter().all(|p| p.id == sb::SET_CREATIVE_MODE_SLOT));
         assert_eq!(dropped[0].payload.0, [255, 255, 1, 1, 0, 0]);
@@ -1308,9 +1341,17 @@ mod tests {
         inventory.open_inventory().unwrap();
         assert_eq!(inventory.player.slots[37].as_ref().unwrap().count, 2);
         inventory.game_mode = 0;
-        let packets = inventory.execute(&UiIntent::ClickSlot {
-            context: inventory.context(), slot: 37, button: 0, mode: ClickMode::Pickup,
-        }, &content).unwrap();
+        let packets = inventory
+            .execute(
+                &UiIntent::ClickSlot {
+                    context: inventory.context(),
+                    slot: 37,
+                    button: 0,
+                    mode: ClickMode::Pickup,
+                },
+                &content,
+            )
+            .unwrap();
         assert!(packets.iter().all(|p| p.id != sb::SET_CREATIVE_MODE_SLOT));
     }
 }

@@ -72,28 +72,41 @@ pub(crate) struct Family {
 }
 
 pub(crate) const SWORD_COMBO: [&str; 3] = [
-    "animation.solaris.humanoid.sword_slash",
-    "animation.solaris.humanoid.sword_backhand",
-    "animation.solaris.humanoid.sword_overhead",
+    "animation.krasnokamen.humanoid.sword_slash",
+    "animation.krasnokamen.humanoid.sword_backhand",
+    "animation.krasnokamen.humanoid.sword_overhead",
 ];
-pub(crate) const SPEAR: &str = "animation.solaris.humanoid.spear_thrust";
-pub(crate) const MACE: &str = "animation.solaris.humanoid.mace_overhead";
-pub(crate) const SHIELD: &str = "animation.solaris.humanoid.shield_block";
-pub(crate) const STAGGER: &str = "animation.solaris.humanoid.stagger";
-pub(crate) const BOW: &str = "animation.solaris.humanoid.bow_shot";
-pub(crate) const CROSSBOW: &str = "animation.solaris.humanoid.crossbow_shot";
-pub(crate) const LANCE: &str = "animation.solaris.humanoid.lance_strike";
-pub(crate) const MOUNTED_SWORD: &str = "animation.solaris.humanoid.mounted_sword";
-pub(crate) const HURT: &str = "animation.solaris.humanoid.hurt";
-pub(crate) const DEATH: &str = "animation.solaris.humanoid.death";
-pub(crate) const HORSE_HURT: &str = "animation.solaris.horse.hurt";
-pub(crate) const HORSE_DEATH: &str = "animation.solaris.horse.death";
+pub(crate) const SPEAR: &str = "animation.krasnokamen.humanoid.spear_thrust";
+pub(crate) const MACE: &str = "animation.krasnokamen.humanoid.mace_overhead";
+pub(crate) const SHIELD: &str = "animation.krasnokamen.humanoid.shield_block";
+pub(crate) const STAGGER: &str = "animation.krasnokamen.humanoid.stagger";
+pub(crate) const BOW: &str = "animation.krasnokamen.humanoid.bow_shot";
+pub(crate) const CROSSBOW: &str = "animation.krasnokamen.humanoid.crossbow_shot";
+pub(crate) const LANCE: &str = "animation.krasnokamen.humanoid.lance_strike";
+pub(crate) const MOUNTED_SWORD: &str = "animation.krasnokamen.humanoid.mounted_sword";
+pub(crate) const HURT: &str = "animation.krasnokamen.humanoid.hurt";
+pub(crate) const DEATH: &str = "animation.krasnokamen.humanoid.death";
+pub(crate) const HORSE_HURT: &str = "animation.krasnokamen.horse.hurt";
+pub(crate) const HORSE_DEATH: &str = "animation.krasnokamen.horse.death";
 
 /// Every clip name the selection can start; the shipped files must provide each.
 #[cfg(test)]
 pub(crate) const ALL: [&str; 15] = [
-    SWORD_COMBO[0], SWORD_COMBO[1], SWORD_COMBO[2], SPEAR, MACE, SHIELD, STAGGER, BOW, CROSSBOW,
-    LANCE, MOUNTED_SWORD, HURT, DEATH, HORSE_HURT, HORSE_DEATH,
+    SWORD_COMBO[0],
+    SWORD_COMBO[1],
+    SWORD_COMBO[2],
+    SPEAR,
+    MACE,
+    SHIELD,
+    STAGGER,
+    BOW,
+    CROSSBOW,
+    LANCE,
+    MOUNTED_SWORD,
+    HURT,
+    DEATH,
+    HORSE_HURT,
+    HORSE_DEATH,
 ];
 
 const fn right(clips: &'static [&'static str]) -> Family {
@@ -112,7 +125,10 @@ pub(crate) fn family(class: Class, kind: SwingKind, mounted: bool) -> Option<Fam
         (Class::Heavy, _) => right(&[MACE]),
         (Class::Bow, _) => right(&[BOW]),
         (Class::Crossbow, _) => right(&[CROSSBOW]),
-        (Class::Shield, _) => Family { clips: &[SHIELD], arm: 1 },
+        (Class::Shield, _) => Family {
+            clips: &[SHIELD],
+            arm: 1,
+        },
     })
 }
 
@@ -120,7 +136,10 @@ pub(crate) fn family(class: Class, kind: SwingKind, mounted: bool) -> Option<Fam
 pub(crate) fn horse_like(type_name: &str) -> bool {
     matches!(
         type_name,
-        "minecraft:horse" | "minecraft:donkey" | "minecraft:mule" | "minecraft:zombie_horse"
+        "minecraft:horse"
+            | "minecraft:donkey"
+            | "minecraft:mule"
+            | "minecraft:zombie_horse"
             | "minecraft:skeleton_horse"
     )
 }
