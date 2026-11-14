@@ -203,22 +203,88 @@ fn install_facts(layout: &Layout, staging: &Path, rep: &Reporter) -> Result<()> 
     Ok(())
 }
 
-fn extract_resources(layout: &Layout, rep: &Reporter) -> Result<()> {
-    let mut zip = zip::ZipArchive::new(fs::File::open(layout.client_jar())?)?;
+/// Marker written inside an extracted resource pack. A pack is trusted only when
+/// this file matches the client jar that would produce it: `installed.json`'s
+/// `resources_for` is a claim, and a pre-populated or half-written pack carries a
+/// stale one, which left 26.3-only assets (`models/block/template_sign_*`,
+/// `textures/entity/cushion/*`, `textures/entity/sulfur_cube/*`) missing after an
+/// upgrade from an older client jar.
+const RESOURCES_MARKER: &str = ".resources.json";
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ResourcesManifest {
+    game_version: String,
+    client_sha1: String,
+    entries: u64,
+    paths_sha256: String,
+}
+
+/// What the jar's `assets/` tree must produce: the file count and a digest of the
+/// sorted paths, so a pack built from any other jar never matches.
+fn resources_manifest(jar: &Path, client_sha1: &str) -> Result<ResourcesManifest> {
+    use sha2::{Digest, Sha256};
+    let mut archive = zip::ZipArchive::new(fs::File::open(jar)?)?;
+    let mut paths = Vec::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        if entry.is_file() && entry.name().starts_with("assets/") {
+            paths.push(entry.name().to_owned());
+        }
+    }
+    paths.sort();
+    let mut hasher = Sha256::new();
+    for path in &paths {
+        hasher.update(path.as_bytes());
+        hasher.update(b"\n");
+    }
+    Ok(ResourcesManifest {
+        game_version: GAME_VERSION.to_owned(),
+        client_sha1: client_sha1.to_owned(),
+        entries: paths.len() as u64,
+        paths_sha256: format!("{:x}", hasher.finalize()),
+    })
+}
+
+/// Whether stage 5 may skip. The pack's own marker must name the jar that would
+/// build it: `Installed::resources_for` is a manifest claim that survives a copied
+/// or half-written tree, so it takes no part in the decision.
+fn resources_current(
+    layout: &Layout,
+    installed: &Installed,
+    expected: &ResourcesManifest,
+    client_changed: bool,
+    force: bool,
+) -> bool {
+    let _ = installed;
+    !force && !client_changed && pack_is_current(layout, expected)
+}
+
+fn pack_is_current(layout: &Layout, expected: &ResourcesManifest) -> bool {
+    fs::read_to_string(layout.join("resources").join(RESOURCES_MARKER))
+        .ok()
+        .and_then(|text| serde_json::from_str::<ResourcesManifest>(&text).ok())
+        .is_some_and(|marker| marker == *expected)
+}
+
+fn extract_resources(layout: &Layout, rep: &Reporter, expected: &ResourcesManifest) -> Result<()> {
+    let staging = layout.join("resources.staging");
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+    let mut archive = zip::ZipArchive::new(fs::File::open(layout.client_jar())?)?;
     let mut total = 0;
-    for index in 0..zip.len() {
-        let entry = zip.by_index(index)?;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
         if entry.is_file() && entry.name().starts_with("assets/") {
             total += entry.size();
         }
     }
     rep.set_total(total);
-    let root = layout.join("resources");
     let mut buffer = Vec::new();
-    for index in 0..zip.len() {
+    for index in 0..archive.len() {
         rep.check_cancel()
             .map_err(|_: Cancelled| net::UserCancelled)?;
-        let mut entry = zip.by_index(index)?;
+        let mut entry = archive.by_index(index)?;
         if !entry.is_file() || !entry.name().starts_with("assets/") {
             continue;
         }
@@ -228,17 +294,26 @@ fn extract_resources(layout: &Layout, rep: &Reporter) -> Result<()> {
                 entry.name()
             );
         };
-        let target = root.join(relative);
+        let target = staging.join(relative);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
         buffer.clear();
         entry.read_to_end(&mut buffer)?;
-        if fs::read(&target).ok().as_deref() != Some(buffer.as_slice()) {
-            fs::File::create(&target)?.write_all(&buffer)?;
-        }
+        fs::File::create(&target)?.write_all(&buffer)?;
         rep.add_done(buffer.len() as u64);
     }
+    fs::write(
+        staging.join(RESOURCES_MARKER),
+        serde_json::to_vec_pretty(expected)?,
+    )?;
+    // Swap the finished pack in. An additive extraction would keep entries the
+    // jar dropped and could leave a half-written pack that later runs trust.
+    let root = layout.join("resources");
+    if root.exists() {
+        fs::remove_dir_all(&root)?;
+    }
+    fs::rename(&staging, &root)?;
     Ok(())
 }
 
@@ -283,14 +358,11 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     net::download_all(&client, jobs, 12, rep)?;
 
     rep.stage(5, STAGES, "Extracting textures, models and fonts");
-    if installed.resources_for == release.client.sha1
-        && layout.join("resources/assets/minecraft").is_dir()
-        && !force
-        && !client_changed
-    {
+    let manifest = resources_manifest(&layout.client_jar(), &release.client.sha1)?;
+    if resources_current(layout, &installed, &manifest, client_changed, force) {
         rep.log("resources already extracted");
     } else {
-        extract_resources(layout, rep)?;
+        extract_resources(layout, rep, &manifest)?;
         installed.resources_for = release.client.sha1.clone();
         installed.save(layout)?;
     }
@@ -339,6 +411,116 @@ pub fn ensure_singleplayer_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_jar(path: &Path, entries: &[(&str, &[u8])]) {
+        let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
+        for (name, body) in entries {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(body).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn a_stale_resource_pack_is_replaced_instead_of_merged() {
+        let root = std::env::temp_dir().join(format!("krasnokamen-pack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let layout = Layout::new(root.clone());
+        fs::create_dir_all(layout.join("mojang/versions").join(GAME_VERSION)).unwrap();
+        write_jar(
+            &layout.client_jar(),
+            &[
+                (
+                    "assets/minecraft/models/block/template_sign_rot_0.json",
+                    b"{}",
+                ),
+                (
+                    "assets/minecraft/textures/entity/cushion/white_cushion.png",
+                    b"x",
+                ),
+            ],
+        );
+        // A pack from an older client jar: a file the 26.3 jar no longer has, no marker.
+        fs::create_dir_all(layout.join("resources/assets/minecraft/models/block")).unwrap();
+        fs::write(
+            layout.join("resources/assets/minecraft/models/block/oak_sign.json"),
+            b"{}",
+        )
+        .unwrap();
+        let expected = resources_manifest(&layout.client_jar(), &"a".repeat(40)).unwrap();
+        assert_eq!(expected.entries, 2);
+        assert!(!pack_is_current(&layout, &expected));
+        // A marker for another jar never stands in for the content it names.
+        let mut stale = expected.clone();
+        stale.client_sha1 = "b".repeat(40);
+        fs::write(
+            layout.join("resources").join(RESOURCES_MARKER),
+            serde_json::to_vec(&stale).unwrap(),
+        )
+        .unwrap();
+        assert!(!pack_is_current(&layout, &expected));
+
+        extract_resources(&layout, &Reporter::new(None, true), &expected).unwrap();
+
+        assert!(
+            layout
+                .join("resources/assets/minecraft/models/block/template_sign_rot_0.json")
+                .is_file(),
+            "the 26.3-only asset must arrive"
+        );
+        assert!(
+            !layout
+                .join("resources/assets/minecraft/models/block/oak_sign.json")
+                .exists(),
+            "an entry the jar dropped must not survive the rebuild"
+        );
+        assert!(pack_is_current(&layout, &expected));
+        assert!(!layout.join("resources.staging").exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_manifest_claim_does_not_make_a_stale_pack_current() {
+        let root = std::env::temp_dir().join(format!("krasnokamen-skip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let layout = Layout::new(root.clone());
+        fs::create_dir_all(layout.join("mojang/versions").join(GAME_VERSION)).unwrap();
+        write_jar(
+            &layout.client_jar(),
+            &[("assets/minecraft/models/block/oak_sign_rot_0.json", b"{}")],
+        );
+        // 26.1.2-era pack: the directory exists and the manifest already names the
+        // current client sha1, which is exactly what the old skip trusted.
+        fs::create_dir_all(layout.join("resources/assets/minecraft/models/block")).unwrap();
+        fs::write(
+            layout.join("resources/assets/minecraft/models/block/oak_sign.json"),
+            b"{}",
+        )
+        .unwrap();
+        let expected = resources_manifest(&layout.client_jar(), &"a".repeat(40)).unwrap();
+        let installed = Installed {
+            resources_for: expected.client_sha1.clone(),
+            ..Default::default()
+        };
+        assert!(
+            layout.join("resources/assets/minecraft").is_dir(),
+            "the pre-fix condition also required this directory"
+        );
+        assert!(
+            !resources_current(&layout, &installed, &expected, false, false),
+            "a stale pack must be rebuilt even when the manifest claims the current jar"
+        );
+        extract_resources(&layout, &Reporter::new(None, true), &expected).unwrap();
+        assert!(resources_current(
+            &layout, &installed, &expected, false, false
+        ));
+        assert!(!resources_current(
+            &layout, &installed, &expected, false, true
+        ));
+        let _ = fs::remove_dir_all(&root);
+    }
 
     fn manifest(kind: &str, name: &str, sha: &str) -> Vec<u8> {
         format!(

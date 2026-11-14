@@ -132,6 +132,7 @@ The data folder is `$XDG_DATA_HOME/krasnokamen-client` (default `~/.local/share/
 ```
 facts/ data/vanilla/                  Krasnokamen data tables (entity metadata and models ship inside the client)
 resources/assets/                     textures/models/fonts unpacked from your client.jar
+resources/.resources.json             marker: which client.jar produced the pack (rebuilt when it differs)
 assets/asset-index.json, objects/     Mojang asset index and sound/language objects
 mojang/versions/26.3/               official version json and client.jar
 servers/content/26.3/               singleplayer only: server content cache, installed on its first Play
@@ -143,6 +144,8 @@ client-settings.json  servers.json   in-game Options and the client's multiplaye
 artifacts/yyyy-MM-dd_HH.mm.ss.png     F2 screenshots (suffix _1, _2, … on collisions)
 logs/launcher.log                     everything the launcher and the client printed
 ```
+
+The resource pack is extracted whole from the official `client.jar`, never merged into an older tree, and carries `.resources.json` with that jar's SHA-1 plus the asset count and path digest. A pack whose marker does not name the current jar is rebuilt on the next launch, so assets a release adds (`models/block/template_sign_*`, `textures/entity/cushion/*`, `textures/entity/sulfur_cube/*`) can never be missing after an upgrade. Developers can rebuild the repository's own pack for tests with `python3 tools/resources.py build --jar <client.jar>` (`check --models` verifies every embedded entity model's texture).
 
 Render distance and fullscreen in the launcher's Settings use the same `client-settings.json` as the in-game Options screen. Launcher editing is disabled while installation or the launched game is active; use in-game Options while playing. Each launch reads the current persisted fullscreen value, and launcher edits refuse to overwrite corrupt or unreadable game settings with defaults. This does not coordinate independently started clients or multiple launcher instances.
 
