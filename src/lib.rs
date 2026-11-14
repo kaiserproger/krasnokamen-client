@@ -1323,6 +1323,12 @@ impl ApplicationHandler for App {
                     self.options.width,
                     self.options.height,
                 ))
+                // Renderer creation and the first scene build take tens of seconds on a
+                // cold start; a mapped window would show the compositor's unpainted
+                // surface for that whole time (QA5-STARTUP-GREY). The window is mapped by
+                // the first presented frame in `resumed`; Wayland ignores this flag and
+                // maps on that same buffer.
+                .with_visible(false)
                 .with_fullscreen(
                     self.options
                         .fullscreen
@@ -1364,7 +1370,18 @@ impl ApplicationHandler for App {
             self.fail(event_loop, error);
             return;
         }
+        // Present one frame before the window is mapped (QA5-STARTUP-GREY): a cold start
+        // spends tens of seconds in renderer creation and the first scene, and a mapped
+        // window shows the compositor's unpainted surface for that whole time. The first
+        // frame cannot wait for a `RedrawRequested`: Wayland delivers frame callbacks only
+        // to a mapped surface and ignores `set_visible`, so the buffer committed here is
+        // what maps the window there.
+        let presented = self.draw();
+        self.window.as_ref().unwrap().set_visible(true);
         self.window.as_ref().unwrap().request_redraw();
+        if let Err(error) = presented {
+            self.fail(event_loop, error);
+        }
     }
 
     fn window_event(
