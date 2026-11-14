@@ -1176,20 +1176,37 @@ pub(super) fn draw_entity(
                     emit_rig_parts(
                         rig,
                         store.transforms,
-                        RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light },
-                        (entity.type_name == "minecraft:armor_stand")
-                            .then(|| number(models, entity, "DATA_CLIENT_FLAGS").unwrap_or(0)),
-                        entity.type_name == "minecraft:end_crystal"
-                            && value(models, entity, "DATA_SHOW_BOTTOM")
-                                .and_then(Metadata::boolean) == Some(false),
-                        Some((entity, models, tick, partial)),
-                        out,
-                    )?;
-                    super::villagers::append(
-                        binding.layers.as_ref(),
-                        rig,
-                        store.transforms,
                         light,
+                        out,
+                    )
+                {
+                    stats
+                        .unrendered
+                        .insert(format!("{}:outer", entity.type_name), reason);
+                }
+                if entity.type_name == "minecraft:slime" {
+                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
+                        .ok_or("missing authored slime outer rig")?;
+                    evaluate_rig(
+                        shell,
+                        entity,
+                        models,
+                        content,
+                        tick,
+                        partial,
+                        matrix,
+                        store.transforms,
+                    );
+                    emit_rig(
+                        shell,
+                        store.transforms,
+                        crate::entities::presentation::RigStyle {
+                            tex,
+                            color: [1.; 3],
+                            layer: EntityMaterial::EntityTranslucent,
+                            alpha: 1.,
+                            light,
+                        },
                         out,
                     )
                 })();
