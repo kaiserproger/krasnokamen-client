@@ -1065,6 +1065,29 @@ class Fight(unittest.TestCase):
         self.assertTrue(sim.hits, logs[-6:])
         self.assertTrue(any(line.startswith("sidestep stuck") for line in logs), [line for line in logs if "sidestep" in line][:4])
 
+    def test_standing_in_the_rank_without_a_fight_is_explained_every_two_seconds(self):
+        sim, logs = duel({}, duration=14.0)  # a still rank, no enemy at all
+        lines = [line for line in logs if line.startswith("stand ")]
+        self.assertTrue(lines, "no explanation of why he stands")
+        self.assertIn("rank; no enemy within 24 blocks", lines[0])
+        self.assertIn("; hold;", lines[0])
+        self.assertRegex(lines[0], r"standing \d+ s$")
+        self.assertLessEqual(len(lines), 14 / 2.0 + 1, "more often than every 2 s")
+
+    def test_standing_in_the_rank_with_a_far_enemy_names_the_distance_and_the_place(self):
+        with mock.patch.object(pilot, "IDLE_ENGAGE", 1e9):
+            sim, logs = duel({1000: (0.0, 20.0, 64.0)}, duration=40.0)
+        lines = [line for line in logs if line.startswith("stand ") and "nearest enemy" in line]
+        self.assertTrue(lines, [line for line in logs if line.startswith("stand ")][:2])
+        self.assertRegex(lines[-1], r"^stand rank; nearest enemy 20\.0 blocks .*rank place [\d.]+ blocks away.*; hold;")
+
+    def test_a_refused_swing_does_not_silence_the_stand_line(self):
+        sim, logs = duel({1000: (0.0, 2.0, 64.0)}, always_using=True, duration=14.0)
+        self.assertEqual(sim.attacks, [])
+        lines = [line for line in logs if line.startswith("stand fight;")]
+        self.assertTrue(lines, "a swing that was tried and refused hid the explanation")
+        self.assertTrue(all("swing tried, not sent" in line for line in lines), lines[:2])
+
     def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
         for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
             sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), floor=void)

@@ -745,6 +745,7 @@ def rank(args, client: Client):
     decision = None  # the sidestep decision of the last step, logged once its outcome is known
     episode = 0  # sidestep steps in the current detour
     stuck = 0  # fight steps in a row that asked for a walk and got nowhere (a wall in the way)
+    standing_since = None  # when the current spell of standing still began
     stand, last_stand = None, -1e9  # the last fight step's facts, and when a `stand` line was last written
     side_dir, side_from, sidestepping = 1.0, None, False  # sidestep: direction, where this way began, last step was one
     blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
@@ -786,12 +787,15 @@ def rank(args, client: Client):
             pitch = float(me.get("pitch", pitch))
             interval = weapon_profile(client, args)
         last, last_step = here, stepped
-        if stand is not None and not stand["struck"] and math.dist(stand["before"], here) < STAND_MOVED \
-                and stepped - last_stand >= STAND_LOG:
-            last_stand = stepped
-            log(f"stand {stand['why']}")
+        if stand is not None and stand["swing"] != "sent" and math.dist(stand["before"], here) < STAND_MOVED:
+            standing_since = stepped if standing_since is None else standing_since
+            if stepped - standing_since >= STAND_LOG and stepped - last_stand >= STAND_LOG:
+                last_stand = stepped
+                log(f"stand {stand['why']}; swing {stand['swing']}; standing {stepped - standing_since:.0f} s")
+        else:
+            standing_since = None
         if stand is not None:
-            stuck = stuck + 1 if stand["asked"] and math.dist(stand["before"], here) < STAND_MOVED and not stand["struck"] else 0
+            stuck = stuck + 1 if stand["asked"] and math.dist(stand["before"], here) < STAND_MOVED and stand["swing"] != "sent" else 0
         else:
             stuck = 0
         stand = None
@@ -978,21 +982,27 @@ def rank(args, client: Client):
         sidestepping, walked_last = step_aside, bool(walked)
         if not step_aside:
             side_from = None
-        if contact:
-            nearest = enemies[0]
-            strength = attack_strength(pilot.observed)
-            stand = {"before": list(here), "struck": strike, "asked": bool(asked), "why": (
-                f"fight; nearest enemy {nearest['distance']:.1f} blocks (eye-to-box {eye_distance(me, nearest):.1f}, "
-                f"reach {args.min_reach}..{args.reach}, engage {args.engage}), side {sides.get(nearest['entity_id'])}, "
-                f"{'blocked by a friend (all enemies)' if enemy is None else 'targeted'}, jam {pilot.jam} {pilot.jam_kind}; "
-                f"strength {None if strength is None else round(strength, 2)}/{args.charge}; "
-                f"steer {'none' if steer is None else round(distance, 2)} wanted {asked} walked {sorted(walked)}; "
-                f"{'sidestep' if step_aside else 'hold' if steer is not None and steer == [here[0], here[2]] else 'walk'}"
-                f"{'; guard: ' + ' | '.join(dict.fromkeys(guard.refusals)) if guard is not None and guard.refusals else ''}")}
+        nearest = enemies[0] if enemies else None
+        strength = attack_strength(pilot.observed)
+        place = ("" if contact else
+                 f", rank place {'unmeasured' if offset is None else 'unknown' if target is None else str(round(math.dist([here[0], here[2]], target), 1)) + ' blocks away'}")
+        foe = (f"no enemy within {args.radius:g} blocks" if nearest is None else
+               f"nearest enemy {nearest['distance']:.1f} blocks (eye-to-box {eye_distance(me, nearest):.1f}, "
+               f"reach {args.min_reach}..{args.reach}, engage {args.engage}), side {sides.get(nearest['entity_id'])}, "
+               f"{'blocked by a friend (all enemies)' if enemy is None else 'targeted'}")
+        stand = {"before": list(here), "swing": "none", "asked": bool(asked), "why": (
+            f"{'fight' if contact else 'rank'}; {foe}, jam {pilot.jam} {pilot.jam_kind}{place}; "
+            f"strength {None if strength is None else round(strength, 2)}/{args.charge}; "
+            f"steer {'none' if steer is None else round(distance, 2)} wanted {asked} walked {sorted(walked)}; "
+            f"{'sidestep' if step_aside else 'hold' if steer is not None and steer == [here[0], here[2]] else 'walk' if asked else 'hold place'}"
+            f"{'; guard: ' + ' | '.join(dict.fromkeys(guard.refusals)) if guard is not None and guard.refusals else ''}")}
         if strike:
             # The ordinary attack, with the shield let go and the client's word that nothing is in use.
-            if attack(client, pilot, enemy, args, sides, blocked, not was_using):
+            sent = attack(client, pilot, enemy, args, sides, blocked, not was_using)
+            if sent:
                 last_sent = time.monotonic()
+            if stand is not None:
+                stand["swing"] = "sent" if sent else "tried, not sent"
             last_attack = time.monotonic()
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
