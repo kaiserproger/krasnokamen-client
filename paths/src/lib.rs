@@ -1,7 +1,7 @@
-//! Platform data-root discovery shared by the Solaris client and launcher.
+//! Platform data-root discovery shared by the Krasnokamen client and launcher.
 use std::{ffi::OsString, path::PathBuf};
 
-const APP_NAME: &str = "solaris-client";
+const APP_NAME: &str = "krasnokamen-client";
 
 fn default_root_for(
     platform: &str,
@@ -30,7 +30,9 @@ fn default_root_for(
     }
     home.filter(|value| !value.is_empty())
         .map(|home| PathBuf::from(home).join(".local/share").join(APP_NAME))
-        .ok_or_else(|| "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into())
+        .ok_or_else(|| {
+            "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into()
+        })
 }
 
 /// `explicit` wins; otherwise use the platform's conventional per-user data root.
@@ -53,7 +55,7 @@ mod tests {
     fn macos_uses_application_support() {
         assert_eq!(
             default_root_for("macos", Some("/Users/player".into()), None, None).unwrap(),
-            PathBuf::from("/Users/player/Library/Application Support/solaris-client"),
+            PathBuf::from("/Users/player/Library/Application Support/krasnokamen-client"),
         );
     }
 }

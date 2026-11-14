@@ -477,7 +477,9 @@ impl UiState {
                 return None;
             }
             if matches!(node.action, NodeAction::CreativeTab(_)) {
-                return Some(Arc::new(json!({"action":"show_text","value":{"text":node.label}})));
+                return Some(Arc::new(
+                    json!({"action":"show_text","value":{"text":node.label}}),
+                ));
             }
             let Paint::RichText(layout) = &node.paint else {
                 return None;
