@@ -1,9 +1,9 @@
-use super::super::{presentation as p, Entity, Metadata, Models};
+use super::super::{Entity, Metadata, Models, presentation as p};
 use super::modern::{Axolotl, Fox};
 use super::motion::{BodyRule, MotionFacts, WalkRule};
 use crate::{
     player::math,
-    protocol::{models::JavaRandom, Result},
+    protocol::{Result, models::JavaRandom},
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
@@ -326,7 +326,7 @@ impl State {
     }
     /// Updates the wing beat of mobs that fold their wings while standing.
     /// minecraft.wiki: chickens flap their wings while in midair. The beat eases in
-    /// and out by a quarter per tick (a Solaris choice), so landing settles in four ticks.
+    /// and out by a quarter per tick (a Krasnokamen choice), so landing settles in four ticks.
     pub fn tick_wings(&mut self, supported: bool) {
         const EASE: f32 = 0.25;
         self.wings_old = self.wings;
@@ -344,14 +344,17 @@ impl State {
     /// received swell direction (or ignition) itself, one step per tick, over the
     /// 30-tick (1.5 s) fuse minecraft.wiki gives for a creeper.
     pub fn swell(&self, partial: f32) -> f32 {
-        (self.swell_old as f32 + partial * (self.swell - self.swell_old) as f32) / CREEPER_FUSE as f32
+        (self.swell_old as f32 + partial * (self.swell - self.swell_old) as f32)
+            / CREEPER_FUSE as f32
     }
     fn tick_swell(&mut self, models: &Models, entity: &Entity) {
         self.swell_old = self.swell;
         let direction = if p::boolean(models, entity, "DATA_IS_IGNITED") {
             1
         } else {
-            p::number(models, entity, "DATA_SWELL_DIR").unwrap_or(-1).signum()
+            p::number(models, entity, "DATA_SWELL_DIR")
+                .unwrap_or(-1)
+                .signum()
         };
         self.swell = (self.swell + direction).clamp(0, CREEPER_FUSE);
     }

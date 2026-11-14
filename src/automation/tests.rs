@@ -3,8 +3,9 @@ use crate::api::{Observation, Shared};
 use parking_lot::Mutex;
 use serde_json::json;
 use std::sync::{
+    Arc, Condvar,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Condvar,
+    mpsc,
 };
 use std::time::{Duration, Instant};
 
@@ -51,7 +52,13 @@ fn offline_schema_matches_live_tools_in_both_presentation_modes() {
     assert_eq!(exported["headless_tools"], json!(core.tools()));
     core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
     assert_eq!(exported["tools"], json!(core.tools()));
-    assert!(exported["tools"].as_array().unwrap().iter().all(|tool| tool["inputSchema"].is_object()));
+    assert!(
+        exported["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["inputSchema"].is_object())
+    );
 }
 #[test]
 fn authenticated_transport_writer_is_exclusive_and_context_fenced() {
@@ -153,10 +160,19 @@ fn observe_queued_before_respawn_reads_the_new_dimension() {
         let click = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         click.reply.send(Ok(json!({"status": "ok"}))).unwrap();
         let observe = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
-        owner_core.shared.observation.lock().unwrap().dimension_epoch = "3".into();
+        owner_core
+            .shared
+            .observation
+            .lock()
+            .unwrap()
+            .dimension_epoch = "3".into();
         let (verdict, _) = Core::lease_verdict(&mut owner_core.control.lock(), "1", "3");
         assert!(verdict.is_none());
-        let result = if observe.expected_dimension_epoch.as_deref().is_some_and(|epoch| epoch != "3") {
+        let result = if observe
+            .expected_dimension_epoch
+            .as_deref()
+            .is_some_and(|epoch| epoch != "3")
+        {
             Err("stale_dimension_epoch".to_string())
         } else {
             Ok(json!({"dimension_epoch": "3"}))
@@ -174,7 +190,8 @@ fn observe_queued_before_respawn_reads_the_new_dimension() {
             "button_label": "Respawn"
         }),
         &cancelled,
-    ).unwrap();
+    )
+    .unwrap();
     let result = super::tools::execute(&core, "a", "minecraft_observe", &json!({}), &cancelled)
         .expect("observe must return the current dimension after the queued handoff");
     assert_eq!(result["dimension_epoch"], "3");
@@ -187,12 +204,19 @@ fn writer_queued_before_dimension_change_remains_epoch_fenced() {
     let owner = std::thread::spawn(move || {
         let write = receiver.recv_timeout(Duration::from_secs(10)).unwrap();
         assert_eq!(write.expected_dimension_epoch.as_deref(), Some("2"));
-        write.reply.send(Err("stale_dimension_epoch".into())).unwrap();
+        write
+            .reply
+            .send(Err("stale_dimension_epoch".into()))
+            .unwrap();
     });
     let error = super::tools::execute(
-        &core, "a", "minecraft_send_chat", &json!({"message": "hello"}),
+        &core,
+        "a",
+        "minecraft_send_chat",
+        &json!({"message": "hello"}),
         &Arc::new(AtomicBool::new(false)),
-    ).unwrap_err();
+    )
+    .unwrap_err();
     assert_eq!(error, "stale_dimension_epoch");
     owner.join().unwrap();
 }
@@ -200,12 +224,54 @@ fn writer_queued_before_dimension_change_remains_epoch_fenced() {
 #[test]
 fn ui_respawn_authorization_expires_on_next_writer_and_rejects_other_clicks() {
     for (class, label, succeeds, next_writer, connection, dimension) in [
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, true, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", false, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Quit", true, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.PauseScreen", "Respawn", true, false, "1", "3"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, false, "1", "4"),
-        ("net.minecraft.client.gui.screens.DeathScreen", "Respawn", true, false, "2", "3"),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            true,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            false,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Quit",
+            true,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.PauseScreen",
+            "Respawn",
+            true,
+            false,
+            "1",
+            "3",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            false,
+            "1",
+            "4",
+        ),
+        (
+            "net.minecraft.client.gui.screens.DeathScreen",
+            "Respawn",
+            true,
+            false,
+            "2",
+            "3",
+        ),
     ] {
         let (core, receiver) = client();
         core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});

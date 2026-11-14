@@ -3,8 +3,8 @@ pub mod lighting;
 pub(crate) mod mipmaps;
 pub(crate) mod shapes;
 use super::{
-    content::{ResourceSource, TextureRegion},
     Result,
+    content::{ResourceSource, TextureRegion},
 };
 use crate::api::RenderLayer;
 use glam::{Mat3, Vec3};
@@ -593,7 +593,11 @@ fn bake_elements(model: &Value, descriptor: &Value, tint: TintKind) -> Result<Ve
                 };
             } else {
                 let angles = if r["angles"].is_null() {
-                    Vec3::new(coordinate(&r["x"])?, coordinate(&r["y"])?, coordinate(&r["z"])?)
+                    Vec3::new(
+                        coordinate(&r["x"])?,
+                        coordinate(&r["y"])?,
+                        coordinate(&r["z"])?,
+                    )
                 } else {
                     vector(&r["angles"])?
                 };
@@ -989,10 +993,11 @@ mod tests {
         )
         .unwrap();
         assert!(qs.iter().any(|q| q.quad.cullface == Some(0)));
-        assert!(qs
-            .iter()
-            .flat_map(|q| q.quad.positions)
-            .all(|p| p[1] >= 0.49999));
+        assert!(
+            qs.iter()
+                .flat_map(|q| q.quad.positions)
+                .all(|p| p[1] >= 0.49999)
+        );
         // Vanilla `Quadrant.fromXYAngles` composes `y.compose(x)`, i.e. the X
         // rotation applies first: for {x:180,y:90} north maps to WEST (face 4),
         // verified against decompiled `OctahedralGroup`/`SymmetricGroup3`
@@ -1038,7 +1043,8 @@ mod tests {
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
         v["elements"][0]["rotation"]["angle"] = serde_json::json!(-90);
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
-        v["elements"][0]["rotation"] = serde_json::json!({"origin":[8,0,8],"axis":"y","angle":0.0001});
+        v["elements"][0]["rotation"] =
+            serde_json::json!({"origin":[8,0,8],"axis":"y","angle":0.0001});
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
         v["elements"][0]["rotation"]["angle"] = serde_json::json!(-112.5);
         assert!(bake_elements(&v, &serde_json::json!({}), TintKind::None).is_ok());
@@ -1049,7 +1055,8 @@ mod tests {
     #[test]
     fn baked_faces_retain_resolved_gui_light_mode() {
         let mut model = slab();
-        let bake = |model: &Value| bake_elements(model, &serde_json::json!({}), TintKind::None).unwrap();
+        let bake =
+            |model: &Value| bake_elements(model, &serde_json::json!({}), TintKind::None).unwrap();
         assert!(bake(&model).iter().all(|q| q.quad.gui_light_side));
         model["gui_light"] = serde_json::json!("front");
         assert!(bake(&model).iter().all(|q| !q.quad.gui_light_side));
@@ -1058,11 +1065,13 @@ mod tests {
     }
     #[test]
     fn cyclic_texture_is_rejected() {
-        assert!(texture_ref(
-            &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
-            "#a".into()
-        )
-        .is_err());
+        assert!(
+            texture_ref(
+                &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
+                "#a".into()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn java_random_weight_choice_matches_known_jdk_sequence() {
@@ -1152,7 +1161,7 @@ mod tests {
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let holder = TempRoot(std::env::temp_dir().join(format!(
-            "solaris-models-test-{}-{}",
+            "krasnokamen-models-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )));
@@ -1260,7 +1269,13 @@ mod tests {
             .collect();
         assert_eq!(
             pairs,
-            BTreeSet::from([(1, Some(1)), (2, Some(1)), (5, Some(1)), (1, None), (2, None)])
+            BTreeSet::from([
+                (1, Some(1)),
+                (2, Some(1)),
+                (5, Some(1)),
+                (1, None),
+                (2, None)
+            ])
         );
         // The legacy flag is untouched: the override does not masquerade as `shade: false`.
         assert!(qs.iter().all(|q| q.quad.shade));
@@ -1293,9 +1308,10 @@ mod tests {
         // The geometry did rotate (y=90 sends the north face to east) while the
         // override keeps naming world north.
         let qs = bake_elements(&model, &serde_json::json!({"y":90}), TintKind::None).unwrap();
-        assert!(qs
-            .iter()
-            .any(|q| q.quad.face == 5 && q.quad.shade_direction == Some(2)));
+        assert!(
+            qs.iter()
+                .any(|q| q.quad.face == 5 && q.quad.shade_direction == Some(2))
+        );
     }
     #[test]
     fn legacy_shade_flag_still_parses_next_to_the_override() {
@@ -1305,13 +1321,17 @@ mod tests {
         let qs = bake_elements(&model, &serde_json::json!({}), TintKind::None).unwrap();
         assert!(qs.iter().all(|q| !q.quad.shade));
         assert_eq!(
-            qs.iter().filter(|q| q.quad.shade_direction == Some(1)).count(),
+            qs.iter()
+                .filter(|q| q.quad.shade_direction == Some(1))
+                .count(),
             3
         );
         let plain = bake_elements(&slab(), &serde_json::json!({}), TintKind::None).unwrap();
-        assert!(plain
-            .iter()
-            .all(|q| q.quad.shade && q.quad.shade_direction.is_none()));
+        assert!(
+            plain
+                .iter()
+                .all(|q| q.quad.shade && q.quad.shade_direction.is_none())
+        );
     }
     #[test]
     fn invalid_shade_direction_override_is_a_model_error() {
@@ -1330,7 +1350,10 @@ mod tests {
             )
             .err()
             .unwrap_or_else(|| panic!("{value} must be rejected"));
-            assert!(error.contains("shade_direction_override"), "{value}: {error}");
+            assert!(
+                error.contains("shade_direction_override"),
+                "{value}: {error}"
+            );
         }
     }
     #[test]
@@ -1343,7 +1366,7 @@ mod tests {
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let holder = TempRoot(std::env::temp_dir().join(format!(
-            "solaris-shade-override-test-{}-{}",
+            "krasnokamen-shade-override-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )));

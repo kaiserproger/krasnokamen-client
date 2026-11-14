@@ -1,8 +1,8 @@
-//! Data-root discovery and the on-disk layout shared with `solaris-client`.
+//! Data-root discovery and the on-disk layout shared with `krasnokamen-client`.
 //!
 //! ```text
 //! <root>/
-//!   facts/ data/vanilla/                Solaris data bundle (see `bootstrap`)
+//!   facts/ data/vanilla/                Krasnokamen data bundle (see `bootstrap`)
 //!   resources/assets/                   extracted from the official client.jar
 //!   assets/asset-index.json, objects/   Mojang asset index + sound/lang objects
 //!   mojang/versions/<ver>/              official version json + client.jar
@@ -18,7 +18,7 @@ pub const GAME_VERSION: &str = "26.3";
 
 /// `--data-dir` wins; otherwise use the shared client data-root convention.
 pub fn data_root(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
-    solaris_paths::data_root(explicit)
+    krasnokamen_paths::data_root(explicit)
 }
 
 pub struct Layout {
