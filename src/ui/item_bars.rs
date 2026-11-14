@@ -25,8 +25,6 @@ pub(super) fn append(
     transform: Mat4,
     out: &mut MeshGeometry,
 ) -> Result<()> {
-    // NEGATIVE CONTROL (RCBNegBars): pre-e8fe40c2 behavior, no bar producer.
-    return Ok(());
     if stack.empty() {
         return Ok(());
     }
