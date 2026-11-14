@@ -23,6 +23,9 @@ mod attack_dispatch_tests;
 mod hud_packet_tests;
 mod local_server;
 #[cfg(test)]
+mod hud_packet_tests;
+mod local_server;
+#[cfg(test)]
 mod mining_start_tests;
 mod observation;
 mod packets;
