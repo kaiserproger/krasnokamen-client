@@ -254,9 +254,12 @@ pub fn start(
 struct ConnectionSlot(Arc<Transport>);
 impl ConnectionSlot {
     fn acquire(transport: &Arc<Transport>) -> Option<Self> {
-        transport.connections.fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
-            (used < 32).then_some(used + 1)
-        }).ok()?;
+        transport
+            .connections
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                (used < 32).then_some(used + 1)
+            })
+            .ok()?;
         Some(Self(transport.clone()))
     }
 }
@@ -328,7 +331,12 @@ fn read_before(
             Ok(0) => return Err(format!("{phase}_eof")),
             Ok(count) => return Ok(count),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
                 return Err(format!("{phase}_timeout"));
             }
             Err(e) => return Err(e.to_string()),
@@ -348,10 +356,19 @@ fn read_http(
         if available == 0 {
             return Err("header_too_large".into());
         }
-        let count = read_before(stream, &mut chunk[..available], header_deadline, "header", stopped)?;
+        let count = read_before(
+            stream,
+            &mut chunk[..available],
+            header_deadline,
+            "header",
+            stopped,
+        )?;
         let search_from = header.len().saturating_sub(3);
         header.extend_from_slice(&chunk[..count]);
-        if let Some(offset) = header[search_from..].windows(4).position(|w| w == b"\r\n\r\n") {
+        if let Some(offset) = header[search_from..]
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+        {
             break search_from + offset + 4;
         }
     };
@@ -398,7 +415,13 @@ fn read_http(
     body[..received].copy_from_slice(&prefetched[..received]);
     while received < length {
         let end = (received + HTTP_READ_CHUNK).min(length);
-        received += read_before(stream, &mut body[received..end], body_deadline, "body", stopped)?;
+        received += read_before(
+            stream,
+            &mut body[received..end],
+            body_deadline,
+            "body",
+            stopped,
+        )?;
     }
     Ok(Http {
         method: parts[0].into(),
@@ -519,7 +542,11 @@ impl Transport {
             }
         }
     }
-    fn serve(self: &Arc<Self>, stream: &mut TcpStream, header_deadline: Instant) -> Result<(), String> {
+    fn serve(
+        self: &Arc<Self>,
+        stream: &mut TcpStream,
+        header_deadline: Instant,
+    ) -> Result<(), String> {
         let http = match read_http(stream, header_deadline, &self.core.stopped) {
             Ok(h) => h,
             Err(e) => {
@@ -1247,14 +1274,22 @@ mod tests {
     impl ResponseClock {
         fn new(header_delay: Duration, body_delay: Duration) -> Self {
             Self {
-                now: Instant::now(), timeout: Duration::ZERO, timeouts: Vec::new(),
-                written: Vec::new(), header_delay, body_delay, body_started: false,
-                interrupt_once: false, zero_once: false,
+                now: Instant::now(),
+                timeout: Duration::ZERO,
+                timeouts: Vec::new(),
+                written: Vec::new(),
+                header_delay,
+                body_delay,
+                body_started: false,
+                interrupt_once: false,
+                zero_once: false,
             }
         }
     }
     impl HttpOutput for ResponseClock {
-        fn now(&self) -> Instant { self.now }
+        fn now(&self) -> Instant {
+            self.now
+        }
         fn set_timeout(&mut self, timeout: Duration) -> std::io::Result<()> {
             self.timeout = timeout;
             self.timeouts.push(timeout);
@@ -1270,30 +1305,43 @@ mod tests {
             if std::mem::take(&mut self.zero_once) {
                 return Ok(0);
             }
-            let delay = if self.body_started { self.body_delay } else {
+            let delay = if self.body_started {
+                self.body_delay
+            } else {
                 std::mem::take(&mut self.header_delay)
             };
             self.now += delay.min(self.timeout);
             if delay >= self.timeout {
                 return Err(ErrorKind::TimedOut.into());
             }
-            let count = if self.body_started { bytes.len().min(1) } else { bytes.len() };
+            let count = if self.body_started {
+                bytes.len().min(1)
+            } else {
+                bytes.len()
+            };
             self.written.extend_from_slice(&bytes[..count]);
             self.body_started |= self.written.ends_with(b"\r\n\r\n");
             Ok(count)
         }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
     fn http_response_deadline_bounds_slow_reader_across_headers_and_body() {
         for header_seconds in [0, 4] {
-            let mut output = ResponseClock::new(
-                Duration::from_secs(header_seconds), Duration::from_secs(1));
+            let mut output =
+                ResponseClock::new(Duration::from_secs(header_seconds), Duration::from_secs(1));
             let deadline = output.now + HTTP_WRITE_BUDGET;
-            assert!(respond_bytes(&mut output, 200, &[("Mcp-Session-Id", "test")], b"abcdef").is_err());
+            assert!(
+                respond_bytes(&mut output, 200, &[("Mcp-Session-Id", "test")], b"abcdef").is_err()
+            );
             assert_eq!(output.now, deadline);
-            assert!(output.body_started, "exercise body progress, not just a header timeout");
+            assert!(
+                output.body_started,
+                "exercise body progress, not just a header timeout"
+            );
             assert_eq!(output.timeouts.last(), Some(&Duration::from_secs(1)));
             assert!(output.timeouts.windows(2).all(|pair| pair[1] <= pair[0]));
             assert!(!output.written.ends_with(b"abcdef"));
@@ -1301,8 +1349,15 @@ mod tests {
         let mut output = ResponseClock::new(Duration::ZERO, Duration::ZERO);
         output.interrupt_once = true;
         respond_bytes(&mut output, 429, &[], b"ok").unwrap();
-        assert_eq!(&output.timeouts[..2], &[Duration::from_secs(5), Duration::from_secs(4)]);
-        assert!(output.written.starts_with(b"HTTP/1.1 429 Too Many Requests\r\n"));
+        assert_eq!(
+            &output.timeouts[..2],
+            &[Duration::from_secs(5), Duration::from_secs(4)]
+        );
+        assert!(
+            output
+                .written
+                .starts_with(b"HTTP/1.1 429 Too Many Requests\r\n")
+        );
         assert!(output.written.ends_with(b"\r\n\r\nok"));
         let mut output = ResponseClock::new(Duration::ZERO, Duration::ZERO);
         output.zero_once = true;
@@ -1316,7 +1371,8 @@ mod tests {
         let slot = ConnectionSlot::acquire(&server.transport).unwrap();
         let worker = spawn_connection(std::thread::Builder::new(), slot, |_| {
             panic!("injected serve panic");
-        }).unwrap();
+        })
+        .unwrap();
         assert!(worker.join().is_err());
         assert_eq!(server.transport.connections.load(Ordering::Acquire), 0);
         drop(server);
@@ -1329,7 +1385,8 @@ mod tests {
         let slot = ConnectionSlot::acquire(&server.transport).unwrap();
         // A stack larger than the address space is rejected without allocating it.
         let spawned = spawn_connection(
-            std::thread::Builder::new().stack_size(usize::MAX / 2), slot,
+            std::thread::Builder::new().stack_size(usize::MAX / 2),
+            slot,
             |_| panic!("failed spawn must not run serve"),
         );
         assert!(spawned.is_err());
@@ -1354,8 +1411,11 @@ mod tests {
     impl SocketClock {
         fn new(steps: impl IntoIterator<Item = Step>) -> Self {
             Self {
-                now: Instant::now(), steps: steps.into_iter().collect(),
-                timeout: Duration::ZERO, timeouts: Vec::new(), read_sizes: Vec::new(),
+                now: Instant::now(),
+                steps: steps.into_iter().collect(),
+                timeout: Duration::ZERO,
+                timeouts: Vec::new(),
+                read_sizes: Vec::new(),
                 stopped: Arc::new(AtomicBool::new(false)),
             }
         }
@@ -1366,7 +1426,9 @@ mod tests {
         }
     }
     impl HttpInput for SocketClock {
-        fn now(&self) -> Instant { self.now }
+        fn now(&self) -> Instant {
+            self.now
+        }
         fn set_timeout(&mut self, timeout: Duration) -> std::io::Result<()> {
             self.timeout = timeout;
             self.timeouts.push(timeout);
@@ -1385,7 +1447,8 @@ mod tests {
                     let count = data.len().min(bytes.len());
                     bytes[..count].copy_from_slice(&data[..count]);
                     if count < data.len() {
-                        self.steps.push_front(Step::Bytes(Duration::ZERO, data[count..].to_vec()));
+                        self.steps
+                            .push_front(Step::Bytes(Duration::ZERO, data[count..].to_vec()));
                     }
                     Ok(count)
                 }
@@ -1410,14 +1473,27 @@ mod tests {
         for body in [false, true] {
             let mut steps = Vec::new();
             if body {
-                steps.push(bytes(b"POST /mcp HTTP/1.1\r\nContent-Length: 8\r\n\r\n".to_vec()));
+                steps.push(bytes(
+                    b"POST /mcp HTTP/1.1\r\nContent-Length: 8\r\n\r\n".to_vec(),
+                ));
             }
             steps.extend((0..8).map(|_| Step::Bytes(Duration::from_secs(1), vec![b'x'])));
             let mut input = SocketClock::new(steps);
             let start = input.now;
-            assert_eq!(parse_error(&mut input), if body { "body_timeout" } else { "header_timeout" });
+            assert_eq!(
+                parse_error(&mut input),
+                if body {
+                    "body_timeout"
+                } else {
+                    "header_timeout"
+                }
+            );
             assert_eq!(input.now - start, HTTP_READ_BUDGET);
-            let timeouts = if body { &input.timeouts[1..] } else { &input.timeouts[..] };
+            let timeouts = if body {
+                &input.timeouts[1..]
+            } else {
+                &input.timeouts[..]
+            };
             assert_eq!(timeouts, &[5, 4, 3, 2, 1].map(Duration::from_secs));
         }
     }
@@ -1425,8 +1501,10 @@ mod tests {
     #[test]
     fn http_body_has_one_independent_budget_after_header_completion() {
         let mut input = SocketClock::new([
-            Step::Bytes(Duration::from_secs(4),
-                b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\nx".to_vec()),
+            Step::Bytes(
+                Duration::from_secs(4),
+                b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\nx".to_vec(),
+            ),
             Step::Bytes(Duration::from_secs(4), vec![b'y']),
         ]);
         let start = input.now;
@@ -1443,7 +1521,9 @@ mod tests {
             let mut rest = header[boundary..].to_vec();
             rest.extend([0xff, 0, b'\r']);
             let mut input = SocketClock::new([
-                bytes(header[..boundary].to_vec()), bytes(rest), bytes(vec![b'\n']),
+                bytes(header[..boundary].to_vec()),
+                bytes(rest),
+                bytes(vec![b'\n']),
             ]);
             let http = input.parse().unwrap();
             assert_eq!(http.method, "POST");
@@ -1455,7 +1535,11 @@ mod tests {
 
     #[test]
     fn http_exact_size_boundaries_and_prefetch_do_not_weaken_caps() {
-        for size in [HTTP_HEADER_LIMIT - 1, HTTP_HEADER_LIMIT, HTTP_HEADER_LIMIT + 1] {
+        for size in [
+            HTTP_HEADER_LIMIT - 1,
+            HTTP_HEADER_LIMIT,
+            HTTP_HEADER_LIMIT + 1,
+        ] {
             let mut header = b"POST /mcp HTTP/1.1\r\nContent-Length: 0\r\nX-Pad: ".to_vec();
             header.resize(size - 4, b'x');
             header.extend_from_slice(b"\r\n\r\n");
@@ -1468,7 +1552,8 @@ mod tests {
             }
         }
         for size in [0, HTTP_BODY_LIMIT - 1, HTTP_BODY_LIMIT, HTTP_BODY_LIMIT + 1] {
-            let mut request = format!("POST /mcp HTTP/1.1\r\nContent-Length: {size}\r\n\r\n").into_bytes();
+            let mut request =
+                format!("POST /mcp HTTP/1.1\r\nContent-Length: {size}\r\n\r\n").into_bytes();
             request.extend(vec![0xff; size]);
             let mut input = SocketClock::new([bytes(request)]);
             if size <= HTTP_BODY_LIMIT {
@@ -1484,17 +1569,30 @@ mod tests {
     #[test]
     fn http_eof_timeout_interrupt_and_shutdown_are_terminal_or_bounded() {
         for body in [false, true] {
-            for terminal in [ErrorKind::UnexpectedEof, ErrorKind::TimedOut, ErrorKind::WouldBlock] {
+            for terminal in [
+                ErrorKind::UnexpectedEof,
+                ErrorKind::TimedOut,
+                ErrorKind::WouldBlock,
+            ] {
                 let prefix = if body {
                     b"POST /mcp HTTP/1.1\r\nContent-Length: 2\r\n\r\nx".as_slice()
-                } else { b"POST /mcp HTTP/1.1\r\n\r".as_slice() };
+                } else {
+                    b"POST /mcp HTTP/1.1\r\n\r".as_slice()
+                };
                 let mut steps = vec![bytes(prefix.to_vec())];
                 if terminal != ErrorKind::UnexpectedEof {
                     steps.push(Step::Error(terminal));
                 }
                 let mut input = SocketClock::new(steps);
-                let expected = format!("{}_{}", if body { "body" } else { "header" },
-                    if terminal == ErrorKind::UnexpectedEof { "eof" } else { "timeout" });
+                let expected = format!(
+                    "{}_{}",
+                    if body { "body" } else { "header" },
+                    if terminal == ErrorKind::UnexpectedEof {
+                        "eof"
+                    } else {
+                        "timeout"
+                    }
+                );
                 assert_eq!(parse_error(&mut input), expected);
                 let mut input = SocketClock::new([bytes(prefix.to_vec()), Step::Shutdown]);
                 assert_eq!(parse_error(&mut input), "automation_shutdown");
@@ -1502,7 +1600,8 @@ mod tests {
         }
         let mut input = SocketClock::new([
             Step::Bytes(Duration::from_secs(4), b"GET /mcp HTTP/1.1\r\n".to_vec()),
-            Step::Error(ErrorKind::Interrupted), bytes(b"\r\n".to_vec()),
+            Step::Error(ErrorKind::Interrupted),
+            bytes(b"\r\n".to_vec()),
         ]);
         assert_eq!(input.parse().unwrap().method, "GET");
         assert_eq!(input.timeouts, [5, 1, 1].map(Duration::from_secs));
@@ -1513,7 +1612,10 @@ mod tests {
         let mut input = SocketClock::new([]);
         let stopped = input.stopped.clone();
         let expired = input.now;
-        assert_eq!(read_http(&mut input, expired, &stopped).err().unwrap(), "header_timeout");
+        assert_eq!(
+            read_http(&mut input, expired, &stopped).err().unwrap(),
+            "header_timeout"
+        );
         assert!(input.read_sizes.is_empty());
     }
 
@@ -1521,12 +1623,17 @@ mod tests {
     fn http_framing_rejections_stay_before_body_reads() {
         for (header, error) in [
             ("Content-Length: 0\r\ncontent-length: 0", "duplicate_header"),
-            ("Transfer-Encoding: chunked", "transfer_encoding_not_supported"),
+            (
+                "Transfer-Encoding: chunked",
+                "transfer_encoding_not_supported",
+            ),
             ("Content-Length: nope", "invalid_content_length"),
             ("Content-Length: -1", "invalid_content_length"),
             ("X-Test: empty", "content_length_required"),
         ] {
-            let mut input = SocketClock::new([bytes(format!("POST /mcp HTTP/1.1\r\n{header}\r\n\r\n").into_bytes())]);
+            let mut input = SocketClock::new([bytes(
+                format!("POST /mcp HTTP/1.1\r\n{header}\r\n\r\n").into_bytes(),
+            )]);
             assert_eq!(parse_error(&mut input), error);
             assert_eq!(input.read_sizes.len(), 1);
         }
@@ -1543,7 +1650,9 @@ mod tests {
         (server, receiver, directory)
     }
     fn response(stream: &mut TcpStream) -> String {
-        stream.set_read_timeout(Some(Duration::from_secs(12))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(12)))
+            .unwrap();
         let mut data = String::new();
         stream.read_to_string(&mut data).unwrap();
         data
@@ -1555,7 +1664,9 @@ mod tests {
         let mut peers = Vec::new();
         for index in 0..32 {
             let slot = ConnectionSlot::acquire(&server.transport).unwrap();
-            let prefix: &[u8] = if index % 2 == 0 { b"POST /mcp HTTP/1.1\r\n" } else {
+            let prefix: &[u8] = if index % 2 == 0 {
+                b"POST /mcp HTTP/1.1\r\n"
+            } else {
                 b"POST /mcp HTTP/1.1\r\nContent-Length: 4\r\n\r\nx"
             };
             let peer = SocketClock::new([
@@ -1574,20 +1685,27 @@ mod tests {
         for (slot, mut peer) in peers {
             let deadline = peer.now + HTTP_READ_BUDGET;
             let result = parse_error(&mut peer);
-            assert!(matches!(result.as_str(), "header_timeout" | "body_timeout"), "{result}");
+            assert!(
+                matches!(result.as_str(), "header_timeout" | "body_timeout"),
+                "{result}"
+            );
             assert_eq!(peer.now, deadline);
             drop(slot);
         }
         assert_eq!(server.transport.connections.load(Ordering::Acquire), 0);
         let bridge = Bridge {
-            address: server.transport.address, token: server.transport.token.clone(),
-            session: Mutex::new(None), output: Mutex::new(std::io::stdout()),
+            address: server.transport.address,
+            token: server.transport.token.clone(),
+            session: Mutex::new(None),
+            output: Mutex::new(std::io::stdout()),
         };
-        let (status, _, result) = bridge.send(&json!({
-            "jsonrpc":"2.0", "id":1, "method":"initialize",
-            "params":{"protocolVersion":"2025-11-25","capabilities":{},
-                "clientInfo":{"name":"ingress-regression","version":"1"}}
-        })).unwrap();
+        let (status, _, result) = bridge
+            .send(&json!({
+                "jsonrpc":"2.0", "id":1, "method":"initialize",
+                "params":{"protocolVersion":"2025-11-25","capabilities":{},
+                    "clientInfo":{"name":"ingress-regression","version":"1"}}
+            }))
+            .unwrap();
         assert_eq!(status, 200);
         assert!(result.unwrap().get("result").is_some());
         drop(server);
@@ -1598,23 +1716,61 @@ mod tests {
     fn http_host_origin_auth_order_and_private_credentials_are_preserved() {
         let (server, _owner, directory) = test_server();
         for (host, origin, token, status, message) in [
-            ("wrong".to_string(), "http://wrong", "wrong".to_string(), 400, "invalid Host"),
-            (server.transport.address.to_string(), "http://wrong", "wrong".to_string(), 403, "invalid Origin"),
-            (server.transport.address.to_string(), "", "wrong".to_string(), 401, "unauthorized"),
-            (server.transport.address.to_string(), "", server.transport.token.clone(), 405, ""),
+            (
+                "wrong".to_string(),
+                "http://wrong",
+                "wrong".to_string(),
+                400,
+                "invalid Host",
+            ),
+            (
+                server.transport.address.to_string(),
+                "http://wrong",
+                "wrong".to_string(),
+                403,
+                "invalid Origin",
+            ),
+            (
+                server.transport.address.to_string(),
+                "",
+                "wrong".to_string(),
+                401,
+                "unauthorized",
+            ),
+            (
+                server.transport.address.to_string(),
+                "",
+                server.transport.token.clone(),
+                405,
+                "",
+            ),
         ] {
             let mut peer = TcpStream::connect(server.transport.address).unwrap();
-            let origin = if origin.is_empty() { String::new() } else { format!("Origin: {origin}\r\n") };
-            write!(peer, "GET /mcp HTTP/1.1\r\nHost: {host}\r\n{origin}Authorization: Bearer {token}\r\n\r\n").unwrap();
+            let origin = if origin.is_empty() {
+                String::new()
+            } else {
+                format!("Origin: {origin}\r\n")
+            };
+            write!(
+                peer,
+                "GET /mcp HTTP/1.1\r\nHost: {host}\r\n{origin}Authorization: Bearer {token}\r\n\r\n"
+            )
+            .unwrap();
             let result = response(&mut peer);
-            assert!(result.starts_with(&format!("HTTP/1.1 {status}")), "{result}");
+            assert!(
+                result.starts_with(&format!("HTTP/1.1 {status}")),
+                "{result}"
+            );
             assert!(result.contains(message));
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             for path in [&server.descriptor, &server.token_file] {
-                assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o777, 0o600);
+                assert_eq!(
+                    fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
             }
         }
         drop(server);
@@ -1632,7 +1788,13 @@ mod tests {
             let (mut socket, _) = listener.accept().unwrap();
             peer.write_all(prefix).unwrap();
             peer.shutdown(std::net::Shutdown::Write).unwrap();
-            let error = read_http(&mut socket, Instant::now() + HTTP_READ_BUDGET, &AtomicBool::new(false)).err().unwrap();
+            let error = read_http(
+                &mut socket,
+                Instant::now() + HTTP_READ_BUDGET,
+                &AtomicBool::new(false),
+            )
+            .err()
+            .unwrap();
             assert!(error.ends_with("_eof"), "{error}");
         }
     }

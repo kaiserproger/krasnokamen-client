@@ -92,7 +92,11 @@ pub(super) fn execute(
         return Err("window_not_focused".into());
     }
     let capture_fence = if capture {
-        core.capture_fence(session, &observation.connection_epoch, &observation.dimension_epoch)?
+        core.capture_fence(
+            session,
+            &observation.connection_epoch,
+            &observation.dimension_epoch,
+        )?
     } else {
         None
     };
@@ -211,7 +215,9 @@ pub(super) fn execute(
             reply,
             expected_connection_epoch: connection,
             expected_dimension_epoch: dimension,
-            automation_fence: writer.as_ref().map(|writer| writer.fence.clone())
+            automation_fence: writer
+                .as_ref()
+                .map(|writer| writer.fence.clone())
                 .or_else(|| capture_fence.clone()),
             cancelled: Some(cancelled.clone()),
         })

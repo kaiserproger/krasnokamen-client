@@ -1312,7 +1312,10 @@ impl Renderer {
                 .automation_fence
                 .as_ref()
                 .is_some_and(|f| !f.load(Ordering::Acquire))
-                || request.cancelled.as_ref().is_some_and(|c| c.load(Ordering::Acquire));
+                || request
+                    .cancelled
+                    .as_ref()
+                    .is_some_and(|c| c.load(Ordering::Acquire));
             let stale = request
                 .expected_connection_epoch
                 .as_ref()
@@ -1678,9 +1681,15 @@ impl Renderer {
             .and_then(|capture| capture.mapped.try_recv().ok());
         if let Some(result) = mapped {
             let mut capture = self.capture.take().unwrap();
-            if capture.request.automation_fence.as_ref()
+            if capture
+                .request
+                .automation_fence
+                .as_ref()
                 .is_some_and(|fence| !fence.load(Ordering::Acquire))
-                || capture.request.cancelled.as_ref()
+                || capture
+                    .request
+                    .cancelled
+                    .as_ref()
                     .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
             {
                 let _ = capture.request.reply.send(Err("capture_cancelled".into()));
@@ -1725,7 +1734,10 @@ impl Renderer {
                             .automation_fence
                             .as_ref()
                             .is_some_and(|fence| !fence.load(std::sync::atomic::Ordering::Acquire))
-                            || capture.request.cancelled.as_ref()
+                            || capture
+                                .request
+                                .cancelled
+                                .as_ref()
                                 .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
                         {
                             return Err("capture_cancelled".into());
@@ -1767,7 +1779,10 @@ impl Renderer {
                             .automation_fence
                             .as_ref()
                             .is_some_and(|f| !f.load(Ordering::Acquire))
-                            || capture.request.cancelled.as_ref()
+                            || capture
+                                .request
+                                .cancelled
+                                .as_ref()
                                 .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
                         {
                             let _ = std::fs::remove_file(&capture.path);
@@ -1816,48 +1831,71 @@ mod presentation_error_tests {
                 .unwrap().as_nanos(),
         ));
         std::fs::create_dir(&directory).unwrap();
-        let mut renderer = pollster::block_on(Renderer::new_offscreen(
-            64, 64, directory.clone(),
-        )).unwrap();
+        let mut renderer =
+            pollster::block_on(Renderer::new_offscreen(64, 64, directory.clone())).unwrap();
         let (wake, events) = mpsc::channel();
-        renderer.set_wake(Arc::new(move || { let _ = wake.send(()); }));
+        renderer.set_wake(Arc::new(move || {
+            let _ = wake.send(());
+        }));
         let mut results = Vec::new();
         for before_submission in [true, false] {
             let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(before_submission));
             let (reply, response) = mpsc::sync_channel(1);
             let path = directory.join(format!("cancel-{before_submission}.png"));
             let previous_frame = renderer.frame_id;
-            renderer.render(&Scene::default(), Some(Request {
-                command: crate::api::Command::Capture {
-                    name: format!("cancel-{before_submission}"), destination: Some(path.clone()),
-                },
-                reply,
-                expected_connection_epoch: None,
-                expected_dimension_epoch: None,
-                automation_fence: None,
-                cancelled: Some(cancelled.clone()),
-            }), &super::shader_tests::observation()).unwrap();
+            renderer
+                .render(
+                    &Scene::default(),
+                    Some(Request {
+                        command: crate::api::Command::Capture {
+                            name: format!("cancel-{before_submission}"),
+                            destination: Some(path.clone()),
+                        },
+                        reply,
+                        expected_connection_epoch: None,
+                        expected_dimension_epoch: None,
+                        automation_fence: None,
+                        cancelled: Some(cancelled.clone()),
+                    }),
+                    &super::shader_tests::observation(),
+                )
+                .unwrap();
             if before_submission {
-                assert!(renderer.capture_ready(), "pre-submission cancellation queued a readback");
-                assert_eq!(renderer.frame_id, previous_frame, "cancelled capture submitted a frame");
+                assert!(
+                    renderer.capture_ready(),
+                    "pre-submission cancellation queued a readback"
+                );
+                assert_eq!(
+                    renderer.frame_id, previous_frame,
+                    "cancelled capture submitted a frame"
+                );
             } else {
-                assert!(!renderer.capture_ready(), "post-submission case must submit a capture");
+                assert!(
+                    !renderer.capture_ready(),
+                    "post-submission case must submit a capture"
+                );
             }
             cancelled.store(true, Ordering::Release);
-            renderer.device.poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: Some(std::time::Duration::from_secs(30)),
-            }).unwrap();
-            renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+            renderer
+                .device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(std::time::Duration::from_secs(30)),
+                })
+                .unwrap();
+            renderer
+                .device
+                .push_error_scope(wgpu::ErrorFilter::Validation);
             if !before_submission {
                 // This buffer cannot be mapped. Cancellation must discard it before
                 // entering cull-counter readback (including the blocking device poll).
-                renderer.capture.as_mut().unwrap().cull = Some(renderer.device.create_buffer(
-                    &wgpu::BufferDescriptor {
+                renderer.capture.as_mut().unwrap().cull =
+                    Some(renderer.device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("cancelled-capture-unmappable-counters"),
-                        size: 4, usage: wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
-                    },
-                ));
+                        size: 4,
+                        usage: wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }));
             }
             let deadline = Instant::now() + std::time::Duration::from_secs(30);
             let result = loop {
@@ -1865,22 +1903,31 @@ mod presentation_error_tests {
                 match response.try_recv() {
                     Ok(result) => break result,
                     Err(mpsc::TryRecvError::Empty) => {
-                        events.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        events
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                             .expect("capture completion must wake its owner");
                     }
                     Err(error) => panic!("capture owner lost: {error}"),
                 }
             };
-            assert!(pollster::block_on(renderer.device.pop_error_scope()).is_none(),
-                "cancelled capture attempted cull-counter mapping");
+            assert!(
+                pollster::block_on(renderer.device.pop_error_scope()).is_none(),
+                "cancelled capture attempted cull-counter mapping"
+            );
             results.push((before_submission, result, path.exists()));
         }
         drop(renderer);
         std::fs::remove_dir_all(directory).unwrap();
         for (before_submission, result, artifact_exists) in results {
-            assert_eq!(result.unwrap_err(), "capture_cancelled",
-                "cancellation before submission: {before_submission}");
-            assert!(!artifact_exists, "cancelled capture must not retain an artifact");
+            assert_eq!(
+                result.unwrap_err(),
+                "capture_cancelled",
+                "cancellation before submission: {before_submission}"
+            );
+            assert!(
+                !artifact_exists,
+                "cancelled capture must not retain an artifact"
+            );
         }
     }
 
