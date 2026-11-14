@@ -18,7 +18,10 @@ pub(super) fn tools() -> &'static Vec<Value> {
                 "Read received block states in y/z/x order. Responses are byte-bounded; when truncated, repeat unchanged bounds with offset=next_offset. count is returned rows; total_count is requested volume."
             );
         }
-        if let Some(inputs) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_press_inputs") {
+        if let Some(inputs) = tools
+            .iter_mut()
+            .find(|tool| tool["name"] == "minecraft_press_inputs")
+        {
             inputs["inputSchema"]["properties"]["hold"] = serde_json::json!({
                 "type": "boolean",
                 "description": "Press (true) or release (false) keys until the next explicit release or controller revocation."
@@ -71,7 +74,7 @@ pub(super) fn resources() -> Vec<Value> {
     .into_iter()
     .map(|name| {
         serde_json::json!({
-            "uri":format!("solaris-client://{name}"),"name":name,"mimeType":"application/json"
+            "uri":format!("krasnokamen-client://{name}"),"name":name,"mimeType":"application/json"
         })
     })
     .collect()

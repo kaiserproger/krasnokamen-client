@@ -1,7 +1,7 @@
 {
   "confirmation": {
     "sounds": [
-      "solaris_fixture:confirmation"
+      "krasnokamen_fixture:confirmation"
     ]
   }
 }

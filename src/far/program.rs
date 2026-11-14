@@ -1,4 +1,4 @@
-//! Far-terrain generation program (`solaris:lod/program`), sent only when the
+//! Far-terrain generation program (`krasnokamen:lod/program`), sent only when the
 //! server operator opted in (`[lod] share_terrain_keys`): decoding and the
 //! CPU evaluator. The format and the reference semantics are documented in
 //! the server's `mc_worldgen::vanilla_density::program`; this evaluator gives
@@ -351,11 +351,7 @@ impl Program {
                 1 => r(a) + r(b),
                 2 => {
                     let a = r(a);
-                    if a == 0. {
-                        0.
-                    } else {
-                        a * r(b)
-                    }
+                    if a == 0. { 0. } else { a * r(b) }
                 }
                 3 => r(a).min(r(b)),
                 4 => r(a).max(r(b)),
@@ -364,19 +360,11 @@ impl Program {
                 7 => r(a) * r(a) * r(a),
                 8 => {
                     let v = r(a);
-                    if v > 0. {
-                        v
-                    } else {
-                        v * 0.5
-                    }
+                    if v > 0. { v } else { v * 0.5 }
                 }
                 9 => {
                     let v = r(a);
-                    if v > 0. {
-                        v
-                    } else {
-                        v * 0.25
-                    }
+                    if v > 0. { v } else { v * 0.25 }
                 }
                 10 => 1. / r(a),
                 11 => {
@@ -450,11 +438,7 @@ impl Program {
                 }
                 18 => {
                     let v = r(a);
-                    if v >= c0 && v < c1 {
-                        r(b)
-                    } else {
-                        r(c)
-                    }
+                    if v >= c0 && v < c1 { r(b) } else { r(c) }
                 }
                 19 => f64::from(spline(code, a, b, c, regs)),
                 20 => self.blended(a, px, py, pz),

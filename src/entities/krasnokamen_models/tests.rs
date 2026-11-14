@@ -22,31 +22,55 @@ fn centroid(quad: &[[f32; 5]; 4]) -> Vec3 {
 #[test]
 fn rc2_authored_village_models_have_coherent_body_parts() {
     let model = |id: &str| {
-        let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == format!("{id}.json")).unwrap();
+        let (_, source) = EMBEDDED
+            .iter()
+            .find(|(name, _)| *name == format!("{id}.json"))
+            .unwrap();
         ModelFile::parse(source).unwrap()
     };
     let child = model("villager_baby");
     let body = child.bones.iter().find(|b| b.name == "body").unwrap();
-    assert!(body.cubes[0].size[1] > 2., "child torso must not be a flat strip");
+    assert!(
+        body.cubes[0].size[1] > 2.,
+        "child torso must not be a flat strip"
+    );
     let golem = model("iron_golem");
     let torso = golem.bones.iter().find(|b| b.name == "body").unwrap();
-    assert!(torso.cubes.len() >= 2 && torso.cubes[0].size[0] > torso.cubes[1].size[0],
-        "golem shoulders must taper to a narrower waist");
+    assert!(
+        torso.cubes.len() >= 2 && torso.cubes[0].size[0] > torso.cubes[1].size[0],
+        "golem shoulders must taper to a narrower waist"
+    );
     let head = golem.bones.iter().find(|b| b.name == "head").unwrap();
     let chin = head.pivot[1] + head.cubes[0].origin[1] + head.cubes[0].size[1];
-    assert!(head.pivot[2] < torso.pivot[2] && chin == torso.pivot[1] + torso.cubes[0].origin[1],
-        "golem head must sit forward on the shoulder line, as on the oracle");
+    assert!(
+        head.pivot[2] < torso.pivot[2] && chin == torso.pivot[1] + torso.cubes[0].origin[1],
+        "golem head must sit forward on the shoulder line, as on the oracle"
+    );
     for name in ["right_arm", "left_arm"] {
         let arm = golem.bones.iter().find(|b| b.name == name).unwrap();
-        assert_eq!(arm.cubes[0].size, [4., 30., 6.], "arm texture net dimensions");
-        assert!(arm.pivot[1] + arm.cubes[0].size[1] >= 23., "arms reach near the feet");
+        assert_eq!(
+            arm.cubes[0].size,
+            [4., 30., 6.],
+            "arm texture net dimensions"
+        );
+        assert!(
+            arm.pivot[1] + arm.cubes[0].size[1] >= 23.,
+            "arms reach near the feet"
+        );
     }
-    assert!(!golem.bones.iter().any(|b| b.name.ends_with("_hand") || b.name.ends_with("_foot") || b.name.ends_with("_heel")),
-        "free-floating hands and feet cannot follow the limbs");
+    assert!(
+        !golem.bones.iter().any(|b| b.name.ends_with("_hand")
+            || b.name.ends_with("_foot")
+            || b.name.ends_with("_heel")),
+        "free-floating hands and feet cannot follow the limbs"
+    );
     let left = golem.bones.iter().find(|b| b.name == "left_leg").unwrap();
     let right = golem.bones.iter().find(|b| b.name == "right_leg").unwrap();
-    assert!(right.pivot[0] + right.cubes[0].origin[0] + right.cubes[0].size[0] < left.pivot[0] + left.cubes[0].origin[0],
-        "golem legs must remain visibly separate");
+    assert!(
+        right.pivot[0] + right.cubes[0].origin[0] + right.cubes[0].size[0]
+            < left.pivot[0] + left.cubes[0].origin[0],
+        "golem legs must remain visibly separate"
+    );
 }
 
 #[test]
@@ -57,7 +81,10 @@ fn goat_horn_spacing_tracks_observed_front_silhouette() {
     // Matched 26.3 front shots: observed horn centres are about 27 pixels
     // apart, versus 22 pixels with the previous 2.5-unit separation.
     let spacing_in_model_units = (left - right).abs() * 16.;
-    assert!((3.0..=3.2).contains(&spacing_in_model_units), "{spacing_in_model_units}");
+    assert!(
+        (3.0..=3.2).contains(&spacing_in_model_units),
+        "{spacing_in_model_units}"
+    );
 }
 
 #[test]
@@ -197,7 +224,6 @@ fn rig_key_resolution() {
     }
 }
 
-
 #[test]
 fn placeholder_is_a_visible_entity_sized_box() {
     let rig = placeholder(0.6, 1.8);
@@ -234,7 +260,7 @@ fn parser_rejects_malformed_models() {
 
 fn texture_root() -> Option<PathBuf> {
     let candidates = [
-        std::env::var_os("SOLARIS_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
+        std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist/resources")),
     ];
     candidates
@@ -253,7 +279,10 @@ fn png_size(path: &std::path::Path) -> [u32; 2] {
 #[test]
 fn every_shipped_model_is_well_formed() {
     let textures = texture_root();
-    assert!(!EMBEDDED.is_empty(), "no Solaris entity models embedded");
+    assert!(
+        !EMBEDDED.is_empty(),
+        "no Krasnokamen entity models embedded"
+    );
     let mut ids = std::collections::BTreeSet::new();
     for (file, source) in EMBEDDED {
         let model = ModelFile::parse(source).unwrap_or_else(|e| panic!("{file}: {e}"));
@@ -324,16 +353,21 @@ fn malformed_and_duplicate_files_are_skipped_not_fatal() {
 }
 
 fn embedded(id: &str) -> ModelFile {
-    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == format!("{id}.json")).unwrap();
+    let (_, source) = EMBEDDED
+        .iter()
+        .find(|(name, _)| *name == format!("{id}.json"))
+        .unwrap();
     ModelFile::parse(source).unwrap()
 }
 /// `(min, max)` of a top-level bone's cubes along `axis`, in model pixels.
 fn extent(model: &ModelFile, bone: &str, axis: usize) -> (f32, f32) {
     let bone = model.bones.iter().find(|b| b.name == bone).unwrap();
-    bone.cubes.iter().fold((f32::MAX, f32::MIN), |(low, high), c| {
-        let start = bone.pivot[axis] + c.origin[axis];
-        (low.min(start), high.max(start + c.size[axis]))
-    })
+    bone.cubes
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(low, high), c| {
+            let start = bone.pivot[axis] + c.origin[axis];
+            (low.min(start), high.max(start + c.size[axis]))
+        })
 }
 
 #[test]
@@ -348,10 +382,18 @@ fn iron_golem_matches_the_oracle_silhouette() {
         .fold(f32::MAX, f32::min);
     // 43 px = 2.69 blocks: the golem stands its full 2.7-block hitbox height.
     assert_eq!(top, -19., "head top");
-    assert_eq!(extent(&golem, "head", 2), (-9.5, 0.5), "head and nose sit forward of the torso");
+    assert_eq!(
+        extent(&golem, "head", 2),
+        (-9.5, 0.5),
+        "head and nose sit forward of the torso"
+    );
     assert_eq!(extent(&golem, "body", 1), (-9., 8.), "chest over waist");
     assert_eq!(extent(&golem, "body", 2), (-6., 5.));
-    assert_eq!(extent(&golem, "right_arm", 1), (-9.5, 20.5), "arms hang from the shoulders");
+    assert_eq!(
+        extent(&golem, "right_arm", 1),
+        (-9.5, 20.5),
+        "arms hang from the shoulders"
+    );
     assert_eq!(extent(&golem, "right_leg", 1), (8., 24.));
     assert_eq!(extent(&golem, "right_leg", 0), (-7.5, -1.5));
 }
@@ -365,10 +407,22 @@ fn child_villager_nose_is_a_small_bump_over_the_mouth() {
     let nose = &head.cubes[1];
     assert_eq!((nose.size, nose.uv), ([2., 2., 1.], [23., 0.]));
     let face = &head.cubes[0];
-    assert_eq!(nose.origin[1] + nose.size[1], face.origin[1] + face.size[1], "nose ends at the chin");
-    assert_eq!(nose.origin[2] + nose.size[2], face.origin[2], "nose protrudes one pixel");
+    assert_eq!(
+        nose.origin[1] + nose.size[1],
+        face.origin[1] + face.size[1],
+        "nose ends at the chin"
+    );
+    assert_eq!(
+        nose.origin[2] + nose.size[2],
+        face.origin[2],
+        "nose protrudes one pixel"
+    );
     // Limbs follow their texture nets instead of stretched strips.
-    for (bone, size) in [("body", [4., 5., 3.]), ("right_leg", [2., 3., 2.]), ("left_leg", [2., 3., 2.])] {
+    for (bone, size) in [
+        ("body", [4., 5., 3.]),
+        ("right_leg", [2., 3., 2.]),
+        ("left_leg", [2., 3., 2.]),
+    ] {
         let cube = &child.bones.iter().find(|b| b.name == bone).unwrap().cubes[0];
         assert_eq!(cube.size, size, "{bone}");
         assert!(cube.faces.is_empty(), "{bone} uses the plain box unwrap");
@@ -384,7 +438,11 @@ fn chest_rims_are_single_and_the_latch_straddles_the_lid_seam() {
         // start one texel below the base's own top rim row (v = 33).
         for face in [Face::Front, Face::Back, Face::Left, Face::Right] {
             let rect = base.faces[&face];
-            assert_eq!((rect[1], rect[3] - rect[1]), (34., base.size[1]), "{id} {face:?}");
+            assert_eq!(
+                (rect[1], rect[3] - rect[1]),
+                (34., base.size[1]),
+                "{id} {face:?}"
+            );
         }
         let (_, lid_bottom) = extent(&chest, "lid", 1);
         let (latch_top, latch_bottom) = extent(&chest, "lock", 1);
