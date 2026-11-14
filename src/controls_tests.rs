@@ -7,9 +7,9 @@ fn controls_rebind_conflict_and_resets() {
     bindings.set("forward", Binding::Key(KeyCode::KeyA));
     assert!(bindings.conflict("forward"));
     assert!(bindings.conflict("left"));
-    bindings.set("forward", Binding::Mouse(MouseButton::Middle));
+    bindings.set("forward", Binding::Mouse(MouseButton::Other(4)));
     assert!(!bindings.conflict("forward"));
-    assert_eq!(bindings.action(Binding::Mouse(MouseButton::Middle)), Some("forward"));
+    assert_eq!(bindings.action(Binding::Mouse(MouseButton::Other(4))), Some("forward"));
     bindings.reset("forward");
     assert_eq!(bindings.action(Binding::Key(KeyCode::KeyW)), Some("forward"));
 }
@@ -34,6 +34,25 @@ fn controls_item_mapping_uses_rebound_key() {
     bindings.set("hotbar_2", Binding::Mouse(MouseButton::Middle));
     assert!(matches!(crate::native_item_key(&bindings, Binding::Mouse(MouseButton::Middle), true, crate::ui::Modifiers::default(), false), Some(crate::api::InputIntent::Hotbar { slot: 1 })));
     assert!(crate::native_item_key(&bindings, Binding::Key(KeyCode::Digit2), true, crate::ui::Modifiers::default(), false).is_none());
+}
+
+#[test]
+fn controls_pick_defaults_and_old_settings_keep_rebindings() {
+    let mut bindings = Bindings::default();
+    bindings.set("jump", Binding::Key(KeyCode::KeyJ));
+    let mut saved = bindings.value();
+    saved.as_object_mut().unwrap().remove("pick");
+    let restored = Bindings::from_value(&saved).unwrap();
+    assert_eq!(restored.action(Binding::Key(KeyCode::KeyJ)), Some("jump"));
+    for pressed in [true, false] {
+        assert!(matches!(
+            crate::native_item_key(&restored, Binding::Mouse(MouseButton::Middle), pressed,
+                crate::ui::Modifiers::default(), false),
+            Some(crate::api::InputIntent::Key { key, pressed: edge }) if key == "pick" && edge == pressed
+        ));
+    }
+    assert!(crate::native_item_key(&restored, Binding::Mouse(MouseButton::Middle), true,
+        crate::ui::Modifiers::default(), true).is_none());
 }
 
 #[test]
