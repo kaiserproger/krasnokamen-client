@@ -372,6 +372,7 @@ impl ItemModels {
         }
         Ok(&self.selected[&key])
     }
+    key
 }
 /// Everything entity emission (`presentation::append_baked`) reads from a selection in one
 /// display context, as bits: equal keys draw identical triangles.
