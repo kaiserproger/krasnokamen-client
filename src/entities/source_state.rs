@@ -422,7 +422,8 @@ pub(crate) fn tick(
                         .ok_or("Source maximum body/head rotation missing")?,
                     attack_active: entity.animation.is_some_and(|(action, start)| {
                         matches!(action, 0 | 3)
-                            && tick.saturating_sub(start) < u64::from(entity.physical.combat.vanilla_ticks())
+                            && tick.saturating_sub(start)
+                                < u64::from(entity.physical.combat.vanilla_ticks())
                     }) || entity.physical.combat.swinging(tick),
                     camel_sitting: sitting,
                     camel_visually_sitting: (pose_time < 0) != sitting,

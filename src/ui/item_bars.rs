@@ -1,4 +1,4 @@
-//! Solaris-authored GUI item bars, from public minecraft.wiki Durability/Bundle descriptions.
+//! Krasnokamen-authored GUI item bars, from public minecraft.wiki Durability/Bundle descriptions.
 //! Geometry/palette/rounding are our approximations, not extracted renderer constants.
 use crate::{
     api::{MeshGeometry, RenderLayer},

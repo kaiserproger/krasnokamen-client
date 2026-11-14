@@ -6,8 +6,8 @@ use crate::{
     entities::{Handle, Models},
     player::Hit,
     protocol::{
-        world::{Chunk, Palette, Section, SurfaceHeightmap},
         Reader, Writer,
+        world::{Chunk, Palette, Section, SurfaceHeightmap},
     },
 };
 
