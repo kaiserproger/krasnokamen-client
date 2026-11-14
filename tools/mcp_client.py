@@ -50,7 +50,7 @@ class Client:
 
     def initialize(self):
         result = self.request('initialize', {'protocolVersion':'2025-11-25', 'capabilities':{},
-                              'clientInfo':{'name':'solaris-native-evidence-driver', 'version':'0.1.0'}})
+                              'clientInfo':{'name':'krasnokamen-native-evidence-driver', 'version':'0.1.0'}})
         if not result or 'error' in result:
             raise RuntimeError(result)
         self.request('notifications/initialized')
