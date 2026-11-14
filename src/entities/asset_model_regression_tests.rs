@@ -598,10 +598,12 @@ fn polar_bear_has_a_long_two_section_torso_and_grounded_paws() {
     }
 }
 
-/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos"): the adult horse rig follows
-/// the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a 10 x 10 x 22 body
-/// (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs, and the head carried
-/// forward of the chest on a neck raised 30 degrees. The pre-fix rig had a 10 x 10 x 10 body.
+/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos") + MODEL-OPUS-11: the adult
+/// horse rig follows the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a
+/// 10 x 10 x 22 body (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs,
+/// and the head carried forward of the chest on a neck raised 30 degrees. The 26.1 mesh
+/// transformer (translate -2.4016, scale 1.1) is folded into the top bones the way the client
+/// applies no per-entity scale, so every number below carries the 1.1 factor.
 #[test]
 fn adult_horse_rig_has_vanilla_equine_proportions() {
     let horse = rig("horse");
@@ -609,11 +611,11 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
     let (low, high) = bounds(horse, &transforms, "body");
     let size = (high - low) * 16.;
     assert!(
-        (size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3,
+        (size - Vec3::new(11.11, 11.11, 24.31)).abs().max_element() < 1e-2,
         "body {size}"
     );
     assert!(
-        (low.y * 16. - 2.95).abs() < 1e-3,
+        (low.y * 16. - 0.84).abs() < 1e-2,
         "back height {}",
         low.y * 16.
     );
@@ -625,11 +627,11 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
     ] {
         let (leg_low, leg_high) = bounds(horse, &transforms, leg);
         assert!(
-            (leg_high.y * 16. - 23.99).abs() < 1e-3,
+            (leg_high.y * 16. - 23.99).abs() < 1e-2,
             "{leg} reaches the ground"
         );
         assert!(
-            ((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3,
+            ((leg_high.y - leg_low.y) * 16. - 12.1).abs() < 1e-2,
             "{leg} length"
         );
     }

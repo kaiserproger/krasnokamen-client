@@ -760,14 +760,16 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         (vex["head"].1 - vex["head"].0).max_element() < 7. * px,
         "vex head is small"
     );
+    // Vanilla's bee legs are three two-legged fans (`front_legs`, `middle_legs`,
+    // `back_legs`), not six per-side leg bones.
     let bee = rest_bounds("minecraft:bee_baby#main");
     assert_eq!(
         names(&bee)
             .iter()
-            .filter(|name| name.ends_with("_leg"))
+            .filter(|name| name.ends_with("_legs"))
             .count(),
-        6,
-        "baby bee legs"
+        3,
+        "baby bee leg fans"
     );
     assert!(
         bee.contains_key("stinger")
@@ -858,8 +860,14 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
     }
 
     for key in ["minecraft:guardian#main", "minecraft:elder_guardian#main"] {
+        // Vanilla's guardian torso bone is `head`; the three-cube tail is
+        // `tail0`..`tail2` and the twelve spikes ring the torso.
         let guardian = rest_bounds(key);
-        let body = guardian["body"];
+        let body = guardian["head"];
+        assert!(
+            !guardian.contains_key("body") && !guardian.contains_key("tail"),
+            "{key}: vanilla names the torso head and the tail tail0..tail2"
+        );
         let spikes: Vec<f32> = guardian
             .iter()
             .filter(|(name, _)| name.starts_with("spike"))
@@ -876,14 +884,24 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         let fish = rest_bounds(key);
         let size = overall_size(&fish);
         assert!(size.z > 2.4 * size.y, "{key}: long swimming body: {size}");
-        assert!(
+        // Vanilla's cod fans are `top_fin`/`tail_fin`; the salmon keeps its own
+        // authored names (`dorsal`, `tail`) until its layer is re-authored.
+        let fins: [&str; 3] = if key.starts_with("minecraft:cod") {
+            ["left_fin", "right_fin", "top_fin"]
+        } else {
             ["left_fin", "right_fin", "dorsal"]
-                .iter()
-                .all(|fin| fish.contains_key(*fin)),
+        };
+        assert!(
+            fins.iter().all(|fin| fish.contains_key(*fin)),
             "{key}: fins"
         );
+        let tail = if key.starts_with("minecraft:cod") {
+            "tail_fin"
+        } else {
+            "tail"
+        };
         assert!(
-            fish["head"].0.z < fish["tail"].0.z,
+            fish["head"].0.z < fish[tail].0.z,
             "{key}: head leads, tail trails"
         );
     }

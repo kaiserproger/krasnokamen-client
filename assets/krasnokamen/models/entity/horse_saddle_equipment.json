@@ -7,13 +7,13 @@
   },
   "bones": [
     {
-      "name": "body", "pivot": [0, 11, 5],
+      "name": "body", "pivot": [0, 9.6984, 5.5], "scale": [1.1, 1.1, 1.1],
       "cubes": [
         {"origin": [-5, -8, -9], "size": [10, 9, 9], "uv": [26, 0], "inflate": 0.5}
       ]
     },
     {
-      "name": "head_parts", "pivot": [0, 4, -12], "rotation": [30, 0, 0],
+      "name": "head_parts", "pivot": [0, 1.9984, -13.2], "rotation": [30, 0, 0], "scale": [1.1, 1.1, 1.1],
       "bones": [
         {
           "name": "head", "pivot": [0, 0, 0],

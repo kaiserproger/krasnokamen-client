@@ -3946,9 +3946,25 @@ mod tests {
             "../../assets/krasnokamen/models/entity/allay.json"
         ))
         .unwrap();
-        let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
+        // The vanilla layer nests every part under the layer root, so the head is
+        // found through the tree, not in the top-level bone list.
+        fn find<'a>(
+            bones: &'a [super::super::krasnokamen_models::BoneSpec],
+            name: &str,
+        ) -> Option<&'a super::super::krasnokamen_models::BoneSpec> {
+            bones.iter().find_map(|bone| {
+                (bone.name == name)
+                    .then_some(bone)
+                    .or_else(|| find(&bone.bones, name))
+            })
+        }
+        let head = find(&model.bones, "head").expect("allay head bone");
         let cube = &head.cubes[0];
-        let [u0, v0, u1, v1] = cube.faces[&Face::Front];
+        let [u0, v0, u1, v1] = cube.faces.get(&Face::Front).copied().unwrap_or_else(|| {
+            let [u, v] = cube.uv;
+            let [w, h, d] = cube.size;
+            [u + d, v + d, u + d + w, v + d + h]
+        });
         // Pixel centers independently observed in the runtime allay texture.
         for (u, v) in [(6.5, 7.5), (8.5, 7.5), (6.5, 8.5), (8.5, 8.5)] {
             assert!(u0 < u && u < u1 && v0 < v && v < v1);

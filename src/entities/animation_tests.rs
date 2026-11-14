@@ -2340,15 +2340,15 @@ fn animation_casting_is_distinct_from_crossbow_and_clears_on_received_spell_end(
 #[test]
 fn animation_roleless_named_parts_move_without_erasing_authored_orientation() {
     for (kind, part) in [
-        ("cod", "tail"),
+        ("cod", "tail_fin"),
         ("salmon", "body_rear"),
         ("tropical_fish", "tail"),
         ("squid", "tentacle1"),
         ("glow_squid", "tentacle1"),
         ("ghast", "tentacle_0"),
         ("blaze", "stick0"),
-        ("guardian", "tail"),
-        ("elder_guardian", "tail"),
+        ("guardian", "tail0"),
+        ("elder_guardian", "tail0"),
         ("dolphin", "tail"),
         ("silverfish", "segment0"),
         ("endermite", "head"),
