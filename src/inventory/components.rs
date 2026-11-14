@@ -244,11 +244,21 @@ fn read_value(r: &mut Reader<'_>, c: &Content, name: &str, depth: u8) -> Result<
         "villager_food" => H::record([("nutrition", integer(r)?)]),
         "compostable" => H::record([("layers", resolvable(r, false)?)]),
         "cooking_fuel" | "brewing_fuel" => H::record([
-            (if name == "cooking_fuel" { "burn_time" } else { "uses" }, resolvable(r, false)?),
+            (
+                if name == "cooking_fuel" {
+                    "burn_time"
+                } else {
+                    "uses"
+                },
+                resolvable(r, false)?,
+            ),
             ("speed_multiplier", resolvable(r, true)?),
         ]),
         "mob_visibility" => H::record([
-            ("targeting_entity_types", holder_set(r, c, "minecraft:entity_type")?),
+            (
+                "targeting_entity_types",
+                holder_set(r, c, "minecraft:entity_type")?,
+            ),
             ("visibility", float(r)?),
         ]),
         "sign_text_front" | "sign_text_back" => sign_text(r)?,
@@ -260,7 +270,8 @@ fn read_value(r: &mut Reader<'_>, c: &Content, name: &str, depth: u8) -> Result<
         | "sheep/color"
         | "shulker/color"
         | "tropical_fish/base_color"
-        | "tropical_fish/pattern_color" | "cushion/color" => enum_value(r, COLORS)?,
+        | "tropical_fish/pattern_color"
+        | "cushion/color" => enum_value(r, COLORS)?,
         "fox/variant" => enum_value(r, &["red", "snow"])?,
         "salmon/size" => enum_value(r, &["small", "medium", "large"])?,
         "parrot/variant" => enum_value(r, &["red_blue", "blue", "green", "yellow_blue", "gray"])?,
@@ -803,7 +814,12 @@ fn sign_text(r: &mut Reader<'_>) -> Result<H> {
     let mut fields = vec![];
     put(&mut fields, "messages", lines(r)?);
     opt(r, &mut fields, "filtered_messages", lines)?;
-    optional(&mut fields, "color", enum_value(r, COLORS)?, H::string("black"));
+    optional(
+        &mut fields,
+        "color",
+        enum_value(r, COLORS)?,
+        H::string("black"),
+    );
     optional(&mut fields, "has_glowing_text", boolean(r)?, H::Bool(false));
     Ok(H::Map(fields))
 }

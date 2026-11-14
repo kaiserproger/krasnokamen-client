@@ -427,9 +427,11 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.wall([2., 0., -2.], [3., 3., 3.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
+                .unwrap()
+        );
         assert!(planner.path.iter().any(|p| p[2] < -2. || p[2] > 3.));
         assert!(planner.path.windows(2).all(|edge| planner_transition(
             &mut terrain,
@@ -445,9 +447,11 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.loaded = [-2, 3, -2, 3];
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(!planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
-            .unwrap());
+        assert!(
+            !planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
+                .unwrap()
+        );
         assert!(planner.path.is_empty());
     }
     #[test]
@@ -458,18 +462,22 @@ mod tests {
         terrain.wall([3., 0., -3.], [9., 4., -2.]);
         terrain.wall([3., 0., 3.], [9., 4., 4.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(!planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
-            .unwrap());
+        assert!(
+            !planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [6, 0, 0], false)
+                .unwrap()
+        );
     }
     #[test]
     fn solid_target_has_collision_free_adjacent_endpoint() {
         let mut terrain = Terrain::flat();
         terrain.wall([5., 0., 0.], [6., 2., 1.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [5, 0, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [5, 0, 0], false)
+                .unwrap()
+        );
         let end = *planner.path.last().unwrap();
         assert!(near(end, [5, 0, 0], 1.5));
         assert!(planner.collision_free(&mut terrain, end).unwrap());
@@ -484,9 +492,11 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.wall([4., 0., 0.], [5., 1., 1.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [5.87, 0., 0.5], [4, 0, 0], true)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [5.87, 0., 0.5], [4, 0, 0], true)
+                .unwrap()
+        );
         let end = *planner.path.last().unwrap();
         // The endpoint must be a walkable cell beyond the start cell (never
         // an instant "arrival" without moving): adjacent or atop the step.
@@ -499,9 +509,11 @@ mod tests {
         )));
         // Without the solidity flag the legacy adjacent arrival still holds.
         let mut legacy = Planner::new(0.3, 1.8);
-        assert!(legacy
-            .plan(&mut terrain, [5.87, 0., 0.5], [4, 0, 0], false)
-            .unwrap());
+        assert!(
+            legacy
+                .plan(&mut terrain, [5.87, 0., 0.5], [4, 0, 0], false)
+                .unwrap()
+        );
         assert_eq!(legacy.path.len(), 1);
     }
 
@@ -510,16 +522,22 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.wall([1., 0., 0.], [2., 1., 1.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .transition(&mut terrain, [0.5, 0., 0.5], [1.5, 1., 0.5])
-            .unwrap());
+        assert!(
+            planner
+                .transition(&mut terrain, [0.5, 0., 0.5], [1.5, 1., 0.5])
+                .unwrap()
+        );
         terrain.wall([0., 2., 0.], [2., 3., 1.]);
-        assert!(!planner
-            .transition(&mut terrain, [0.5, 0., 0.5], [1.5, 1., 0.5])
-            .unwrap());
-        assert!(!planner
-            .transition(&mut Terrain::flat(), [0.5, 4., 0.5], [1.5, 0., 0.5])
-            .unwrap());
+        assert!(
+            !planner
+                .transition(&mut terrain, [0.5, 0., 0.5], [1.5, 1., 0.5])
+                .unwrap()
+        );
+        assert!(
+            !planner
+                .transition(&mut Terrain::flat(), [0.5, 4., 0.5], [1.5, 0., 0.5])
+                .unwrap()
+        );
     }
     #[test]
     fn exact_arrival_boundary() {
@@ -536,15 +554,19 @@ mod tests {
         terrain.wall([0., 0., -2.], [1., 2., 3.]);
         terrain.wall([1., 0., -2.], [2., 1., 3.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [-5.5, 5., 0.5], [-8, 5, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [-5.5, 5., 0.5], [-8, 5, 0], false)
+                .unwrap()
+        );
         // After dipping to the lowland mid-route, a replan from the current
         // position must anchor its search envelope at the current position,
         // not at the task's first origin (whose low bound is y=2 here).
-        assert!(planner
-            .plan(&mut terrain, [5.5, 0., 0.5], [-8, 5, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [5.5, 0., 0.5], [-8, 5, 0], false)
+                .unwrap()
+        );
     }
     #[test]
     fn one_wide_two_tall_tunnel_with_steps() {
@@ -556,9 +578,11 @@ mod tests {
         terrain.wall([-1., 2., -1.], [9., 3., 2.]);
         terrain.wall([4., 0., -1.], [5., 1., 2.]);
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [7, 0, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [7, 0, 0], false)
+                .unwrap()
+        );
         assert!(planner.path.windows(2).all(|edge| planner_transition(
             &mut terrain,
             edge[0],
@@ -570,9 +594,11 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.loaded = [-200, 200, -200, 200];
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [150, 0, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [150, 0, 0], false)
+                .unwrap()
+        );
         assert!(planner.path.len() >= 2);
         let end = *planner.path.last().unwrap();
         let start_distance = (150.5f64 - 0.5).powi(2);
@@ -590,9 +616,11 @@ mod tests {
         let mut terrain = Terrain::flat();
         terrain.loaded = [-2, 3, -2, 3];
         let mut planner = Planner::new(0.3, 1.8);
-        assert!(planner
-            .plan(&mut terrain, [0.5, 0., 0.5], [150, 0, 0], false)
-            .unwrap());
+        assert!(
+            planner
+                .plan(&mut terrain, [0.5, 0., 0.5], [150, 0, 0], false)
+                .unwrap()
+        );
         assert!(planner.path.len() >= 2);
         for p in &planner.path {
             assert!(p[0] >= -2. && p[0] <= 3. && p[2] >= -2. && p[2] <= 3.);

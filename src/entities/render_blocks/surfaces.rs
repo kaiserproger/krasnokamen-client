@@ -21,7 +21,13 @@ fn paint_banner_part(
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let crate::entities::presentation::RigStyle { tex, color, layer, light, .. } = style;
+    let crate::entities::presentation::RigStyle {
+        tex,
+        color,
+        layer,
+        light,
+        ..
+    } = style;
     transforms.clear();
     transforms.reserve(rig.bones.len());
     for bone in &rig.bones {
@@ -37,13 +43,22 @@ fn paint_banner_part(
         }
         let normal_matrix = matrix.inverse().transpose();
         for (quad, normal) in bone.quads.iter().zip(&bone.normals) {
-            let positions = quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array());
-            let uv = quad.map(|v| [
-                tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
-                tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
-            ]);
+            let positions = quad.map(|v| {
+                matrix
+                    .transform_point3(Vec3::new(v[0], v[1], v[2]))
+                    .to_array()
+            });
+            let uv = quad.map(|v| {
+                [
+                    tex.uv[0] + v[3] * (tex.uv[2] - tex.uv[0]),
+                    tex.uv[1] + v[4] * (tex.uv[3] - tex.uv[1]),
+                ]
+            });
             emit(positions, uv, color, tex.layer, layer, 1., light, out)?;
-            let normal = normal_matrix.transform_vector3(Vec3::from_array(*normal)).normalize_or_zero().to_array();
+            let normal = normal_matrix
+                .transform_vector3(Vec3::from_array(*normal))
+                .normalize_or_zero()
+                .to_array();
             let first = out.vertices.len() - 4;
             for vertex in &mut out.vertices[first..] {
                 vertex.normal = normal;
@@ -92,9 +107,51 @@ pub(super) fn banner(
         / 100.;
     let flag_angle = math::banner_angle(phase);
     let banner = rig(m, &format!("{key}#main"))?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, false, t, out)?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/banner_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
-    paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/banner/base")?, color: rgb(dye(color).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/banner_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        false,
+        t,
+        out,
+    )?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/banner_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        true,
+        t,
+        out,
+    )?;
+    paint_banner_part(
+        banner,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/banner/base")?,
+            color: rgb(dye(color).0),
+            layer: EntityMaterial::BannerPattern,
+            alpha: 1.,
+            light: f.light,
+        },
+        flag_angle,
+        true,
+        t,
+        out,
+    )?;
     if let Some(patterns) = e.data_value()["patterns"].as_array() {
         for pattern in patterns.iter().take(16) {
             let id = pattern["pattern"].as_str().ok_or("banner pattern holder")?;
@@ -103,7 +160,21 @@ pub(super) fn banner(
                 .ok_or("banner pattern asset id")?;
             let (namespace, path) = identifier_path(asset);
             let material = format!("{namespace}:entity/banner/{path}");
-            paint_banner_part(banner, root, crate::entities::presentation::RigStyle { tex: texture(c, &material)?, color: rgb(dye(pattern["color"].as_str().unwrap_or("white")).0), layer: EntityMaterial::BannerPattern, alpha: 1., light: f.light }, flag_angle, true, t, out)?;
+            paint_banner_part(
+                banner,
+                root,
+                crate::entities::presentation::RigStyle {
+                    tex: texture(c, &material)?,
+                    color: rgb(dye(pattern["color"].as_str().unwrap_or("white")).0),
+                    layer: EntityMaterial::BannerPattern,
+                    alpha: 1.,
+                    light: f.light,
+                },
+                flag_angle,
+                true,
+                t,
+                out,
+            )?;
         }
     }
     Ok(BlockRenderStatus::Rendered)
@@ -137,7 +208,20 @@ pub(super) fn pot(
                 * Mat4::from_rotation_y(angles[1]),
         );
     }
-    paint_rig(rig(m, "minecraft:decorated_pot_base#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/decorated_pot/decorated_pot_base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+    paint_rig(
+        rig(m, "minecraft:decorated_pot_base#main")?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/decorated_pot/decorated_pot_base")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        t,
+        out,
+        |_, _, _| {},
+    )?;
     let sides = rig(m, "minecraft:decorated_pot_sides#main")?;
     for side in ["back", "left", "right", "front"] {
         let item = e.data_value()["sherds"]
@@ -426,7 +510,11 @@ pub(super) fn beacon(
     let distance = ((camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
         + (camera[2] - f64::from(e.position[2]) - 0.5).powi(2))
     .sqrt() as f32;
-    let radius = if scoping { 1. } else { (distance / 96.).max(1.) };
+    let radius = if scoping {
+        1.
+    } else {
+        (distance / 96.).max(1.)
+    };
     let mut start = 0;
     for (i, section) in sections.iter().enumerate() {
         beam(
@@ -434,7 +522,11 @@ pub(super) fn beacon(
             root,
             time,
             start,
-            if i + 1 == sections.len() { 2048 } else { section.height },
+            if i + 1 == sections.len() {
+                2048
+            } else {
+                section.height
+            },
             section.color,
             1.,
             0.2 * radius,
@@ -472,7 +564,8 @@ pub(super) fn portal(
             visible[direction as usize] = direction == 0 || direction == 1;
         }
     }
-    let layer = c.texture("minecraft:environment/end_sky")
+    let layer = c
+        .texture("minecraft:environment/end_sky")
         .ok_or("missing mandatory portal texture minecraft:environment/end_sky")?
         .layer;
     if gateway
@@ -525,4 +618,3 @@ pub(super) fn portal(
     }
     Ok(BlockRenderStatus::Rendered)
 }
-

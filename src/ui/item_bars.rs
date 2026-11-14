@@ -1,4 +1,4 @@
-//! Solaris-authored GUI item bars, from public minecraft.wiki Durability/Bundle descriptions.
+//! Krasnokamen-authored GUI item bars, from public minecraft.wiki Durability/Bundle descriptions.
 //! Geometry/palette/rounding are our approximations, not extracted renderer constants.
 use crate::{
     api::{MeshGeometry, RenderLayer},
@@ -36,32 +36,54 @@ pub(super) fn append(
         // Display-only tolerance for floating-point sums of custom stack-size
         // reciprocals. Inventory admission continues to own exact rational weights.
         let full = fullness >= 1. - 16. * f64::EPSILON;
-        (fullness.min(1.) as f32, if full { BUNDLE_FULL } else { BUNDLE_BLUE }, true)
+        (
+            fullness.min(1.) as f32,
+            if full { BUNDLE_FULL } else { BUNDLE_BLUE },
+            true,
+        )
     } else {
         if stack.component("minecraft:unbreakable").is_some() {
             return Ok(());
         }
-        let damage = stack.component("minecraft:damage").and_then(Value::as_i64).unwrap_or(0);
-        let maximum = stack.component("minecraft:max_damage").and_then(Value::as_i64).unwrap_or(0);
+        let damage = stack
+            .component("minecraft:damage")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let maximum = stack
+            .component("minecraft:max_damage")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         if damage <= 0 || maximum <= 0 {
             return Ok(());
         }
         let remaining = 1. - damage.min(maximum) as f64 / maximum as f64;
         let remaining = remaining as f32;
         // Our two linear ramps interpolate green -> yellow -> orange -> red.
-        let color = [(2. * (1. - remaining)).min(1.), (2. * remaining).min(1.), 0.];
+        let color = [
+            (2. * (1. - remaining)).min(1.),
+            (2. * remaining).min(1.),
+            0.,
+        ];
         (remaining, color, false)
     };
     let [left, top, width, height] = TRACK;
     let track = [x + left * w, y + top * h, width * w, height * h];
     let mut painter = Painter {
-        content, out, transform, light: [-1.; 2], render_layer: RenderLayer::Translucent,
+        content,
+        out,
+        transform,
+        light: [-1.; 2],
+        render_layer: RenderLayer::Translucent,
     };
     painter.solid(track, EMPTY, 1.);
     // Durability can round down to an empty track at the last few uses. A
     // nonempty bundle always has at least one visible logical pixel of blue.
     let filled = track[2] * fraction;
-    let filled = if is_bundle { filled.round().max(1.).min(track[2]) } else { filled.floor() };
+    let filled = if is_bundle {
+        filled.round().max(1.).min(track[2])
+    } else {
+        filled.floor()
+    };
     if filled > 0. {
         painter.solid([track[0], track[1], filled, track[3] / 2.], color, 1.);
     }
@@ -75,12 +97,17 @@ fn bundle_fullness(bundle: &Stack, depth: u8) -> Result<f64> {
     if depth > 32 {
         return Err("GUI bundle fullness exceeds retained stack depth bound".into());
     }
-    let entries = bundle.component("minecraft:bundle_contents")
-        .and_then(Value::as_array).ok_or("GUI bundle contents is not a list")?;
+    let entries = bundle
+        .component("minecraft:bundle_contents")
+        .and_then(Value::as_array)
+        .ok_or("GUI bundle contents is not a list")?;
     if entries.is_empty() {
         return Ok(0.);
     }
-    let stacks = bundle.patch.added.values()
+    let stacks = bundle
+        .patch
+        .added
+        .values()
         .find(|value| value.name == "minecraft:bundle_contents")
         .map(|value| value.nested_stacks.as_ref())
         .filter(|stacks| stacks.len() == entries.len())
@@ -92,7 +119,9 @@ fn bundle_fullness(bundle: &Stack, depth: u8) -> Result<f64> {
         }
         let weight = if stack.component("minecraft:bundle_contents").is_some() {
             1. / 16. + bundle_fullness(stack, depth + 1)?
-        } else if stack.component("minecraft:bees").and_then(Value::as_array)
+        } else if stack
+            .component("minecraft:bees")
+            .and_then(Value::as_array)
             .is_some_and(|bees| !bees.is_empty())
         {
             1.
