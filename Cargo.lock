@@ -3323,7 +3323,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solaris-client"
+name = "krasnokamen-client"
 version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
@@ -3350,7 +3350,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "solaris-paths",
+ "krasnokamen-paths",
  "symphonia",
  "unicode-bidi",
  "uuid",
@@ -3360,7 +3360,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
@@ -3372,7 +3372,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "solaris-paths",
+ "krasnokamen-paths",
  "tar",
  "wgpu",
  "zip",
@@ -3380,7 +3380,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solaris-paths"
+name = "krasnokamen-paths"
 version = "0.1.0"
 
 [[package]]

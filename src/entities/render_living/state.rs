@@ -1,9 +1,9 @@
-use super::super::{presentation as p, Entity, Metadata, Models};
+use super::super::{Entity, Metadata, Models, presentation as p};
 use super::modern::{Axolotl, Fox};
 use super::motion::{BodyRule, MotionFacts, WalkRule};
 use crate::{
     player::math,
-    protocol::{models::JavaRandom, Result},
+    protocol::{Result, models::JavaRandom},
 };
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 

@@ -1,13 +1,13 @@
 //! Bounded entity tools use received identity/state and the ordinary player action path.
-use super::{lifecycle, Outcome};
+use super::{Outcome, lifecycle};
 use crate::{
     api::InputIntent,
     entities::{Entity, Handle, Metadata},
     player::{Bounds, InteractionIntent},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     session::Session,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) const SUPPORTED_TOOLS: &[&str] = &[

@@ -1,14 +1,14 @@
 [package]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 version = "1.0.0-rc.5"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Launcher for the Solaris native Minecraft client: downloads game content and starts the client"
+description = "Launcher for the Krasnokamen native Minecraft client: downloads game content and starts the client"
 publish = false
 
 [[bin]]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 path = "src/main.rs"
 
 [dependencies]
@@ -25,5 +25,5 @@ eframe = { version = "=0.33.3", default-features = false, features = ["wgpu", "d
 # eframe disables backend defaults; standalone launcher builds need native APIs.
 wgpu = { version = "=27.0.1", default-features = false, features = ["dx12", "metal", "vulkan"] }
 png = "=0.18.1"
-solaris-paths = { path = "../paths" }
+krasnokamen-paths = { path = "../paths" }
 flate2 = "=1.1.9"
