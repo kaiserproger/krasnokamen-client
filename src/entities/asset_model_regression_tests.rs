@@ -323,19 +323,24 @@ fn tropical_fish_both_shapes_have_two_sided_fins_and_a_trailing_tail() {
 
 #[test]
 fn pufferfish_inflation_changes_body_volume_and_exposes_spines() {
-    let mut previous = Vec3::ZERO;
-    for id in ["pufferfish_small", "pufferfish_medium", "pufferfish"] {
+    // PUFF_STATE selects three vanilla layers: `pufferfish_small#main` (3x2x3 body),
+    // `pufferfish_medium#main` (5x5x5) and `pufferfish_big#main` (8x8x8). The small
+    // and medium rigs are quad-exact against the 26.3 dump; the big layer samples
+    // outside its 32x32 atlas (`top_back_fin` front face [31,18,39,19]), so the big
+    // state keeps its authored rig and its own spine names until that policy is decided.
+    for (id, expected) in [
+        ("pufferfish_small", [3., 2., 3.]),
+        ("pufferfish_medium", [5., 5., 5.]),
+        ("pufferfish", [8., 8., 8.]),
+    ] {
         let rig = rig(id);
         let pose = rest(rig);
         let body = bounds(rig, &pose, "body");
-        let size = body.1 - body.0;
+        let actual = (body.1 - body.0) * 16.;
         assert!(
-            size.cmpgt(previous).all(),
-            "{id}: inflation must grow all three axes"
+            (actual - Vec3::from_array(expected)).abs().max_element() < 0.05,
+            "{id}: body {actual}"
         );
-        previous = size;
-        assert!(bounds(rig, &pose, "right_fin").0.x < body.0.x);
-        assert!(bounds(rig, &pose, "left_fin").1.x > body.1.x);
         if id == "pufferfish_small" {
             for eye in ["left_eye", "right_eye"] {
                 assert!(
@@ -343,28 +348,49 @@ fn pufferfish_inflation_changes_body_volume_and_exposes_spines() {
                     "deflated eyes rise above the body"
                 );
             }
+            for fin in ["right_fin", "left_fin", "back_fin"] {
+                assert!(rig.part_by_name.contains_key(fin), "deflated {fin}");
+            }
             continue;
         }
-        for (name, axis, positive) in [
-            ("top_front_spines", 1, false),
-            ("bottom_front_spines", 1, true),
-            ("right_front_spines", 0, false),
-            ("left_front_spines", 0, true),
-        ] {
+        let spines: [(&str, usize, bool); 4] = if id == "pufferfish_medium" {
+            [
+                ("top_front_fin", 1, false),
+                ("bottom_front_fin", 1, true),
+                ("right_front_fin", 0, false),
+                ("left_front_fin", 0, true),
+            ]
+        } else {
+            [
+                ("top_front_spines", 1, false),
+                ("bottom_front_spines", 1, true),
+                ("right_front_spines", 0, false),
+                ("left_front_spines", 0, true),
+            ]
+        };
+        let size = body.1 - body.0;
+        for (name, axis, positive) in spines {
             let spine = bounds(rig, &pose, name);
             let protrusion = if positive {
                 spine.1[axis] - body.1[axis]
             } else {
                 body.0[axis] - spine.0[axis]
-            };
+            } * 16.;
             assert!(
-                protrusion > size[axis] * 0.05,
+                protrusion > size[axis] * 16. * 0.05,
                 "{id}: {name} hidden inside body"
             );
-            assert_eq!(
-                uv_bounds(face(rig, name, -Vec3::Z)),
-                uv_bounds(face(rig, name, Vec3::Z))
+            // Vanilla's inflated fins are thin plates sampled from one strip of the
+            // 32x32 atlas, so the two sides are not mirrored texels.
+            assert!(
+                rig.bones[rig.part_by_name[name]].quads.len() >= 2,
+                "{id}: {name} is a plate"
             );
+        }
+        if id == "pufferfish_medium" {
+            for blue in ["left_blue_fin", "right_blue_fin"] {
+                assert!(rig.part_by_name.contains_key(blue), "inflated {blue}");
+            }
         }
         assert!(
             !rig.part_by_name.contains_key("tail_base"),
@@ -886,5 +912,107 @@ fn rabbit_fox_panda_and_vex_shapes_match_the_vanilla_proportions() {
         rest_px(vex, &transforms, "right_wing"),
         ([-0.5, 18.5, 1.], [-0.5, 23.5, 9.]),
         "vex wing plane",
+    );
+}
+
+// Boat parity (owner round 5): the four hull rigs were invented boxes; the vanilla
+// 26.3 layers are `boat/poplar#main`, `chest_boat/poplar#main`,
+// `boat/bamboo#main` and `chest_boat/bamboo#main`, and the water patch is the
+// `boat#water_patch` mask mesh drawn with the water-mask material.
+#[test]
+fn boat_and_raft_hulls_match_the_vanilla_26_3_layers() {
+    let boat = rig("boat");
+    let transforms = rest(boat);
+    let names: Vec<&str> = boat
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "bottom",
+            "left_paddle",
+            "right_paddle",
+            "left",
+            "back",
+            "front",
+            "right"
+        ],
+        "vanilla boat parts"
+    );
+    assert_px(
+        rest_px(boat, &transforms, "bottom"),
+        ([-14., 3., -8.], [14., 6., 8.]),
+        "boat floor",
+    );
+    for (wall, expected) in [
+        ("left", ([-14., -3., 8.], [14., 3., 10.])),
+        ("right", ([-14., -3., -10.], [14., 3., -8.])),
+        ("front", ([14., -3., -8.], [16., 3., 8.])),
+        ("back", ([-16., -3., -9.], [-14., 3., 9.])),
+    ] {
+        assert_px(rest_px(boat, &transforms, wall), expected, wall);
+    }
+    // Both paddles mount on the same side and mirror by rotation, as in vanilla.
+    for (paddle, z) in [("left_paddle", (4., 24.)), ("right_paddle", (-24., -4.))] {
+        assert_px(
+            rest_px(boat, &transforms, paddle),
+            ([1.43, -8.14, z.0], [3.98, -2.06, z.1]),
+            paddle,
+        );
+    }
+
+    let raft = rig("raft");
+    let transforms = rest(raft);
+    let raft_names: Vec<&str> = raft
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        raft_names,
+        ["bottom", "left_paddle", "right_paddle"],
+        "the bamboo raft is its double-deck hull and two paddles, no walls"
+    );
+    assert_px(
+        rest_px(raft, &transforms, "bottom"),
+        ([-14., -2.1, -10.], [14., 5.9, 10.]),
+        "raft deck",
+    );
+
+    let chest = rig("chest_boat");
+    let transforms = rest(chest);
+    for (part, expected) in [
+        ("chest_bottom", ([-14., -5., -6.], [-2., 3., 6.])),
+        ("chest_lid", ([-14., -9., -6.], [-2., -5., 6.])),
+        ("chest_lock", ([-2., -6., -1.], [-1., -2., 1.])),
+    ] {
+        assert_px(rest_px(chest, &transforms, part), expected, part);
+    }
+    assert!(
+        !chest.part_by_name.contains_key("chest"),
+        "vanilla splits the chest into bottom, lid and lock"
+    );
+
+    let patch = rig("boat_water_patch");
+    let transforms = rest(patch);
+    let patch_names: Vec<&str> = patch
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        patch_names,
+        ["water_patch"],
+        "the water patch is one mask mesh in the hull frame"
+    );
+    assert_px(
+        rest_px(patch, &transforms, "water_patch"),
+        ([-14., -3., -8.], [14., 0., 8.]),
+        "water patch",
     );
 }

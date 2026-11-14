@@ -1,183 +1,45 @@
 {
   "schema": 1,
   "id": "chest_raft",
-  "texture": {
-    "path": "entity/chest_boat/bamboo.png",
-    "size": [
-      128,
-      128
-    ]
-  },
+  "texture": {"path": "entity/chest_boat/bamboo.png", "size": [128, 128]},
   "bones": [
     {
-      "name": "bottom",
-      "pivot": [
-        0,
-        16,
-        0
-      ],
+      "name": "bottom", "pivot": [0, -2.1, 1], "rotation": [90.0002, 0, 0],
       "cubes": [
-        {
-          "origin": [
-            -8,
-            0,
-            -14
-          ],
-          "size": [
-            16,
-            2,
-            14
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        },
-        {
-          "origin": [
-            -8,
-            0,
-            0
-          ],
-          "size": [
-            16,
-            2,
-            14
-          ],
-          "uv": [
-            0,
-            0
-          ],
-          "mirror": true
-        }
+        {"origin": [-14, -11, -4], "size": [28, 20, 4], "uv": [0, 0]},
+        {"origin": [-14, -9, -8], "size": [28, 16, 4], "uv": [0, 0]}
       ]
     },
     {
-      "name": "left_paddle",
-      "pivot": [
-        -8,
-        15,
-        0
-      ],
+      "name": "left_paddle", "pivot": [3, -4, 9], "rotation": [0, 0, 11.25],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            -1,
-            -8
-          ],
-          "size": [
-            2,
-            2,
-            14
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        },
-        {
-          "origin": [
-            -1,
-            0,
-            6
-          ],
-          "size": [
-            2,
-            1,
-            5
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        }
+        {"origin": [-1, 0, -5], "size": [2, 2, 18], "uv": [0, 24]},
+        {"origin": [-1.001, -3, 8], "size": [1, 6, 7], "uv": [0, 24]}
       ]
     },
     {
-      "name": "right_paddle",
-      "pivot": [
-        8,
-        15,
-        0
-      ],
+      "name": "right_paddle", "pivot": [3, -4, -9], "rotation": [0, 180, 11.25],
       "cubes": [
-        {
-          "origin": [
-            -1,
-            -1,
-            -8
-          ],
-          "size": [
-            2,
-            2,
-            14
-          ],
-          "uv": [
-            0,
-            0
-          ],
-          "mirror": true
-        },
-        {
-          "origin": [
-            -1,
-            0,
-            6
-          ],
-          "size": [
-            2,
-            1,
-            5
-          ],
-          "uv": [
-            0,
-            0
-          ],
-          "mirror": true
-        }
+        {"origin": [-1, 0, -5], "size": [2, 2, 18], "uv": [40, 24]},
+        {"origin": [0.001, -3, 8], "size": [1, 6, 7], "uv": [40, 24]}
       ]
     },
     {
-      "name": "chest",
-      "pivot": [
-        0,
-        11,
-        6
-      ],
+      "name": "chest_bottom", "pivot": [-2, -10.1, -6], "rotation": [0, -90, 0],
       "cubes": [
-        {
-          "origin": [
-            -6,
-            -1,
-            -5
-          ],
-          "size": [
-            12,
-            6,
-            10
-          ],
-          "uv": [
-            4,
-            80
-          ]
-        },
-        {
-          "origin": [
-            -6,
-            -5,
-            -5
-          ],
-          "size": [
-            12,
-            4,
-            10
-          ],
-          "uv": [
-            4,
-            63
-          ]
-        }
+        {"origin": [0, 0, 0], "size": [12, 8, 12], "uv": [0, 76]}
+      ]
+    },
+    {
+      "name": "chest_lid", "pivot": [-2, -14.1, -6], "rotation": [0, -90, 0],
+      "cubes": [
+        {"origin": [0, 0, 0], "size": [12, 4, 12], "uv": [0, 59]}
+      ]
+    },
+    {
+      "name": "chest_lock", "pivot": [-1, -11.1, -1], "rotation": [0, -90, 0],
+      "cubes": [
+        {"origin": [0, 0, 0], "size": [2, 4, 1], "uv": [0, 59]}
       ]
     }
   ]

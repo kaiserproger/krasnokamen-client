@@ -487,10 +487,12 @@ pub(super) fn material(
         anger: anger(models, e, game_time),
     })
 }
-// All four Solaris-authored boat/raft rigs share a hull bottom at model Y=18
-// pixels. Anchor that surface to the received entity position, not to water.
-fn boat_root(position: Vec3, yaw: f32) -> Mat4 {
-    Mat4::from_translation(position + Vec3::new(0., 18. / 16., 0.))
+// The vanilla 26.3 hulls hang their underside at model Y=6 px (boat and chest boat,
+// `boat/poplar#main` bottom 3..6) and Y=5.9 px (bamboo raft, `boat/bamboo#main`
+// bottom -2.1..5.9). Anchor that surface to the received entity position, not to water.
+fn boat_root(position: Vec3, yaw: f32, raft: bool) -> Mat4 {
+    let underside = if raft { 5.9 } else { 6. };
+    Mat4::from_translation(position + Vec3::new(0., underside / 16., 0.))
         * Mat4::from_rotation_y((180. - yaw).to_radians())
         * Mat4::from_scale(Vec3::new(-1., -1., 1.))
         * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
@@ -1074,7 +1076,7 @@ pub(super) fn root_matrix(
             t.pitch,
             entity.type_name == "minecraft:trident",
         ),
-        RootStyle::Boat => boat_root(relative, t.yaw),
+        RootStyle::Boat => boat_root(relative, t.yaw, entity.type_name.ends_with("_raft")),
         RootStyle::Minecart => {
             Mat4::from_translation(relative + Vec3::new(0., 0.375, 0.))
                 * Mat4::from_rotation_y((180. - t.yaw).to_radians())
@@ -4369,7 +4371,7 @@ mod tests {
                     matrices.push(
                         bone.parent
                             .map(|i| matrices[i])
-                            .unwrap_or_else(|| boat_root(position, yaw))
+                            .unwrap_or_else(|| boat_root(position, yaw, key.contains("_raft")))
                             * resources::transform(bone.pivot, bone.rotation, bone.scale),
                     );
                 }
@@ -4388,14 +4390,20 @@ mod tests {
                     },
                 );
                 assert!((min_y - position.y).abs() < 1e-4, "{key}: {min_y}");
+                // Vanilla hull floors are 3 px thick (`boat/poplar#main` bottom
+                // y 3..6) and the bamboo raft's double deck is 8 px
+                // (`boat/bamboo#main` bottom y -2.1..5.9).
+                let floor = if key.contains("_raft") { 8. } else { 3. };
                 assert!(
-                    (max_y - position.y - 2. / 16.).abs() < 1e-4,
+                    (max_y - position.y - floor / 16.).abs() < 1e-4,
                     "{key}: {max_y}"
                 );
                 if key.contains("_boat#") {
-                    for name in ["left_wall", "right_wall", "bow", "stern"] {
+                    // Vanilla hull walls (`left`, `right`, `front`, `back`) span
+                    // y -3..3, so their lower edge meets the floor's upper face.
+                    for name in ["left", "right", "front", "back"] {
                         let index = rig.bones.iter().position(|bone| bone.name == name).unwrap();
-                        let wall_min = rig.bones[index]
+                        let wall_low = rig.bones[index]
                             .quads
                             .iter()
                             .flatten()
@@ -4406,8 +4414,8 @@ mod tests {
                             })
                             .fold(f32::INFINITY, f32::min);
                         assert!(
-                            (wall_min - max_y).abs() < 1e-4,
-                            "{key} {name}: {wall_min} vs {max_y}"
+                            (wall_low - max_y).abs() < 1e-4,
+                            "{key} {name}: {wall_low} vs {max_y}"
                         );
                     }
                 }
