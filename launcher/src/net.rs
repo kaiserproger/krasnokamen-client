@@ -41,6 +41,17 @@ pub fn client() -> Result<Client> {
 }
 
 pub fn hash_file(path: &Path, check: &Check) -> Result<String> {
+    digest_file(path, matches!(check, Check::Sha1(_)))
+}
+
+/// SHA-1 of a file's bytes, without an expected value: the launcher identifies the
+/// client jar it extracted with it (the recorded manifest claim is not evidence
+/// that the file on disk is that jar).
+pub fn sha1_file(path: &Path) -> Result<String> {
+    digest_file(path, true)
+}
+
+fn digest_file(path: &Path, sha1: bool) -> Result<String> {
     let mut file = File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mut buffer = vec![0u8; 256 * 1024];
     macro_rules! digest {
@@ -56,9 +67,10 @@ pub fn hash_file(path: &Path, check: &Check) -> Result<String> {
             hex(&hasher.finalize())
         }};
     }
-    Ok(match check {
-        Check::Sha1(_) => digest!(Sha1::new()),
-        Check::Sha256(_) => digest!(Sha256::new()),
+    Ok(if sha1 {
+        digest!(Sha1::new())
+    } else {
+        digest!(Sha256::new())
     })
 }
 

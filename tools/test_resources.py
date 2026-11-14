@@ -15,7 +15,20 @@ def make_jar(path, entries):
             archive.writestr(name, body)
 
 
+KNOWN_ENTRIES_SHA256 = "ad578fa0a6ded8e432c2ca3bfc35f8fe5b00ccf04aa85a2b13ab175522076939"
+
+
 class StalePackTests(unittest.TestCase):
+    def test_entry_digest_is_the_shared_known_answer(self):
+        # The launcher computes the same value for this jar shape
+        # (`pack_entry_digest_is_the_shared_known_answer` in bootstrap.rs); both
+        # must agree or a pack built here would never look current to the launcher.
+        with tempfile.TemporaryDirectory() as tmp:
+            jar = os.path.join(tmp, "client.jar")
+            make_jar(jar, [("assets/a.json", "{}"), ("assets/b/c.png", "x")])
+            _, digest = resources.asset_entries(jar)
+            self.assertEqual(digest, KNOWN_ENTRIES_SHA256)
+
     def test_a_pack_from_another_jar_never_matches(self):
         with tempfile.TemporaryDirectory() as tmp:
             jar = os.path.join(tmp, "client.jar")
@@ -27,7 +40,7 @@ class StalePackTests(unittest.TestCase):
             with open(os.path.join(pack, "assets/minecraft/models/block/oak_sign.json"), "w") as f:
                 f.write("{}")
             marker = resources.expected_marker(jar, "26.3")
-            forced = dict(marker, paths_sha256="0" * 64)
+            forced = dict(marker, entries_sha256="0" * 64)
             with open(os.path.join(pack, resources.MARKER), "w") as f:
                 json.dump(forced, f)
             self.assertNotEqual(resources.read_marker(pack), marker)

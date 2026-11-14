@@ -28,10 +28,8 @@ fn ordinary_play_repairs_an_installation_whose_pack_lost_its_marker() {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    let sha1 = "a".repeat(40);
     let layout = crate::bootstrap::test_install(
         &root,
-        &sha1,
         &[(
             "assets/minecraft/models/block/template_sign_rot_0.json",
             b"{}",
@@ -50,7 +48,7 @@ fn ordinary_play_repairs_an_installation_whose_pack_lost_its_marker() {
         "a stale pack must send ordinary Play through the install stage, not start the client"
     );
 
-    crate::bootstrap::test_repair(&layout, &sha1);
+    crate::bootstrap::test_repair(&layout);
     let app = App::new(layout);
     assert!(
         app.ready,

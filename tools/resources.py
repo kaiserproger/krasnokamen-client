@@ -100,16 +100,23 @@ def tracked(path):
 
 
 def asset_entries(jar):
+    """Asset paths plus a digest of each entry's path, CRC-32 and size.
+
+    The launcher's marker uses the same recipe (`resources_manifest` in
+    `launcher/src/bootstrap.rs`), so a jar rebuilt with the same paths but other
+    bytes is a different pack source. `test_resources.py` pins the shared
+    known answer for a fixed jar shape.
+    """
     with zipfile.ZipFile(jar) as archive:
-        names = sorted(
-            info.filename
+        entries = sorted(
+            (info.filename, info.CRC, info.file_size)
             for info in archive.infolist()
             if not info.is_dir() and info.filename.startswith("assets/")
         )
     digest = hashlib.sha256()
-    for name in names:
-        digest.update(name.encode() + b"\n")
-    return names, digest.hexdigest()
+    for name, crc32, size in entries:
+        digest.update(f"{name}\0{crc32:08x}\0{size}\n".encode())
+    return [name for name, _, _ in entries], digest.hexdigest()
 
 
 def jar_sha1(jar):
@@ -121,12 +128,12 @@ def jar_sha1(jar):
 
 
 def expected_marker(jar, version):
-    names, paths_sha256 = asset_entries(jar)
+    names, entries_sha256 = asset_entries(jar)
     return {
         "game_version": version,
         "client_sha1": jar_sha1(jar),
         "entries": len(names),
-        "paths_sha256": paths_sha256,
+        "entries_sha256": entries_sha256,
     }
 
 

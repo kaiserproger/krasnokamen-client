@@ -57,17 +57,17 @@ pub fn is_ready(layout: &Layout) -> bool {
         && !installed.bundles.is_empty()
         && !installed.resources_for.is_empty()
         && paths::missing(&layout.root).is_empty()
-        && pack_ready(layout, &installed)
+        && pack_ready(layout)
 }
 
 /// The pack's marker, compared with what the local client jar produces. The jar
 /// must be present (stage 3 downloads it before stage 5): without it nothing can
 /// say the pack is current, so readiness is false and `run` decides.
-fn pack_ready(layout: &Layout, installed: &Installed) -> bool {
-    let Ok(manifest) = resources_manifest(&layout.client_jar(), &installed.client_sha1) else {
+fn pack_ready(layout: &Layout) -> bool {
+    let Ok(manifest) = resources_manifest(&layout.client_jar()) else {
         return false;
     };
-    resources_current(layout, installed, &manifest, false, false)
+    resources_current(layout, &manifest, false, false)
 }
 
 pub struct Options {
@@ -229,34 +229,39 @@ const RESOURCES_MARKER: &str = ".resources.json";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ResourcesManifest {
     game_version: String,
+    /// SHA-1 of the jar's bytes, measured here, never a recorded claim.
     client_sha1: String,
     entries: u64,
-    paths_sha256: String,
+    /// SHA-256 over each `assets/` entry's path, CRC-32 and size, so two jars with
+    /// equal paths but different contents cannot share a marker.
+    entries_sha256: String,
 }
 
-/// What the jar's `assets/` tree must produce: the file count and a digest of the
-/// sorted paths, so a pack built from any other jar never matches.
-pub(crate) fn resources_manifest(jar: &Path, client_sha1: &str) -> Result<ResourcesManifest> {
+/// What the jar itself produces. The SHA-1 is measured from the file's bytes (the
+/// value the download checks against the release) and the entry digest carries
+/// each member's CRC-32 and size, so a rebuilt or tampered jar with the same paths
+/// is a different pack source.
+pub(crate) fn resources_manifest(jar: &Path) -> Result<ResourcesManifest> {
     use sha2::{Digest, Sha256};
+    let client_sha1 = net::sha1_file(jar)?;
     let mut archive = zip::ZipArchive::new(fs::File::open(jar)?)?;
-    let mut paths = Vec::new();
+    let mut entries = Vec::new();
     for index in 0..archive.len() {
         let entry = archive.by_index(index)?;
         if entry.is_file() && entry.name().starts_with("assets/") {
-            paths.push(entry.name().to_owned());
+            entries.push((entry.name().to_owned(), entry.crc32(), entry.size()));
         }
     }
-    paths.sort();
+    entries.sort();
     let mut hasher = Sha256::new();
-    for path in &paths {
-        hasher.update(path.as_bytes());
-        hasher.update(b"\n");
+    for (name, crc32, size) in &entries {
+        hasher.update(format!("{name}\0{crc32:08x}\0{size}\n").as_bytes());
     }
     Ok(ResourcesManifest {
         game_version: GAME_VERSION.to_owned(),
-        client_sha1: client_sha1.to_owned(),
-        entries: paths.len() as u64,
-        paths_sha256: format!("{:x}", hasher.finalize()),
+        client_sha1,
+        entries: entries.len() as u64,
+        entries_sha256: format!("{:x}", hasher.finalize()),
     })
 }
 
@@ -265,12 +270,10 @@ pub(crate) fn resources_manifest(jar: &Path, client_sha1: &str) -> Result<Resour
 /// or half-written tree, so it takes no part in the decision.
 fn resources_current(
     layout: &Layout,
-    installed: &Installed,
     expected: &ResourcesManifest,
     client_changed: bool,
     force: bool,
 ) -> bool {
-    let _ = installed;
     !force && !client_changed && pack_is_current(layout, expected)
 }
 
@@ -397,8 +400,14 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     net::download_all(&client, jobs, 12, rep)?;
 
     rep.stage(5, STAGES, "Extracting textures, models and fonts");
-    let manifest = resources_manifest(&layout.client_jar(), &release.client.sha1)?;
-    if resources_current(layout, &installed, &manifest, client_changed, force) {
+    let manifest = resources_manifest(&layout.client_jar())?;
+    if !manifest
+        .client_sha1
+        .eq_ignore_ascii_case(&release.client.sha1)
+    {
+        bail!("client jar does not match the resolved release");
+    }
+    if resources_current(layout, &manifest, client_changed, force) {
         rep.log("resources already extracted");
     } else {
         extract_resources(layout, rep, &manifest)?;
@@ -464,7 +473,7 @@ pub(crate) fn write_test_jar(path: &Path, entries: &[(&str, &[u8])]) {
 /// `paths::REQUIRED` entry, the client jar, and an `installed.json` for this
 /// release (test fixture).
 #[cfg(test)]
-pub(crate) fn test_install(root: &Path, client_sha1: &str, jar: &[(&str, &[u8])]) -> Layout {
+pub(crate) fn test_install(root: &Path, jar: &[(&str, &[u8])]) -> Layout {
     let layout = Layout::new(root.to_owned());
     for (relative, directory) in paths::REQUIRED {
         let target = layout.join(relative);
@@ -479,14 +488,15 @@ pub(crate) fn test_install(root: &Path, client_sha1: &str, jar: &[(&str, &[u8])]
     }
     fs::create_dir_all(layout.join("mojang/versions").join(GAME_VERSION)).unwrap();
     write_test_jar(&layout.client_jar(), jar);
+    let client_sha1 = net::sha1_file(&layout.client_jar()).unwrap();
     Installed {
         game_version: GAME_VERSION.to_owned(),
-        client_sha1: client_sha1.to_owned(),
         bundles: std::collections::BTreeMap::from([(
             "solaris-facts-26.3-r1".to_owned(),
             "x".to_owned(),
         )]),
-        resources_for: client_sha1.to_owned(),
+        resources_for: client_sha1.clone(),
+        client_sha1,
     }
     .save(&layout)
     .unwrap();
@@ -495,8 +505,8 @@ pub(crate) fn test_install(root: &Path, client_sha1: &str, jar: &[(&str, &[u8])]
 
 /// An extractable pack for a test jar: `assets/**` only, with a marker.
 #[cfg(test)]
-pub(crate) fn test_repair(layout: &Layout, client_sha1: &str) {
-    let manifest = resources_manifest(&layout.client_jar(), client_sha1).unwrap();
+pub(crate) fn test_repair(layout: &Layout) {
+    let manifest = resources_manifest(&layout.client_jar()).unwrap();
     extract_resources(layout, &Reporter::new(None, true), &manifest).unwrap();
 }
 
@@ -534,7 +544,7 @@ mod tests {
             b"{}",
         )
         .unwrap();
-        let expected = resources_manifest(&layout.client_jar(), &"a".repeat(40)).unwrap();
+        let expected = resources_manifest(&layout.client_jar()).unwrap();
         assert_eq!(expected.entries, 2);
         assert!(!pack_is_current(&layout, &expected));
         // A marker for another jar never stands in for the content it names.
@@ -570,10 +580,8 @@ mod tests {
     fn an_installation_whose_pack_lost_its_marker_is_not_ready() {
         let root = std::env::temp_dir().join(format!("krasnokamen-ready-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let sha1 = "a".repeat(40);
         let layout = test_install(
             &root,
-            &sha1,
             &[("assets/minecraft/models/block/oak_sign_rot_0.json", b"{}")],
         );
         // The 26.1.2-era pack a player still has: the directory exists, no marker.
@@ -591,10 +599,26 @@ mod tests {
             !is_ready(&layout),
             "a markerless pack must not report the installation ready; Play then runs the repair stage"
         );
-        test_repair(&layout, &sha1);
+        test_repair(&layout);
         assert!(
             is_ready(&layout),
             "the repaired pack makes Play start the client directly"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pack_entry_digest_is_the_shared_known_answer() {
+        // `tools/test_resources.py` asserts the same constant: the builder and the
+        // launcher must agree on the entry digest or every pack would look stale.
+        let root = std::env::temp_dir().join(format!("krasnokamen-digest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let jar = root.join("client.jar");
+        write_test_jar(&jar, &[("assets/a.json", b"{}"), ("assets/b/c.png", b"x")]);
+        assert_eq!(
+            resources_manifest(&jar).unwrap().entries_sha256,
+            "ad578fa0a6ded8e432c2ca3bfc35f8fe5b00ccf04aa85a2b13ab175522076939"
         );
         let _ = fs::remove_dir_all(&root);
     }
@@ -640,26 +664,48 @@ mod tests {
             b"{}",
         )
         .unwrap();
-        let expected = resources_manifest(&layout.client_jar(), &"a".repeat(40)).unwrap();
-        let installed = Installed {
-            resources_for: expected.client_sha1.clone(),
-            ..Default::default()
-        };
+        let expected = resources_manifest(&layout.client_jar()).unwrap();
         assert!(
             layout.join("resources/assets/minecraft").is_dir(),
             "the pre-fix condition also required this directory"
         );
         assert!(
-            !resources_current(&layout, &installed, &expected, false, false),
+            !resources_current(&layout, &expected, false, false),
             "a stale pack must be rebuilt even when the manifest claims the current jar"
         );
         extract_resources(&layout, &Reporter::new(None, true), &expected).unwrap();
-        assert!(resources_current(
-            &layout, &installed, &expected, false, false
-        ));
-        assert!(!resources_current(
-            &layout, &installed, &expected, false, true
-        ));
+        assert!(resources_current(&layout, &expected, false, false));
+        assert!(!resources_current(&layout, &expected, false, true));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_jar_with_the_same_paths_and_other_bytes_invalidates_the_pack() {
+        let root = std::env::temp_dir().join(format!("krasnokamen-jar-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let layout = test_install(&root, &[("assets/minecraft/models/block/a.json", b"{}")]);
+        test_repair(&layout);
+        assert!(is_ready(&layout));
+        let before = resources_manifest(&layout.client_jar()).unwrap();
+        // Same entry path, different bytes (a rebuilt or tampered jar): the marker
+        // carries the measured SHA-1 and the entry CRC/size, so it cannot match.
+        write_test_jar(
+            &layout.client_jar(),
+            &[("assets/minecraft/models/block/a.json", b"[]")],
+        );
+        let after = resources_manifest(&layout.client_jar()).unwrap();
+        assert_ne!(
+            before.client_sha1, after.client_sha1,
+            "the jar SHA-1 is measured"
+        );
+        assert_ne!(
+            before.entries_sha256, after.entries_sha256,
+            "equal paths with different contents must not share the entry digest"
+        );
+        assert!(
+            !is_ready(&layout),
+            "a pack extracted from another jar must not report the installation ready"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
