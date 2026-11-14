@@ -19,12 +19,12 @@ The client remains an offline/test-identity preview, not full vanilla parity.
 - Appearance contains 40 built-in palettes, searchable previews, category filters,
   favorites and a validated custom-theme editor with JSON import/export. Export
   creates a new file and refuses to overwrite an existing one.
-- An optional Home banner uses an original Solaris illustration or a local PNG.
+- An optional Home banner uses an original Krasnokamen illustration or a local PNG.
   Reduced motion disables decorative transitions and indeterminate spinners;
   progress and status still update.
 - Local skin previews accept 64 x 64 / 64 x 32 PNGs and integer HD multiples up to
   1024 pixels wide. The installed Steve texture is used when available and no
-  custom skin is selected; otherwise an explicitly labeled original Solaris
+  custom skin is selected; otherwise an explicitly labeled original Krasnokamen
   avatar is shown. This preview does **not** change the player's in-game skin.
 
 ## Ownership and safety boundaries
@@ -99,8 +99,8 @@ are not evidence of OS-level input, scaling, IME or presentation correctness.
 From the repository root, with the pinned toolchain:
 
 ```sh
-CARGO_INCREMENTAL=0 nice -n 19 cargo test --locked -p solaris-launcher -j 2
-CARGO_INCREMENTAL=0 nice -n 19 cargo clippy --locked -p solaris-launcher --all-targets --no-deps -j 2 -- -D warnings
+CARGO_INCREMENTAL=0 nice -n 19 cargo test --locked -p krasnokamen-launcher -j 2
+CARGO_INCREMENTAL=0 nice -n 19 cargo clippy --locked -p krasnokamen-launcher --all-targets --no-deps -j 2 -- -D warnings
 rustfmt --check --edition 2024 --config skip_children=true launcher/src/config.rs launcher/src/main.rs launcher/src/ui.rs launcher/src/ui_tests.rs launcher/src/media.rs launcher/src/motion.rs launcher/src/theme.rs launcher/src/theme_presets.rs
 git diff --check
 ```

@@ -1,7 +1,7 @@
 {
  "format_version": "1.8.0",
  "animations": {
-  "animation.solaris.horse.hurt": {
+  "animation.krasnokamen.horse.hurt": {
    "animation_length": 0.5,
    "bones": {
     "head": {
@@ -78,7 +78,7 @@
     }
    }
   },
-  "animation.solaris.horse.death": {
+  "animation.krasnokamen.horse.death": {
    "animation_length": 1.0,
    "loop": "hold_on_last_frame",
    "override_previous_animation": true,

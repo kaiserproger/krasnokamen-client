@@ -48,7 +48,17 @@ impl Player {
         for face in 0..6 {
             let neighbor = shifted(position, face);
             let state = self.use_block(world, neighbor)?;
-            if self.block_has_signal(SignalQuery { position: neighbor, state, face, direct: false }, world, content, entities)? {
+            if self.block_has_signal(
+                SignalQuery {
+                    position: neighbor,
+                    state,
+                    face,
+                    direct: false,
+                },
+                world,
+                content,
+                entities,
+            )? {
                 return Ok(true);
             }
             if content.block_redstone_conductor(state)? {
@@ -56,7 +66,12 @@ impl Player {
                     let direct_neighbor = shifted(neighbor, direct_face);
                     let direct_state = self.use_block(world, direct_neighbor)?;
                     if self.block_has_signal(
-                        SignalQuery { position: direct_neighbor, state: direct_state, face: direct_face, direct: true },
+                        SignalQuery {
+                            position: direct_neighbor,
+                            state: direct_state,
+                            face: direct_face,
+                            direct: true,
+                        },
                         world,
                         content,
                         entities,
@@ -76,7 +91,12 @@ impl Player {
         content: &Content,
         entities: &EntityStore,
     ) -> Result<bool> {
-        let SignalQuery { position, state, face, direct } = query;
+        let SignalQuery {
+            position,
+            state,
+            face,
+            direct,
+        } = query;
         let owners = content.block_signal_owners(state)?;
         let owner = short_class(if direct { owners.1 } else { owners.0 });
         let facing = || direction(property(content, state, "facing")?);
@@ -264,7 +284,6 @@ impl Player {
         }
         self.wire_connection_state(position, seed, world, content)
     }
-
 
     pub(super) fn wire_connects_to(
         &self,

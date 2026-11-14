@@ -17,8 +17,8 @@
 //!
 //! Not implemented (vanilla extras): the "custom screen" warning button, button tooltips and
 //! title hover tooltips.
-use crate::protocol::packet_ids::play::clientbound as cb;
 use super::state::{NodeAction, Paint, Screen, UiCommand, UiEffects, UiState};
+use crate::protocol::packet_ids::play::clientbound as cb;
 use crate::protocol::{Reader, Result, nbt::Nbt};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -1089,10 +1089,7 @@ impl UiState {
         e: &mut UiEffects,
     ) -> Result<()> {
         let shown = self.dialogs.shown.as_ref().ok_or("dialog_not_open")?;
-        let action = match event["action"]
-            .as_str()
-            .ok_or("component_click_action")?
-        {
+        let action = match event["action"].as_str().ok_or("component_click_action")? {
             "custom" => DialogAction::Custom {
                 id: identifier(event["id"].as_str().ok_or("component_custom_id_required")?)?,
                 payload: match event.get("payload_slot") {

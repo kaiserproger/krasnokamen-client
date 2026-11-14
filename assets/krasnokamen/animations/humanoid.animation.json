@@ -1,7 +1,7 @@
 {
  "format_version": "1.8.0",
  "animations": {
-  "animation.solaris.humanoid.sword_slash": {
+  "animation.krasnokamen.humanoid.sword_slash": {
    "animation_length": 1.05,
    "override_previous_animation": true,
    "timeline": {
@@ -622,7 +622,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.sword_backhand": {
+  "animation.krasnokamen.humanoid.sword_backhand": {
    "animation_length": 1.05,
    "override_previous_animation": true,
    "timeline": {
@@ -1243,7 +1243,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.sword_overhead": {
+  "animation.krasnokamen.humanoid.sword_overhead": {
    "animation_length": 1.05,
    "override_previous_animation": true,
    "timeline": {
@@ -1864,7 +1864,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.spear_thrust": {
+  "animation.krasnokamen.humanoid.spear_thrust": {
    "animation_length": 1.15,
    "override_previous_animation": true,
    "timeline": {
@@ -2413,7 +2413,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.mace_overhead": {
+  "animation.krasnokamen.humanoid.mace_overhead": {
    "animation_length": 1.25,
    "override_previous_animation": true,
    "timeline": {
@@ -3034,7 +3034,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.shield_block": {
+  "animation.krasnokamen.humanoid.shield_block": {
    "animation_length": 0.5,
    "override_previous_animation": true,
    "timeline": {
@@ -3439,7 +3439,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.stagger": {
+  "animation.krasnokamen.humanoid.stagger": {
    "animation_length": 0.75,
    "override_previous_animation": true,
    "bones": {
@@ -3841,7 +3841,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.bow_shot": {
+  "animation.krasnokamen.humanoid.bow_shot": {
    "animation_length": 2.0,
    "override_previous_animation": true,
    "timeline": {
@@ -4414,7 +4414,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.crossbow_shot": {
+  "animation.krasnokamen.humanoid.crossbow_shot": {
    "animation_length": 3.75,
    "override_previous_animation": true,
    "timeline": {
@@ -4867,7 +4867,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.lance_strike": {
+  "animation.krasnokamen.humanoid.lance_strike": {
    "animation_length": 1.15,
    "override_previous_animation": true,
    "timeline": {
@@ -5240,7 +5240,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.mounted_sword": {
+  "animation.krasnokamen.humanoid.mounted_sword": {
    "animation_length": 1.05,
    "override_previous_animation": true,
    "timeline": {
@@ -5669,7 +5669,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.hurt": {
+  "animation.krasnokamen.humanoid.hurt": {
    "animation_length": 0.5,
    "bones": {
     "body": {
@@ -5926,7 +5926,7 @@
     }
    }
   },
-  "animation.solaris.humanoid.death": {
+  "animation.krasnokamen.humanoid.death": {
    "animation_length": 1.0,
    "loop": "hold_on_last_frame",
    "override_previous_animation": true,
