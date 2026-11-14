@@ -868,7 +868,7 @@ mod tests {
         );
         inventory.predict_use_slot(36, Some(stack), false).unwrap();
         player.tick_using_item(&World::new(0, 16), &content, &inventory,
-            &EntityStore::new(), 1, &mut Vec::new()).unwrap();
+            &EntityStore::new(), 1, 1, &mut Vec::new()).unwrap();
         let using = player.using.as_ref().unwrap();
         assert_eq!(using.crossbow_charge_ticks, 10.);
         assert!((using.crossbow_pull(0.) - 1.6).abs() < 0.0001);

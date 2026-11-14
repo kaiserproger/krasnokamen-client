@@ -34,7 +34,7 @@ pub(super) fn append_drowned_outer(
     }
     let texture = p::texture(content, texture)?;
     let rig = models.rig(key);
-    p::evaluate_rig(rig, entity, models, tick, partial, root, transforms);
+    p::evaluate_rig(rig, entity, models, content, tick, partial, root, transforms);
     p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)
 }
 

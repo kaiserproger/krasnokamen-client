@@ -28,6 +28,8 @@ pub(crate) struct AnimationState {
     /// lands mid-tick continues from the pose already on screen.
     pub lerp_phase: f32,
     pub motion: crate::motion::EntityMotion,
+    pub seat_motion: Option<crate::player::vehicle::SeatMotion>,
+    pub seat_game_time: i64,
 }
 impl Default for AnimationState {
     fn default() -> Self {
@@ -44,6 +46,8 @@ impl Default for AnimationState {
             display: None,
             lerp_phase: 0.,
             motion: crate::motion::EntityMotion::default(),
+            seat_motion: Some(crate::player::vehicle::SeatMotion::default()),
+            seat_game_time: 0,
         }
     }
 }
@@ -126,8 +130,10 @@ pub(crate) fn physical_peek(amount: f32) -> f32 {
     0.5 - math::sin(f64::from((0.5 + amount) * std::f32::consts::PI)) * 0.5
 }
 pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Result<Bounds> {
+    bounds_at(models, e, e.presented_transform(tick, partial).position)
+}
+pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
-    let position = e.presented_transform(tick, partial).position;
     if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
@@ -220,6 +226,10 @@ impl Store {
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
             .flat_map(|(_, ids)| ids.iter())
             .filter_map(|id| self.get(*id))
+            .filter(|entity| entity.vehicle.is_none())
+            // Mounted bodies may be received far from their seat. Their raw
+            // body bucket cannot decide whether the presentation exists.
+            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
             .filter(|entity| {
                 !entity
                     .source
@@ -326,7 +336,7 @@ impl Store {
             {
                 continue;
             }
-            let mut bounds = bounds(models, e, tick, partial)?;
+            let mut bounds = self.bounds(e.handle, tick, partial)?;
             if owner(models, e, "getPickRadius")
                 == "net.minecraft.world.entity.projectile.Projectile"
             {
@@ -368,7 +378,7 @@ impl Store {
                     && alive(models, e)
                     && ((mover.is_none_or(|m| {
                         hierarchy(models, m, "net.minecraft.world.entity.player.Player")
-                    }) && mover_position[1] >= bounds(models, e, tick, 0.)?.max[1])
+                    }) && mover_position[1] >= self.bounds(e.handle, tick, 0.)?.max[1])
                         || (!e.passenger_ids.is_empty()
                             && mover.is_some_and(|m| {
                                 hierarchy(
@@ -447,7 +457,7 @@ impl Store {
             {
                 continue;
             }
-            let b = bounds(models, e, tick, 0.)?;
+            let b = self.bounds(e.handle, tick, 0.)?;
             if b.intersects(area) {
                 out.push(b);
             }
@@ -483,7 +493,7 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && bounds(models, entity, tick, 0.)?.intersects(area) {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
                 return Ok(false);
             }
         }
@@ -494,7 +504,7 @@ impl Store {
         for e in self.candidates(area) {
             if e.handle.network_id != exclude_id
                 && hierarchy(models, e, "net.minecraft.world.entity.LivingEntity")
-                && bounds(models, e, tick, 0.)?.intersects(area)
+                && self.bounds(e.handle, tick, 0.)?.intersects(area)
             {
                 return Ok(true);
             }
@@ -519,7 +529,7 @@ impl Store {
             if entity.handle.network_id == local_id || spectator(self, entity) {
                 continue;
             }
-            let bounds = bounds(models, entity, tick, 0.)?;
+            let bounds = self.bounds(entity.handle, tick, 0.)?;
             if bounds.intersects(area) {
                 return Ok(true);
             }
@@ -561,7 +571,7 @@ impl Store {
             if entity.handle.network_id == local_id || spectator(self, entity) {
                 continue;
             }
-            if !bounds(models, entity, tick, 0.)?.intersects(area) {
+            if !self.bounds(entity.handle, tick, 0.)?.intersects(area) {
                 continue;
             }
             // The hypothetical mover is a boat, not the ordinary local-player query.
@@ -600,7 +610,7 @@ impl Store {
             {
                 continue;
             }
-            let bounds = bounds(models, entity, tick, 0.)?;
+            let bounds = self.bounds(entity.handle, tick, 0.)?;
             if !bounds.intersects(area) {
                 continue;
             }
@@ -670,7 +680,7 @@ impl Store {
                 && !self.root_has_player(self.root_vehicle(*id)?, &models, 0)?;
             let peek = number(&models, e, "DATA_PEEK_ID", 0) as f32 * 0.01;
             let standing = boolean(&models, e, "DATA_STANDING_ID", false);
-            let before_bounds = bounds(&models, e, tick, 0.)?;
+            let before_bounds = self.bounds(e.handle, tick, 0.)?;
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
             let controlling_passenger = e.passenger_ids.first().is_some_and(|passenger| {
@@ -689,6 +699,18 @@ impl Store {
                 .lerp_progress
                 .saturating_add(1)
                 .min(e.physical.lerp_duration.saturating_add(1));
+            e.physical.seat_game_time = game_time;
+            if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
+                "net.minecraft.world.entity.animal.equine.AbstractHorse"
+                    | "net.minecraft.world.entity.monster.Strider")
+            {
+                let position = e.presented_transform(tick, 0.).position;
+                let standing = number(&models, e, "DATA_ID_FLAGS", 0) & 32 != 0;
+                crate::player::vehicle::SeatMotion::advance(
+                    &mut e.physical.seat_motion, e.handle, position, tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
+                );
+            }
             e.physical.peek_old = e.physical.peek;
             e.physical.peek = approach(e.physical.peek, peek, 0.05);
             e.physical.bear_stand_old = e.physical.bear_stand;
@@ -719,7 +741,8 @@ impl Store {
                     (living.walk.speed(1.), living.body(1.))
                 });
             let can_look = may_glance(&models, e);
-            let at = e.presented_transform(tick, 0.);
+            let at = self.presented_transform(self.get(*id).unwrap(), tick, 0.)?;
+            let e = self.get_mut(*id).unwrap();
             e.physical.motion.tick(&crate::motion::EntityTick {
                 tick,
                 on_ground: e.on_ground,

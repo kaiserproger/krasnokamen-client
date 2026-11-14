@@ -26,7 +26,7 @@ pub(super) fn append_arrow(
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    let p::EntityDrawFrame { origin, tick, partial, light, .. } = frame;
+    let p::EntityDrawFrame { origin, transform, partial, light, .. } = frame;
     let family = models
         .families
         .get(&entity.type_name)
@@ -34,7 +34,6 @@ pub(super) fn append_arrow(
     let rig = models.rig(&family.rig);
     let is_trident = family.renderer_class.as_deref()
         == Some("net.minecraft.client.renderer.entity.ThrownTridentRenderer");
-    let transform = entity.presented_transform(tick, partial);
     let root = translation(transform.position, origin)
         * Mat4::from_rotation_y((transform.yaw - 90.).to_radians())
         * Mat4::from_rotation_z((transform.pitch + if is_trident { 90. } else { 0. }).to_radians());

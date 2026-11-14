@@ -55,6 +55,7 @@ pub(crate) struct Cache {
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
     clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    dynamic_models: BTreeMap<String, Result<bool>>,
     tnt_state: Option<u32>,
 }
 impl Cache {
@@ -62,32 +63,60 @@ impl Cache {
         self.text.remove(&handle);
         self.clock_needles.remove(&handle);
     }
-    pub(super) fn clock_context(
+    pub(super) fn item_context(
         &mut self,
         entity: &Entity,
-        stack: Option<&Stack>,
+        stacks: [Option<&Stack>; 3],
         content: &Content,
         position: [f64; 3],
         environment: Option<super::ClockEnvironment<'_>>,
     ) -> Result<Option<ItemContext>> {
-        let is_clock = stack.is_some_and(|stack| {
-            !stack.empty()
-                && crate::ui::items::item_model_id(content, stack)
-                    .is_some_and(|id| crate::ui::items::item_model_location(id) == ("minecraft", "clock"))
-        });
-        let Some((base, time_at)) = environment.filter(|_| is_clock) else {
+        let Some((base, time_at)) = environment else { return Ok(None) };
+        if !stacks.iter().flatten().any(|stack| !stack.empty()) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
-        };
+        }
+        fn dynamic(value: &Value) -> bool {
+            match value {
+                Value::Object(fields) => {
+                    fields.get("property").and_then(Value::as_str).is_some_and(|name| {
+                        matches!(name.strip_prefix("minecraft:").unwrap_or(name), "time" | "compass")
+                    }) || fields.values().any(dynamic)
+                }
+                Value::Array(values) => values.iter().any(dynamic),
+                _ => false,
+            }
+        }
+        let mut needs_world = false;
+        for stack in stacks.into_iter().flatten().filter(|s| !s.empty()) {
+            let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
+            if !self.dynamic_models.contains_key(id) {
+                if self.dynamic_models.len() >= 4096 {
+                    return Err("dynamic item model cache bound".into());
+                }
+                let (ns, path) = crate::ui::items::item_model_location(id);
+                let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+                    .map(|graph| dynamic(&graph));
+                self.dynamic_models.insert(id.into(), result);
+            }
+            needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
+        }
+        if !needs_world {
+            self.clock_needles.remove(&entity.handle);
+            return Ok(None);
+        }
         let Some(mut world) = base.world.clone() else {
             return Ok(None);
         };
         let (sun_angle, moon_phase) = time_at(position)?;
         world.position = position;
+        world.yaw = entity.transform.yaw;
         world.sun_angle = sun_angle;
         world.moon_phase = moon_phase;
         world.needles = self.clock_needles.entry(entity.handle).or_default().clone();
         let mut context = base.clone();
+        context.seed = entity.handle.network_id;
         context.world = Some(world);
         Ok(Some(context))
     }
@@ -144,8 +173,11 @@ pub(crate) fn append(
     origin: [f64; 3],
     tick: u64,
     partial: f32,
+    transform: super::Transform,
     clock_context: Option<&ItemContext>,
+    maps: crate::ui::MapRenderView<'_>,
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    tint_source: &dyn Fn(crate::protocol::models::TintKind, [i32; 3]) -> Result<[f32; 3]>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let entity = &store.slots[slot];
@@ -161,7 +193,7 @@ pub(crate) fn append(
     let result = (|| {
         let entity = &store.slots[slot];
         if entity.type_name == "minecraft:lightning_bolt" {
-            return world_fx::append_bolt(entity, origin, tick, partial, out);
+            return world_fx::append_bolt(entity, origin, transform, out);
         }
         if !matches!(entity.type_name.as_str(),
             "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
@@ -174,17 +206,17 @@ pub(crate) fn append(
         }
         let entity = &store.slots[slot];
         let (dimensions, scale) = models.dimensions(entity)?;
-        let Some(light) = p::entity_light(entity, models, tick, partial,
+        let Some(light) = p::entity_light(entity, store, models, tick, transform,
             dimensions, scale, light_source)? else {
             return Ok(Handled::PendingLighting);
         };
         if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_block(store, slot, content,
-                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, out);
+            return world_fx::append_block(store, slot, models, content,
+                p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, tint_source, out);
         }
         item_frame::append(entity, models, item_frame::ItemFrameResources {
-            cache: &mut store.special_render_cache, items: &mut store.items,
-        }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
+            cache: &mut store.special_render_cache, items: &mut store.items, maps,
+        }, content, p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, clock_context, out)
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);

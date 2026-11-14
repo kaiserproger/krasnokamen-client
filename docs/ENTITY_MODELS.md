@@ -290,6 +290,13 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   geometry without separate ears or tail: the adult head sits in front of the body with the
   snout just below the eyes, and the piglet head rises a pixel above its back. The cold pig's
   extra texture layer is not modelled.
+  Adult camel and camel husk rigs stand on 22-pixel legs, so the back and saddle reach the
+  received two-block rider seat. The first rider sits on the back between the neck and the
+  hump. Sitting lowers the back by 19 pixels onto the received sitting seat and tucks the
+  folded front legs under the chest. `camel_back_and_saddle_carry_the_received_standing_and_sitting_seat`
+  checks both contacts. Two native-client scenes showed a remote rider seated on a saddled
+  camel. Solaris core never sends camel sitting poses, so sitting is checked only by the test.
+  Matched-vanilla appearance remains unverified.
   Allay, vex, baby bee, ghastling, rabbit, fox, panda, hoglin, zoglin, strider, guardian, elder
   guardian, cod, salmon and axolotl rigs (with their babies where listed) and the vindicator's
   clothing UVs were re-authored by eye from public minecraft.wiki renders; receipts list the
