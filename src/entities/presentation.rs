@@ -187,12 +187,33 @@ pub(super) fn entity_light(
         }
         return Ok(best);
     }
+    // Vanilla AbstractArrow.onHitBlock retracts a stuck projectile by
+    // signum(deltaMovement) * 0.05 per axis, and EntityRenderer then samples
+    // light at BlockPos.containing(getLightProbePosition(partial)) = eye
+    // height above that retracted position. The server reports the raw impact
+    // point, so apply the same retraction to the probe: without it a
+    // projectile stuck on a block face samples the opaque cell and renders
+    // black instead of the lit cell in front of the face.
+    let mut position = t.position;
+    if models.schemas[&e.type_name]
+        .hierarchy
+        .iter()
+        .any(|class| class == "net.minecraft.world.entity.projectile.arrow.AbstractArrow")
+        && boolean(models, e, "IN_GROUND")
+    {
+        for axis in 0..3 {
+            // Java Math.signum maps zero to zero (f64::signum(0.0) is 1.0).
+            let velocity = e.velocity[axis];
+            let signum = if velocity > 0. { 1. } else if velocity < 0. { -1. } else { 0. };
+            position[axis] -= signum * 0.05;
+        }
+    }
     sampled(
         light,
         [
-            t.position[0],
-            t.position[1] + f64::from(dimensions.eye_height * scale),
-            t.position[2],
+            position[0],
+            position[1] + f64::from(dimensions.eye_height * scale),
+            position[2],
         ],
     )
 }
@@ -3232,5 +3253,62 @@ mod tests {
         );
         let binding = material(&Store::default(), &models, &dragon, &content, 0).unwrap();
         assert_eq!(binding.texture.layer, 42);
+    }
+
+    #[test]
+    fn stuck_projectile_light_probe_retracts_from_the_block_face() {
+        let (mut models, mut entity) = fixture();
+        let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+        schema.accessors.insert("IN_GROUND".into(), [10, 8]);
+        schema.dimensions.eye_height = 0.13;
+        schema.hierarchy = vec![
+            "net.minecraft.world.entity.projectile.arrow.ThrownTrident".into(),
+            "net.minecraft.world.entity.projectile.arrow.AbstractArrow".into(),
+            "net.minecraft.world.entity.projectile.Projectile".into(),
+            "net.minecraft.world.entity.Entity".into(),
+        ];
+        entity.type_name = "minecraft:trident".into();
+        models.schemas.insert(entity.type_name.clone(), schema);
+        // Server-reported raw impact point on the stone wall face z=1009 plus the
+        // last received (pre-stuck) velocity, exactly as the wall scene census.
+        entity.velocity = [0., -0.05, 2.475];
+        entity.metadata.insert(10, Metadata::Bool(true));
+        let store = Store::new();
+        let transform = super::super::Transform {
+            position: [1005.5, 161.365703125, 1009.0],
+            yaw: 0.,
+            pitch: 0.,
+            head_yaw: 0.,
+        };
+        let (dimensions, scale) = models.dimensions(&entity).unwrap();
+        let points = std::cell::RefCell::new(Vec::new());
+        let light = |point: [f64; 3]| {
+            points.borrow_mut().push(point);
+            Ok(Some([15., 0.]))
+        };
+        let sampled_light =
+            entity_light(&entity, &store, &models, 0, transform, dimensions, scale, &light).unwrap();
+        assert_eq!(sampled_light, Some([15., 0.]));
+        // AbstractArrow.onHitBlock retracts by signum(velocity)*0.05 per axis
+        // before the probe takes eye height: z 1009.0 -> 1008.95 (the air cell in
+        // front of the wall), y picks up +0.05 from the -0.05 velocity component.
+        let borrowed = points.borrow();
+        let [point] = borrowed.as_slice() else { panic!("exactly one sample: {borrowed:?}") };
+        assert!((point[0] - 1005.5).abs() < 1e-9, "{point:?}");
+        assert!((point[1] - (161.365703125 + 0.05 + f64::from(0.13f32))).abs() < 1e-9, "{point:?}");
+        assert!((point[2] - 1008.95).abs() < 1e-9, "{point:?}");
+        drop(borrowed);
+        // A flying (not IN_GROUND) projectile keeps the raw position probe.
+        entity.metadata.insert(10, Metadata::Bool(false));
+        let points = std::cell::RefCell::new(Vec::new());
+        let light = |point: [f64; 3]| {
+            points.borrow_mut().push(point);
+            Ok(Some([15., 0.]))
+        };
+        entity_light(&entity, &store, &models, 0, transform, dimensions, scale, &light).unwrap();
+        let borrowed = points.borrow();
+        let [point] = borrowed.as_slice() else { panic!("exactly one sample: {borrowed:?}") };
+        assert!((point[1] - (161.365703125 + f64::from(0.13f32))).abs() < 1e-9, "{point:?}");
+        assert!((point[2] - 1009.0).abs() < 1e-9, "{point:?}");
     }
 }
