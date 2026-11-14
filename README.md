@@ -68,6 +68,10 @@ World startup follows the server's pushed log/progress and listening signal,
 not a three-minute deadline. A slow first start remains cancellable; a server
 that exits reports its log tail instead of asking you to press Play again.
 
+World startup follows the server's pushed log/progress and listening signal,
+not a three-minute deadline. A slow first start remains cancellable; a server
+that exits reports its log tail instead of asking you to press Play again.
+
 ### Server dialogs
 
 The client renders vanilla 26.1.2 server-driven dialogs (`show_dialog`/`clear_dialog`): `notice`, `confirmation` and `multi_action` with plain-message bodies and `text`, `number_range`, `boolean` and `single_option` inputs. Buttons answer with `custom_click_action` (`dynamic/custom` and `custom` actions carry the typed input values; `run_command` actions send the templated command). Plain-message text is centered line by line like vanilla; hovering a styled run shows its `hover_event` tooltip, and clicking a run with a `click_event` runs it like a button action (`custom` with its typed payload, `run_command`; other kinds are reported, not executed) followed by the dialog's `after_action`. `after_action`, `can_close_with_escape` and Escape-as-cancel follow vanilla. Not rendered: `server_links`/`dialog_list`, item bodies, button and title tooltips and vanilla's "custom screen" warning button. The server side is documented in the Krasnokamen repo (`docs/DIALOGS.md`).
