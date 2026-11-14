@@ -641,3 +641,56 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
         low.z
     );
 }
+
+/// MODEL-SHIELD-GUI: the GUI cell rendered 10x16 because the authored plate was a
+/// 10x16x1 box at texOffs(0,6) plus a two-cube grip. Vanilla 26.3 `ShieldModel.createLayer`
+/// is plate `addBox(-6,-11,-2,12,22,1)` texOffs(0,0) and handle `addBox(-1,-3,-1,2,6,6)`
+/// texOffs(26,0); `receipts/XHarnessGates/models/vanilla_layers_26_3.json`
+/// (`minecraft:shield#main`) carries the same boxes, bone names and quads.
+#[test]
+fn shield_plate_and_handle_match_the_vanilla_263_model() {
+    let shield = rig("shield");
+    let pose = rest(shield);
+    assert_eq!(
+        bounds(shield, &pose, "plate"),
+        (
+            Vec3::new(-6., -11., -2.) / 16.,
+            Vec3::new(6., 11., -1.) / 16.
+        ),
+        "plate: ShieldModel addBox(-6,-11,-2,12,22,1)"
+    );
+    assert_eq!(
+        bounds(shield, &pose, "handle"),
+        (Vec3::new(-1., -3., -1.) / 16., Vec3::new(1., 3., 5.) / 16.),
+        "handle: ShieldModel addBox(-1,-3,-1,2,6,6)"
+    );
+    // Vanilla names the grip cube `handle`; a renamed bone would silently drop the
+    // banner-pattern overlay, which is attached to `plate`.
+    assert!(
+        !shield.part_by_name.contains_key("grip"),
+        "the old two-cube `grip` bone is gone"
+    );
+    // Box unwrap in pixels of the 64x64 sheet: plate covers 0..26 x 0..23, handle
+    // 26..42 x 0..12.
+    for (part, expected) in [
+        ("plate", [0., 0., 26., 23.]),
+        ("handle", [26., 0., 42., 12.]),
+    ] {
+        let bone = &shield.bones[shield.part_by_name[part]];
+        let mut span = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for quad in &bone.quads {
+            let uv = uv_bounds(quad);
+            span = [
+                span[0].min(uv[0]),
+                span[1].min(uv[1]),
+                span[2].max(uv[2]),
+                span[3].max(uv[3]),
+            ];
+        }
+        assert_eq!(
+            [span[0] * 64., span[1] * 64., span[2] * 64., span[3] * 64.],
+            expected,
+            "{part}: vanilla texOffs unwrap"
+        );
+    }
+}
