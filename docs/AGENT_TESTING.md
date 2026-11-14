@@ -74,6 +74,16 @@ keep Steve (heads never fetch textures themselves).
 branches. Visual proof of a custom skin still needs a listed player with a
 verified published skin in the real-client scene.
 
+### Placed player head
+
+A placed `player_head` block resolves the same profile through the client's
+listed players and samples that skin with the hat overlay
+(`listed_player_head_profile_renders_skin_with_hat_layer`). An owner the client
+cannot resolve, or a head without a profile, keeps the default skin instead of
+disappearing (`static_skulls_render_and_unresolved_player_heads_keep_the_default_skin`);
+vanilla and the item path behave the same way. Placement appearance against a
+real Java head still needs a real-client frame.
+
 ### Received maps: held decorations and item frames
 
 The held-map winding correction already exists at the ClientNext source base.
@@ -931,6 +941,25 @@ Local metadata loading now also needs `KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS`, `KRA
 - `minecraft_press_inputs` accepts `key.keyboard.f1` (alias `hide_hud`): one press toggles the HUD like the physical F1 key. The `hide_hud` setting also controls the HUD. Creative and spectator hide the health, armour, hunger and air rows. The hotbar, selection frame and crosshair use GUI sprites from the runtime resource stack; the crosshair has its own inverting blend.
 - An attack or use press is one click at the next player tick even when its release arrives first (vanilla `KeyMapping.click`), so a fast physical or VNC click is never lost. Every key-down event is one click, OS key repeats included (`KeyboardHandler.keyPress` calls `KeyMapping.click` for GLFW_PRESS and GLFW_REPEAT), so a held drop or pick key acts once per repeat while a held mouse button is one click; `ReleaseAll` drops presses no tick has consumed. Observed origin stays `locally_predicted` until the server replies.
 - World presentation includes a cloud layer built from the runtime `environment/clouds` texture, with cloud height from the received environment attribute; cell size, thickness and drift are authored visual approximations. A dark outline follows targeted selection-box edges. Torch flame and smoke use runtime particle sprites and an independently authored emitter; their motion and emission rate are approximations.
+
+## Resource pack for source tests
+
+The model tests check every shipped rig's declared texture against a real client
+resource pack (`dist/resources`, or `KRASNOKAMEN_CLIENT_RESOURCE_ROOT`) and fail
+when it is absent, naming the command that builds one:
+
+```sh
+python3 tools/resources.py build --jar <26.3 client.jar> --models
+```
+
+`dist/` is ignored by Git, so every worktree needs its own build; the pack holds
+Mojang bytes and is never committed. `KRASNOKAMEN_CLIENT_NO_PACK=1` is the only
+opt-out and belongs only where no client jar exists: CI sets it explicitly in
+`.github/workflows/release.yml` (`env:`), and the texture checks then print that
+they were skipped. `python3 tools/resources.py check --models` verifies an
+existing pack without running cargo. A pack that exists but is stale still fails
+the per-model texture checks, which is how the 26.1.2 copy of `dist/resources`
+was caught.
 
 ## Required workflow
 

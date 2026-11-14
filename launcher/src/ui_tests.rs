@@ -1,6 +1,6 @@
 //! Behavioral shell tests. Native-window screenshots are a separate acceptance gate.
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 fn test_app() -> App {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -14,6 +14,104 @@ fn test_app() -> App {
     ));
     App::new(Layout::new(root))
 }
+/// Signals the install worker started by the real `start_play`; the fake never
+/// touches the network.
+static INSTALL_SIGNAL: std::sync::OnceLock<std::sync::Mutex<Option<mpsc::Sender<()>>>> =
+    std::sync::OnceLock::new();
+static INSTALLS: AtomicUsize = AtomicUsize::new(0);
+
+fn recording_install(
+    _: &Layout,
+    _: &bootstrap::Options,
+    _: bool,
+    _: &Reporter,
+) -> anyhow::Result<()> {
+    INSTALLS.fetch_add(1, Ordering::SeqCst);
+    if let Some(sender) = INSTALL_SIGNAL
+        .get()
+        .and_then(|slot| slot.lock().ok().and_then(|sender| sender.clone()))
+    {
+        let _ = sender.send(());
+    }
+    Ok(())
+}
+
+/// An installation that looks complete to the old readiness test (current
+/// `installed.json`, every required path) but whose resource pack predates this
+/// launcher: ordinary Play must run the install stage that re-extracts the pack,
+/// and must not start the client.
+#[test]
+fn ordinary_play_runs_the_install_stage_for_a_stale_pack() {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let scratch = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let root = scratch.join(format!(
+        "krasnokamen-play-ready-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let layout = crate::bootstrap::test_install(
+        &root,
+        &[(
+            "assets/minecraft/models/block/template_sign_rot_0.json",
+            b"{}",
+        )],
+    );
+    std::fs::create_dir_all(layout.join("resources/assets/minecraft/models/block")).unwrap();
+    std::fs::write(
+        layout.join("resources/assets/minecraft/models/block/oak_sign.json"),
+        b"{}",
+    )
+    .unwrap();
+
+    let mut app = App::new(Layout::new(root.clone()));
+    app.installer = recording_install;
+    assert!(!app.ready, "a markerless pack is not ready");
+    let (sender, signal) = mpsc::channel();
+    *INSTALL_SIGNAL
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .unwrap() = Some(sender);
+    let before = INSTALLS.load(Ordering::SeqCst);
+    app.start_play(&egui::Context::default());
+    assert!(
+        matches!(app.phase, Phase::Installing { .. }),
+        "ordinary Play must enter the install stage for a stale pack"
+    );
+    assert!(app.busy());
+    // The worker is a real thread: wait for its signal instead of polling.
+    signal
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the install worker must run through the real Play path");
+    assert_eq!(INSTALLS.load(Ordering::SeqCst), before + 1);
+
+    // The repaired pack matches the client jar: Play starts the client directly
+    // (the fixture has no client binary, so launch refuses instead of installing).
+    crate::bootstrap::test_repair(&layout);
+    let mut app = App::new(layout);
+    app.installer = recording_install;
+    assert!(app.ready);
+    let before = INSTALLS.load(Ordering::SeqCst);
+    app.start_play(&egui::Context::default());
+    assert!(
+        !matches!(app.phase, Phase::Installing { .. }),
+        "a ready installation must skip the install stage"
+    );
+    assert_eq!(
+        INSTALLS.load(Ordering::SeqCst),
+        before,
+        "no install worker runs for a ready installation"
+    );
+    assert!(
+        app.status
+            .as_ref()
+            .is_some_and(|s| s.1 && s.0.contains("Cannot launch Minecraft")),
+        "the direct branch reached the launch step"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn paint(
     app: &mut App,
     ctx: &egui::Context,

@@ -397,6 +397,10 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   sanity test over every shipped model (UVs inside the declared texture, roles/bones valid, and -
   when vanilla textures are available under `KRASNOKAMEN_CLIENT_RESOURCE_ROOT` or `dist/resources` -
   the texture exists with the declared size).
+  `python3 tools/resources.py build|check [--jar PATH] [--models]` rebuilds or verifies that pack from
+  a real 26.3 `client.jar`; it refuses a pack directory Git would track, because the pack contains
+  Mojang bytes. A fresh 26.3 pack has no `textures/entity/bed/`: 26.3 beds are
+  block models, so `bed_head`/`bed_foot` entity rigs no longer ship.
 
 ## Combat animation clips
 

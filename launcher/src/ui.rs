@@ -65,6 +65,20 @@ enum Phase {
     Running(Child),
 }
 
+/// The install worker Play runs when the layout needs work. A function pointer so a
+/// test can substitute a fake and exercise the real `start_play` branch without
+/// network access.
+type Installer = fn(&Layout, &bootstrap::Options, bool, &Reporter) -> anyhow::Result<()>;
+
+fn run_install(
+    layout: &Layout,
+    options: &bootstrap::Options,
+    force: bool,
+    rep: &Reporter,
+) -> anyhow::Result<()> {
+    bootstrap::run(layout, options, force, rep)
+}
+
 struct App {
     layout: Layout,
     config: Config,
@@ -77,6 +91,7 @@ struct App {
     ready: bool,
     status: Option<(String, bool)>,
     manifest: String,
+    installer: Installer,
     args_server: Option<String>,
     args_username: Option<String>,
     force_next: bool,
@@ -226,6 +241,7 @@ impl App {
             settings: config::load_client_settings(&layout.client_settings()),
             ready: bootstrap::is_ready(&layout),
             manifest: config.manifest_url.clone(),
+            installer: run_install,
             rep: Reporter::new(Some(&layout.log_file()), false),
             layout,
             config,
@@ -347,8 +363,9 @@ impl App {
             manifest_url: self.manifest.clone(),
         };
         let ctx = ctx.clone();
+        let install = self.installer;
         std::thread::spawn(move || {
-            let result = bootstrap::run(&Layout::new(root), &options, force, &rep).map_err(|e| {
+            let result = install(&Layout::new(root), &options, force, &rep).map_err(|e| {
                 if e.downcast_ref::<crate::net::UserCancelled>().is_some() {
                     "Cancelled".to_owned()
                 } else {

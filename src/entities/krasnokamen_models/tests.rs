@@ -376,16 +376,37 @@ fn parser_rejects_malformed_models() {
     );
 }
 
+/// Textures of a real client resource pack, or `None` when the run opted out.
+///
+/// A missing pack is a failure, not a skip. These checks used to skip silently,
+/// which hid a stale 26.1.2 pack in `dist/resources`: 26.3-only assets
+/// (`models/block/template_sign_*`, `textures/entity/cushion/*`,
+/// `textures/entity/sulfur_cube/*`) were missing and the shipped bed rigs sampled
+/// an `entity/bed/red.png` that 26.3 does not have. Build a pack with
+/// `python3 tools/resources.py build --jar <26.3 client.jar> --models`, or set
+/// `KRASNOKAMEN_CLIENT_NO_PACK=1` where no client jar exists (CI).
 fn texture_root() -> Option<PathBuf> {
     let candidates = [
         std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist/resources")),
     ];
-    candidates
+    if let Some(root) = candidates
         .into_iter()
         .flatten()
         .map(|root| root.join("assets/minecraft/textures"))
         .find(|root| root.is_dir())
+    {
+        return Some(root);
+    }
+    if std::env::var("KRASNOKAMEN_CLIENT_NO_PACK").is_ok_and(|value| value == "1") {
+        return None;
+    }
+    panic!(
+        "no client resource pack: build one with \
+         `python3 tools/resources.py build --jar <26.3 client.jar> --models`, point \
+         KRASNOKAMEN_CLIENT_RESOURCE_ROOT at an extracted pack, or set \
+         KRASNOKAMEN_CLIENT_NO_PACK=1 where no client jar exists"
+    )
 }
 fn png_size(path: &std::path::Path) -> [u32; 2] {
     let info = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).unwrap()))
@@ -457,7 +478,10 @@ fn every_shipped_model_is_well_formed() {
         }
     }
     if textures.is_none() {
-        eprintln!("vanilla textures not available: texture existence/size check skipped");
+        eprintln!(
+            "vanilla textures not available and KRASNOKAMEN_CLIENT_NO_PACK=1: \
+             texture existence/size check skipped"
+        );
     }
 }
 
@@ -604,11 +628,14 @@ fn png_opaque(path: &std::path::Path) -> (usize, usize, Vec<bool>) {
 /// A limb whose baked quads sample only fully transparent texels of the rig's default skin is
 /// invisible once the cutout material discards them (the zombie, husk and giant lost their left
 /// arm and leg this way). Bakes every shipped rig and samples the baked UVs against the locally
-/// supplied vanilla skin; skipped when those textures are absent.
+/// supplied vanilla skin; skipped only under `KRASNOKAMEN_CLIENT_NO_PACK=1`.
 #[test]
 fn baked_limbs_sample_visible_texels_of_the_default_skin() {
     let Some(root) = texture_root() else {
-        eprintln!("vanilla textures not available: limb visibility check skipped");
+        eprintln!(
+            "vanilla textures not available and KRASNOKAMEN_CLIENT_NO_PACK=1: \
+             limb visibility check skipped"
+        );
         return;
     };
     let limbs = [
@@ -1381,15 +1408,6 @@ fn cow_and_mooshroom_front_legs_match_vanilla_quadruped() {
 }
 
 #[test]
-fn bed_has_no_legacy_entity_rig_with_mirrored_leg() {
-    // Updated: the merged `special_item` bed arm renders bed_head/bed_foot from these
-    // entity rigs again (26.3 item path), so they ship; the mirrored leg_right is fixed
-    // in the asset itself.
-    assert!(authored("bed_head").is_some());
-    assert!(authored("bed_foot").is_some());
-}
-
-#[test]
 fn baby_leggings_stay_visible_above_boots_in_every_family() {
     for kind in [
         "drowned",
@@ -1513,12 +1531,15 @@ fn bell_wall_texels_follow_the_clean_control_orientation() {
 
 #[test]
 fn obsolete_bed_entity_texture_rigs_are_not_shipped_in_26_3() {
-    // Updated: superseded by the merged bed special-item arm — bed_head/bed_foot rigs
-    // ship again in 26.3 for the bed item's special renderer.
+    // 26.3 draws beds from block models (`block/red_bed_head`, `block/red_bed_foot`,
+    // per-face `block/red_bed_*` textures) and the bed item is a composite of those;
+    // the client jar has no `textures/entity/bed/` at all. The old entity rigs
+    // declared `entity/bed/red.png` and therefore cannot ship.
     assert!(
-        EMBEDDED
+        !EMBEDDED
             .iter()
-            .any(|(name, _)| matches!(*name, "bed_head.json" | "bed_foot.json"))
+            .any(|(name, _)| matches!(*name, "bed_head.json" | "bed_foot.json")),
+        "a 26.3 pack has no entity bed texture for these rigs"
     );
 }
 

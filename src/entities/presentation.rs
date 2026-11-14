@@ -3206,20 +3206,6 @@ pub fn special_item(
                 .ok_or("copper golem statue item texture missing")?
                 .to_owned(),
         ),
-        "bed" => (
-            match special["part"].as_str() {
-                Some("head") => "minecraft:bed_head#main",
-                Some("foot") => "minecraft:bed_foot#main",
-                _ => return Err("bed item part must be head or foot".into()),
-            },
-            format!(
-                "entity/bed/{}",
-                special["texture"]
-                    .as_str()
-                    .unwrap_or("red")
-                    .trim_start_matches("minecraft:")
-            ),
-        ),
         _ => return Err(format!("unknown special item render family {kind}")),
     };
     // Solaris-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
@@ -3342,11 +3328,8 @@ pub fn special_item(
                 ambient_occlusion: false,
                 light_emission: 0,
                 layer: RenderLayer::Cutout,
-                entity_material: matches!(
-                    kind,
-                    "banner" | "shield" | "bed" | "chest" | "decorated_pot"
-                )
-                .then_some(EntityMaterial::EntitySolid),
+                entity_material: matches!(kind, "banner" | "shield" | "chest" | "decorated_pot")
+                    .then_some(EntityMaterial::EntitySolid),
                 alpha: 1.,
                 texture_layer: tex.layer,
             });

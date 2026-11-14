@@ -132,6 +132,7 @@ The data folder is `$XDG_DATA_HOME/krasnokamen-client` (default `~/.local/share/
 ```
 facts/ data/vanilla/                  Krasnokamen data tables (entity metadata and models ship inside the client)
 resources/assets/                     textures/models/fonts unpacked from your client.jar
+resources/.resources.json             marker: which client.jar produced the pack (rebuilt when it differs)
 assets/asset-index.json, objects/     Mojang asset index and sound/language objects
 mojang/versions/26.3/               official version json and client.jar
 servers/content/26.3/               singleplayer only: server content cache, installed on its first Play
@@ -143,6 +144,8 @@ client-settings.json  servers.json   in-game Options and the client's multiplaye
 artifacts/yyyy-MM-dd_HH.mm.ss.png     F2 screenshots (suffix _1, _2, … on collisions)
 logs/launcher.log                     everything the launcher and the client printed
 ```
+
+The resource pack is extracted whole from the official `client.jar`, never merged into an older tree, and carries `.resources.json` with that jar's measured SHA-1 plus the asset count and a digest of each asset's path, CRC-32 and size. A pack whose marker does not name the current jar is rebuilt on the next launch, so assets a release adds (`models/block/template_sign_*`, `textures/entity/cushion/*`, `textures/entity/sulfur_cube/*`) can never be missing after an upgrade. Developers can rebuild the repository's own pack for tests with `python3 tools/resources.py build --jar <client.jar>` (`check --models` verifies every embedded entity model's texture).
 
 Render distance and fullscreen in the launcher's Settings use the same `client-settings.json` as the in-game Options screen. Launcher editing is disabled while installation or the launched game is active; use in-game Options while playing. Each launch reads the current persisted fullscreen value, and launcher edits refuse to overwrite corrupt or unreadable game settings with defaults. This does not coordinate independently started clients or multiple launcher instances.
 
@@ -194,6 +197,15 @@ cargo build --release          # builds krasnokamen-client and krasnokamen-launc
 `rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses wgpu with Vulkan/X11/Wayland on Linux, Direct3D 12 or Vulkan on Windows, and Metal on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
 
 CI (`.github/workflows/release.yml`) builds Linux and Windows archives plus an ad-hoc-signed Apple Silicon `Krasnokamen.app` zip on every `v*` tag, attaches checksums, and asserts that no `.jar` or `assets/` directory is in the package.
+
+### Tests
+
+```sh
+python3 tools/resources.py build --jar <26.3 client.jar> --models   # once per worktree: dist/ is ignored
+cargo test --locked -p krasnokamen-client --lib
+```
+
+The model tests check every shipped rig's texture against that pack and fail with this command when it is absent; `KRASNOKAMEN_CLIENT_NO_PACK=1` is the explicit opt-out where no client jar exists. `python3 tools/resources.py check --models` verifies a pack without running the suite.
 
 ### Publishing the data bundles
 

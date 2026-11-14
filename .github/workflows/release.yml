@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI has no Minecraft client jar, so no resource pack can be built here: the
+  # client's texture-existence tests opt out explicitly instead of failing.
+  KRASNOKAMEN_CLIENT_NO_PACK: "1"
   # Singleplayer ships the Krasnokamen server and the default plugin pack. Both are
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
