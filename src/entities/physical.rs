@@ -30,6 +30,8 @@ pub(crate) struct AnimationState {
     pub motion: crate::motion::EntityMotion,
     pub seat_motion: Option<crate::player::vehicle::SeatMotion>,
     pub seat_game_time: i64,
+    /// Combat clip selection (swing counter, armed flag, vanilla swing duration).
+    pub combat: super::animation::Selection,
 }
 impl Default for AnimationState {
     fn default() -> Self {
@@ -48,6 +50,7 @@ impl Default for AnimationState {
             motion: crate::motion::EntityMotion::default(),
             seat_motion: Some(crate::player::vehicle::SeatMotion::default()),
             seat_game_time: 0,
+            combat: super::animation::Selection::default(),
         }
     }
 }
