@@ -13,8 +13,10 @@ impl Binding {
         match self {
             Self::Key(key) => {
                 let name = format!("{key:?}");
-                name.strip_prefix("Key").or_else(|| name.strip_prefix("Digit"))
-                    .unwrap_or(&name).to_owned()
+                name.strip_prefix("Key")
+                    .or_else(|| name.strip_prefix("Digit"))
+                    .unwrap_or(&name)
+                    .to_owned()
             }
             Self::Mouse(button) => format!("Mouse {button:?}"),
         }
@@ -57,7 +59,12 @@ pub(crate) struct Bindings(pub(crate) BTreeMap<String, Binding>);
 
 impl Default for Bindings {
     fn default() -> Self {
-        Self(ACTIONS.iter().map(|(id, _, key)| ((*id).into(), *key)).collect())
+        Self(
+            ACTIONS
+                .iter()
+                .map(|(id, _, key)| ((*id).into(), *key))
+                .collect(),
+        )
     }
 }
 impl Bindings {
@@ -76,15 +83,23 @@ impl Bindings {
         serde_json::to_value(&self.0).expect("binding table serializes")
     }
     pub(crate) fn action(&self, key: Binding) -> Option<&'static str> {
-        ACTIONS.iter().find_map(|(id, _, _)| (self.0.get(*id) == Some(&key)).then_some(*id))
+        ACTIONS
+            .iter()
+            .find_map(|(id, _, _)| (self.0.get(*id) == Some(&key)).then_some(*id))
     }
     pub(crate) fn conflict(&self, id: &str) -> bool {
-        self.0.get(id).is_some_and(|key| self.0.values().filter(|other| *other == key).count() > 1)
+        self.0
+            .get(id)
+            .is_some_and(|key| self.0.values().filter(|other| *other == key).count() > 1)
     }
     pub(crate) fn set(&mut self, id: &str, key: Binding) {
-        if let Some(value) = self.0.get_mut(id) { *value = key; }
+        if let Some(value) = self.0.get_mut(id) {
+            *value = key;
+        }
     }
     pub(crate) fn reset(&mut self, id: &str) {
-        if let Some((_, _, key)) = ACTIONS.iter().find(|(action, _, _)| *action == id) { self.set(id, *key); }
+        if let Some((_, _, key)) = ACTIONS.iter().find(|(action, _, _)| *action == id) {
+            self.set(id, *key);
+        }
     }
 }
