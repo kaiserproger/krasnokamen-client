@@ -303,11 +303,9 @@ fn model_quad(
     // names the cardinal weight outright (world-space, so blockstate rotation never
     // turns it); legacy `shade: false` flattens to the up weight; otherwise the quad's
     // own face. The weights are whatever `rules` carries for the dimension.
-    let shade = rules.directional_shade[match quad.shade_direction {
-        Some(face) => face as usize,
-        None if quad.shade => quad.face as usize,
-        None => 1,
-    }];
+    // NEGATIVE CONTROL (RCBNegShade): pre-43362918 legacy behavior, the
+    // shade_direction_override is ignored and every shaded face takes its own weight.
+    let shade = rules.directional_shade[if quad.shade { quad.face as usize } else { 1 }];
     let tagged = samples.catalog.state(state)?;
     let offset = tagged.fact.offset.at(position).map(|value| value as f32);
     let normal_base = NORMALS[quad.face as usize].map(|v| v as f32);
