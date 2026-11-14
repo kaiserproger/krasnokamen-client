@@ -735,6 +735,72 @@ fn banner_item_bakes_colored_flag_and_patterns() {
 }
 
 #[test]
+fn player_head_item_uses_listed_profile_skin() {
+    let models = models_with(Vec::new());
+    let mut content = Content::test_cube();
+    content.insert_test_texture("minecraft:entity/player/wide/steve", test_region(5));
+    let skin = TextureRegion {
+        layer: 9,
+        uv: [0.5, 0.5, 1., 1.],
+        width: 64,
+        height: 64,
+    };
+    let uuid = "00000000-0000-0000-0000-000000000000";
+    let profiles = BTreeMap::from([(
+        uuid.to_owned(),
+        super::super::PlayerProfile {
+            uuid: uuid.to_owned(),
+            name: "Alex".into(),
+            properties: Vec::new(),
+            generation: 1,
+            listed: true,
+            latency: 0,
+            game_mode: 0,
+            display_name: None,
+            list_order: 0,
+            show_hat: true,
+            chat_key: None,
+            textures: Some(super::super::ProfileTextures {
+                skin: Some(skin),
+                cape: None,
+                elytra: None,
+                model: Some(super::super::PlayerModel::Wide),
+                secure: true,
+            }),
+        },
+    )]);
+    let mut stack = crate::inventory::Stack::default();
+    Arc::make_mut(&mut stack.components).insert(
+        "minecraft:profile".into(),
+        serde_json::json!({"name": "Alex"}),
+    );
+    let special = serde_json::json!({"type": "minecraft:player_head"});
+    // A listed profile with a published skin bakes onto that skin's atlas layer.
+    let model = crate::entities::special_item(&models, &content, &stack, &special, Some(&profiles))
+        .unwrap();
+    assert!(!model.quads.is_empty());
+    assert!(
+        model.quads.iter().all(|q| q.texture_layer == 9),
+        "profiled head must use the published skin layer"
+    );
+    // No profiles snapshot, or a profile naming no listed player: Steve.
+    let plain = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
+    assert!(plain.quads.iter().all(|q| q.texture_layer == 5));
+    let mut other = stack.clone();
+    Arc::make_mut(&mut other.components).insert(
+        "minecraft:profile".into(),
+        serde_json::json!({"name": "Nobody"}),
+    );
+    let unlisted =
+        crate::entities::special_item(&models, &content, &other, &special, Some(&profiles))
+            .unwrap();
+    assert!(
+        unlisted.quads.iter().all(|q| q.texture_layer == 5),
+        "unlisted profile must keep Steve"
+    );
+}
+
+#[test]
 fn shield_item_renders_plain_and_patterned_components() {
     let models = models_with(Vec::new());
     let mut content = Content::test_cube();
@@ -812,7 +878,7 @@ fn unknown_special_rig_falls_back_to_placeholder_instead_of_failing() {
 }
 
 #[test]
-fn static_skulls_render_and_report_unresolved_player_profiles() {
+fn static_skulls_render_and_unresolved_player_heads_keep_the_default_skin() {
     for (block, key, texture_name) in [
         (
             "minecraft:zombie_head",
@@ -946,9 +1012,15 @@ fn static_skulls_render_and_report_unresolved_player_profiles() {
                 0.,
                 &mut profiled,
             );
-            assert_eq!(stats.block_entities, 0);
-            assert!(profiled.vertices.is_empty());
-            assert!(stats.unrendered.contains_key("minecraft:skull"));
+            // An owner the client cannot resolve keeps the default skin, exactly
+            // like the item path and vanilla; the head never disappears.
+            assert_eq!(stats.block_entities, 1);
+            assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+            assert_eq!(profiled.vertices.len(), 12);
+            assert!(
+                profiled.vertices.iter().all(|v| v.texture_layer == 3),
+                "the unresolved owner samples the default skin"
+            );
         }
     }
 }
@@ -960,10 +1032,17 @@ fn listed_player_head_profile_renders_skin_with_hat_layer() {
         "minecraft:player_head",
         "minecraft:skull",
         BTreeMap::from([("rotation".into(), "0".into())]),
-        vec![],
+        vec![("minecraft:entity/player/wide/steve", 7)],
     );
     let mut store = super::super::Store::new();
-    store.activate_models(Arc::new(models_with(Vec::new())));
+    let mut models = models_with(Vec::new());
+    models.default_skins = (0..7)
+        .map(|_| super::super::resources::DefaultSkin {
+            texture: "entity/player/wide/steve".into(),
+            model: super::super::PlayerModel::Wide,
+        })
+        .collect();
+    store.activate_models(Arc::new(models));
     let uuid = "00000001-0000-0002-0000-000300000004";
     store.profiles.insert(
         uuid.into(),
@@ -1051,8 +1130,19 @@ fn listed_player_head_profile_renders_skin_with_hat_layer() {
         0.,
         &mut offline,
     );
-    assert!(stats.unrendered.contains_key("minecraft:skull"));
-    assert!(offline.vertices.is_empty());
+    // An unlisted owner keeps the default skin: the placed head stays visible
+    // (head and hat shells) instead of disappearing behind a resolution error.
+    assert!(
+        stats.unrendered.is_empty(),
+        "unresolved profile: {:?}",
+        stats.unrendered
+    );
+    assert_eq!(stats.block_entities, 1);
+    assert_eq!(offline.vertices.len(), 12 * 4);
+    assert!(
+        offline.vertices.iter().all(|v| v.texture_layer == 7),
+        "the fallback samples the default skin"
+    );
 }
 
 #[test]
@@ -1283,6 +1373,37 @@ fn static_decorated_pot_uses_received_sherd_textures() {
         geometry.vertices[16..20]
             .iter()
             .all(|vertex| vertex.texture_layer == 4)
+    );
+    // 26.3 PotDecorations sides are ItemStackTemplates whose codec takes the bare
+    // item id as well as the `{id}` record; a pot placed from an item arrives with
+    // the bare form, and it must not fall back to plain brick.
+    store.block_entities.get_mut(&position).unwrap().data =
+        Arc::new(serde_json::json!({"sherds": {
+            "back": "minecraft:angler_pottery_sherd",
+            "left": "minecraft:brick",
+            "right": "minecraft:brick",
+            "front": "minecraft:skull_pottery_sherd"
+        }}));
+    let mut bare = DynamicGeometry::default();
+    let stats = render_static(&mut store, &content, &world, origin, camera, 0., &mut bare);
+    assert_eq!(stats.block_entities, 1, "{:?}", stats.unrendered);
+    assert_eq!(bare.vertices.len(), 20);
+    assert!(
+        bare.vertices[4..8]
+            .iter()
+            .all(|vertex| vertex.texture_layer == 3),
+        "the bare item id selects the back sherd texture"
+    );
+    assert!(
+        bare.vertices[8..16]
+            .iter()
+            .all(|vertex| vertex.texture_layer == 2)
+    );
+    assert!(
+        bare.vertices[16..20]
+            .iter()
+            .all(|vertex| vertex.texture_layer == 4),
+        "the bare item id selects the front sherd texture"
     );
 }
 
@@ -1692,6 +1813,51 @@ fn static_vault_scene_follows_received_display_item_and_clear() {
     assert_eq!(stats.block_entities, 0);
     assert!(stats.unrendered.is_empty());
     assert!(cleared.vertices.is_empty());
+}
+
+#[test]
+fn every_factory_block_entity_reaches_the_static_scene() {
+    // model-review-sonnet-continuation-20261103 §D1: the production scene drew 22
+    // of 27 factory types and silently skipped shelf, brushable_block,
+    // structure_block and test_instance_block. The scene filter now derives from
+    // the factory list, so a new factory cannot miss the pass again.
+    for name in [
+        "minecraft:sign",
+        "minecraft:hanging_sign",
+        "minecraft:mob_spawner",
+        "minecraft:chest",
+        "minecraft:ender_chest",
+        "minecraft:trapped_chest",
+        "minecraft:enchanting_table",
+        "minecraft:lectern",
+        "minecraft:end_portal",
+        "minecraft:end_gateway",
+        "minecraft:beacon",
+        "minecraft:skull",
+        "minecraft:banner",
+        "minecraft:structure_block",
+        "minecraft:test_instance_block",
+        "minecraft:shulker_box",
+        "minecraft:bed",
+        "minecraft:conduit",
+        "minecraft:bell",
+        "minecraft:campfire",
+        "minecraft:brushable_block",
+        "minecraft:decorated_pot",
+        "minecraft:trial_spawner",
+        "minecraft:vault",
+        "minecraft:copper_golem_statue",
+        "minecraft:shelf",
+    ] {
+        assert!(
+            super::draws_static(name),
+            "{name} has a factory but the static scene skips it"
+        );
+    }
+    // The moving piston's block entity comes only from received motion, and a
+    // factory-less type is never drawn by this pass.
+    assert!(!super::draws_static("minecraft:piston"));
+    assert!(!super::draws_static("minecraft:furnace"));
 }
 
 #[test]

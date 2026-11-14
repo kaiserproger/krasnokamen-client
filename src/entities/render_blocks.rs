@@ -185,37 +185,11 @@ impl super::Store {
         };
         let initial = out.vertices.len();
         let radius_squared = f64::from(radius).powi(2);
-        for block in self.block_entities.values().filter(|block| {
-            matches!(
-                block.type_name.as_str(),
-                "minecraft:sign"
-                    | "minecraft:hanging_sign"
-                    | "minecraft:chest"
-                    | "minecraft:trapped_chest"
-                    | "minecraft:ender_chest"
-                    | "minecraft:bed"
-                    | "minecraft:bell"
-                    | "minecraft:lectern"
-                    | "minecraft:copper_golem_statue"
-                    | "minecraft:banner"
-                    | "minecraft:decorated_pot"
-                    | "minecraft:shulker_box"
-                    | "minecraft:enchanting_table"
-                    | "minecraft:conduit"
-                    | "minecraft:campfire"
-                    | "minecraft:brushable_block"
-                    | "minecraft:shelf"
-                    | "minecraft:vault"
-                    | "minecraft:mob_spawner"
-                    | "minecraft:trial_spawner"
-                    | "minecraft:beacon"
-                    | "minecraft:end_portal"
-                    | "minecraft:end_gateway"
-                    | "minecraft:structure_block"
-                    | "minecraft:test_instance_block"
-                    | "minecraft:skull"
-            )
-        }) {
+        for block in self
+            .block_entities
+            .values()
+            .filter(|block| draws_static(&block.type_name))
+        {
             let gateway = matches!(
                 block.type_name.as_str(),
                 "minecraft:end_gateway" | "minecraft:test_instance_block"
@@ -543,7 +517,10 @@ impl super::Store {
                         if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
                             && !profile.is_null()
                         {
-                            Some(super::profiles::head_skin(&self.profiles, profile)?)
+                            // A profile the client cannot resolve to a published skin keeps
+                            // the default skin, exactly like the item path and vanilla: an
+                            // unresolved owner never makes the placed head invisible.
+                            super::profiles::head_skin(&self.profiles, profile).ok()
                         } else {
                             None
                         };
@@ -612,6 +589,13 @@ pub(crate) fn has_factory(name: &str) -> bool {
             | "minecraft:copper_golem_statue"
             | "minecraft:shelf"
     )
+}
+/// Block-entity types the static scene pass draws: every factory type except the
+/// moving piston, whose block entity only received motion creates (`blocks.rs`
+/// returns none for it). One predicate keeps the scene filter from drifting away
+/// from the factory list again (MODEL-BLOCK-ENTITY-DRAW drew 22 of 27).
+pub(crate) fn draws_static(name: &str) -> bool {
+    has_factory(name) && name != "minecraft:piston"
 }
 pub(crate) fn source_no_factory(name: &str) -> bool {
     // Reflected against the pinned original PROVIDERS map and complete registry.

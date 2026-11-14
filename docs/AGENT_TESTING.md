@@ -74,6 +74,16 @@ keep Steve (heads never fetch textures themselves).
 branches. Visual proof of a custom skin still needs a listed player with a
 verified published skin in the real-client scene.
 
+### Placed player head
+
+A placed `player_head` block resolves the same profile through the client's
+listed players and samples that skin with the hat overlay
+(`listed_player_head_profile_renders_skin_with_hat_layer`). An owner the client
+cannot resolve, or a head without a profile, keeps the default skin instead of
+disappearing (`static_skulls_render_and_unresolved_player_heads_keep_the_default_skin`);
+vanilla and the item path behave the same way. Placement appearance against a
+real Java head still needs a real-client frame.
+
 ### Received maps: held decorations and item frames
 
 The held-map winding correction already exists at the ClientNext source base.

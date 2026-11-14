@@ -279,6 +279,63 @@ fn closed_shulker_shell_encloses_its_head_and_has_matching_sides() {
 }
 
 #[test]
+fn chest_lid_top_samples_the_outer_plank_net_and_the_underside_the_inner_one() {
+    // model-review-opus-20261102 §4: a double chest without lid overrides showed
+    // the dark lid underside on top. The top face takes the (d+w .. d+2w, 0 .. d)
+    // island and the underside the (d .. d+w, 0 .. d) one for every chest size.
+    for (id, width) in [
+        ("chest", 14.),
+        ("double_chest_left", 15.),
+        ("double_chest_right", 15.),
+    ] {
+        let rig = rig(id);
+        let texture = 64.;
+        let depth = 14.;
+        let top = uv_bounds(face(rig, "lid", -Vec3::Y));
+        let bottom = uv_bounds(face(rig, "lid", Vec3::Y));
+        for (actual, expected) in top.into_iter().zip([
+            (depth + width) / texture,
+            0.,
+            (depth + 2. * width) / texture,
+            depth / texture,
+        ]) {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{id} lid top {top:?} != {expected}"
+            );
+        }
+        for (actual, expected) in bottom.into_iter().zip([
+            depth / texture,
+            0.,
+            (depth + width) / texture,
+            depth / texture,
+        ]) {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "{id} lid underside {bottom:?} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn banner_flags_keep_the_full_vanilla_height() {
+    // model-review-opus-20261102 §13: the flags shipped 20x25 (standing) and
+    // 20x19 (wall) against vanilla's 20x40, so patterns were truncated.
+    for id in ["standing_banner", "wall_banner"] {
+        let rig = rig(id);
+        let pose = rest(rig);
+        let (low, high) = bounds(rig, &pose, "flag");
+        assert!((high.x - low.x - 20. / 16.).abs() < 1e-5, "{id} flag width");
+        assert!(
+            (high.y - low.y - 40. / 16.).abs() < 1e-5,
+            "{id} flag height {} is shorter than 40 px",
+            (high.y - low.y) * 16.
+        );
+    }
+}
+
+#[test]
 fn tropical_fish_both_shapes_have_two_sided_fins_and_a_trailing_tail() {
     for id in ["tropical_fish", "tropical_fish_large"] {
         let rig = rig(id);
