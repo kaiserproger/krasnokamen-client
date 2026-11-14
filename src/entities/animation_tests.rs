@@ -2620,7 +2620,10 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
         let standing = action_pose(&models, &e, &content, rig);
         // Model space is Y-down: the standing feet are the lowest leg point.
         feet.push(extent(rig, &standing, "right_hind_leg", 1).1);
-        for bone in ["neck", "humps"] {
+        // Vanilla `camel#main` has one `hump` and no separate neck bone (the neck is
+        // part of the body cube); the head hangs forward across the seat line by design,
+        // so the hump is the part that must clear the rider's seat.
+        for bone in ["hump"] {
             let (front, back) = extent(rig, &standing, bone, 2);
             assert!(
                 !(front..=back).contains(&-0.5),

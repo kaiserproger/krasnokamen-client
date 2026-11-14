@@ -936,18 +936,25 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
             "{leg} samples the teal trousers"
         );
     }
+    // Vanilla `vindicator#main`: torso cube uv (16,20) and coat skirt uv (0,38);
+    // the old rig swapped those rows with the trouser and sleeve regions.
+    assert_eq!(
+        front_face(&cube("body")[0]),
+        [22., 26., 30., 38.],
+        "torso samples the coat front"
+    );
+    let skirt = front_face(&cube("body")[1]);
     assert!(
-        front_face(&cube("body")[0])[1] >= 46.,
-        "torso samples the buttoned coat"
+        skirt[1] >= 44. && skirt[3] <= 64.,
+        "coat skirt samples the lower coat rows"
     );
     for arm in ["right_arm", "left_arm"] {
-        for sleeve in &cube(arm)[..2] {
-            let [u0, v0, _, v1] = front_face(sleeve);
-            assert!(
-                u0 >= 44. && (46. ..62.).contains(&v0) && v1 <= 62.,
-                "{arm} samples the dark coat sleeve"
-            );
-        }
+        // Vanilla arms are one 4x12x4 cube at uv (40,46).
+        let [u0, v0, _, v1] = front_face(&cube(arm)[0]);
+        assert!(
+            u0 >= 44. && (46. ..62.).contains(&v0) && v1 <= 62.,
+            "{arm} samples the dark coat sleeve"
+        );
     }
 }
 
