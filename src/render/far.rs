@@ -422,7 +422,7 @@ impl FarTerrain {
         self.stats.visible_tiles = self.visible.len() as u64;
         self.stats.uploads = uploads as u64;
         self.stats.vertices = faces * 6;
-        if std::env::var_os("SOLARIS_FAR_DARK_DEBUG").is_some() {
+        if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some() {
             let mut dark = 0u64;
             for tile in &far.tiles {
                 for pair in tile.data.chunks_exact(2) {

@@ -1881,7 +1881,12 @@ impl Player {
                 .iter()
                 .any(|class| class.as_str() == Some("net.minecraft.world.level.block.DiodeBlock"))
                 && self.block_has_signal(
-                    super::signals::SignalQuery { position: neighbor_position, state: neighbor, face: direction, direct: true },
+                    super::signals::SignalQuery {
+                        position: neighbor_position,
+                        state: neighbor,
+                        face: direction,
+                        direct: true,
+                    },
                     world,
                     content,
                     entities,
@@ -2334,12 +2339,12 @@ impl Player {
             "Item" | "LeadItem" | "PlaceOnWaterBlockItem" => Ok(Outcome::Pass),
             // Growth, effects and the inventory debit are server-authoritative.
             "BoneMealItem" => Ok(Outcome::CLIENT),
-            "HangingEntityItem" => self.hanging_item_on(
-                hit, hand, world, content, inventory, entities, world_tick,
-            ),
-            "MinecartItem" => self.minecart_item_on(
-                hit, hand, world, content, inventory, entities, world_tick,
-            ),
+            "HangingEntityItem" => {
+                self.hanging_item_on(hit, hand, world, content, inventory, entities, world_tick)
+            }
+            "MinecartItem" => {
+                self.minecart_item_on(hit, hand, world, content, inventory, entities, world_tick)
+            }
             "DebugStickItem" | "SpawnEggItem" => Ok(Outcome::CLIENT),
             "ArmorStandItem" => {
                 // ArmorStandItem only asks BlockPlaceContext.getClickedPos, not canPlace.
@@ -2416,7 +2421,10 @@ impl Player {
                 Ok(result)
             }
             "BrushItem" => {
-                if self.brush_hit(world, content, entities, world_tick)?.is_some() {
+                if self
+                    .brush_hit(world, content, entities, world_tick)?
+                    .is_some()
+                {
                     self.start_using(Some(item), hand, content, inventory, tick)?;
                 }
                 Ok(Outcome::CONSUME)
@@ -2882,17 +2890,30 @@ mod comparator_privacy_tests {
         content.configure_test_comparator();
         let world = World::new(0, 16);
         world.initialize_random_sources().unwrap();
-        let palette = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
+        let palette = |size| Palette {
+            bits: 0,
+            values: vec![0],
+            words: Vec::new(),
+            size,
+        };
         let mut world = world;
-        world.insert([0, 0], Chunk {
-            sections: vec![Arc::new(Section {
-                blocks: palette(4096), biomes: palette(64), non_empty_block_count: 0,
-            })],
-            sky: BTreeMap::new(), block: BTreeMap::new(),
-            block_entities: Arc::new(Vec::new()),
-            surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
-            surface_heightmap_received: false,
-        }).unwrap();
+        world
+            .insert(
+                [0, 0],
+                Chunk {
+                    sections: vec![Arc::new(Section {
+                        blocks: palette(4096),
+                        biomes: palette(64),
+                        non_empty_block_count: 0,
+                    })],
+                    sky: BTreeMap::new(),
+                    block: BTreeMap::new(),
+                    block_entities: Arc::new(Vec::new()),
+                    surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+                    surface_heightmap_received: false,
+                },
+            )
+            .unwrap();
         world.set([5, 4, 4], 1, |id| Ok(id == 0)).unwrap();
         (Player::new(), world, content, EntityStore::new())
     }
@@ -2902,16 +2923,49 @@ mod comparator_privacy_tests {
         let (player, world, mut content, entities) = fixture();
         let target = [4, 4, 4];
         // Strengths 1 and 14 have the same public powered state; no BE is available.
-        assert!(player.neighbor_signal(target, &world, &content, &entities).unwrap());
-        assert!(player.placement_repeater_locked(0, target, &world, &content, &entities).unwrap());
-        assert!(!player.block_has_signal(crate::player::use_on::signals::SignalQuery { position: [5, 4, 4], state: 1, face: 4, direct: true }, &world, &content, &entities).unwrap());
-        content.insert_test_state_properties(1, BTreeMap::from([
-            ("facing".into(), "east".into()),
-            ("mode".into(), "compare".into()),
-            ("powered".into(), "false".into()),
-        ]));
-        assert!(!player.neighbor_signal(target, &world, &content, &entities).unwrap());
-        assert!(!player.placement_repeater_locked(0, target, &world, &content, &entities).unwrap());
+        assert!(
+            player
+                .neighbor_signal(target, &world, &content, &entities)
+                .unwrap()
+        );
+        assert!(
+            player
+                .placement_repeater_locked(0, target, &world, &content, &entities)
+                .unwrap()
+        );
+        assert!(
+            !player
+                .block_has_signal(
+                    crate::player::use_on::signals::SignalQuery {
+                        position: [5, 4, 4],
+                        state: 1,
+                        face: 4,
+                        direct: true
+                    },
+                    &world,
+                    &content,
+                    &entities
+                )
+                .unwrap()
+        );
+        content.insert_test_state_properties(
+            1,
+            BTreeMap::from([
+                ("facing".into(), "east".into()),
+                ("mode".into(), "compare".into()),
+                ("powered".into(), "false".into()),
+            ]),
+        );
+        assert!(
+            !player
+                .neighbor_signal(target, &world, &content, &entities)
+                .unwrap()
+        );
+        assert!(
+            !player
+                .placement_repeater_locked(0, target, &world, &content, &entities)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -2919,14 +2973,32 @@ mod comparator_privacy_tests {
         let (player, world, mut content, entities) = fixture();
         content.configure_test_redstone_lamp();
         let context = PlacementContext {
-            hit: BlockHit { position: [4, 4, 4], state: 0, face: 1,
-                point: [4.5, 4.5, 4.5], distance: 2., inside: false },
-            position: [4, 4, 4], replacing: true,
-            directions: [1, 2, 3, 4, 5, 0], horizontal: 2, nearest: 1,
+            hit: BlockHit {
+                position: [4, 4, 4],
+                state: 0,
+                face: 1,
+                point: [4.5, 4.5, 4.5],
+                distance: 2.,
+                inside: false,
+            },
+            position: [4, 4, 4],
+            replacing: true,
+            directions: [1, 2, 3, 4, 5, 0],
+            horizontal: 2,
+            nearest: 1,
         };
-        let state = player.source_placement_state(
-            3, &context, &Stack::default(), &world, &content, &entities, 0,
-        ).unwrap().unwrap();
+        let state = player
+            .source_placement_state(
+                3,
+                &context,
+                &Stack::default(),
+                &world,
+                &content,
+                &entities,
+                0,
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(property(&content, state, "lit").unwrap(), "true");
     }
 
@@ -2934,19 +3006,38 @@ mod comparator_privacy_tests {
     fn jukebox_received_playback_drives_lamp_placement() {
         let (player, world, mut content, mut entities) = fixture();
         content.set_test_signal_owner(1, "JukeboxBlock");
-        content.insert_test_state_properties(1, BTreeMap::from([
-            ("has_record".into(), "true".into()),
-        ]));
+        content.insert_test_state_properties(
+            1,
+            BTreeMap::from([("has_record".into(), "true".into())]),
+        );
         content.configure_test_redstone_lamp();
         let context = PlacementContext {
-            hit: BlockHit { position: [4, 4, 4], state: 0, face: 1,
-                point: [4.5, 4.5, 4.5], distance: 2., inside: false },
-            position: [4, 4, 4], replacing: true,
-            directions: [1, 2, 3, 4, 5, 0], horizontal: 2, nearest: 1,
+            hit: BlockHit {
+                position: [4, 4, 4],
+                state: 0,
+                face: 1,
+                point: [4.5, 4.5, 4.5],
+                distance: 2.,
+                inside: false,
+            },
+            position: [4, 4, 4],
+            replacing: true,
+            directions: [1, 2, 3, 4, 5, 0],
+            horizontal: 2,
+            nearest: 1,
         };
-        let missing = player.source_placement_state(
-            3, &context, &Stack::default(), &world, &content, &entities, 0,
-        ).unwrap().unwrap();
+        let missing = player
+            .source_placement_state(
+                3,
+                &context,
+                &Stack::default(),
+                &world,
+                &content,
+                &entities,
+                0,
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(property(&content, missing, "lit").unwrap(), "false");
         let mut jukebox = crate::entities::BlockEntity {
             position: [5, 4, 4],
@@ -2963,15 +3054,38 @@ mod comparator_privacy_tests {
         jukebox.animation.signals.jukebox_elapsed = Some(1);
         jukebox.animation.signals.jukebox_duration = Some(100);
         entities.block_entities.insert([5, 4, 4], jukebox);
-        let powered = player.source_placement_state(
-            3, &context, &Stack::default(), &world, &content, &entities, 0,
-        ).unwrap().unwrap();
+        let powered = player
+            .source_placement_state(
+                3,
+                &context,
+                &Stack::default(),
+                &world,
+                &content,
+                &entities,
+                0,
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(property(&content, powered, "lit").unwrap(), "true");
-        entities.block_entities.get_mut(&[5, 4, 4]).unwrap()
-            .animation.signals.jukebox_elapsed = None;
-        let unpowered = player.source_placement_state(
-            3, &context, &Stack::default(), &world, &content, &entities, 0,
-        ).unwrap().unwrap();
+        entities
+            .block_entities
+            .get_mut(&[5, 4, 4])
+            .unwrap()
+            .animation
+            .signals
+            .jukebox_elapsed = None;
+        let unpowered = player
+            .source_placement_state(
+                3,
+                &context,
+                &Stack::default(),
+                &world,
+                &content,
+                &entities,
+                0,
+            )
+            .unwrap()
+            .unwrap();
         assert_eq!(property(&content, unpowered, "lit").unwrap(), "false");
     }
 
@@ -2980,23 +3094,46 @@ mod comparator_privacy_tests {
         let (player, world, mut content, entities) = fixture();
         content.configure_test_door();
         let context = PlacementContext {
-            hit: BlockHit { position: [4, 4, 4], state: 0, face: 1,
-                point: [4.5, 4.5, 4.5], distance: 2., inside: false },
-            position: [4, 4, 4], replacing: true,
-            directions: [1, 2, 3, 4, 5, 0], horizontal: 2, nearest: 1,
+            hit: BlockHit {
+                position: [4, 4, 4],
+                state: 0,
+                face: 1,
+                point: [4.5, 4.5, 4.5],
+                distance: 2.,
+                inside: false,
+            },
+            position: [4, 4, 4],
+            replacing: true,
+            directions: [1, 2, 3, 4, 5, 0],
+            horizontal: 2,
+            nearest: 1,
         };
-        let place = |content: &Content| player.source_placement_state(
-            3, &context, &Stack::default(), &world, content, &entities, 0,
-        ).unwrap().unwrap();
+        let place = |content: &Content| {
+            player
+                .source_placement_state(
+                    3,
+                    &context,
+                    &Stack::default(),
+                    &world,
+                    content,
+                    &entities,
+                    0,
+                )
+                .unwrap()
+                .unwrap()
+        };
         let powered = place(&content);
         assert_eq!(property(&content, powered, "half").unwrap(), "lower");
         assert_eq!(property(&content, powered, "open").unwrap(), "true");
         assert_eq!(property(&content, powered, "powered").unwrap(), "true");
-        content.insert_test_state_properties(1, BTreeMap::from([
-            ("facing".into(), "east".into()),
-            ("mode".into(), "compare".into()),
-            ("powered".into(), "false".into()),
-        ]));
+        content.insert_test_state_properties(
+            1,
+            BTreeMap::from([
+                ("facing".into(), "east".into()),
+                ("mode".into(), "compare".into()),
+                ("powered".into(), "false".into()),
+            ]),
+        );
         let unpowered = place(&content);
         assert_eq!(property(&content, unpowered, "open").unwrap(), "false");
         assert_eq!(property(&content, unpowered, "powered").unwrap(), "false");
@@ -3006,28 +3143,56 @@ mod comparator_privacy_tests {
     fn comparator_click_only_predicts_mode_and_sound() {
         let (mut player, world, content, _) = fixture();
         let hit = BlockHit {
-            position: [5, 4, 4], state: 1, face: 1,
-            point: [5.5, 5., 4.5], distance: 2., inside: false,
+            position: [5, 4, 4],
+            state: 1,
+            face: 1,
+            point: [5.5, 5., 4.5],
+            distance: 2.,
+            inside: false,
         };
-        player.predict_block_interaction(
-            "ComparatorBlock", BlockUse { hit: &hit, hand: 0 }, true, &world, &content,
-            &InventoryStore::default(),
-        ).unwrap();
+        player
+            .predict_block_interaction(
+                "ComparatorBlock",
+                BlockUse { hit: &hit, hand: 0 },
+                true,
+                &world,
+                &content,
+                &InventoryStore::default(),
+            )
+            .unwrap();
         assert_eq!(player.use_predictions.len(), 2);
-        assert!(matches!(&player.use_predictions[0], UsePrediction::Sound(sound)
-            if sound.event == "minecraft:block.comparator.click" && sound.pitch == 0.55));
-        assert!(matches!(&player.use_predictions[1], UsePrediction::WorldBlock { position, state: 2, .. }
-            if *position == hit.position));
+        assert!(
+            matches!(&player.use_predictions[0], UsePrediction::Sound(sound)
+            if sound.event == "minecraft:block.comparator.click" && sound.pitch == 0.55)
+        );
+        assert!(
+            matches!(&player.use_predictions[1], UsePrediction::WorldBlock { position, state: 2, .. }
+            if *position == hit.position)
+        );
         assert_eq!(property(&content, 2, "powered").unwrap(), "true");
         assert_eq!(property(&content, 2, "mode").unwrap(), "subtract");
         let second_hit = BlockHit { state: 2, ..hit };
-        player.predict_block_interaction(
-            "ComparatorBlock", BlockUse { hit: &second_hit, hand: 0 }, true, &world, &content,
-            &InventoryStore::default(),
-        ).unwrap();
+        player
+            .predict_block_interaction(
+                "ComparatorBlock",
+                BlockUse {
+                    hit: &second_hit,
+                    hand: 0,
+                },
+                true,
+                &world,
+                &content,
+                &InventoryStore::default(),
+            )
+            .unwrap();
         assert_eq!(player.use_predictions.len(), 4);
-        assert!(matches!(&player.use_predictions[2], UsePrediction::Sound(sound)
-            if sound.event == "minecraft:block.comparator.click" && sound.pitch == 0.5));
-        assert!(matches!(&player.use_predictions[3], UsePrediction::WorldBlock { state: 1, .. }));
+        assert!(
+            matches!(&player.use_predictions[2], UsePrediction::Sound(sound)
+            if sound.event == "minecraft:block.comparator.click" && sound.pitch == 0.5)
+        );
+        assert!(matches!(
+            &player.use_predictions[3],
+            UsePrediction::WorldBlock { state: 1, .. }
+        ));
     }
 }

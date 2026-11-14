@@ -1,5 +1,5 @@
 [package]
-name = "solaris-paths"
+name = "krasnokamen-paths"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
