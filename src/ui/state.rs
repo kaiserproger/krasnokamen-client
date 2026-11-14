@@ -4340,7 +4340,7 @@ pub(super) fn append_fake_item(
     if let Some(texture) = foil {
         super::items::mark_foil(&mut out.vertices[start..], texture);
     }
-    Ok(())
+    item_bars::append(content, stack, bounds, parent, out)
 }
 
 fn append_item(
