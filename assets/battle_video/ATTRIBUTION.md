@@ -21,7 +21,10 @@ are retained in `source-textures`. The Iron Plate equipment texture was modified
 by adding eight transparent rows above it, and its model UVs shifted accordingly,
 to retain a source cuboid with a negative V coordinate. Its red plume pixels were
 moved into a greyscale dyeable layer, `iron_plate_plume.png`, and replaced by grey
-in the base texture. Upstream animated decorations are represented at their rest pose.
+in the base texture. Upstream animated decorations are represented at their rest pose,
+except the Holy chest's animated effect planes (the gold rings and white crosses
+around the torso and arms), which are omitted: drawn static at full size they cut a
+flat cloud through the wearer.
 For mounted and close-up shots the front face of the Holy helm cuboid was opened
 (the cross visor's texels in front of the wearer's eyes, nose and mouth made
 transparent, keeping a brow band and a nasal bar) so the wearer's face shows inside

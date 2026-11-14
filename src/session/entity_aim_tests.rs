@@ -11,8 +11,8 @@ use crate::{
     },
 };
 
-const VILLAGER: u32 = 1;
-const ENTITY_ID: i32 = 42;
+pub(crate) const VILLAGER: u32 = 1;
+pub(crate) const ENTITY_ID: i32 = 42;
 
 fn models() -> Models {
     let schema = serde_json::from_value(json!({
@@ -43,7 +43,7 @@ fn models() -> Models {
 }
 
 /// Player eye at (4.5, 5.62, 4.5); a villager standing at `villager`.
-fn session(villager: [f64; 3]) -> (Session, Handle) {
+pub(crate) fn session(villager: [f64; 3]) -> (Session, Handle) {
     let mut session = Session::new_mode("entity-aim-test".into(), false);
     let mut content = Content::test_cube();
     content

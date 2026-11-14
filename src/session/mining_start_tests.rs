@@ -147,7 +147,7 @@ fn spectator_and_adventure_name_the_game_mode() {
 }
 
 /// A loopback peer is enough: commands only need a live outbound queue.
-pub(super) fn connect(session: &mut Session) -> TcpListener {
+pub(crate) fn connect(session: &mut Session) -> TcpListener {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap().to_string();
     session.network = Some(Network::connect(address, "Miner".into(), 8, true, Arc::new(|| {}), None).unwrap());

@@ -1,6 +1,7 @@
 //! One packet-applied session authority shared by native and offscreen application owners.
 use crate::protocol::packet_ids::play::serverbound as sb;
 mod actions;
+pub use actions::EntityInteraction;
 mod block_effects;
 mod block_outline;
 mod clouds;
@@ -9,9 +10,9 @@ mod block_motion;
 mod local_server;
 mod follow;
 #[cfg(test)]
-mod entity_aim_tests;
+pub(crate) mod entity_aim_tests;
 #[cfg(test)]
-mod mining_start_tests;
+pub(crate) mod mining_start_tests;
 mod observation;
 mod packets;
 mod replay;
