@@ -5,7 +5,7 @@
 use super::state::{NodeAction, Paint, Screen, UiState};
 use crate::protocol::Result;
 use crate::render::GraphicsPreset;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -265,7 +265,12 @@ pub(super) fn value_text(key: &str, value: Option<&Value>) -> String {
         "volume" => pct(num.unwrap_or(1.)),
         "entity_distance_scaling" => pct(num.unwrap_or(1.)),
         "text_background_opacity" => pct(num.unwrap_or(0.5)),
-        "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) { "Right" } else { "Left" }.into(),
+        "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) {
+            "Right"
+        } else {
+            "Left"
+        }
+        .into(),
         "narrator" => ["Off", "All", "Chat", "System"]
             [value.and_then(Value::as_u64).unwrap_or(0) as usize % 4]
             .into(),
@@ -341,7 +346,12 @@ impl UiState {
         let footer_h = 24.;
         self.options_footer = [lx, y0 + ph - footer_h - 2., lw, footer_h];
         let rows = rows(self.options_tab);
-        let total = rows.len() + if self.options_tab == 1 { crate::controls::ACTIONS.len() + 1 } else { 0 };
+        let total = rows.len()
+            + if self.options_tab == 1 {
+                crate::controls::ACTIONS.len() + 1
+            } else {
+                0
+            };
         let visible = (((ph - 26. - footer_h - 8.) + 2.) / Self::ROW_PITCH)
             .floor()
             .max(1.) as usize;
@@ -403,11 +413,16 @@ impl UiState {
             )?;
         }
         if self.options_tab == 1 {
-            let bindings = self.settings.get("key_bindings")
-                .and_then(crate::controls::Bindings::from_value).unwrap_or_default();
+            let bindings = self
+                .settings
+                .get("key_bindings")
+                .and_then(crate::controls::Bindings::from_value)
+                .unwrap_or_default();
             for (index, (id, label, _)) in crate::controls::ACTIONS.iter().enumerate() {
                 let row = rows.len() + index;
-                if row < scroll || row >= scroll + visible { continue; }
+                if row < scroll || row >= scroll + visible {
+                    continue;
+                }
                 let y = list_top + (row - scroll) as f32 * Self::ROW_PITCH;
                 let value = if self.rebind == Some(*id) {
                     "Press a key...".to_string()
@@ -415,28 +430,48 @@ impl UiState {
                     bindings.0[*id].label()
                 };
                 self.add(
-                    format!("controls/bind/{id}"), "button", format!("{label}: {value}"),
-                    [lx, y, lw - 48., Self::ROW_HEIGHT], true, None,
-                    NodeAction::Rebind(id), Paint::Split { delim: ": ", desc: "Click then press a key or mouse button.", conflict: bindings.conflict(id) },
+                    format!("controls/bind/{id}"),
+                    "button",
+                    format!("{label}: {value}"),
+                    [lx, y, lw - 48., Self::ROW_HEIGHT],
+                    true,
+                    None,
+                    NodeAction::Rebind(id),
+                    Paint::Split {
+                        delim: ": ",
+                        desc: "Click then press a key or mouse button.",
+                        conflict: bindings.conflict(id),
+                    },
                 )?;
                 self.button(
-                    &format!("controls/reset/{id}"), "Reset",
+                    &format!("controls/reset/{id}"),
+                    "Reset",
                     [lx + lw - 46., y, 46., Self::ROW_HEIGHT],
-                    NodeAction::ResetBinding(id), true, None,
+                    NodeAction::ResetBinding(id),
+                    true,
+                    None,
                 )?;
             }
             let row = rows.len() + crate::controls::ACTIONS.len();
             if row >= scroll && row < scroll + visible {
-                self.button("controls/reset_all", "Reset all",
-                    [lx, list_top + (row - scroll) as f32 * Self::ROW_PITCH, lw, Self::ROW_HEIGHT],
-                    NodeAction::ResetBindings, true, None)?;
+                self.button(
+                    "controls/reset_all",
+                    "Reset all",
+                    [
+                        lx,
+                        list_top + (row - scroll) as f32 * Self::ROW_PITCH,
+                        lw,
+                        Self::ROW_HEIGHT,
+                    ],
+                    NodeAction::ResetBindings,
+                    true,
+                    None,
+                )?;
             }
         }
         if total > visible {
             let track_h = visible as f32 * Self::ROW_PITCH - 2.;
-            let thumb_h = (track_h * visible as f32 / total as f32)
-                .max(8.)
-                .floor();
+            let thumb_h = (track_h * visible as f32 / total as f32).max(8.).floor();
             let travel = track_h - thumb_h;
             let max = (total - visible) as f32;
             self.add(
@@ -551,12 +586,31 @@ mod tests {
     fn controls_tab_exposes_rebindable_forward_action() {
         let (content, mut inventory, mut ui) = state();
         open_options(&mut ui, &mut inventory, &content);
-        ui.activate_for_test(NodeAction::OptionsTab(1), &mut inventory, &content).unwrap();
+        ui.activate_for_test(NodeAction::OptionsTab(1), &mut inventory, &content)
+            .unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        assert!(ui.nodes.iter().any(|node| node.id == "controls/bind/forward"));
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|node| node.id == "controls/bind/forward")
+        );
         let [x, y, w, h] = node_bounds(&ui, "controls/bind/forward");
-        pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, x + w / 2., y + h / 2.);
-        pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, x + w / 2., y + h / 2.);
+        pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Down,
+            x + w / 2.,
+            y + h / 2.,
+        );
+        pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Up,
+            x + w / 2.,
+            y + h / 2.,
+        );
         assert_eq!(ui.rebind, Some("forward"));
     }
 
@@ -564,15 +618,31 @@ mod tests {
     fn controls_reset_buttons_update_the_persisted_setting() {
         let (content, mut inventory, mut ui) = state();
         let mut bindings = crate::controls::Bindings::default();
-        bindings.set("forward", crate::controls::Binding::Key(winit::keyboard::KeyCode::KeyA));
+        bindings.set(
+            "forward",
+            crate::controls::Binding::Key(winit::keyboard::KeyCode::KeyA),
+        );
         ui.apply_setting("key_bindings", bindings.value()).unwrap();
-        let effects = ui.activate_for_test(NodeAction::ResetBinding("forward"), &mut inventory, &content).unwrap();
-        assert!(matches!(&effects.commands[0], UiCommand::Settings { key, value }
-            if key == "key_bindings" && !crate::controls::Bindings::from_value(value).unwrap().conflict("forward")));
-        ui.activate_for_test(NodeAction::Rebind("jump"), &mut inventory, &content).unwrap();
+        let effects = ui
+            .activate_for_test(
+                NodeAction::ResetBinding("forward"),
+                &mut inventory,
+                &content,
+            )
+            .unwrap();
+        assert!(
+            matches!(&effects.commands[0], UiCommand::Settings { key, value }
+            if key == "key_bindings" && !crate::controls::Bindings::from_value(value).unwrap().conflict("forward"))
+        );
+        ui.activate_for_test(NodeAction::Rebind("jump"), &mut inventory, &content)
+            .unwrap();
         assert_eq!(ui.rebind, Some("jump"));
-        let effects = ui.activate_for_test(NodeAction::ResetBindings, &mut inventory, &content).unwrap();
-        assert!(matches!(&effects.commands[0], UiCommand::Settings { key, .. } if key == "key_bindings"));
+        let effects = ui
+            .activate_for_test(NodeAction::ResetBindings, &mut inventory, &content)
+            .unwrap();
+        assert!(
+            matches!(&effects.commands[0], UiCommand::Settings { key, .. } if key == "key_bindings")
+        );
     }
 
     fn state() -> (Content, InventoryStore, UiState) {
@@ -589,7 +659,11 @@ mod tests {
         ui.rebuild_for_test(inventory, content).unwrap();
     }
     fn node_bounds(ui: &UiState, id: &str) -> [f32; 4] {
-        ui.nodes.iter().find(|n| n.id == id).unwrap_or_else(|| panic!("{id}")).bounds
+        ui.nodes
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap_or_else(|| panic!("{id}"))
+            .bounds
     }
     fn pointer(
         ui: &mut UiState,
@@ -629,14 +703,29 @@ mod tests {
         open_options(&mut ui, &mut inventory, &content);
         let ids: Vec<_> = ui.nodes.iter().map(|n| n.id.as_str()).collect();
         for tab in 0..4 {
-            assert!(ids.contains(&format!("options/tab/{tab}").as_str()), "{ids:?}");
+            assert!(
+                ids.contains(&format!("options/tab/{tab}").as_str()),
+                "{ids:?}"
+            );
         }
-        for key in ["fov", "render_distance", "max_fps", "vsync", "fullscreen", "graphics_preset"] {
+        for key in [
+            "fov",
+            "render_distance",
+            "max_fps",
+            "vsync",
+            "fullscreen",
+            "graphics_preset",
+        ] {
             assert!(ids.contains(&format!("settings/{key}").as_str()), "{key}");
         }
         for node in &ui.nodes {
             let [x, y, w, h] = node.bounds;
-            assert!(x >= 0. && y >= 0. && x + w <= 427. && y + h <= 240., "{} {:?}", node.id, node.bounds);
+            assert!(
+                x >= 0. && y >= 0. && x + w <= 427. && y + h <= 240.,
+                "{} {:?}",
+                node.id,
+                node.bounds
+            );
             if matches!(node.role, "slider" | "switch" | "tab" | "button") {
                 // 32 physical px at GUI scale 2 is 16 logical px.
                 assert!(h >= 22., "{} is {h}px tall", node.id);
@@ -645,7 +734,14 @@ mod tests {
         let fov = ui.nodes.iter().find(|n| n.id == "settings/fov").unwrap();
         assert_eq!(fov.role, "slider");
         assert!(fov.label.starts_with("Field of view: "), "{}", fov.label);
-        assert_eq!(ui.nodes.iter().find(|n| n.id == "settings/vsync").unwrap().role, "switch");
+        assert_eq!(
+            ui.nodes
+                .iter()
+                .find(|n| n.id == "settings/vsync")
+                .unwrap()
+                .role,
+            "switch"
+        );
     }
 
     #[test]
@@ -655,23 +751,63 @@ mod tests {
         let bounds = node_bounds(&ui, "settings/fov");
         let (tx, tw) = track_span(bounds);
         let y = bounds[1] + 11.;
-        let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, tx + 3., y);
+        let down = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Down,
+            tx + 3.,
+            y,
+        );
         assert_eq!(setting_commands(&down, "fov"), vec![json!(30.)]);
         assert!(ui.slider_drag.is_some());
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let moved = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + tw + 80., y);
+        let moved = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + tw + 80.,
+            y,
+        );
         assert_eq!(setting_commands(&moved, "fov"), vec![json!(110.)]);
         assert_eq!(ui.setting("fov"), Some(&json!(110.)));
         // Same stop again emits nothing.
-        let again = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + tw + 90., y);
+        let again = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + tw + 90.,
+            y,
+        );
         assert!(setting_commands(&again, "fov").is_empty());
-        pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, tx + tw, y);
+        pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Up,
+            tx + tw,
+            y,
+        );
         assert!(ui.slider_drag.is_none());
         // A move after release no longer drags.
-        let after = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + 3., y);
+        let after = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + 3.,
+            y,
+        );
         assert!(setting_commands(&after, "fov").is_empty());
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let label = &ui.nodes.iter().find(|n| n.id == "settings/fov").unwrap().label;
+        let label = &ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "settings/fov")
+            .unwrap()
+            .label;
         assert_eq!(label, "Field of view: 110");
     }
 
@@ -706,7 +842,10 @@ mod tests {
                 UiIntent::Key {
                     key: name.into(),
                     pressed: true,
-                    modifiers: Modifiers { shift, ..Default::default() },
+                    modifiers: Modifiers {
+                        shift,
+                        ..Default::default()
+                    },
                 },
                 inventory,
                 &content,
@@ -751,22 +890,37 @@ mod tests {
     fn interface_tab_scrolls_and_accessibility_opens_it() {
         let (content, mut inventory, mut ui) = state();
         ui.transition(Screen::Pause);
-        ui.activate_for_test(NodeAction::Screen(Screen::Accessibility), &mut inventory, &content)
-            .unwrap();
+        ui.activate_for_test(
+            NodeAction::Screen(Screen::Accessibility),
+            &mut inventory,
+            &content,
+        )
+        .unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         assert_eq!(ui.options_tab, INTERFACE_TAB);
         assert!(ui.nodes.iter().any(|n| n.id == "settings/ui_scale"));
-        let first_rows = ui.nodes.iter().filter(|n| n.id.starts_with("settings/") && n.id != "settings/done").count();
-        assert!(first_rows < 8, "8 interface rows overflow a 240px viewport: {first_rows}");
+        let first_rows = ui
+            .nodes
+            .iter()
+            .filter(|n| n.id.starts_with("settings/") && n.id != "settings/done")
+            .count();
+        assert!(
+            first_rows < 8,
+            "8 interface rows overflow a 240px viewport: {first_rows}"
+        );
         assert!(ui.nodes.iter().any(|n| n.id == "options/scrollbar"));
         ui.scroll = 99;
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        assert!(ui.nodes.iter().any(|n| n.id == "settings/text_background_opacity"), "scroll clamps to the last row");
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|n| n.id == "settings/text_background_opacity"),
+            "scroll clamps to the last row"
+        );
         assert!(!ui.nodes.iter().any(|n| n.id == "settings/ui_scale"));
         // Done returns to the pause menu.
         assert_eq!(ui.settings_parent, Screen::Pause);
     }
-
 
     #[test]
     fn every_slider_round_trips_through_every_stop() {
@@ -828,7 +982,10 @@ mod tests {
         assert_eq!(value_text("max_fps", Some(&json!(0))), "Unlimited");
         assert_eq!(value_text("ui_scale", Some(&json!(0.))), "Auto");
         assert_eq!(value_text("ui_scale", Some(&json!(3.))), "3x");
-        assert_eq!(value_text("graphics_preset", Some(&json!("medium"))), "Medium");
+        assert_eq!(
+            value_text("graphics_preset", Some(&json!("medium"))),
+            "Medium"
+        );
         assert_eq!(value_text("graphics_preset", Some(&json!("low"))), "Low");
         assert_eq!(value_text("graphics_preset", Some(&json!("high"))), "High");
         assert_eq!(value_text("vsync", None), "On");

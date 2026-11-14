@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the battle-video item models and textures (assets/battle_video/assets/solaris_battle).
+"""Generates the battle-video item models and textures (assets/battle_video/assets/krasnokamen_battle).
 
 Own art, no third-party bytes: shields are the vanilla shield's geometry (plate 12x22x1, handle
 2x6x6, read from the local ShieldModel class) built from elements with a painted heraldic texture;
@@ -15,7 +15,7 @@ import json, math, os, sys
 from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PACK = os.path.join(ROOT, "assets/battle_video/assets/solaris_battle")
+PACK = os.path.join(ROOT, "assets/battle_video/assets/krasnokamen_battle")
 MODELS = os.path.join(PACK, "models/item")
 TEX = os.path.join(PACK, "textures/item")
 
@@ -76,7 +76,7 @@ class Weapon:
         self.elements.append(el)
 
     def model(self, display):
-        return {"textures": {"parts": "solaris_battle:item/battle_parts", "particle": "solaris_battle:item/battle_parts"},
+        return {"textures": {"parts": "krasnokamen_battle:item/battle_parts", "particle": "krasnokamen_battle:item/battle_parts"},
                 "elements": self.elements, "display": display}
 
 
@@ -345,7 +345,7 @@ def make_shield(name, rows, crest, field, trim, boss, w_half=None, tex_size=(64,
         "fixed": {"rotation": [0, 180, 0], "translation": [-4.5, 4.5, -5], "scale": [0.55, 0.55, 0.55]},
         "ground": {"rotation": [0, 0, 0], "translation": [2, 4, 2], "scale": [0.25, 0.25, 0.25]},
     }
-    model = {"textures": {"shield": f"solaris_battle:item/{name}", "particle": f"solaris_battle:item/{name}"},
+    model = {"textures": {"shield": f"krasnokamen_battle:item/{name}", "particle": f"krasnokamen_battle:item/{name}"},
              "elements": elements, "display": disp}
     # shield_blocking.json display (same local read): the board turns to the front
     blocking = json.loads(json.dumps(model))
@@ -427,8 +427,8 @@ def main():
         save_model(name, model)
         save_model(name + "_blocking", blocking)
         save_item(name, {"model": {"type": "minecraft:condition", "property": "minecraft:using_item",
-                                    "on_false": {"type": "minecraft:model", "model": f"solaris_battle:item/{name}"},
-                                    "on_true": {"type": "minecraft:model", "model": f"solaris_battle:item/{name}_blocking"}}})
+                                    "on_false": {"type": "minecraft:model", "model": f"krasnokamen_battle:item/{name}"},
+                                    "on_true": {"type": "minecraft:model", "model": f"krasnokamen_battle:item/{name}_blocking"}}})
         im.save(os.path.join(TEX, name + ".png"))
     print("generated")
 

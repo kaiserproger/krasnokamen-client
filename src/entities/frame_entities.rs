@@ -4,7 +4,7 @@
 //! the part their own range covers, instead of each walking the spatial index and resolving
 //! every transform (a mounted body's attachment chain included) again.
 
-use super::{resources::Models, view_range, Store, Transform};
+use super::{Store, Transform, resources::Models, view_range};
 use crate::player::Bounds;
 
 /// One candidate seen from the frame's camera.
@@ -36,13 +36,30 @@ impl Entry {
         let entity = &store.slots[slot];
         let transform = store.presented_transform(entity, tick, partial);
         let distance_squared = transform.as_ref().map_or(f64::INFINITY, |transform| {
-            transform.position.iter().zip(camera).map(|(a, b)| (a - b) * (a - b)).sum::<f64>()
+            transform
+                .position
+                .iter()
+                .zip(camera)
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
         });
         let within = transform.as_ref().is_ok_and(|transform| {
             distance_squared <= range * range
-                && view_range::within(models, entity, transform.position, distance_squared, store.view_scale.0)
+                && view_range::within(
+                    models,
+                    entity,
+                    transform.position,
+                    distance_squared,
+                    store.view_scale.0,
+                )
         });
-        Self { slot, cell, transform, distance_squared, within }
+        Self {
+            slot,
+            cell,
+            transform,
+            distance_squared,
+            within,
+        }
     }
 }
 
@@ -76,9 +93,13 @@ impl FrameEntities {
         partial: f32,
     ) {
         self.entries.clear();
-        self.entries.extend(store.candidate_slots(area(camera, range)).map(|(cell, slot)| {
-            Entry::of(store, models, slot, cell, camera, range, tick, partial)
-        }));
+        self.entries.extend(
+            store
+                .candidate_slots(area(camera, range))
+                .map(|(cell, slot)| {
+                    Entry::of(store, models, slot, cell, camera, range, tick, partial)
+                }),
+        );
         self.key = Some(Key {
             camera,
             tick,
@@ -120,7 +141,10 @@ impl FrameEntities {
 }
 
 fn area(camera: [f64; 3], range: f64) -> Bounds {
-    Bounds { min: camera.map(|value| value - range), max: camera.map(|value| value + range) }
+    Bounds {
+        min: camera.map(|value| value - range),
+        max: camera.map(|value| value + range),
+    }
 }
 
 impl Store {
@@ -136,7 +160,10 @@ impl Store {
         tick: u64,
         partial: f32,
     ) -> impl Iterator<Item = &'a Entry> + 'a {
-        let frame = if self.frame_entities.covers(self, camera, range, tick, partial) {
+        let frame = if self
+            .frame_entities
+            .covers(self, camera, range, tick, partial)
+        {
             &self.frame_entities
         } else {
             own.gather(self, models, camera, range, tick, partial);
@@ -153,7 +180,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{packet_ids::play::clientbound as cb, Reader, Writer};
+    use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
     use std::sync::Arc;
 
     /// Husks and horses on a grid 300 blocks wide around the origin, every third husk riding
@@ -177,14 +204,18 @@ mod tests {
                     }
                     spawn.0.extend_from_slice(&[0; 4]);
                     spawn.var(0);
-                    store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+                    store
+                        .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                        .unwrap();
                 }
                 if id % 3 == 0 {
                     let mut mount = Writer::default();
                     mount.var(id);
                     mount.var(1);
                     mount.var(id - 1);
-                    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&mount.0), &content, 1).unwrap();
+                    store
+                        .apply(cb::SET_PASSENGERS, &mut Reader::new(&mount.0), &content, 1)
+                        .unwrap();
                 }
             }
         }
@@ -200,20 +231,37 @@ mod tests {
         let (tick, partial) = (1, 0.25);
         let mut frame = FrameEntities::default();
         frame.gather(&store, &models, camera, 128., tick, partial);
-        assert!(frame.entries.iter().any(|entry| entry.cell.is_none()), "riders are gathered");
+        assert!(
+            frame.entries.iter().any(|entry| entry.cell.is_none()),
+            "riders are gathered"
+        );
         for range in [16., 40., 64., 128.] {
             let expected: Vec<_> = store
                 .candidates(area(camera, range))
                 .map(|entity| {
                     let transform = store.presented_transform(entity, tick, partial).unwrap();
-                    let distance =
-                        transform.position.iter().zip(camera).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+                    let distance = transform
+                        .position
+                        .iter()
+                        .zip(camera)
+                        .map(|(a, b)| (a - b) * (a - b))
+                        .sum::<f64>();
                     let within = distance <= range * range
-                        && view_range::within(&models, entity, transform.position, distance, store.view_scale.0);
+                        && view_range::within(
+                            &models,
+                            entity,
+                            transform.position,
+                            distance,
+                            store.view_scale.0,
+                        );
                     (entity.handle, transform.position, distance, within)
                 })
                 .collect();
-            assert!(expected.len() > 10, "range {range}: {} candidates", expected.len());
+            assert!(
+                expected.len() > 10,
+                "range {range}: {} candidates",
+                expected.len()
+            );
             let mut own = FrameEntities::default();
             store.frame_entities = std::mem::take(&mut frame);
             let got: Vec<_> = store
@@ -221,10 +269,18 @@ mod tests {
                 .map(|entry| {
                     let transform = entry.transform.as_ref().unwrap();
                     let within = entry.distance_squared <= range * range && entry.within;
-                    (store.slots[entry.slot].handle, transform.position, entry.distance_squared, within)
+                    (
+                        store.slots[entry.slot].handle,
+                        transform.position,
+                        entry.distance_squared,
+                        within,
+                    )
                 })
                 .collect();
-            assert!(own.entries.is_empty(), "range {range} reads the gathered frame");
+            assert!(
+                own.entries.is_empty(),
+                "range {range} reads the gathered frame"
+            );
             frame = std::mem::take(&mut store.frame_entities);
             assert_eq!(got, expected, "range {range}");
         }
@@ -232,13 +288,17 @@ mod tests {
         store.frame_entities = frame;
         for (range, tick) in [(64., tick + 1), (200., tick)] {
             let mut own = FrameEntities::default();
-            let count = store.frame_entities(&mut own, &models, camera, range, tick, partial).count();
+            let count = store
+                .frame_entities(&mut own, &models, camera, range, tick, partial)
+                .count();
             assert_eq!(count, store.candidates(area(camera, range)).count());
             assert!(!own.entries.is_empty());
         }
         store.end_entity_frame();
         let mut own = FrameEntities::default();
-        let _ = store.frame_entities(&mut own, &models, camera, 16., 1, partial).count();
+        let _ = store
+            .frame_entities(&mut own, &models, camera, 16., 1, partial)
+            .count();
         assert!(!own.entries.is_empty(), "an ended frame is not reused");
     }
 }

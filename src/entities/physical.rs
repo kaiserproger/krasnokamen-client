@@ -1,9 +1,9 @@
 //! Version-pinned entity shape and query rules. Predicates follow declaring Java owners,
 //! not an approximate species list; server tags remain authoritative.
-use super::{resources::Shape, Entity, Handle, Metadata, Models, Store};
+use super::{Entity, Handle, Metadata, Models, Store, resources::Shape};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -64,7 +64,9 @@ impl Default for AnimationState {
     }
 }
 pub(crate) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
-    models.entity_accessor(e, name).and_then(|id| e.metadata_value(id))
+    models
+        .entity_accessor(e, name)
+        .and_then(|id| e.metadata_value(id))
 }
 pub(crate) fn number(models: &Models, e: &Entity, name: &str, default: i32) -> i32 {
     value(models, e, name)
@@ -93,7 +95,10 @@ fn stays_active(e: &Entity) -> bool {
         || super::display::is_display(e)
         || matches!(
             e.type_name.as_str(),
-            "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
+            "minecraft:shulker"
+                | "minecraft:polar_bear"
+                | "minecraft:ender_dragon"
+                | "minecraft:falling_block"
         )
 }
 pub(crate) fn boolean(models: &Models, e: &Entity, name: &str, default: bool) -> bool {
@@ -108,13 +113,17 @@ fn float(models: &Models, e: &Entity, name: &str, default: f32) -> f32 {
     }
 }
 fn hierarchy(models: &Models, e: &Entity, class: &str) -> bool {
-    models.schema_of(e).expect("entity schema of a known kind")
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .hierarchy
         .iter()
         .any(|v| v == class)
 }
 fn owner<'a>(models: &'a Models, e: &Entity, method: &str) -> &'a str {
-    models.schema_of(e).expect("entity schema of a known kind")
+    models
+        .schema_of(e)
+        .expect("entity schema of a known kind")
         .method_owners
         .get(method)
         .map(String::as_str)
@@ -236,7 +245,8 @@ impl Store {
         Ok(())
     }
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
-        self.candidate_slots(area).map(|(_, slot)| &self.slots[slot])
+        self.candidate_slots(area)
+            .map(|(_, slot)| &self.slots[slot])
     }
     /// `candidates` as slots, each with the spatial cell it was found in (`None`: a mounted
     /// body, considered wherever it is).
@@ -253,7 +263,11 @@ impl Store {
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| Some((None, *self.ids.get(id)?))))
+            .chain(
+                self.passenger_vehicles
+                    .keys()
+                    .filter_map(|id| Some((None, *self.ids.get(id)?))),
+            )
             .filter(|(_, slot)| {
                 !self.slots[*slot]
                     .source
@@ -502,7 +516,12 @@ impl Store {
     /// (`EntitySelector.pushableBy`) among boxes intersecting its own, and `doPush` calls
     /// `player.push(entity)` (`Entity.push(Entity)`), which moves the player away from it.
     /// The caller applies it only while the player itself is pushable.
-    pub(crate) fn local_player_push(&self, player: Bounds, player_id: i32, tick: u64) -> Result<[f64; 2]> {
+    pub(crate) fn local_player_push(
+        &self,
+        player: Bounds,
+        player_id: i32,
+        tick: u64,
+    ) -> Result<[f64; 2]> {
         let models = self.models_ref().ok_or("entity models not activated")?;
         let root = self.root_vehicle(player_id)?;
         let x = (player.min[0] + player.max[0]) / 2.;
@@ -574,7 +593,8 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area)
+            {
                 return Ok(false);
             }
         }
@@ -771,7 +791,9 @@ impl Store {
             if presenting
                 && e.physical.shown_tick + 1 < tick
                 && self.local_entity_id != Some(*id)
-                && e.source.as_ref().is_some_and(|source| source.living.is_some())
+                && e.source
+                    .as_ref()
+                    .is_some_and(|source| source.living.is_some())
                 && e.passenger_ids.is_empty()
                 && e.vehicle.is_none()
                 && e.physical.dragon.is_none()
@@ -787,7 +809,11 @@ impl Store {
             let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
             let standing = super::presentation::flag_at(e, ids.standing);
             // Only a boat reads its bounds from before the tick (`source_state::tick`).
-            let boat_bounds = if ids.boat { Some(self.bounds(e.handle, tick, 0.)?) } else { None };
+            let boat_bounds = if ids.boat {
+                Some(self.bounds(e.handle, tick, 0.)?)
+            } else {
+                None
+            };
             let seat_motion = ids.seat_motion;
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
@@ -818,8 +844,12 @@ impl Store {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
-                    &mut e.physical.seat_motion, e.handle, position, tick,
-                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
+                    &mut e.physical.seat_motion,
+                    e.handle,
+                    position,
+                    tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(),
+                    standing,
                 );
             }
             e.physical.peek_old = e.physical.peek;
@@ -873,7 +903,8 @@ impl Store {
             self.remove_motion_span(span);
             if falling {
                 let mut colliders = std::mem::take(&mut self.falling_colliders);
-                let result = self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
+                let result =
+                    self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
                 self.falling_colliders = colliders;
                 result?;
             }
@@ -898,10 +929,17 @@ impl Store {
     /// Vanilla 26.3 FallingBlockEntity ticks gravity, collision and air drag on
     /// the client between the server's position updates.
     fn tick_falling_block(
-        &mut self, id: i32, models: &Models, world: &World, content: &Content,
-        tick: u64, colliders: &mut Vec<Bounds>,
+        &mut self,
+        id: i32,
+        models: &Models,
+        world: &World,
+        content: &Content,
+        tick: u64,
+        colliders: &mut Vec<Bounds>,
     ) -> Result<()> {
-        let Some(entity) = self.get(id) else { return Ok(()) };
+        let Some(entity) = self.get(id) else {
+            return Ok(());
+        };
         let mut velocity = entity.physical.falling_velocity.unwrap_or(entity.velocity);
         if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
             velocity[1] -= 0.04;

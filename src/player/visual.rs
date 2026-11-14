@@ -4,7 +4,7 @@ use crate::{
     api::EntityMaterial,
     inventory::Stack,
     motion::{self, HandPose, ViewInput, ViewMotion},
-    ui::items::{display_matrix, ItemContext, ItemModels},
+    ui::items::{ItemContext, ItemModels, display_matrix},
 };
 use glam::{Mat4, Vec3};
 use std::cell::Cell;
@@ -38,7 +38,9 @@ fn map_pose(two_handed: bool, side: f32, pitch: f32, equip: f32, swing: f32) -> 
             * Mat4::from_rotation_x((-85. * tilt).to_radians());
         MapPose {
             arms: Some(arms * Mat4::from_rotation_y(90f32.to_radians())),
-            map: arms * Mat4::from_rotation_x((20. * wave).to_radians()) * Mat4::from_scale(Vec3::splat(2.)),
+            map: arms
+                * Mat4::from_rotation_x((20. * wave).to_radians())
+                * Mat4::from_scale(Vec3::splat(2.)),
         }
     } else {
         MapPose {
@@ -369,7 +371,12 @@ impl Player {
         scene: &mut crate::api::Scene,
         frame: FirstPersonFrame<'_>,
     ) -> Result<()> {
-        let FirstPersonFrame { partial, light, item_context, ui } = frame;
+        let FirstPersonFrame {
+            partial,
+            light,
+            item_context,
+            ui,
+        } = frame;
         if self.game_mode == 3 || !self.pose_known || self.health.is_some_and(|h| h <= 0.) {
             return Ok(());
         }
@@ -457,20 +464,37 @@ impl Player {
                     .filter(|id| *id >= 0)
                     .ok_or("invalid held map id")?;
                 let ui = ui.ok_or("held map UI state unavailable")?;
-                let swing = if self.visual.swing_hand.get() == hand { view.swing } else { 0. };
-                let pose = map_pose(hand == 0 && held(inventory, 1).is_none(), side, scene.pitch, 1. - lowered, swing);
+                let swing = if self.visual.swing_hand.get() == hand {
+                    view.swing
+                } else {
+                    0.
+                };
+                let pose = map_pose(
+                    hand == 0 && held(inventory, 1).is_none(),
+                    side,
+                    scene.pitch,
+                    1. - lowered,
+                    swing,
+                );
                 let sway = camera_to_world
                     * Mat4::from_translation(Vec3::new(hx, view.bob[1] + hy, hz))
                     * Mat4::from_rotation_z(view.hand.roll_deg.to_radians());
                 if let Some(arms) = pose.arms {
                     for arm_right in [true, false] {
                         let f: f32 = if arm_right { 1. } else { -1. };
-                        let shoulder = sway * arms
+                        let shoulder = sway
+                            * arms
                             * Mat4::from_rotation_y(92f32.to_radians())
                             * Mat4::from_rotation_x(45f32.to_radians())
                             * Mat4::from_rotation_z((-41. * f).to_radians())
                             * Mat4::from_translation(Vec3::new(0.3 * f, -1.1, 0.45));
-                        entities.append_local_arm(content, arm_right, hand_part(shoulder, arm_right), light, &mut scene.first_person)?;
+                        entities.append_local_arm(
+                            content,
+                            arm_right,
+                            hand_part(shoulder, arm_right),
+                            light,
+                            &mut scene.first_person,
+                        )?;
                     }
                 } else {
                     // Source renderOneHandedMap: from the map's shifted origin the arm
@@ -479,9 +503,21 @@ impl Player {
                         * Mat4::from_translation(Vec3::new(side * 0.125, -0.125, 0.))
                         * Mat4::from_rotation_z((side * 10.).to_radians())
                         * player_arm(side, lowered, swing);
-                    entities.append_local_arm(content, right, hand_part(shoulder, right), light, &mut scene.first_person)?;
+                    entities.append_local_arm(
+                        content,
+                        right,
+                        hand_part(shoulder, right),
+                        light,
+                        &mut scene.first_person,
+                    )?;
                 }
-                ui.append_held_map(id, content, map_surface_transform(sway * pose.map), light, &mut scene.first_person)?;
+                ui.append_held_map(
+                    id,
+                    content,
+                    map_surface_transform(sway * pose.map),
+                    light,
+                    &mut scene.first_person,
+                )?;
                 continue;
             }
             // Ordinary item graphs and resource-pack first-person transforms;
@@ -521,7 +557,13 @@ impl Player {
                     * Mat4::from_rotation_z(side * -2.015)
                     * Mat4::from_rotation_y(side * 0.697)
                     * Mat4::from_rotation_x(-1.453);
-                entities.append_local_arm(content, right, shoulder, light, &mut scene.first_person)?;
+                entities.append_local_arm(
+                    content,
+                    right,
+                    shoulder,
+                    light,
+                    &mut scene.first_person,
+                )?;
                 match failure {
                     Some(reason) => return Err(reason),
                     None => continue,
@@ -548,18 +590,23 @@ impl Player {
                     quad.uv,
                     color,
                     quad.texture_layer,
-                    quad.entity_material.unwrap_or(if quad.layer == crate::api::RenderLayer::Translucent {
-                        EntityMaterial::ItemTranslucent
-                    } else {
-                        EntityMaterial::ItemCutout
-                    }),
+                    quad.entity_material.unwrap_or(
+                        if quad.layer == crate::api::RenderLayer::Translucent {
+                            EntityMaterial::ItemTranslucent
+                        } else {
+                            EntityMaterial::ItemCutout
+                        },
+                    ),
                     quad.alpha,
                     light,
                     &mut scene.first_person,
                 )?;
                 if let Some(texture) = foil
-                    && (quad.entity_material.is_none() || matches!(quad.entity_material,
-                        Some(EntityMaterial::ItemCutout | EntityMaterial::ItemTranslucent)))
+                    && (quad.entity_material.is_none()
+                        || matches!(
+                            quad.entity_material,
+                            Some(EntityMaterial::ItemCutout | EntityMaterial::ItemTranslucent)
+                        ))
                 {
                     crate::ui::items::mark_foil(&mut scene.first_person.vertices[first..], texture);
                 }
@@ -618,7 +665,9 @@ mod tests {
             map_surface_transform(pose.map).transform_point3(Vec3::new(64., 64., 0.))
         };
         let two = map_pose(true, 1., 0., 1., 0.);
-        let arms = two.arms.expect("an empty off hand holds the map with both arms");
+        let arms = two
+            .arms
+            .expect("an empty off hand holds the map with both arms");
         assert!(center(&two).x.abs() < 1e-5 && center(&two).z < 0.);
         assert!((arms.transform_vector3(Vec3::X).length() - 1.).abs() < 1e-5);
         assert!((two.map.transform_vector3(Vec3::X).length() - 2.).abs() < 1e-5);
@@ -830,7 +879,10 @@ mod tests {
         let mut player = Player::new();
         player.pose_known = true;
         player.visual.shown = Some(stack);
-        player.visual.items.insert_test_model("test:held", content.models[0].clone());
+        player
+            .visual
+            .items
+            .insert_test_model("test:held", content.models[0].clone());
         let mut scene = crate::api::Scene {
             yaw: 0.,
             pitch: 0.,
@@ -854,8 +906,15 @@ mod tests {
             .unwrap();
         // The rest hand pose must be exactly still: no idle offset or roll.
         let hand = player.visual.sample(&player, 1.).hand;
-        assert_eq!(hand.offset, [0., 0., 0.], "rest hand offset must be zero, got {hand:?}");
-        assert_eq!(hand.roll_deg, 0., "rest hand roll must be zero, got {hand:?}");
+        assert_eq!(
+            hand.offset,
+            [0., 0., 0.],
+            "rest hand offset must be zero, got {hand:?}"
+        );
+        assert_eq!(
+            hand.roll_deg, 0.,
+            "rest hand roll must be zero, got {hand:?}"
+        );
         // Recover the camera-space placement: the render pass adds
         // presentation_origin = origin - camera_position and applies
         // camera_view(ZERO, yaw, pitch), so the item lands in pure camera space.
@@ -891,22 +950,43 @@ mod tests {
         player.visual.shown = Some(stack.clone());
         (player.visual.old_equip, player.visual.equip) = (equip, equip);
         for id in models {
-            player.visual.items.insert_test_model(id, content.models[0].clone());
+            player
+                .visual
+                .items
+                .insert_test_model(id, content.models[0].clone());
         }
         let mut scene = crate::api::Scene {
-            yaw: 0., pitch: 0., origin: [4096., 0., -4096.],
+            yaw: 0.,
+            pitch: 0.,
+            origin: [4096., 0., -4096.],
             camera_position: [4096.5, 65.62, -4095.5],
             ..Default::default()
         };
-        player.append_first_person(content, &inventory, &mut EntityStore::new(), &mut scene,
-            crate::player::FirstPersonFrame { partial: 1., light: [15., 0.], item_context: &ItemContext::default(), ui: None })
+        player
+            .append_first_person(
+                content,
+                &inventory,
+                &mut EntityStore::new(),
+                &mut scene,
+                crate::player::FirstPersonFrame {
+                    partial: 1.,
+                    light: [15., 0.],
+                    item_context: &ItemContext::default(),
+                    ui: None,
+                },
+            )
             .unwrap();
         let view = crate::render::camera_view(Vec3::ZERO, scene.yaw, scene.pitch);
-        let pres = Vec3::from_array(std::array::from_fn(|i| (scene.origin[i] - scene.camera_position[i]) as f32));
+        let pres = Vec3::from_array(std::array::from_fn(|i| {
+            (scene.origin[i] - scene.camera_position[i]) as f32
+        }));
         let vertices = &scene.first_person.vertices;
         assert!(!vertices.is_empty());
-        vertices.iter().map(|v| view.transform_point3(Vec3::from_array(v.position) + pres))
-            .fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f32
+        vertices
+            .iter()
+            .map(|v| view.transform_point3(Vec3::from_array(v.position) + pres))
+            .fold(Vec3::ZERO, |sum, p| sum + p)
+            / vertices.len() as f32
     }
 
     #[test]
@@ -918,8 +998,10 @@ mod tests {
         content.item_names.insert(8, "test:plain".into());
         content.insert_test_resource("assets/test/items/spear.json",
             br#"{"model":{"type":"minecraft:model","model":"test:spear_model"},"swap_animation_scale":1.95}"#);
-        content.insert_test_resource("assets/test/items/plain.json",
-            br#"{"model":{"type":"minecraft:model","model":"test:spear_model"}}"#);
+        content.insert_test_resource(
+            "assets/test/items/plain.json",
+            br#"{"model":{"type":"minecraft:model","model":"test:spear_model"}}"#,
+        );
         let stack = |id| {
             let mut stack = Stack::default();
             stack.id = id;
@@ -931,8 +1013,14 @@ mod tests {
         let plain = held_centroid(&content, &stack(8), &models, 0.5);
         let spear = held_centroid(&content, &stack(7), &models, 0.5);
         // smoothstep(0.5) = 0.5, so the plain item drops 0.3 and the spear 1.95 times that.
-        assert!(((rest.y - plain.y) - 0.3).abs() < 1e-4, "{rest:?} {plain:?}");
-        assert!(((rest.y - spear.y) - 0.3 * 1.95).abs() < 1e-4, "{rest:?} {spear:?}");
+        assert!(
+            ((rest.y - plain.y) - 0.3).abs() < 1e-4,
+            "{rest:?} {plain:?}"
+        );
+        assert!(
+            ((rest.y - spear.y) - 0.3 * 1.95).abs() < 1e-4,
+            "{rest:?} {spear:?}"
+        );
         assert_eq!(held_centroid(&content, &stack(7), &models, 1.), rest);
     }
 
@@ -940,7 +1028,8 @@ mod tests {
     fn one_handed_map_arm_follows_the_source_bare_arm_pose() {
         // Source renderOneHandedMap -> renderPlayerArm -> renderHand at rest (right arm).
         let pose = Mat4::from_translation(Vec3::new(0.125, -0.125, 0.))
-            * Mat4::from_rotation_z(10f32.to_radians()) * player_arm(1., 0., 0.);
+            * Mat4::from_rotation_z(10f32.to_radians())
+            * player_arm(1., 0., 0.);
         let hand = hand_part(pose, true);
         // Shoulder pivot of the right arm part and the fist end 10 px further down it.
         let shoulder = hand.transform_point3(Vec3::ZERO);
@@ -948,14 +1037,31 @@ mod tests {
         for p in [shoulder, fist] {
             assert!(p.is_finite());
         }
-        assert!(fist.x > 0. && fist.z < 0., "the fist sits right of and ahead of the eye: {fist:?}");
-        assert!(fist.y > shoulder.y, "the arm reaches up from below the view toward the fist");
-        let left = hand_part(Mat4::from_translation(Vec3::new(-0.125, -0.125, 0.))
-            * Mat4::from_rotation_z((-10f32).to_radians()) * player_arm(-1., 0., 0.), false);
+        assert!(
+            fist.x > 0. && fist.z < 0.,
+            "the fist sits right of and ahead of the eye: {fist:?}"
+        );
+        assert!(
+            fist.y > shoulder.y,
+            "the arm reaches up from below the view toward the fist"
+        );
+        let left = hand_part(
+            Mat4::from_translation(Vec3::new(-0.125, -0.125, 0.))
+                * Mat4::from_rotation_z((-10f32).to_radians())
+                * player_arm(-1., 0., 0.),
+            false,
+        );
         let mirrored = left.transform_point3(Vec3::new(1. / 16., 10. / 16., 0.));
-        assert!((mirrored - fist * Vec3::new(-1., 1., 1.)).length() < 1e-5, "{mirrored:?} vs {fist:?}");
-        let lowered = hand_part(Mat4::from_translation(Vec3::new(0.125, -0.125, 0.))
-            * Mat4::from_rotation_z(10f32.to_radians()) * player_arm(1., 1., 0.), true);
+        assert!(
+            (mirrored - fist * Vec3::new(-1., 1., 1.)).length() < 1e-5,
+            "{mirrored:?} vs {fist:?}"
+        );
+        let lowered = hand_part(
+            Mat4::from_translation(Vec3::new(0.125, -0.125, 0.))
+                * Mat4::from_rotation_z(10f32.to_radians())
+                * player_arm(1., 1., 0.),
+            true,
+        );
         let drop = (lowered.transform_point3(Vec3::ZERO) - shoulder).length();
         assert!((drop - 0.6).abs() < 1e-4, "{drop}");
     }
@@ -973,24 +1079,66 @@ mod tests {
         let mut player = Player::new();
         player.pose_known = true;
         player.visual.shown = Some(stack);
-        player.visual.items.insert_test_model("test:held", content.models[0].clone());
+        player
+            .visual
+            .items
+            .insert_test_model("test:held", content.models[0].clone());
         for (yaw, pitch, using) in [(0., 0., false), (90., 60., false), (-90., -60., true)] {
             player.visual.swing_age.set(2);
             player.using = using.then_some(super::super::interaction::UsingItem {
-                hand: 0, item_id: 7, slot_identity: 0, duration: 32, remaining: 16,
-                crossbow_charge_ticks: 0., crossbow_components: None,
-                movement_factor: 1., can_sprint: false,
+                hand: 0,
+                item_id: 7,
+                slot_identity: 0,
+                duration: 32,
+                remaining: 16,
+                crossbow_charge_ticks: 0.,
+                crossbow_components: None,
+                movement_factor: 1.,
+                can_sprint: false,
             });
             let mut scene = crate::api::Scene {
-                yaw, pitch, origin: [4096., 0., -4096.],
+                yaw,
+                pitch,
+                origin: [4096., 0., -4096.],
                 camera_position: [4096.5, 65.62, -4095.5],
                 ..Default::default()
             };
-            player.append_first_person(&content, &inventory, &mut EntityStore::new(), &mut scene, crate::player::FirstPersonFrame { partial: 0.5, light: [15., 0.], item_context: &ItemContext::default(), ui: None }).unwrap();
+            player
+                .append_first_person(
+                    &content,
+                    &inventory,
+                    &mut EntityStore::new(),
+                    &mut scene,
+                    crate::player::FirstPersonFrame {
+                        partial: 0.5,
+                        light: [15., 0.],
+                        item_context: &ItemContext::default(),
+                        ui: None,
+                    },
+                )
+                .unwrap();
             assert_eq!(scene.first_person.vertices.len(), 48);
-            assert_eq!(scene.first_person.indices.iter().map(Vec::len).sum::<usize>(), 72);
-            assert!(scene.first_person.vertices.iter().flat_map(|v| v.position).all(f32::is_finite));
-            assert!(scene.dynamic.vertices.is_empty(), "a camera-held item became a world occluder/caster");
+            assert_eq!(
+                scene
+                    .first_person
+                    .indices
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>(),
+                72
+            );
+            assert!(
+                scene
+                    .first_person
+                    .vertices
+                    .iter()
+                    .flat_map(|v| v.position)
+                    .all(f32::is_finite)
+            );
+            assert!(
+                scene.dynamic.vertices.is_empty(),
+                "a camera-held item became a world occluder/caster"
+            );
             assert!(scene.dynamic.indices.iter().all(Vec::is_empty));
         }
     }
@@ -1003,8 +1151,15 @@ mod tests {
         let mut player = Player::new();
         assert!(!player.is_scoping(&content));
         player.using = Some(super::super::interaction::UsingItem {
-            hand: 0, item_id: 7, slot_identity: 0, duration: 1200,
-            remaining: 1100, crossbow_charge_ticks: 0., crossbow_components: None, movement_factor: 1., can_sprint: false,
+            hand: 0,
+            item_id: 7,
+            slot_identity: 0,
+            duration: 1200,
+            remaining: 1100,
+            crossbow_charge_ticks: 0.,
+            crossbow_components: None,
+            movement_factor: 1.,
+            can_sprint: false,
         });
         assert!(player.is_scoping(&content));
         player.using.as_mut().unwrap().item_id = 8;
@@ -1016,8 +1171,15 @@ mod tests {
     #[test]
     fn crossbow_pull_tracks_active_use_ticks() {
         let mut use_item = super::super::interaction::UsingItem {
-            hand: 0, item_id: 1, slot_identity: 0, duration: 72000, remaining: 71985,
-            crossbow_charge_ticks: 25., crossbow_components: None, movement_factor: 1., can_sprint: false,
+            hand: 0,
+            item_id: 1,
+            slot_identity: 0,
+            duration: 72000,
+            remaining: 71985,
+            crossbow_charge_ticks: 25.,
+            crossbow_components: None,
+            movement_factor: 1.,
+            can_sprint: false,
         };
         assert!((use_item.crossbow_pull(0.) - 0.6).abs() < 0.0001);
         use_item.crossbow_charge_ticks = 10.;
@@ -1045,15 +1207,27 @@ mod tests {
         let mut inventory = InventoryStore::default();
         inventory.player.slots[36] = Some(stack.clone());
         let mut player = Player::new();
-        player.start_using(Some(&stack), 0, &content, &inventory, 0).unwrap();
+        player
+            .start_using(Some(&stack), 0, &content, &inventory, 0)
+            .unwrap();
         player.using.as_mut().unwrap().remaining = 71985;
         assert!((player.using.as_ref().unwrap().crossbow_pull(0.) - 0.6).abs() < 0.0001);
         Arc::make_mut(&mut stack.components).insert(
-            "minecraft:enchantments".into(), json!({"minecraft:quick_charge": 3}),
+            "minecraft:enchantments".into(),
+            json!({"minecraft:quick_charge": 3}),
         );
         inventory.predict_use_slot(36, Some(stack), false).unwrap();
-        player.tick_using_item(&World::new(0, 16), &content, &inventory,
-            &EntityStore::new(), 1, 1, &mut Vec::new()).unwrap();
+        player
+            .tick_using_item(
+                &World::new(0, 16),
+                &content,
+                &inventory,
+                &EntityStore::new(),
+                1,
+                1,
+                &mut Vec::new(),
+            )
+            .unwrap();
         let using = player.using.as_ref().unwrap();
         assert_eq!(using.crossbow_charge_ticks, 10.);
         assert!((using.crossbow_pull(0.) - 1.6).abs() < 0.0001);

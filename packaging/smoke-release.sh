@@ -3,13 +3,13 @@
 # checkout: the client must publish its automation descriptor under the data
 # root of a fresh HOME. Content is not required; the client may fail on
 # missing content after the descriptor line, which is fine here.
-#   smoke-release.sh PATH/TO/solaris-client
+#   smoke-release.sh PATH/TO/krasnokamen-client
 set -euo pipefail
 
-client="${1:?usage: smoke-release.sh PATH/TO/solaris-client}"
+client="${1:?usage: smoke-release.sh PATH/TO/krasnokamen-client}"
 home="$(mktemp -d)"
 trap 'rm -rf "$home"' EXIT
-root="$home/.local/share/solaris-client"
+root="$home/.local/share/krasnokamen-client"
 
 coproc CLIENT {
   exec env -u XDG_DATA_HOME HOME="$home" "$client" play --headless --profile fixture --automation 2>&1

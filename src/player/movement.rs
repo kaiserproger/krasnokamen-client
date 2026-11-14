@@ -1,8 +1,8 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::collision;
 use super::*;
 use crate::inventory::Stack;
 use crate::protocol::content::FluidState;
+use crate::protocol::packet_ids::play::serverbound as sb;
 
 #[derive(Default)]
 struct Environment {
@@ -77,9 +77,13 @@ impl Player {
         }
         if let Some(vehicle) = entities.vehicle_of(self.entity_id) {
             self.vehicle = Some(vehicle);
-            self.predict_vehicle(world, content, inventory, entities, input, tick, world_tick, out)?;
+            self.predict_vehicle(
+                world, content, inventory, entities, input, tick, world_tick, out,
+            )?;
             self.inside_blocks(world, content, inventory, input, tick_start_position)?;
-            self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
+            self.update_auto_spin(
+                world, content, inventory, entities, input, world_tick, spin_start,
+            )?;
             self.update_eye_environment(world, content)?;
             return Ok(());
         }
@@ -156,8 +160,13 @@ impl Player {
         if self.sprinting != self.sent_sprinting {
             // Hunger, collision and use effects can deny a held sprint key.
             self.entity_command(
-                if self.sprinting { PlayerCommand::StartSprinting } else { PlayerCommand::StopSprinting },
-                0, out,
+                if self.sprinting {
+                    PlayerCommand::StartSprinting
+                } else {
+                    PlayerCommand::StopSprinting
+                },
+                0,
+                out,
             );
             self.sent_sprinting = self.sprinting;
         }
@@ -301,7 +310,9 @@ impl Player {
                 drag = 0.96;
             }
             self.add_relative(movement, acceleration);
-            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
+            self.move_player(
+                world, content, entities, input, inventory, world_tick, movement,
+            )?;
             if self.horizontal_collision && env.climbable {
                 self.velocity[1] = 0.2;
             }
@@ -320,7 +331,9 @@ impl Player {
             )?;
         } else if env.lava > 0. && !flight {
             self.add_relative(movement, 0.02);
-            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
+            self.move_player(
+                world, content, entities, input, inventory, world_tick, movement,
+            )?;
             if env.lava <= 0.4 {
                 self.velocity[0] *= 0.5;
                 self.velocity[1] *= f64::from(0.8f32);
@@ -343,7 +356,9 @@ impl Player {
             )?;
         } else if self.gliding {
             self.glide(gravity);
-            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
+            self.move_player(
+                world, content, entities, input, inventory, world_tick, movement,
+            )?;
         } else {
             let friction = if self.grounded {
                 content.info(env.below_state)?.friction
@@ -369,7 +384,9 @@ impl Player {
                 }
                 self.fall_distance = 0.;
             }
-            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
+            self.move_player(
+                world, content, entities, input, inventory, world_tick, movement,
+            )?;
             if (self.horizontal_collision || input.has(4))
                 && (env.climbable || (env.powder && can_walk_powder(inventory, content)))
             {
@@ -403,7 +420,9 @@ impl Player {
         if !input.has(5) {
             self.accumulate_steps(world, content, tick_start_position)?;
         }
-        self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
+        self.update_auto_spin(
+            world, content, inventory, entities, input, world_tick, spin_start,
+        )?;
         Ok(())
     }
     fn update_auto_spin(
@@ -1392,16 +1411,20 @@ mod tests {
     #[test]
     fn dimension_lava_rate_uses_received_environment_attribute_not_legacy_ultrawarm() {
         assert!(!dimension_fast_lava(&serde_json::json!({"ultrawarm":true})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
-        )
-        .unwrap());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
+            )
+            .unwrap()
+        );
         assert!(!dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"and","argument":true}}})).unwrap());
         assert!(dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"nand","argument":true}}})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
-        )
-        .is_err());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
+            )
+            .is_err()
+        );
     }
 
     fn push_models(hierarchy: &[&str]) -> crate::entities::Models {
@@ -1433,25 +1456,43 @@ mod tests {
     }
 
     /// An air chunk, the player at (12, 4, 12) and one `test:entity` of `hierarchy` per position.
-    fn push_fixture(hierarchy: &[&str], mobs: &[[f64; 3]]) -> (Player, World, Content, InventoryStore, EntityStore) {
+    fn push_fixture(
+        hierarchy: &[&str],
+        mobs: &[[f64; 3]],
+    ) -> (Player, World, Content, InventoryStore, EntityStore) {
         use crate::protocol::world::{Chunk, Palette, Section, SurfaceHeightmap};
         let mut content = Content::test_cube();
         content.entity_names.insert(1, "test:entity".into());
         content.set_registries(BTreeMap::from([(
             "minecraft:block".into(),
-            vec![("minecraft:air".into(), serde_json::Value::Null), ("test:cube".into(), serde_json::Value::Null)],
+            vec![
+                ("minecraft:air".into(), serde_json::Value::Null),
+                ("test:cube".into(), serde_json::Value::Null),
+            ],
         )]));
         let mut world = World::new(0, 16);
-        let palette = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
+        let palette = |size| Palette {
+            bits: 0,
+            values: vec![0],
+            words: Vec::new(),
+            size,
+        };
         world
-            .insert([0, 0], Chunk {
-                sections: vec![Arc::new(Section { blocks: palette(4096), biomes: palette(64), non_empty_block_count: 0 })],
-                sky: BTreeMap::new(),
-                block: BTreeMap::new(),
-                block_entities: Arc::new(Vec::new()),
-                surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
-                surface_heightmap_received: false,
-            })
+            .insert(
+                [0, 0],
+                Chunk {
+                    sections: vec![Arc::new(Section {
+                        blocks: palette(4096),
+                        biomes: palette(64),
+                        non_empty_block_count: 0,
+                    })],
+                    sky: BTreeMap::new(),
+                    block: BTreeMap::new(),
+                    block_entities: Arc::new(Vec::new()),
+                    surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+                    surface_heightmap_received: false,
+                },
+            )
             .unwrap();
         let mut player = Player::new();
         player.position = [12., 4., 12.];
@@ -1465,23 +1506,44 @@ mod tests {
                 packet.f64(*coordinate);
             }
             packet.0.extend([0u8; 5]); // velocity, pitch, yaw, head yaw, data
-            entities.apply(1, &mut crate::protocol::Reader::new(&packet.0), &content, 1).unwrap();
+            entities
+                .apply(1, &mut crate::protocol::Reader::new(&packet.0), &content, 1)
+                .unwrap();
         }
         entities.models = Some(Arc::new(push_models(hierarchy)));
         (player, world, content, InventoryStore::default(), entities)
     }
 
-    const LIVING: [&str; 2] = ["net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity"];
+    const LIVING: [&str; 2] = [
+        "net.minecraft.world.entity.Entity",
+        "net.minecraft.world.entity.LivingEntity",
+    ];
 
     #[test]
     fn overlapping_mob_pushes_the_local_player_out_like_vanilla() {
         // Mob 0.3 east of the player: vanilla Entity.push gives -0.05 * 0.3 / sqrt(0.3) * min(1, 1 / sqrt(0.3))
         // = -0.05 * sqrt(0.3) on x; in air the player then moves by that velocity this tick.
-        let (mut player, world, content, inventory, entities) = push_fixture(&LIVING, &[[12.3, 4., 12.]]);
+        let (mut player, world, content, inventory, entities) =
+            push_fixture(&LIVING, &[[12.3, 4., 12.]]);
         let mut out = Vec::new();
-        player.predict(&world, &content, &inventory, &entities, HeldInput::default(), 1, 1, &mut out).unwrap();
+        player
+            .predict(
+                &world,
+                &content,
+                &inventory,
+                &entities,
+                HeldInput::default(),
+                1,
+                1,
+                &mut out,
+            )
+            .unwrap();
         let push = 0.3 / 0.3f64.sqrt() * f64::from(0.05f32);
-        assert!((player.position[0] - (12. - push)).abs() < 1e-9, "x {}", player.position[0]);
+        assert!(
+            (player.position[0] - (12. - push)).abs() < 1e-9,
+            "x {}",
+            player.position[0]
+        );
         assert_eq!(player.position[2], 12.);
     }
 
@@ -1489,7 +1551,9 @@ mod tests {
     fn local_player_push_follows_vanilla_owners_and_distance_rules() {
         let at = |hierarchy: &[&str], mobs: &[[f64; 3]]| {
             let (player, _, _, _, entities) = push_fixture(hierarchy, mobs);
-            entities.local_player_push(player.bounds(), player.entity_id, 1).unwrap()
+            entities
+                .local_player_push(player.bounds(), player.entity_id, 1)
+                .unwrap()
         };
         // Two mobs on opposite sides cancel; one mob 1.2 north: no overlap, no push.
         let both = at(&LIVING, &[[12.2, 4., 12.], [11.8, 4., 12.]]);
@@ -1498,16 +1562,26 @@ mod tests {
         // Exactly on top (absMax below 0.01): vanilla pushes nothing.
         assert_eq!(at(&LIVING, &[[12.005, 4., 12.]]), [0., 0.]);
         // A plain entity, an armor stand, a bat or a parrot never pushes a player.
-        assert_eq!(at(&["net.minecraft.world.entity.Entity"], &[[12.3, 4., 12.]]), [0., 0.]);
+        assert_eq!(
+            at(&["net.minecraft.world.entity.Entity"], &[[12.3, 4., 12.]]),
+            [0., 0.]
+        );
         for class in [
             "net.minecraft.world.entity.decoration.ArmorStand",
             "net.minecraft.world.entity.ambient.Bat",
             "net.minecraft.world.entity.animal.parrot.Parrot",
         ] {
-            assert_eq!(at(&[LIVING[0], LIVING[1], class], &[[12.3, 4., 12.]]), [0., 0.], "{class}");
+            assert_eq!(
+                at(&[LIVING[0], LIVING[1], class], &[[12.3, 4., 12.]]),
+                [0., 0.],
+                "{class}"
+            );
         }
         // Within a block the 1/sqrt factor is capped at 1: push 0.05 * d / sqrt(d) away.
         let near = at(&LIVING, &[[12., 4., 12.5]]);
-        assert!((near[1] + 0.5f64.sqrt() * f64::from(0.05f32)).abs() < 1e-12, "{near:?}");
+        assert!(
+            (near[1] + 0.5f64.sqrt() * f64::from(0.05f32)).abs() < 1e-12,
+            "{near:?}"
+        );
     }
 }

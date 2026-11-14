@@ -15,10 +15,10 @@ use super::{
 use crate::{
     api::{MeshGeometry, RenderLayer},
     inventory::{Recipe, Stack},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
 };
 use glam::{Mat4, Vec3};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{collections::VecDeque, sync::Arc};
 
 const SLOT_COUNT: usize = 5;
@@ -136,9 +136,11 @@ impl Toast {
     }
     pub(crate) fn height(&self) -> i32 {
         match self.kind {
-            ToastKind::System { title_lines, message_lines, .. } => {
-                20 + (title_lines - 1) * 12 + message_lines.max(1) * 12
-            }
+            ToastKind::System {
+                title_lines,
+                message_lines,
+                ..
+            } => 20 + (title_lines - 1) * 12 + message_lines.max(1) * 12,
             _ => SLOT_HEIGHT,
         }
     }
@@ -237,14 +239,20 @@ impl ToastInstance {
         self.visible_for = now - self.became_fully_visible_at;
         let t = ((now - self.animation_start) as f32 / SLIDE_MS as f32).clamp(0., 1.);
         let t = t * t;
-        self.visible_portion = if self.visibility == Visibility::Hide { 1. - t } else { t };
+        self.visible_portion = if self.visibility == Visibility::Hide {
+            1. - t
+        } else {
+            t
+        };
         self.toast.update(self.visible_for);
         if self.toast.wanted != self.visibility {
             // Reversing mid-slide resumes from the same portion: f2i, then i2l.
-            self.animation_start = now - ((1. - self.visible_portion) * SLIDE_MS as f32) as i32 as i64;
+            self.animation_start =
+                now - ((1. - self.visible_portion) * SLIDE_MS as f32) as i32 as i64;
             self.visibility = self.toast.wanted;
         }
-        self.finished = self.visibility == Visibility::Hide && now - self.animation_start > SLIDE_MS;
+        self.finished =
+            self.visibility == Visibility::Hide && now - self.animation_start > SLIDE_MS;
     }
     /// `Toast.xPos(guiWidth, visiblePortion)`.
     pub(crate) fn x(&self, gui_width: f32) -> f32 {
@@ -292,7 +300,10 @@ impl ToastManager {
                 self.queued.back_mut().expect("pushed above")
             }
         };
-        if let ToastKind::Recipe { entries, changed, .. } = &mut toast.kind {
+        if let ToastKind::Recipe {
+            entries, changed, ..
+        } = &mut toast.kind
+        {
             entries.push(entry);
             *changed = true;
         }
@@ -315,7 +326,8 @@ impl ToastManager {
                 sounds.push(instance.visibility.sound());
             }
             if instance.finished {
-                occupied[instance.first_slot..instance.first_slot + instance.slot_count].fill(false);
+                occupied[instance.first_slot..instance.first_slot + instance.slot_count]
+                    .fill(false);
             }
             !instance.finished
         });
@@ -374,8 +386,9 @@ fn free_run(occupied: &[bool; SLOT_COUNT], count: usize) -> Option<usize> {
 /// first position.
 pub(crate) fn progress_map_order<'a>(ids: &[&'a str]) -> Vec<&'a str> {
     fn java_string_hash(text: &str) -> i32 {
-        text.encode_utf16()
-            .fold(0i32, |hash, unit| hash.wrapping_mul(31).wrapping_add(i32::from(unit)))
+        text.encode_utf16().fold(0i32, |hash, unit| {
+            hash.wrapping_mul(31).wrapping_add(i32::from(unit))
+        })
     }
     let spread = |id: &str| {
         let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
@@ -452,23 +465,33 @@ fn nine_slice_system(p: &mut Painter<'_>, width: i32, height: i32) -> Result<()>
         p.texture(
             texture,
             [x as f32, y as f32, w as f32, h as f32],
-            [u as f32 / sw, v as f32 / sh, (u + w) as f32 / sw, (v + h) as f32 / sh],
+            [
+                u as f32 / sw,
+                v as f32 / sh,
+                (u + w) as f32 / sw,
+                (v + h) as f32 / sh,
+            ],
             [1.; 3],
             1.,
             0.,
         );
     };
-    let tiled = |p: &mut Painter<'_>, [x, y, w, h]: [i32; 4], uv: [i32; 2], [tile_w, tile_h]: [i32; 2]| {
-        let mut dy = 0;
-        while dy < h {
-            let mut dx = 0;
-            while dx < w {
-                blit(p, [x + dx, y + dy, tile_w.min(w - dx), tile_h.min(h - dy)], uv);
-                dx += tile_w;
+    let tiled =
+        |p: &mut Painter<'_>, [x, y, w, h]: [i32; 4], uv: [i32; 2], [tile_w, tile_h]: [i32; 2]| {
+            let mut dy = 0;
+            while dy < h {
+                let mut dx = 0;
+                while dx < w {
+                    blit(
+                        p,
+                        [x + dx, y + dy, tile_w.min(w - dx), tile_h.min(h - dy)],
+                        uv,
+                    );
+                    dx += tile_w;
+                }
+                dy += tile_h;
             }
-            dy += tile_h;
-        }
-    };
+        };
     let [sw, sh] = SPRITE;
     let (left, right) = (17.min(width / 2), 4.min(width / 2));
     let (top, bottom) = (30.min(height / 2), 4.min(height / 2));
@@ -478,11 +501,30 @@ fn nine_slice_system(p: &mut Painter<'_>, width: i32, height: i32) -> Result<()>
     tiled(p, [left, 0, inner_w, top], [left, 0], [tile_w, top]);
     blit(p, [width - right, 0, right, top], [sw - right, 0]);
     blit(p, [0, height - bottom, left, bottom], [0, sh - bottom]);
-    tiled(p, [left, height - bottom, inner_w, bottom], [left, sh - bottom], [tile_w, bottom]);
-    blit(p, [width - right, height - bottom, right, bottom], [sw - right, sh - bottom]);
+    tiled(
+        p,
+        [left, height - bottom, inner_w, bottom],
+        [left, sh - bottom],
+        [tile_w, bottom],
+    );
+    blit(
+        p,
+        [width - right, height - bottom, right, bottom],
+        [sw - right, sh - bottom],
+    );
     tiled(p, [0, top, left, inner_h], [0, top], [left, tile_h]);
-    tiled(p, [left, top, inner_w, inner_h], [left, top], [tile_w, tile_h]);
-    tiled(p, [width - right, top, right, inner_h], [sw - right, top], [right, tile_h]);
+    tiled(
+        p,
+        [left, top, inner_w, inner_h],
+        [left, top],
+        [tile_w, tile_h],
+    );
+    tiled(
+        p,
+        [width - right, top, right, inner_h],
+        [sw - right, top],
+        [right, tile_h],
+    );
     Ok(())
 }
 
@@ -513,9 +555,14 @@ impl UiState {
     /// `RecipeToast.addOrUpdate` for one recipe-book entry flagged as a notification.
     pub(crate) fn raise_recipe_toast(&mut self, recipe: &Recipe, content: &Content) -> Result<()> {
         let first = |key: &str| -> Result<Option<Stack>> {
-            Ok(super::display::display_variants(&recipe.display[key], key, &recipe.display_stacks, content)?
-                .into_iter()
-                .next())
+            Ok(super::display::display_variants(
+                &recipe.display[key],
+                key,
+                &recipe.display_stacks,
+                content,
+            )?
+            .into_iter()
+            .next())
         };
         let entry = RecipeEntry {
             station: first("crafting_station")?,
@@ -652,7 +699,13 @@ impl UiState {
             }
             let origin = transform
                 * Mat4::from_translation(Vec3::new(instance.x(self.width), instance.y(), 0.));
-            let text = |out: &mut MeshGeometry, component: &Value, wrap: f32, x: f32, y: f32, color: u32| -> Result<()> {
+            let text = |out: &mut MeshGeometry,
+                        component: &Value,
+                        wrap: f32,
+                        x: f32,
+                        y: f32,
+                        color: u32|
+             -> Result<()> {
                 if color >> 24 == 0 {
                     return Ok(());
                 }
@@ -676,9 +729,19 @@ impl UiState {
                         light: [-1.; 2],
                         render_layer: RenderLayer::Translucent,
                     }
-                    .image("gui/sprites/toast/advancement", [0., 0., 160., 32.], [0., 0., 1., 1.], [1.; 3], 1.)?;
+                    .image(
+                        "gui/sprites/toast/advancement",
+                        [0., 0., 160., 32.],
+                        [0., 0., 1., 1.],
+                        [1.; 3],
+                        1.,
+                    )?;
                     let kind = json!({"translate": advancement_type_key(*frame)});
-                    let color = if *frame == CHALLENGE { 0xffff88ff } else { 0xffffff00 };
+                    let color = if *frame == CHALLENGE {
+                        0xffff88ff
+                    } else {
+                        0xffffff00
+                    };
                     // Font.split(title, 125).
                     let lines = self.text.layout(&**title, 125.)?.line_widths.len();
                     let t = instance.visible_for;
@@ -686,10 +749,12 @@ impl UiState {
                         text(out, &kind, f32::MAX, 30., 7., color)?;
                         text(out, &**title, 125., 30., 18., 0xffffffff)?;
                     } else if t < 1500 {
-                        let alpha = (((1500 - t) as f32 / 300.).clamp(0., 1.) * 255.).floor() as u32;
+                        let alpha =
+                            (((1500 - t) as f32 / 300.).clamp(0., 1.) * 255.).floor() as u32;
                         text(out, &kind, f32::MAX, 30., 11., argb(alpha, color))?;
                     } else {
-                        let alpha = (((t - 1500) as f32 / 300.).clamp(0., 1.) * 252.).floor() as u32;
+                        let alpha =
+                            (((t - 1500) as f32 / 300.).clamp(0., 1.) * 252.).floor() as u32;
                         let top = SLOT_HEIGHT / 2 - lines as i32 * 9 / 2;
                         text(out, &**title, 125., 30., top as f32, argb(alpha, 0xffffff))?;
                     }
@@ -697,7 +762,9 @@ impl UiState {
                         items.push((icon, [8., 8., 16., 16.]));
                     }
                 }
-                ToastKind::Recipe { entries, displayed, .. } => {
+                ToastKind::Recipe {
+                    entries, displayed, ..
+                } => {
                     Painter {
                         content,
                         out: &mut *out,
@@ -705,9 +772,29 @@ impl UiState {
                         light: [-1.; 2],
                         render_layer: RenderLayer::Translucent,
                     }
-                    .image("gui/sprites/toast/recipe", [0., 0., 160., 32.], [0., 0., 1., 1.], [1.; 3], 1.)?;
-                    text(out, &json!({"translate": "recipe.toast.title"}), f32::MAX, 30., 7., 0xff500050)?;
-                    text(out, &json!({"translate": "recipe.toast.description"}), f32::MAX, 30., 18., 0xff000000)?;
+                    .image(
+                        "gui/sprites/toast/recipe",
+                        [0., 0., 160., 32.],
+                        [0., 0., 1., 1.],
+                        [1.; 3],
+                        1.,
+                    )?;
+                    text(
+                        out,
+                        &json!({"translate": "recipe.toast.title"}),
+                        f32::MAX,
+                        30.,
+                        7.,
+                        0xff500050,
+                    )?;
+                    text(
+                        out,
+                        &json!({"translate": "recipe.toast.description"}),
+                        f32::MAX,
+                        30.,
+                        18.,
+                        0xff000000,
+                    )?;
                     let entry = entries.get(*displayed).ok_or("recipe_toast_entry")?;
                     // The station draws at (3, 3) under a 0.6 scale.
                     if let Some(station) = &entry.station {
@@ -717,7 +804,12 @@ impl UiState {
                         items.push((result, [8., 8., 16., 16.]));
                     }
                 }
-                ToastKind::System { title, message, title_lines, .. } => {
+                ToastKind::System {
+                    title,
+                    message,
+                    title_lines,
+                    ..
+                } => {
                     nine_slice_system(
                         &mut Painter {
                             content,
@@ -730,16 +822,24 @@ impl UiState {
                         instance.toast.height(),
                     )?;
                     // SystemToast.extractTextLines: x 18, 12-pixel lines.
-                    let lines = |out: &mut MeshGeometry, component: &Value, y: i32, color: u32| -> Result<()> {
+                    let lines = |out: &mut MeshGeometry,
+                                 component: &Value,
+                                 y: i32,
+                                 color: u32|
+                     -> Result<()> {
                         let layout = self.text.layout(component, 200.)?;
                         self.text.append_text_layout(
                             &layout,
                             color,
-                            &super::render::WorldTextOptions { line_height: 12., ..Default::default() },
+                            &super::render::WorldTextOptions {
+                                line_height: 12.,
+                                ..Default::default()
+                            },
                             &mut Painter {
                                 content,
                                 out,
-                                transform: origin * Mat4::from_translation(Vec3::new(18., y as f32, 0.)),
+                                transform: origin
+                                    * Mat4::from_translation(Vec3::new(18., y as f32, 0.)),
                                 light: [-1.; 2],
                                 render_layer: RenderLayer::Translucent,
                             },

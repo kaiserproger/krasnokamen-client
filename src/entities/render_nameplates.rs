@@ -2,16 +2,16 @@
 //! PlayerTeam.getFormattedName and Camera.setRotation javap evidence, plus the
 //! received text of `text_display` entities (server-sent floating labels).
 use super::{
-    nameplates::{self, NameSource, Nameplate, NameplateView},
     Handle, PresentationStats, Store,
+    nameplates::{self, NameSource, Nameplate, NameplateView},
 };
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     ui::{
+        ScoreboardState, TeamParameters,
         render::{TextAlignment, TextRenderer, WorldTextOptions},
         shaping::TextLayout,
-        ScoreboardState, TeamParameters,
     },
 };
 use glam::{EulerRot, Mat4, Quat, Vec3};
@@ -170,7 +170,10 @@ impl Cache {
     /// the font pixel); the billboard constraint and display transformation
     /// orient it; light is the received light at the entity unless the display
     /// overrides brightness.
-    #[expect(clippy::too_many_arguments, reason = "Shares the nameplate extraction inputs")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Shares the nameplate extraction inputs"
+    )]
     fn prepare_text_display(
         &mut self,
         entity: &super::Entity,
@@ -184,7 +187,10 @@ impl Cache {
     ) -> Result<Option<DisplayCandidate>> {
         let (Some(state), Some(snapshot)) = (
             entity.physical.display.as_deref(),
-            entity.source.as_ref().and_then(|source| source.display.as_deref()),
+            entity
+                .source
+                .as_ref()
+                .and_then(|source| source.display.as_deref()),
         ) else {
             return Ok(None);
         };
@@ -374,53 +380,15 @@ impl Store {
             // Same received candidates as bodies, including attached riders.
             let mut own = super::frame_entities::FrameEntities::default();
             for entry in self.frame_entities(&mut own, models, camera, range, tick, partial) {
-                    let entity = &self.slots[entry.slot];
-                    let transform = *entry.transform.as_ref().map_err(Clone::clone)?;
-                    let position = transform.position;
-                    let distance_squared = entry.distance_squared;
-                    if distance_squared > range * range || !entry.within {
-                        continue;
-                    }
-                    stats.eligible += 1;
-                    if entity.type_name == "minecraft:text_display" {
-                        let (dimensions, scale) = models.dimensions(entity)?;
-                        let Some(received) = super::presentation::entity_light(
-                            entity, self, models, tick, transform, dimensions, scale, light,
-                        )?
-                        else {
-                            stats.lighting_pending += 1;
-                            continue;
-                        };
-                        if let Some(display) = cache.prepare_text_display(
-                            entity,
-                            text,
-                            origin,
-                            camera_rotation,
-                            view.background_opacity,
-                            received,
-                            transform,
-                            partial,
-                        )? {
-                            cache.displays.push(display);
-                        }
-                        continue;
-                    }
-                    let plate = match nameplates::nameplate(
-                        self,
-                        models,
-                        entity,
-                        view,
-                        distance_squared,
-                        tick,
-                        partial,
-                    ) {
-                        Ok(Some(plate)) => plate,
-                        Ok(None) => continue,
-                        Err(reason) => {
-                            stats.unrendered.insert(entity.type_name.clone(), reason);
-                            continue;
-                        }
-                    };
+                let entity = &self.slots[entry.slot];
+                let transform = *entry.transform.as_ref().map_err(Clone::clone)?;
+                let position = transform.position;
+                let distance_squared = entry.distance_squared;
+                if distance_squared > range * range || !entry.within {
+                    continue;
+                }
+                stats.eligible += 1;
+                if entity.type_name == "minecraft:text_display" {
                     let (dimensions, scale) = models.dimensions(entity)?;
                     let Some(received) = super::presentation::entity_light(
                         entity, self, models, tick, transform, dimensions, scale, light,
@@ -429,19 +397,57 @@ impl Store {
                         stats.lighting_pending += 1;
                         continue;
                     };
-                    let holder = match plate.name {
-                        NameSource::Player(name) => name,
-                        _ => entity.uuid.as_str(),
-                    };
-                    cache.prepare(entity.handle, &plate, holder, view.scoreboard, text)?;
-                    cache.candidates.push(Candidate {
-                        handle: entity.handle,
-                        distance_squared,
-                        transform: billboard(origin, position, plate.attachment, camera_rotation),
-                        discrete: plate.discrete,
-                        light: received,
-                        submitted: false,
-                    });
+                    if let Some(display) = cache.prepare_text_display(
+                        entity,
+                        text,
+                        origin,
+                        camera_rotation,
+                        view.background_opacity,
+                        received,
+                        transform,
+                        partial,
+                    )? {
+                        cache.displays.push(display);
+                    }
+                    continue;
+                }
+                let plate = match nameplates::nameplate(
+                    self,
+                    models,
+                    entity,
+                    view,
+                    distance_squared,
+                    tick,
+                    partial,
+                ) {
+                    Ok(Some(plate)) => plate,
+                    Ok(None) => continue,
+                    Err(reason) => {
+                        stats.unrendered.insert(entity.type_name.clone(), reason);
+                        continue;
+                    }
+                };
+                let (dimensions, scale) = models.dimensions(entity)?;
+                let Some(received) = super::presentation::entity_light(
+                    entity, self, models, tick, transform, dimensions, scale, light,
+                )?
+                else {
+                    stats.lighting_pending += 1;
+                    continue;
+                };
+                let holder = match plate.name {
+                    NameSource::Player(name) => name,
+                    _ => entity.uuid.as_str(),
+                };
+                cache.prepare(entity.handle, &plate, holder, view.scoreboard, text)?;
+                cache.candidates.push(Candidate {
+                    handle: entity.handle,
+                    distance_squared,
+                    transform: billboard(origin, position, plate.attachment, camera_rotation),
+                    discrete: plate.discrete,
+                    light: received,
+                    submitted: false,
+                });
             }
             // Source sorts only SEE_THROUGH far-to-near; NORMAL retains
             // extraction order. Both scratch vectors retain their capacity.
@@ -518,7 +524,7 @@ mod tests {
     use super::*;
     use crate::{
         api::Vertex,
-        entities::{resources::EntitySchema, Entity, Metadata, Models, Transform},
+        entities::{Entity, Metadata, Models, Transform, resources::EntitySchema},
         ui::{ScoreTeam, TeamCollision, TeamVisibility},
     };
     use std::collections::BTreeSet;
@@ -737,7 +743,11 @@ mod tests {
             [0, 1, 2, 0, 2, 3],
             "the solid backdrop must not sample the glyph atlas",
         );
-        store.get_mut(7).unwrap().metadata.insert(0, Metadata::Byte(2));
+        store
+            .get_mut(7)
+            .unwrap()
+            .metadata
+            .insert(0, Metadata::Byte(2));
         let discrete = draw(&mut store, &content, &board, 0.25);
         assert_eq!(
             discrete.indices[EntityMaterial::TextBackground as usize],
@@ -781,13 +791,17 @@ mod tests {
         let normal = &out.indices[EntityMaterial::Text as usize];
         let through = &out.indices[EntityMaterial::TextSeeThrough as usize];
         assert!(!normal.is_empty() && !through.is_empty());
-        assert!(normal
-            .iter()
-            .all(|&i| out.vertices[i as usize].light == [2., 7.]
-                && out.vertices[i as usize].alpha == 1.));
-        assert!(through
-            .iter()
-            .all(|&i| i > 0 && out.vertices[i as usize].light == [0., 7.]));
+        assert!(
+            normal
+                .iter()
+                .all(|&i| out.vertices[i as usize].light == [2., 7.]
+                    && out.vertices[i as usize].alpha == 1.)
+        );
+        assert!(
+            through
+                .iter()
+                .all(|&i| i > 0 && out.vertices[i as usize].light == [0., 7.])
+        );
         assert!(through.iter().all(|&i| i < normal[0]));
         // The actual first quad is the received-options background, not a fake
         // glyph/material record. NORMAL has no background for ordinary names.
@@ -797,9 +811,10 @@ mod tests {
         }
         let dim = &out.vertices[5..normal[0] as usize];
         assert!(!dim.is_empty());
-        assert!(dim
-            .iter()
-            .all(|v| v.color == [1.; 3] && v.alpha == 128. / 255.));
+        assert!(
+            dim.iter()
+                .all(|v| v.color == [1.; 3] && v.alpha == 128. / 255.)
+        );
         let width = store.nameplate_cache.layouts[&handle].layout.width;
         close(
             out.vertices[1].position[0],
@@ -818,18 +833,22 @@ mod tests {
         assert!(discrete.indices[EntityMaterial::TextSeeThrough as usize].is_empty());
         assert!(!discrete.indices[EntityMaterial::Text as usize].is_empty());
         assert!(discrete.vertices.iter().all(|v| v.light == [0., 7.]));
-        assert!(discrete.vertices[4..]
-            .iter()
-            .all(|v| v.alpha == 128. / 255.));
+        assert!(
+            discrete.vertices[4..]
+                .iter()
+                .all(|v| v.alpha == 128. / 255.)
+        );
         let without_background = draw(&mut store, &content, &board, 0.);
         assert_eq!(
             without_background.vertices.len() + 4,
             discrete.vertices.len()
         );
-        assert!(without_background
-            .vertices
-            .iter()
-            .all(|v| v.color == [1.; 3]));
+        assert!(
+            without_background
+                .vertices
+                .iter()
+                .all(|v| v.color == [1.; 3])
+        );
     }
 
     #[test]
@@ -949,14 +968,18 @@ mod tests {
             store.nameplate_cache.layouts[&handle].layout.glyphs.len(),
             3
         );
-        assert!(initial
-            .vertices
-            .iter()
-            .any(|v| v.color == [1., 85. / 255., 85. / 255.]));
-        assert!(initial
-            .vertices
-            .iter()
-            .any(|v| v.color == [85. / 255., 85. / 255., 1.]));
+        assert!(
+            initial
+                .vertices
+                .iter()
+                .any(|v| v.color == [1., 85. / 255., 85. / 255.])
+        );
+        assert!(
+            initial
+                .vertices
+                .iter()
+                .any(|v| v.color == [85. / 255., 85. / 255., 1.])
+        );
         let glyphs = store.nameplate_cache.layouts[&handle]
             .layout
             .glyphs
@@ -982,10 +1005,12 @@ mod tests {
             6
         );
         assert!(changed.vertices.len() > initial.vertices.len());
-        assert!(changed
-            .vertices
-            .iter()
-            .any(|v| v.color == [85. / 255., 1., 85. / 255.]));
+        assert!(
+            changed
+                .vertices
+                .iter()
+                .any(|v| v.color == [85. / 255., 1., 85. / 255.])
+        );
         board.membership.clear();
         let removed = draw(&mut store, &content, &board, 0.25);
         assert!(store.nameplate_cache.layouts[&handle].team.is_none());
@@ -993,10 +1018,12 @@ mod tests {
             store.nameplate_cache.layouts[&handle].layout.glyphs.len(),
             1
         );
-        assert!(removed
-            .vertices
-            .iter()
-            .all(|v| v.color == [0.; 3] || v.color == [1.; 3]));
+        assert!(
+            removed
+                .vertices
+                .iter()
+                .all(|v| v.color == [0.; 3] || v.color == [1.; 3])
+        );
     }
 
     #[test]
@@ -1138,10 +1165,12 @@ mod tests {
         assert_eq!(cache.layouts[&handle].layout.glyphs.len(), 10);
         assert!(renamed.vertices.len() > original.vertices.len());
         assert!(renamed.indices[EntityMaterial::TextSeeThrough as usize].is_empty());
-        assert!(renamed
-            .vertices
-            .iter()
-            .all(|vertex| vertex.light == [3., 2.]));
+        assert!(
+            renamed
+                .vertices
+                .iter()
+                .all(|vertex| vertex.light == [3., 2.])
+        );
     }
 
     #[test]
@@ -1232,7 +1261,9 @@ mod tests {
         // upward from it and is centred on it.
         let anchor = [0., 1., 2.];
         assert!(
-            out.vertices.iter().all(|v| v.position[1] >= anchor[1] - 1e-4),
+            out.vertices
+                .iter()
+                .all(|v| v.position[1] >= anchor[1] - 1e-4),
             "text sits above its anchor"
         );
         let (low, high) = out
@@ -1242,7 +1273,9 @@ mod tests {
             .fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(x), h.max(x)));
         close((low + high) / 2., anchor[0]);
         assert!(
-            out.vertices.iter().all(|v| (v.position[2] - anchor[2]).abs() < 1e-3),
+            out.vertices
+                .iter()
+                .all(|v| (v.position[2] - anchor[2]).abs() < 1e-3),
             "a CENTER label faces the camera"
         );
         assert!(
