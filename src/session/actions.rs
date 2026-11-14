@@ -148,7 +148,14 @@ impl Session {
                         json!({"phase":"applied","origin":"dialog_screen_key","held_inputs":self.keys,"selected_slot":self.inventory.selected_slot}),
                     );
                 }
-                if edge && pressed {
+                // Vanilla calls `KeyMapping.click` on every key-down event, GLFW_REPEAT
+                // included: `KeyboardHandler.keyPress` returns early only for action 0
+                // and reaches `set(key,true)` + `click(key)` for press and repeat
+                // (client.jar javap, offsets 971-1176; `KeyMapping.click` increments a
+                // clickCount that `consumeClick` drains). One press event is one action,
+                // and a held key is one action unless the OS repeats it. Mouse buttons
+                // have no repeat, so a held mouse click still means one click.
+                if pressed {
                     match key {
                         "ui_cancel" if self.phase == "play" => {
                             self.execute_ui(UiIntent::Key {
@@ -2494,6 +2501,38 @@ mod item_key_tests {
             drop_actions(&first) + drop_actions(&second),
             1,
             "a held drop key does not repeat: {first:?} {second:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_key_down_events_are_extra_clicks() {
+        // GLFW_REPEAT reaches `KeyMapping.click` in vanilla, so holding Q drops
+        // one item per OS repeat: two repeat events after the press are 3 drops.
+        let (mut session, frames, _stop) = session_with_peer();
+        for _ in 0..3 {
+            press(&mut session, "drop", true);
+        }
+        press(&mut session, "drop", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            drop_actions(&window),
+            3,
+            "each repeat is one more drop: {window:?}"
+        );
+        // A repeat event on pick is one more pick; the key is never released
+        // between them.
+        press(&mut session, "pick", true);
+        session.tick_after_events(true);
+        let _ = tick_window(&frames);
+        press(&mut session, "pick", true);
+        session.tick_after_events(true);
+        let repeated = tick_window(&frames);
+        press(&mut session, "pick", false);
+        assert_eq!(
+            count_id(&repeated, sb::PICK_ITEM_FROM_BLOCK),
+            1,
+            "the repeat event is a second pick, the press itself was the first: {repeated:?}"
         );
     }
 
