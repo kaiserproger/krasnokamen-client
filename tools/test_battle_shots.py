@@ -2,6 +2,7 @@
 standoff / terrain / framing checks every pose of a shot must pass, and the shot order
 (no backtrack in battle time unless the cut is a sharp angle change)."""
 import contextlib
+import copy
 import io
 import json
 import math
@@ -12,8 +13,11 @@ from pathlib import Path
 from unittest import mock
 
 from tools import battle_shots
-from tools.battle_shots import (HIGH, MIN_SHOT, STANDOFF, Shot, Terrain, Timeline, Vet, angle_change, check, crowding,
-                                dolly_shots, keyed, off_centre, order_shots, place, pose, terrain_view, view_at)
+from tools.battle_shots import (HIGH, HIGH_PITCH, MAX_RUN, MIN_SHOT, MIN_VARIED, STANDOFF, Shot, Terrain, Timeline, Vet,
+                                angle_change, check, crowding, diversify, dolly_shots, enfilade_shots, flank_shots,
+                                ground_relief, shoulder_shots,
+                                frame_share, keyed, median_pitch, off_centre, order_shots, place, pose, shot_class,
+                                terrain_view, variety_problems, view_at)
 
 
 def terrain(ground=70, hill=None, tree=None):
@@ -304,10 +308,10 @@ class CheckTests(unittest.TestCase):
         self.assertIn("1 forbidden backtracks", out)
 
     def test_sharp_backtrack_and_forward_jumps_pass(self):
-        status, out = self.run_check([("a", shot(10.0, 15.0)),
+        status, out = self.run_check([("a", shot(10.0, 15.0, look=(100.0, 20.0, 0.0))),  # a steep view: a high shot
                                       ("b", shot(12.0, 17.0, look=(100.0, 70.0, 45.0))),  # sharp backtrack
                                       ("c", shot(40.0, 44.0, look=(100.0, 70.0, 45.0))),  # forward, similar
-                                      ("d", shot(60.0, 64.0, eye=(300.0, 80.0, 0.0), look=(400.0, 70.0, 0.0)))])  # forward, sharp
+                                      ("d", shot(60.0, 64.0, eye=(300.0, 80.0, 0.0), look=(400.0, 10.0, 0.0)))])  # forward, sharp, high
         self.assertEqual(status, 0, out)
         self.assertIn("a -> b  delta -3.00 s  sharp angle change", out)
         self.assertIn("backtrack allowed", out)
@@ -321,12 +325,310 @@ class CheckTests(unittest.TestCase):
 
     def test_attached_shot_world_position_comes_from_plan_json(self):
         a = shot(10.0, 15.0, eye=(0.0, 85.0, -3.0), look=(10.0, 80.0, 0.0))
-        b = shot(12.0, 17.0, eye=(1.0, 5.5, -3.0), look=(10.0, 0.3, 0.0), kind="shoulder", attach=7)
+        b = shot(12.0, 17.0, eye=(1.0, 5.5, -3.0), look=(30.0, 1.5, 0.0), kind="shoulder", attach=7)
         status, out = self.run_check([("a", a), ("b", b)], where={"a": None, "b": [500.0, 90.0, 0.0]})
         self.assertEqual(status, 0, out)
         self.assertIn("sharp angle change (camera 5", out)
         status, out = self.run_check([("a", a), ("b", b)], where={"a": None, "b": [2.0, 80.0, 0.0]})
         self.assertEqual(status, 1, out)
+
+    def test_three_high_shots_in_a_row_fail_the_check_and_alternating_ones_pass(self):
+        high = lambda start, x: shot(start, start + 5.0, eye=(x, 100.0, 0.0), look=(x + 30.0, 70.0, 0.0))
+        flat = lambda start, x: shot(start, start + 5.0, eye=(x, 80.0, 0.0), look=(x + 100.0, 70.0, 0.0))
+        status, out = self.run_check([("a", high(10.0, 0.0)), ("b", high(20.0, 1.0)), ("c", high(30.0, 2.0)), ("d", flat(40.0, 3.0))])
+        self.assertEqual(status, 1, out)
+        self.assertIn("VARIETY VIOLATION: 3 high shots in a row (shots 1-3), at most 2", out)
+        self.assertIn("classes: a high (-45 deg), b high (-45 deg), c high (-45 deg), d low-side (-6 deg)", out)
+        status, out = self.run_check([("a", high(10.0, 0.0)), ("b", high(20.0, 1.0)), ("c", flat(30.0, 2.0)), ("d", flat(40.0, 3.0))])
+        self.assertEqual(status, 0, out)
+        self.assertIn("0 variety violations", out)
+
+    def test_too_few_low_or_side_shots_fail_the_check(self):
+        high = lambda start, x: shot(start, start + 5.0, eye=(x, 100.0, 0.0), look=(x + 30.0, 70.0, 0.0))
+        flat = lambda start, x: shot(start, start + 5.0, eye=(x, 80.0, 0.0), look=(x + 100.0, 70.0, 0.0))
+        rows = [("a", high(10.0, 0.0)), ("b", high(20.0, 1.0)), ("c", flat(30.0, 2.0)), ("d", high(40.0, 3.0)), ("e", high(50.0, 4.0)),
+                ("f", flat(60.0, 5.0)), ("g", high(70.0, 6.0)), ("h", high(80.0, 7.0)), ("i", flat(90.0, 8.0)), ("j", high(100.0, 9.0))]
+        status, out = self.run_check(rows)
+        self.assertEqual(status, 1, out)
+        self.assertIn("VARIETY VIOLATION: 3 of 10 shots are low-side or shoulder, under 40%", out)
+        self.assertNotIn("in a row", out)
+
+
+def high_shot(start, end, kind="dolly", x=0.0, score=1.0):
+    """A steep (-45 deg) view; `x` keeps two such shots from being similar cameras."""
+    return with_score(shot(start, end, eye=(x, 100.0, 0.0), look=(x + 30.0, 70.0, 0.0), kind=kind, where=[x, 70.0, 0.0]), score)
+
+
+def flat_shot(start, end, kind="flank", x=0.0, score=1.0):
+    """A flat (-6 deg) view."""
+    return with_score(shot(start, end, eye=(x, 80.0, 0.0), look=(x + 100.0, 70.0, 0.0), kind=kind, where=[x, 70.0, 0.0]), score)
+
+
+def with_score(s, score):
+    s.score = score
+    return s
+
+
+class ShotClassTests(unittest.TestCase):
+    def keys(self, eye, look):
+        return keyed([0.0, 1.0, 2.0], [list(eye)] * 3, [list(look)] * 3, [70.0] * 3)
+
+    def test_median_pitch_below_the_limit_is_high(self):
+        steep = self.keys((0.0, 100.0, 0.0), (30.0, 70.0, 0.0))  # 45 deg down
+        self.assertAlmostEqual(median_pitch(steep), -45.0, places=3)
+        self.assertEqual(shot_class(steep), "high")
+        edge = self.keys((0.0, 100.0, 0.0), (100.0, 100.0 - 100.0 * math.tan(math.radians(-HIGH_PITCH)) - 1.0, 0.0))
+        self.assertEqual(shot_class(edge), "high")
+
+    def test_flat_views_are_low_side_and_attached_flat_views_are_shoulder(self):
+        flat = self.keys((0.0, 76.0, 0.0), (100.0, 71.0, 0.0))
+        self.assertEqual(shot_class(flat), "low-side")
+        self.assertEqual(shot_class(flat, attach=5), "shoulder")
+        mild = self.keys((0.0, 100.0, 0.0), (100.0, 100.0 - 100.0 * math.tan(math.radians(-HIGH_PITCH)) + 1.0, 0.0))
+        self.assertEqual(shot_class(mild), "low-side", "just above the limit")
+
+    def test_an_attached_steep_view_is_still_high(self):
+        self.assertEqual(shot_class(self.keys((0.0, 5.5, 0.0), (6.0, 0.3, 0.0)), attach=5), "high")
+
+    def test_a_volley_that_looks_up_is_low_side(self):
+        self.assertEqual(shot_class(self.keys((0.0, 74.0, 0.0), (50.0, 80.0, 0.0))), "low-side")
+
+
+class VarietyRuleTests(unittest.TestCase):
+    def test_more_than_two_of_a_class_in_a_row_is_a_run(self):
+        self.assertEqual(MAX_RUN, 2)
+        problems = variety_problems(["high", "low-side", "low-side", "high", "shoulder", "high"])
+        self.assertEqual(problems, [])
+        problems = variety_problems(["high", "low-side", "low-side", "low-side", "high", "shoulder"])
+        self.assertEqual([(k, a, b) for k, a, b, _ in problems], [("run", 1, 3)])
+        self.assertIn("3 low-side shots in a row (shots 2-4)", problems[0][3])
+
+    def test_shoulder_and_low_side_are_different_classes_for_runs(self):
+        self.assertEqual(variety_problems(["low-side", "low-side", "shoulder", "shoulder", "high"]), [])
+
+    def test_low_side_and_shoulder_share_is_at_least_the_minimum(self):
+        self.assertEqual(MIN_VARIED, 0.4)
+        self.assertEqual(variety_problems(["high", "low-side", "high", "shoulder", "high"]), [], "2 of 5 is exactly 40 %")
+        problems = variety_problems(["high", "low-side", "high", "high", "shoulder", "high", "high"])
+        self.assertEqual([k for k, *_ in problems], ["share"])
+        self.assertIn("2 of 7", problems[0][3])
+
+    def test_empty_plan_has_no_problems(self):
+        self.assertEqual(variety_problems([]), [])
+
+
+class DiversifyTests(unittest.TestCase):
+    def classes(self, shots):
+        return [s.cls for s in order_shots([copy.copy(s) for s in shots])[0]]
+
+    def test_a_run_of_high_shots_is_broken_with_unused_low_side_candidates(self):
+        picked = [high_shot(10.0 + 12.0 * i, 15.0 + 12.0 * i, x=10.0 * i, score=1.0 + i) for i in range(5)]
+        spare = [flat_shot(16.0 + 12.0 * i, 21.0 + 12.0 * i, x=50.0 + 10.0 * i) for i in range(4)]
+        self.assertTrue(variety_problems(self.classes(picked)), "the raw pick is five high shots in a row")
+        chosen, decisions = diversify(picked, picked + spare)
+        self.assertEqual(variety_problems(self.classes(chosen)), [])
+        self.assertTrue(decisions and all(d.startswith("swap high") for d in decisions), decisions)
+        self.assertIn("for low-side flank", decisions[0])
+        self.assertEqual(len(chosen), len(picked), "swaps keep the cut as long")
+
+    def test_the_weakest_shot_of_the_run_is_the_one_swapped_out(self):
+        picked = [high_shot(10.0, 15.0, x=0.0, score=9.0), high_shot(20.0, 25.0, x=10.0, score=1.0),
+                  high_shot(30.0, 35.0, x=20.0, score=8.0), flat_shot(40.0, 45.0, x=30.0), flat_shot(50.0, 55.0, x=40.0)]
+        spare = [flat_shot(21.0, 26.0, x=60.0)]
+        chosen, decisions = diversify(picked, picked + spare)
+        self.assertEqual(len(decisions), 1, decisions)
+        self.assertIn("swap high dolly 20.00-25.00", decisions[0])
+        self.assertNotIn(picked[1], chosen)
+        self.assertIn(spare[0], chosen)
+
+    def test_without_an_unused_candidate_the_offender_is_dropped(self):
+        picked = [high_shot(10.0, 15.0, x=0.0, score=3.0), high_shot(20.0, 25.0, x=10.0, score=1.0),
+                  high_shot(30.0, 35.0, x=20.0, score=2.0), flat_shot(40.0, 45.0, x=30.0)]
+        chosen, decisions = diversify(picked, picked)
+        self.assertEqual([d.split(":")[0] for d in decisions], ["drop high dolly 20.00-25.00", "drop high dolly 30.00-35.00"])
+        self.assertEqual(variety_problems(self.classes(chosen)), [])
+        self.assertEqual([s.cls for s in chosen], ["high", "low-side"])
+
+    def test_a_plan_that_already_varies_is_untouched_and_a_short_cut_is_filled_with_whole_candidates(self):
+        picked = [flat_shot(10.0, 15.0, x=0.0), high_shot(20.0, 25.0, x=10.0), flat_shot(30.0, 35.0, x=20.0)]
+        chosen, decisions = diversify(picked, picked)
+        self.assertEqual((chosen, decisions), (picked, []))
+        spare = [high_shot(40.0, 45.0, x=40.0, kind="push-in"), flat_shot(32.0, 37.0, x=90.0, kind="enfilade")]
+        chosen, decisions = diversify(picked, picked + spare, seconds=20.0)
+        self.assertEqual(len(chosen), 4, decisions)
+        self.assertIn(spare[0], chosen, "a whole later candidate fills the cut")
+        self.assertNotIn(spare[1], chosen, "an overlapping candidate would be trimmed")
+        self.assertEqual(len(decisions), 1)
+        self.assertTrue(decisions[0].startswith("add high push-in 40.00-45.00"), decisions)
+
+
+def sided_cluster(cx, cz, red, blue, half_length=3.0, half_depth=3.0):
+    """A contact cluster with red on its -normal (z-) side and blue on +normal (z+)."""
+    c = cluster(cx, cz, half_length, half_depth)
+    c.update(red=red, blue=blue, count=red + blue)
+    return c
+
+
+class FrameShareTests(unittest.TestCase):
+    def test_down_the_line_both_colours_are_in_frame_and_across_it_from_behind_only_the_near_side_counts(self):
+        s = sample(0, [sided_cluster(0, 0, 50, 50, half_length=10.0, half_depth=10.0)])
+        look = [0.0, 71.2, 0.0]
+        red, blue = frame_share(s, [-30.0, 75.0, 0.0], look, 70.0)
+        self.assertAlmostEqual(red, 50.0, delta=1.0)
+        self.assertAlmostEqual(blue, 50.0, delta=1.0)
+        red, blue = frame_share(s, [0.0, 75.0, 40.0], [0.0, 75.0, 60.0], 70.0)
+        self.assertEqual((red, blue), (0.0, 0.0), "looking away from the cluster")
+        red, blue = frame_share(s, [0.0, 75.0, -9.0], [0.0, 74.0, 60.0], 40.0)
+        self.assertGreater(blue, 0.0)
+        self.assertLess(red + blue, 100.0)
+
+    def test_colour_split_follows_the_counts(self):
+        s = sample(0, [sided_cluster(0, 0, 90, 10, half_length=10.0, half_depth=10.0)])
+        red, blue = frame_share(s, [-30.0, 75.0, 0.0], [0.0, 71.2, 0.0], 70.0)
+        self.assertGreater(red, 7 * blue)
+
+    def test_fighters_beyond_the_reach_do_not_count(self):
+        s = sample(0, [sided_cluster(0, 0, 50, 50)])
+        self.assertEqual(frame_share(s, [-200.0, 75.0, 0.0], [0.0, 71.2, 0.0], 70.0), (0.0, 0.0))
+
+
+class ContactFramingTests(unittest.TestCase):
+    def line_vet(self, red=50, blue=50):
+        tl = Timeline([sample(i * 0.5, [sided_cluster(0, 0, red, blue, half_length=10.0, half_depth=10.0)]) for i in range(21)])
+        return tl, Vet(tl, field())
+
+    def keys(self, eye, look):
+        return keyed([5.0, 7.0, 9.0], [list(eye)] * 3, [list(look)] * 3, [70.0] * 3)
+
+    def test_a_shot_with_no_contact_in_frame_is_rejected_when_sides_are_asked_for(self):
+        _, vet = self.line_vet()
+        away = self.keys([0.0, 78.0, 30.0], [0.0, 76.0, 45.0])
+        self.assertTrue(vet(away), "the other checks pass")
+        self.assertFalse(vet(away, sides=True))
+        self.assertEqual(vet.rejected["no contact in frame"], 1)
+
+    def test_a_frame_filled_by_one_colour_is_rejected_and_a_balanced_one_passes(self):
+        eye, look = [-30.0, 75.0, 0.0], [0.0, 71.2, 0.0]
+        _, vet = self.line_vet(red=95, blue=5)
+        self.assertTrue(vet(self.keys(eye, look)))
+        self.assertFalse(vet(self.keys(eye, look), sides=True))
+        self.assertEqual(vet.rejected["one colour fills the frame"], 1)
+        _, vet = self.line_vet()
+        self.assertTrue(vet(self.keys(eye, look), sides=True))
+
+    def test_enfilade_looks_down_the_line_flat_and_frames_both_colours(self):
+        tl, vet = self.line_vet()
+        shots = enfilade_shots(tl, field(), vet)
+        self.assertTrue(shots)
+        for s in shots:
+            self.assertEqual(s.kind, "enfilade")
+            self.assertEqual(s.cls, "low-side", s.why)
+            self.assertGreater(median_pitch(s.keys), HIGH_PITCH)
+            eye, look, fov = pose(s.keys, (s.start + s.end) / 2)
+            self.assertGreaterEqual(abs(eye[0]), 10.0 + 10.0, "beyond the line's end (half length 10 + 10 back)")
+            self.assertLessEqual(abs(eye[2]), 2.5, "on the line's axis")
+            red, blue = frame_share(tl.at((s.start + s.end) / 2), eye, look, fov)
+            self.assertGreater(min(red, blue), 0.15 * (red + blue))
+
+    def test_enfilade_of_a_one_sided_line_is_rejected(self):
+        tl, vet = self.line_vet(red=100, blue=0)
+        self.assertEqual(enfilade_shots(tl, field(), vet), [])
+        self.assertGreater(vet.rejected["one colour fills the frame"], 0)
+
+    def shoulder_world(self, red, blue, half_length=10.0, half_depth=2.0):
+        c = sided_cluster(0, 0, red, blue, half_length=half_length, half_depth=half_depth)
+        c["ids"] = {"red": [1], "blue": [2]}
+        tl = Timeline([sample(i * 0.5, [c]) for i in range(21)])
+        entities = {i: {"role": "fighter", "vehicle": None, "first_contact_t": 6.0, "spawn_t": 0.0, "death_t": None, "removed_t": None}
+                    for i in (1, 2)}
+        return tl, entities, Vet(tl, field())
+
+    def test_shoulder_camera_rides_a_fighter_flat_and_frames_both_colours(self):
+        tl, entities, vet = self.shoulder_world(50, 50)
+        shots = shoulder_shots(tl, field(), entities, vet)
+        self.assertTrue(shots)
+        for s in shots:
+            self.assertEqual((s.kind, s.cls), ("shoulder", "shoulder"), s.why)
+            self.assertIn(s.attach, (1, 2))
+            self.assertGreater(median_pitch(s.keys), HIGH_PITCH)
+            _, red, blue = battle_shots.mid_frame(tl, field(), s)
+            self.assertGreater(min(red, blue), 0.15 * (red + blue), s.why)
+        self.assertTrue(any("looking along the line" in s.why for s in shots), "a long thin line is framed along its length")
+
+    def test_shoulder_lens_rises_with_the_ground_steps_around_the_cluster(self):
+        flat_tl, entities, flat_vet = self.shoulder_world(50, 50)
+        flat = shoulder_shots(flat_tl, field(), entities, flat_vet)
+        self.assertTrue(flat)
+        for s in flat:
+            self.assertAlmostEqual(s.keys[1][1][1], HIGH, places=6)
+        stepped = field(ground=lambda x, z: 70 if x < 2 else 73)  # a 3-block step beside the cluster's centre
+        tl, entities, vet = self.shoulder_world(50, 50)
+        lifted = shoulder_shots(tl, stepped, entities, vet)
+        self.assertTrue(lifted)
+        for s in lifted:
+            self.assertAlmostEqual(s.keys[1][1][1], HIGH + 3.0, places=6, msg=s.why)
+            self.assertEqual(s.cls, "shoulder", "the lift keeps the view flat")
+        self.assertEqual(ground_relief(stepped, [0.0, 70.0, 0.0], 5.0), 3)
+        self.assertEqual(ground_relief(field(), [0.0, 70.0, 0.0], 5.0), 0)
+
+    def test_shoulder_over_a_one_sided_cluster_is_rejected(self):
+        tl, entities, vet = self.shoulder_world(100, 0)
+        self.assertEqual(shoulder_shots(tl, field(), entities, vet), [])
+        self.assertGreater(vet.rejected["one colour fills the frame"] + vet.rejected["no contact in frame"], 0)
+
+    def test_flank_dolly_is_a_flat_side_view_with_both_colours(self):
+        tl, vet = self.line_vet()
+        shots = flank_shots(tl, field(), vet)
+        self.assertTrue(shots)
+        for s in shots:
+            self.assertEqual(s.cls, "low-side", s.why)
+            eye, look, fov = pose(s.keys, (s.start + s.end) / 2)
+            self.assertGreaterEqual(abs(eye[2]), 10.0 + 1.0 + STANDOFF - 1e-6, "outside the line's ground by the standoff")
+            red, blue = frame_share(tl.at((s.start + s.end) / 2), eye, look, fov)
+            self.assertGreater(min(red, blue), 0.15 * (red + blue))
+
+
+class PlanEndToEndTests(unittest.TestCase):
+    """`plan` on a small synthetic timeline file, then `check` on the shots.txt it wrote."""
+
+    def write_timeline(self, path):
+        arrows = {"launched": 0, "launch": None}
+        rows = [{"kind": "header"}]
+        for i in range(70):
+            t = i * 0.5
+            contacts = [sided_cluster(0, 0, 60, 60, half_length=10.0, half_depth=4.0),
+                        sided_cluster(-24, 30, 60, 40, half_length=8.0, half_depth=3.0)] if t >= 4.0 else []
+            army = {"centroid": [0, 70, 0], "min": [-45, 70, -45], "max": [45, 72, 45]}  # a lens inside rides HIGH
+            rows.append({"kind": "sample", "t": t, "contacts": contacts, "cavalry": [], "arrows": {"red": arrows, "blue": arrows},
+                         "armies": {"red": army, "blue": army},
+                         "contact_fighters": sum(c["count"] for c in contacts)})
+        for cx in range(-3, 3):
+            for cz in range(-3, 3):
+                rows.append({"kind": "chunk", "x": cx, "z": cz, "surface": [70] * 256, "ground": [70] * 256})
+        rows.append({"kind": "summary", "first_tick": 0})
+        Path(path).write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    def test_the_plan_has_both_low_side_and_high_shots_and_passes_its_own_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            timeline = Path(tmp) / "timeline.jsonl"
+            self.write_timeline(timeline)
+            out = Path(tmp) / "plan"
+            with contextlib.redirect_stdout(io.StringIO()):
+                battle_shots.plan(Namespace(timeline=str(timeline), out=str(out), name="t", seconds=30.0, radius=20))
+            report = json.loads((out / "plan.json").read_text())
+            classes = [s["class"] for s in report["shots"]]
+            self.assertGreaterEqual(len(classes), 4, classes)
+            self.assertIn("low-side", classes)
+            self.assertIn("high", classes)
+            self.assertEqual(variety_problems(classes), [], classes)
+            for s in report["shots"]:
+                self.assertIn(s["class"], ("high", "low-side", "shoulder"))
+                self.assertIsNotNone(s["height"])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = check(Namespace(shots=str(out / "shots.txt"), camera_dir=str(out)))
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("0 variety violations", buf.getvalue())
 
 
 if __name__ == "__main__":

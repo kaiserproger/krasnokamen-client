@@ -6,7 +6,13 @@
 Keeps PovRed's join-time place relative to the centroid of the K same-side soldiers
 nearest him at join, respawn or re-slot (side read from their shield/surcoat ids or dyed kit), walks with held movement
 keys, turns smoothly toward the nearest enemy (else along the rank's motion), and
-presses attack when an enemy is in reach. RUNTIME_DIR is the client's --runtime-dir;
+presses attack when an enemy is in reach. Route guard: before a movement key is held, the cells it walks into
+are read from the client's loaded blocks (minecraft_scan_blocks); a key toward a drop of more than 3 blocks (no ground
+within 4 below the feet), water, lava, unread blocks, or into the keep-out box (--keepout, default the mine
+x -192..-184, z 21..30) is not pressed and logs `edge refused <key> at X,Y,Z drop=N (why)` or `keepout refused <key> ...`.
+`--probe X Z` walks to X Z through the same guard and bounded pulses, with no rank, for checking the guard at a chosen
+ledge, pit, water or the keep-out box on a real client (logs `probe step ...` and `probe done: ...`).
+RUNTIME_DIR is the client's --runtime-dir;
 the client runs with `--automation --mcp-http 127.0.0.1:0 --windowed` and
 `--hide-hud-keep-hand`. MCP input needs the client window focused. Every action is an
 ordinary client input, never a packet bot; the loop is paced by client ticks.
@@ -115,11 +121,197 @@ def approach(current: float, target: float, rate: float, limit: float) -> float:
     return current + step
 
 
+# Route guard. Every horizontal key is checked against the client's own loaded blocks
+# (`minecraft_scan_blocks`) before it is held: the cells it walks into over the next step must have
+# standing ground within MAX_DROP blocks below the feet, with no water or lava on the way down, and
+# must stay out of the keep-out box. A refused key is not pressed (a held one is released).
+WALK_KEYS = ("forward", "back", "left", "right")
+MAX_DROP = 3
+KEEPOUT = (-192.0, -184.0, 21.0, 30.0)  # x0, x1, z0, z1: the mine's box, blocks (cells -192..-184 / 21..30), any height
+PLAYER_RADIUS = 0.3
+LOOK_STEP = 0.7  # blocks between checked points along a key's direction, from the feet
+GUARD_REACH = 10.0  # most blocks the guard reads ahead along a key
+GUARD_MARGIN = 1.8  # a pulse ends this many blocks (inertia of its last tick included) short of the farthest cell read
+LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
+FIGHT_DROP = 1   # blocks he may step down in a fight: a deeper drop cannot be climbed out of by jumping
+APPROACH = 14.0  # an enemy this close (blocks) that he has not been able to swing at for IDLE_ENGAGE seconds is walked up to
+IDLE_ENGAGE = 4.0
+FIGHT_Y_LOG = 0.5  # blocks of height change in a fight step that get a `fight step y` line
+STUCK_STEPS = 3  # such steps in a row after which he goes around instead of pushing on
+STAND_MOVED = 0.3  # blocks moved in a step below which he counts as standing
+STAND_LOG = 2.0  # seconds between `stand` lines while he does not move in a fight
+
+
+def look_points(reach: float):
+    """Distances from the feet that are checked along a key's direction: every LOOK_STEP up to `reach`, and `reach` itself."""
+    points = [LOOK_STEP * i for i in range(1, int(reach / LOOK_STEP + 1e-9) + 1)]
+    return points + ([reach] if not points or reach - points[-1] > 1e-9 else [])
+
+
+def key_vector(key: str, yaw: float):
+    """Horizontal unit vector of a movement key for view yaw (forward (-sin, cos), right (-cos, -sin))."""
+    radians = math.radians(yaw)
+    return {"forward": (-math.sin(radians), math.cos(radians)), "back": (math.sin(radians), -math.cos(radians)),
+            "right": (-math.cos(radians), -math.sin(radians)), "left": (math.cos(radians), math.sin(radians))}[key]
+
+
+def in_keepout(x: float, z: float, box) -> bool:
+    """Whether (x, z) is in the keep-out box (cells x0..x1, z0..z1 inclusive) with the player's radius."""
+    if box is None:
+        return False
+    x0, x1, z0, z1 = box
+    return x0 - PLAYER_RADIUS < x < x1 + 1 + PLAYER_RADIUS and z0 - PLAYER_RADIUS < z < z1 + 1 + PLAYER_RADIUS
+
+
+def judge_column(rows: dict, feet_y: int, max_drop: int = MAX_DROP):
+    """(ok, drop, why) for walking into a column: `rows` maps y to the scan row of that cell, feet_y the cell the
+    feet stand in. The ground is the first cell with collision at or below feet_y - 1, found within MAX_DROP + 1
+    cells; a drop is the free cells between the feet and it. Water or lava in a cell passed, an unread cell,
+    or no ground within reach all refuse. A solid cell at feet level (a step or wall) is not a drop."""
+    for y in range(feet_y, feet_y - MAX_DROP - 2, -1):
+        row = rows.get(y)
+        if row is None:
+            return False, feet_y - y, "unloaded"
+        if not row["fluid"]["empty"]:
+            return False, max(feet_y - y, 0), "lava" if "lava" in row["block_id"] else "water"
+        if not row["collision_empty"]:
+            drop = max(feet_y - 1 - y, 0)
+            return (True, drop, "") if drop <= max_drop else (False, drop, "drop deeper than " + str(max_drop))
+    return False, MAX_DROP + 1, "no ground"
+
+
+class Guard:
+    """Route guard over the client's MCP block reads; see the comment above."""
+
+    def __init__(self, client, keepout=KEEPOUT):
+        self.c, self.keepout = client, keepout
+        self.max_drop = MAX_DROP  # blocks he may step down; the rank loop lowers it to FIGHT_DROP in a fight
+        self.cache: dict[tuple, dict] = {}  # (x, z, feet_y) -> {y: row}, columns read within one `filter` call
+        self.logged: dict[tuple, float] = {}
+        self.refusals: list[str] = []  # every refusal since the caller last cleared it (the log line throttles, this does not)
+
+    def cells(self, here, vector, reach):
+        """Distinct (x, z) cells along `vector` from the feet at `look_points(reach)`, not the feet's own."""
+        own = (math.floor(here[0]), math.floor(here[2]))
+        out = []
+        for k in look_points(reach):
+            cell = (math.floor(here[0] + vector[0] * k), math.floor(here[2] + vector[1] * k))
+            if cell != own and cell not in out:
+                out.append(cell)
+        return out
+
+    def columns(self, cells, feet_y):
+        """{cell: {y: row or None}} for columns feet_y - MAX_DROP - 1 .. feet_y; one scan for the cells not cached.
+        Only complete columns are cached, so a chunk that loads later is read again."""
+        need = [c for c in cells if (c[0], c[1], feet_y) not in self.cache]
+        got: dict = {}
+        if need:
+            low = feet_y - MAX_DROP - 1
+            box = {"min_x": min(c[0] for c in need), "max_x": max(c[0] for c in need), "min_z": min(c[1] for c in need),
+                   "max_z": max(c[1] for c in need), "min_y": low, "max_y": feet_y}
+            offset = 0
+            while True:
+                page = self.c.tool("minecraft_scan_blocks", {**box, "offset": offset} if offset else box)
+                for row in page["blocks"]:
+                    got[(row["x"], row["y"], row["z"])] = row
+                if not page.get("truncated"):
+                    break
+                offset = page["next_offset"]
+            for cell in need:
+                column = {y: got.get((cell[0], y, cell[1])) for y in range(low, feet_y + 1)}
+                if None not in column.values():
+                    self.cache[(cell[0], cell[1], feet_y)] = column
+                else:
+                    self.cache.pop((cell[0], cell[1], feet_y), None)
+                    got[("partial", cell)] = column
+        return {c: self.cache.get((c[0], c[1], feet_y)) or got[("partial", c)] for c in cells}
+
+    def judge(self, cells, feet_y):
+        """The first refused cell as (cell, drop, why), else None."""
+        try:
+            columns = self.columns(cells, feet_y)
+        except RuntimeError as error:
+            if any(code in str(error) for code in RECOVERABLE):
+                raise
+            return cells[0], MAX_DROP + 1, "block read failed: " + str(error)[:80]
+        for cell in cells:
+            ok, drop, why = judge_column(columns[cell], feet_y, self.max_drop)
+            if not ok:
+                return cell, drop, why
+        return None
+
+    def refuse(self, line: str, key: tuple):
+        self.refusals.append(line)
+        now = time.monotonic()
+        if "(drop deeper than" in line or now - self.logged.get(key, -1e9) >= LOG_AGAIN:  # a fight's drop refusal is always logged
+            self.logged[key] = now
+            log(line)
+
+    def refused(self, name: str, vector, here, reach: float):
+        """Why walking along `vector` (a unit vector, named `name` in the log) is refused, as (log line, key), else None.
+        Keep-out first (from inside the box only a way out passes), then the terrain under every cell on the way."""
+        feet_y = math.floor(here[1])
+        place = [round(v, 1) for v in here]
+        if self.keepout is not None:
+            x0, x1, z0, z1 = self.keepout
+            if in_keepout(here[0], here[2], self.keepout):
+                centre = ((x0 + x1 + 1) / 2, (z0 + z1 + 1) / 2)
+                if vector[0] * (here[0] - centre[0]) + vector[1] * (here[2] - centre[1]) <= 0:
+                    return (f"keepout refused {name} at {place} (inside the box, key leads deeper)", ("keepout", name))
+            elif any(in_keepout(here[0] + vector[0] * k, here[2] + vector[1] * k, self.keepout)
+                     for k in look_points(reach)):
+                return (f"keepout refused {name} at {place} (box x {x0:g}..{x1:g}, z {z0:g}..{z1:g})", ("keepout", name))
+        bad = self.judge(self.cells(here, vector, reach), feet_y)
+        if bad is not None:
+            (cx, cz), drop, why = bad
+            return (f"edge refused {name} at {cx},{feet_y},{cz} drop={drop if drop <= self.max_drop else str(drop) + '+'} ({why})",
+                    ("edge", name, cx, cz))
+        return None
+
+    def filter(self, wanted: set, here, yaw: float, reach: float, quiet: bool = False) -> set:
+        """`wanted` without the horizontal keys that walk into the keep-out box, off a drop of more than MAX_DROP
+        blocks, or into water or lava; sprint and jump go with their last walking key. `reach` is how far (blocks)
+        the key can carry him before the next check. Every key is checked alone, then the keys left together
+        along their summed direction (forward + right walks the diagonal, whose cells neither key alone reaches);
+        a refused diagonal drops its sideways key. From inside the box only a way out passes, and it is still
+        checked against drops and water."""
+        self.cache.clear()  # blocks change (water, a dug pit): every step reads them again, the cache serves only this check
+        keep = set(wanted)
+        for key in WALK_KEYS:
+            if key in wanted:
+                no = self.refused(key, key_vector(key, yaw), here, reach)
+                if no:
+                    keep.discard(key)
+                    if not quiet:
+                        self.refuse(*no)
+        ahead = ("forward" in keep) - ("back" in keep)
+        side = ("right" in keep) - ("left" in keep)
+        if ahead and side:
+            f, r = key_vector("forward", yaw), key_vector("right", yaw)
+            norm = math.hypot(ahead * f[0] + side * r[0], ahead * f[1] + side * r[1])
+            vector = [(ahead * f[a] + side * r[a]) / norm for a in (0, 1)]
+            name = ("forward" if ahead > 0 else "back") + "+" + ("right" if side > 0 else "left")
+            no = self.refused(name, vector, here, reach)
+            if no:
+                keep.discard("right" if side > 0 else "left")
+                if not quiet:
+                    self.refuse(*no)
+        if not keep & set(WALK_KEYS):
+            keep -= {"sprint", "jump"}
+        elif "forward" not in keep:
+            keep.discard("sprint")
+        return keep
+
+
 class Pilot:
     def __init__(self, client: Client):
         self.c = client
         self.held: set[str] = set()
         self.sent_look = None
+        self.observed: dict = {}  # the whole last minecraft_observe taken by player()
+        self.jam_kind = "friend"  # what stood under the crosshair last: friend | unknown-side | block
+        self.jam = 0  # swings in a row not made because a friend or block stood under the crosshair
+        self.jam_at = -1e9  # when the last of them happened
 
     def keys(self, wanted: set[str]):
         release = self.held - wanted
@@ -145,6 +337,7 @@ class Pilot:
         observed = self.c.tool("minecraft_observe")
         if "player" not in observed:
             raise RuntimeError("not in play (respawning or loading)")
+        self.observed = observed
         return observed["player"]
 
 
@@ -152,18 +345,98 @@ def position(record) -> list[float]:
     return [float(record["x"]), float(record["y"]), float(record["z"])]
 
 
-def attack_interval(client: Client, fallback: float) -> float:
-    """Seconds between full-strength hits with the selected weapon: 1 / (4 + attack_speed modifier)."""
+PIERCING = "minecraft:piercing_weapon"
+HOTBAR_FIRST = 0  # the MCP numbers the Inventory: 0-8 hotbar, 9-35 main, 36-39 feet/legs/chest/head, 40 offhand, 41 body, 42 saddle
+
+
+def components_of(stack) -> dict:
+    return (stack.get("components") or {}) if isinstance(stack, dict) else {}
+
+
+def melee_weapon(stack) -> bool:
+    """A stack that carries an attack_damage or attack_speed attribute modifier."""
+    return any(isinstance(modifier, dict) and modifier.get("type") in ("minecraft:attack_damage", "minecraft:attack_speed")
+               for modifier in components_of(stack).get("minecraft:attribute_modifiers") or [])
+
+
+def choose_melee(client: Client, choice: str) -> None:
+    """Read the hotbar (logged) and select the melee slot with the ordinary hotbar input. `auto` keeps the selected
+    slot when its item has no piercing_weapon component (a spear stabs with a different packet); otherwise it takes the
+    first hotbar slot with a melee weapon without it, or logs `no non-piercing melee weapon in hotbar` and leaves the
+    selection. A number selects that slot."""
+    if choice != "auto":
+        client.tool("minecraft_set_hotbar_slot", {"slot": int(choice)})
+        log("melee slot", choice, "selected by the option")
+        return
+    hotbar = []
+    for slot in range(9):
+        try:
+            stack = client.tool("minecraft_read_item_components", {"source": "player", "slot": HOTBAR_FIRST + slot})
+        except RuntimeError as error:
+            if any(code in str(error) for code in RECOVERABLE):
+                raise
+            stack = None
+            log("hotbar", slot, "unreadable:", str(error)[:120])
+        hotbar.append(stack)
+        if stack is not None:
+            log("hotbar", slot, compact(stack))
+    try:
+        selected = client.tool("minecraft_read_item_components", {"source": "selected"})
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        selected = None
+    if selected is not None and PIERCING not in components_of(selected) and melee_weapon(selected):
+        log("selected item is a melee weapon without piercing_weapon; kept")
+        return
+    for slot, stack in enumerate(hotbar):
+        if stack is not None and melee_weapon(stack) and PIERCING not in components_of(stack):
+            client.tool("minecraft_set_hotbar_slot", {"slot": slot})
+            log("melee slot", slot, "selected (melee weapon without piercing_weapon)")
+            return
+    log("no non-piercing melee weapon in hotbar")
+
+
+SPEAR_RANGE = (2.0, 4.5)  # vanilla attack_range of a piercing weapon, blocks from the eye along the look
+SPEAR_ENGAGE = 3.0
+
+
+def weapon_profile(client: Client, args) -> float:
+    """Read the selected weapon and set what its use needs on `args`: `charge` (attack strength from which a swing
+    counts: the item's minimum_attack_charge, else 1.0 for a piercing weapon, else STRENGTH_READY), `min_reach` and
+    `reach` (eye to the enemy's box; the item's attack_range, else 2.0..4.5 for a piercing weapon, else 0..the
+    --reach option) and `engage` (the walk-up distance). Returns the fallback swing interval in seconds without
+    the HUD: (ceil(20 / attack speed) + 1) ticks, `--attack-interval` when the weapon is unreadable."""
+    if not hasattr(args, "base_reach"):
+        args.base_reach = args.reach
+    args.charge, args.min_reach, args.reach, args.engage = STRENGTH_READY, 0.0, args.base_reach, ENGAGE
     try:
         stack = client.tool("minecraft_read_item_components", {"source": "selected"})
-    except RuntimeError:
-        return fallback
-    for modifier in (stack.get("components") or {}).get("minecraft:attribute_modifiers") or []:
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        log("weapon unreadable:", str(error)[:120], "; defaults")
+        return args.attack_interval
+    components = components_of(stack)
+    piercing = PIERCING in components
+    if piercing:
+        args.charge, (args.min_reach, args.reach), args.engage = 1.0, SPEAR_RANGE, SPEAR_ENGAGE
+    charge = components.get("minecraft:minimum_attack_charge")
+    if isinstance(charge, dict):
+        charge = charge.get("value", charge.get("charge"))
+    if isinstance(charge, (int, float)):
+        args.charge = float(charge)
+    attack_range = components.get("minecraft:attack_range")
+    if isinstance(attack_range, dict) and "max_reach" in attack_range:
+        args.min_reach, args.reach = float(attack_range.get("min_reach", 0.0)), float(attack_range["max_reach"])
+    interval = args.attack_interval
+    for modifier in components.get("minecraft:attribute_modifiers") or []:
         if isinstance(modifier, dict) and modifier.get("type") == "minecraft:attack_speed":
             speed = 4.0 + float(modifier.get("amount", 0.0))
             if speed > 0:
-                return 1.0 / speed + 0.05
-    return fallback
+                interval = (math.ceil(20.0 / speed) + 1) / 20.0
+    log(f"weapon: piercing={piercing} charge={args.charge} reach={args.min_reach}..{args.reach} engage={args.engage} interval={interval:.2f} s")
+    return interval
 
 
 def identity(entity):
@@ -197,10 +470,269 @@ def side_of(client: Client, entity) -> str | None:
     return None
 
 
+EYE = 1.62
+CONTACT = 6.0     # an enemy this close (blocks) is a fight: short steps, no walking off, no handing the place away
+ENGAGE_SLACK = 0.3  # he is close enough this far beyond the engage distance (no creeping steps)
+ENGAGE = 2.5      # blocks short of the nearest enemy that he walks up to in a fight
+CONTACT_READ = CONTACT + 2.0  # in a fight only neighbours this close (blocks) are classified
+CONTACT_CLASSIFY = 1    # unread neighbours classified per step in a fight (nearest, within CONTACT + 2)
+STRENGTH_READY = 0.9    # attack strength (client HUD bar) from which a swing is made
+MAIN_HAND_TTL = 30.0    # seconds the main-hand item read for the diagnostics is reused
+JAM_FRESH = 4.0    # seconds a jam counts after its last skipped swing (swings stop being tried inside the weapon's minimum reach)
+JAM_SKIPS = 2     # swings skipped in a row because a friend or block is under the crosshair: he steps aside
+SIDESTEP = 1.0    # blocks per sidestep pulse
+SIDESTEP_MAX = 1.5  # blocks one way before he tries the other side
+BLOCK_FOR = 1.5   # seconds a target is not struck again after a friend stood in the way
+USE_TICKS = 2     # client ticks to wait after the shield key is let go before a swing
+USE_RECHECKS = 4  # further one-tick waits for the client to report the item no longer in use
+
+
+def eye_distance(me, entity) -> float:
+    """Blocks from PovRed's eyes to the nearest point of the entity's box (the client's own reach measure);
+    without a box, to its middle."""
+    eye = (float(me["x"]), float(me["y"]) + EYE, float(me["z"]))
+    box = entity.get("bounding_box")
+    if box:
+        lo, hi = (box["min_x"], box["min_y"], box["min_z"]), (box["max_x"], box["max_y"], box["max_z"])
+    else:
+        lo = hi = (float(entity["x"]), float(entity["y"]) + 0.9, float(entity["z"]))
+    return math.dist(eye, [min(max(eye[a], lo[a]), hi[a]) for a in range(3)])
+
+
+def release_use(client: Client, pilot: Pilot, waited: bool) -> bool:
+    """Let go of the shield and wait until the client says no item is in use: a swing while an item is in use is
+    silently dropped by the client (`ordinary entity attack was not dispatched`). Returns whether it is free."""
+    if "use" in pilot.held:
+        pilot.keys(pilot.held - {"use"})
+        waited = False
+    if not waited:
+        client.tool("minecraft_wait_ticks", {"ticks": USE_TICKS})
+    for _ in range(USE_RECHECKS):
+        if client.tool("minecraft_observe").get("using") is None:
+            return True
+        client.tool("minecraft_wait_ticks", {"ticks": 1})
+    return client.tool("minecraft_observe").get("using") is None
+
+
+# Where in the enemy's box the look is tried, as fractions of (x, y, z): the middle first (the order is the client's
+# own aim_at_entity order), then past a friend's shoulder (left, right) and over/under him (head, legs).
+AIM_POINTS = ((0.5, 0.5, 0.5), (0.2, 0.5, 0.5), (0.8, 0.5, 0.5), (0.5, 0.85, 0.5), (0.5, 0.15, 0.5))
+
+
+def aim_point(entity, fractions):
+    box = entity["bounding_box"]
+    return [box[f"min_{axis}"] + (box[f"max_{axis}"] - box[f"min_{axis}"]) * fraction
+            for axis, fraction in zip("xyz", fractions)]
+
+
+def attack_strength(observed: dict):
+    """The weapon's attack strength 0..1 from the client HUD in `minecraft_observe` `ui_nodes`: the `hud/attack`
+    progress bar is as wide as that fraction of the 15-pixel `hud/crosshair` and absent at full charge. None when the
+    observation does not carry the HUD (no crosshair node)."""
+    nodes = observed.get("ui_nodes")
+    if not isinstance(nodes, list):
+        return None
+    by_id = {node.get("id"): node for node in nodes if isinstance(node, dict)}
+    cross = by_id.get("hud/crosshair")
+    if not cross or not cross.get("bounds") or float(cross["bounds"][2]) <= 0:
+        return None
+    bar = by_id.get("hud/attack")
+    if bar is None:
+        return 1.0
+    return max(0.0, min(1.0, float(bar["bounds"][2]) / float(cross["bounds"][2])))
+
+
+def attack_ready(observed: dict, now: float, last_attack: float, interval: float, charge: float = STRENGTH_READY) -> bool:
+    """A swing is due at attack strength >= `charge` (STRENGTH_READY unless the weapon says otherwise) when the client reports it, else after the weapon's interval."""
+    strength = attack_strength(observed)
+    return now - last_attack >= interval if strength is None else strength >= charge
+
+
+def crosshair(client: Client):
+    """What the client's own raycast says is under the crosshair: ('entity', id, observed target) | ('block', None, t) | ('none', None, t)."""
+    observed = client.tool("minecraft_observe")
+    target = observed.get("target") or {"type": "none"}
+    if target.get("type") == "entity":
+        return "entity", int(target["entity_id"]), target, observed
+    return ("block" if target.get("type") == "block" else "none"), None, target, observed
+
+
+def compact(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def diag_before(observed: dict, item) -> str:
+    """The one diagnostic line before an attack: `using` whole, held inputs, game mode, the crosshair target, main hand."""
+    return ("attack diag before: using=" + json.dumps(observed.get("using"), sort_keys=True, separators=(",", ":"))
+                + " held=" + json.dumps((observed.get("inputs") or {}).get("held"), sort_keys=True)
+                + " game_mode=" + json.dumps(next((found for found in ((observed.get("player") or {}).get("game_mode"), observed.get("game_mode"))
+                                                   if found is not None), "absent"))
+                + " target=" + json.dumps(observed.get("target"), sort_keys=True, separators=(",", ":"))
+                + " main_hand=" + (item if isinstance(item, str) else json.dumps(item, sort_keys=True, separators=(",", ":"))))
+
+
+def main_hand(client: Client):
+    """The selected item's components for the diagnostics, read at most once per MAIN_HAND_TTL seconds."""
+    now = time.monotonic()
+    cached = getattr(client, "main_hand_read", None)
+    if cached is not None and 0 <= now - cached[0] < MAIN_HAND_TTL:
+        return cached[1]
+    try:
+        item = client.tool("minecraft_read_item_components", {"source": "selected"})
+    except RuntimeError as error:
+        if any(code in str(error) for code in RECOVERABLE):
+            raise
+        item = "unreadable: " + str(error)[:120]
+    client.main_hand_read = (now, item)
+    return item
+
+
+def press_attack(client: Client, observed: dict):
+    """The attack input for one tick with the diagnostic lines: `observed`, the observation taken right before it
+    (the crosshair check), and the tool's whole answer (never cut) right after."""
+    log(diag_before(observed, main_hand(client)))
+    try:
+        answer = client.tool("minecraft_press_inputs", {"keys": ["attack"], "ticks": 1})
+    except RuntimeError as error:
+        log("attack diag after: error " + str(error))
+        raise
+    log("attack diag after: " + compact(answer))
+
+
+def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
+    """One swing at `target` through the ordinary inputs, as a player does: the shield is let go, the look is put on a
+    point of the enemy's box, the client's own crosshair target (`minecraft_observe` `target`) must be an enemy within
+    reach, and only then the ordinary `attack` input is pressed for one tick. (`minecraft_attack_entity_once` is not
+    used: its aim and its raycast at the swing can disagree and the swing is then dropped silently.) The point is moved
+    past a friend or a block in the way; an enemy that stands in the way is struck instead; a friend never is; when no
+    point works the target is left alone for BLOCK_FOR seconds. Logs `attack sent (crosshair enemy N ...)` or
+    `attack skipped (crosshair friend|block|none|enemy out of reach ...)`. Returns True when the input was sent."""
+    ident = target["entity_id"]
+    if not release_use(client, pilot, waited):
+        log("attack skipped (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
+        return False
+    me = pilot.player()
+    eye = [float(me["x"]), float(me["y"]) + EYE, float(me["z"])]
+    page = client.tool("minecraft_list_entities", {"radius": args.reach + 4.0, "limit": 32})["entities"]
+    # In a crowd the 32 nearest may not include the enemy: the step's own entry (at most a step old) stands in.
+    fresh = next((e for e in page if e["entity_id"] == ident), target)
+    reach = eye_distance(me, fresh)
+    if not args.min_reach <= reach <= args.reach:
+        log("attack skipped (out of reach:", ident, "eye distance", round(reach, 2), "outside", args.min_reach, "..", args.reach, ")")
+        return False
+    seen = []
+    for fractions in AIM_POINTS:
+        yaw, pitch = look_angles(eye, aim_point(fresh, fractions))
+        look = (int(round(wrap(yaw))), int(round(pitch)))
+        client.tool("minecraft_look", {"yaw_deg": look[0], "pitch_deg": look[1]})
+        pilot.sent_look = look
+        client.tool("minecraft_wait_ticks", {"ticks": 1})
+        kind, struck, observed, whole = crosshair(client)
+        if kind == "entity":
+            side = sides.get(struck)
+            if side is None and struck not in sides:
+                side = sides[struck] = side_of(client, observed)
+            hit = observed.get("location") or {}
+            away = math.dist(eye, [float(hit[axis]) for axis in "xyz"]) if hit else 0.0
+            if side is None or side == args.side:
+                seen.append(f"{'unknown-side' if side is None else 'friend'} {struck}")
+                continue
+            if not args.min_reach <= away <= args.reach:
+                seen.append(f"enemy {struck} out of reach {away:.2f}")
+                continue
+            note = "" if struck == ident else f" instead of {ident}"
+            press_attack(client, whole)
+            pilot.jam = 0
+            log(f"attack sent (crosshair enemy {struck}{note}, aim {fractions}, distance {away:.2f})")
+            return True
+        seen.append(kind)
+    blocked[ident] = time.monotonic() + BLOCK_FOR
+    pilot.jam += 1
+    pilot.jam_at = time.monotonic()
+    pilot.jam_kind = ("friend" if any(x.startswith("friend") for x in seen) else
+                      "unknown-side" if any(x.startswith("unknown-side") for x in seen) else "block")
+    log(f"attack skipped (crosshair {', '.join(seen)}; target {ident} left alone {BLOCK_FOR} s)")
+    return False
+
+
+OCCLUDED = re.compile(r"occluded by entity (\d+)")
+
+
+def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool, hops: int = 2):
+    """One swing at `target` with the client's `minecraft_attack_entity_once` (`--attack-mode once`): the shield is let
+    go and nothing may be in use, reach is measured from the eye again, an enemy "occluded by entity N" is struck
+    instead, a friend or unknown-side entity never, and every refusal is told apart in the log. The observation before
+    the call and the tool's whole answer (or error) after it are logged. Returns True when dispatched."""
+    ident = target["entity_id"]
+    if not release_use(client, pilot, waited):
+        log("attack not dispatched (item still in use after", USE_TICKS + USE_RECHECKS, "ticks)", ident)
+        return False
+    me = pilot.player()
+    page = client.tool("minecraft_list_entities", {"radius": args.reach + 4.0, "limit": 32})["entities"]
+    fresh = next((e for e in page if e["entity_id"] == ident), target)
+    reach = eye_distance(me, fresh)
+    if not args.min_reach <= reach <= args.reach:
+        log("attack out of reach", ident, "eye distance", round(reach, 2), "outside", args.min_reach, "..", args.reach)
+        return False
+    before = fresh.get("health")
+    log(diag_before(client.tool("minecraft_observe"), main_hand(client)))
+    try:
+        result = client.tool("minecraft_attack_entity_once", {**identity(fresh), "timeout_seconds": 1.0})
+    except RuntimeError as error:
+        text = str(error)
+        log("attack diag after: error " + text)
+        if any(code in text for code in RECOVERABLE):
+            raise
+        in_way = OCCLUDED.search(text)
+        if in_way:
+            other = int(in_way.group(1))
+            entity = next((e for e in page if e["entity_id"] == other), None)
+            side = sides.get(other) if other in sides else (side_of(client, entity) if entity is not None else None)
+            if entity is not None:
+                sides[other] = side
+            if side is not None and side != args.side:
+                log("attack occluded by enemy", other, "(", ident, "behind it): striking", other)
+                if hops > 0 and entity is not None:
+                    return attack_once(client, pilot, entity, args, sides, blocked, True, hops - 1)
+                return False
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+            pilot.jam += 1
+            pilot.jam_at = time.monotonic()
+            pilot.jam_kind = "friend" if side == args.side else "unknown-side"
+            log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
+                "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
+            return False
+        if "occluded by" in text:
+            log("attack occluded by block:", text[:160])
+            blocked[ident] = time.monotonic() + BLOCK_FOR
+            pilot.jam += 1
+            pilot.jam_at = time.monotonic()
+            pilot.jam_kind = "block"
+        elif "reach" in text:
+            log("attack out of reach (client):", text[:160])
+        elif "not dispatched" in text:
+            log("attack not dispatched", ident, text[:200])
+        else:
+            log("attack failed", ident, text[:200])
+        return False
+    log("attack diag after: " + compact(result))
+    pilot.jam = 0
+    log("attack dispatched", ident, "health before", before)
+    return True
+
+
+def attack(client: Client, pilot: Pilot, target, args, sides: dict, blocked: dict, waited: bool):
+    """One swing by `--attack-mode`: `input` (the ordinary inputs, default) or `once` (minecraft_attack_entity_once)."""
+    swing = attack_once if args.attack_mode == "once" else attack_input
+    return swing(client, pilot, target, args, sides, blocked, waited)
+
+
 def rank(args, client: Client):
     pilot = Pilot(client)
+    guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
     client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
     log("in play; holding rank")
+    choose_melee(client, args.melee_slot)
     me = pilot.player()
     yaw, pitch = float(me.get("yaw", 0.0)), float(me.get("pitch", 0.0))
     rest_yaw = yaw
@@ -214,9 +746,19 @@ def rank(args, client: Client):
     flow = [0.0, 0.0]
     moving = False
     last_attack = 0.0
+    last_sent = time.monotonic()  # when the attack input was last sent (or the pilot began)
+    engaging = False  # an idle engage is under way (logged once)
+    walked_last = True
+    decision = None  # the sidestep decision of the last step, logged once its outcome is known
+    episode = 0  # sidestep steps in the current detour
+    stuck = 0  # fight steps in a row that asked for a walk and got nowhere (a wall in the way)
+    fought = False  # the last step was a fight step (its height change is logged)
+    standing_since = None  # when the current spell of standing still began
+    stand, last_stand = None, -1e9  # the last fight step's facts, and when a `stand` line was last written
+    side_dir, side_from, sidestepping = 1.0, None, False  # sidestep: direction, where this way began, last step was one
+    blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
     last_status, steps = time.monotonic(), 0
-    interval = attack_interval(client, args.attack_interval)
-    log("attack interval", round(interval, 2), "s")
+    interval = weapon_profile(client, args)
     while True:
         me = pilot.player()
         here = position(me)
@@ -237,7 +779,11 @@ def rank(args, client: Client):
             offset, anchor, target, last, last_step = None, None, None, position(me), time.monotonic()
             last_goal, drift = None, [0.0, 0.0]
             pilot.sent_look = None
+            decision, stand, sidestepping, side_from, episode, pilot.jam = _forget(decision, episode, "respawn")
+            fought = False
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
+            choose_melee(client, args.melee_slot)
+            interval = weapon_profile(client, args)
             continue
         # A server teleport (re-slot): farther than sprinting (under 8 blocks/s) can go.
         stepped = time.monotonic()
@@ -245,11 +791,34 @@ def rank(args, client: Client):
         if last is not None and math.dist(here, last) > 4.0 + 8.0 * step_time:
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
             offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
+            decision, stand, sidestepping, side_from, episode, pilot.jam = _forget(decision, episode, "teleport")
+            fought = False
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
-            interval = attack_interval(client, args.attack_interval)
-            log("attack interval", round(interval, 2), "s")
+            interval = weapon_profile(client, args)
+        if fought and last is not None and abs(here[1] - last[1]) >= FIGHT_Y_LOG:
+            drop = last[1] - here[1]
+            log(f"fight step y {last[1]:.1f} -> {here[1]:.1f} ({'drop' if drop > 0 else 'rise'} {abs(drop):.1f})")
         last, last_step = here, stepped
+        if stand is not None and stand["swing"] != "sent" and math.dist(stand["before"], here) < STAND_MOVED:
+            standing_since = stepped if standing_since is None else standing_since
+            if stepped - standing_since >= STAND_LOG and stepped - last_stand >= STAND_LOG:
+                last_stand = stepped
+                log(f"stand {stand['why']}; swing {stand['swing']}; standing {stepped - standing_since:.0f} s")
+        else:
+            standing_since = None
+        if stand is not None:
+            stuck = stuck + 1 if stand["asked"] and math.dist(stand["before"], here) < STAND_MOVED and stand["swing"] != "sent" else 0
+        else:
+            stuck = 0
+        stand = None
+        if decision is not None:
+            moved = math.dist(decision["before"], here)
+            log(f"sidestep {decision['reason']}; side {decision['side']}{decision['flip']}; wanted {decision['wanted']} "
+                f"allowed {decision['allowed']}{decision['refused']}; "
+                f"{'moved' if moved >= 0.2 else 'did not move'} {moved:.2f} blocks "
+                f"{[round(v, 1) for v in decision['before']]} -> {[round(v, 1) for v in here]}")
+            decision = None
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
         soldiers = sorted((e for e in listed if soldier(e)), key=lambda e: e["distance"])
         friends, enemies, unread = [], [], []
@@ -262,6 +831,14 @@ def rank(args, client: Client):
                 friends.append(entity)
             elif side is not None:
                 enemies.append(entity)
+        # A fight: any enemy this close, blocked or not. Steps are short, the place is not handed away and he does not walk off.
+        contact = bool(enemies) and enemies[0]["distance"] <= CONTACT
+        if enemies and not contact and enemies[0]["distance"] <= APPROACH and time.monotonic() - last_sent >= IDLE_ENGAGE:
+            if not engaging:
+                log(f"no swing for {IDLE_ENGAGE:g} s, nearest enemy {enemies[0]['distance']:.1f} blocks: walking up to him")
+            contact = engaging = True
+        else:
+            engaging = False
         if offset is None and anchor is None:
             # The rank place is measured from one instant, right after join, respawn or
             # re-slot: PovRed and his nearest 2K neighbours as listed now, however long
@@ -302,7 +879,7 @@ def rank(args, client: Client):
             flow = [0.8 * flow[i] + 0.2 * velocity[i] for i in range(2)]
         if offset is not None:
             tracked = [e for e in friends if e["entity_id"] in members]
-            if len(tracked) < min(args.k, 3) and len(near) >= min(args.k, 3):
+            if len(tracked) < min(args.k, 3) and len(near) >= min(args.k, 3) and not contact:
                 # His soldiers left the nearest page (he lags or leads a few blocks, or they
                 # fell): hand his place, unchanged, to the soldiers nearest him now. Any
                 # soldiers who keep formation can carry it.
@@ -322,11 +899,16 @@ def rank(args, client: Client):
                 # behind a marching rank when steps are slow.
                 blend = 1.0 - math.exp(-step_time / 0.3)
                 target = goal if target is None else [target[i] + blend * (goal[i] - target[i]) for i in range(2)]
-        enemy = min(enemies, key=lambda e: e["distance"]) if enemies else None
+        now = time.monotonic()
+        enemy = min((e for e in enemies if blocked.get(e["entity_id"], 0.0) <= now), key=lambda e: e["distance"], default=None)
+        # The enemy he faces and works around: the nearest one to strike, else (all blocked by friends) the nearest in a fight.
+        focus = enemy if enemy is not None else (enemies[0] if contact else None)
+        if not contact:
+            pilot.jam = 0
         # Facing: the nearest enemy, else the rank's own motion, else the join-time facing.
-        if enemy is not None and enemy["distance"] <= args.face_enemy:
+        if focus is not None and focus["distance"] <= args.face_enemy:
             face_yaw, face_pitch = look_angles([here[0], here[1] + 1.62, here[2]],
-                                               [enemy["x"], enemy["y"] + 1.3, enemy["z"]])
+                                               [focus["x"], focus["y"] + 1.3, focus["z"]])
         elif math.hypot(*flow) > 0.03:
             face_yaw, face_pitch = math.degrees(math.atan2(-flow[0], flow[1])), 8.0
         else:
@@ -335,13 +917,43 @@ def rank(args, client: Client):
         pitch = pitch + max(-3.0, min(3.0, (max(-20.0, min(30.0, face_pitch)) - pitch) * 0.25))
         pilot.look(yaw, pitch)
         wanted: set[str] = set()
-        if target is not None:
+        steer = None
+        if pilot.jam and time.monotonic() - pilot.jam_at > JAM_FRESH:
+            pilot.jam = 0  # nothing has blocked a swing for a while: the old count says nothing about now
+        step_aside, flip = False, ""
+        if contact:
+            too_close = eye_distance(me, focus) < args.min_reach  # a spear misses inside its minimum reach: back off first, a sidestep cannot help
+            aside_wanted = enemy is None or pilot.jam >= JAM_SKIPS or stuck >= STUCK_STEPS
+            if too_close or (not aside_wanted and focus["distance"] > args.engage + ENGAGE_SLACK):
+                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
+                gap = [here[0] - focus["x"], here[2] - focus["z"]]
+                length = math.hypot(*gap) or 1.0
+                steer = [focus["x"] + gap[0] / length * args.engage, focus["z"] + gap[1] / length * args.engage]
+            elif aside_wanted:
+                # A friend stands in the line (every enemy blocked, or swings skipped in a row): one step sideways,
+                # the other way when the guard refused it or this way went SIDESTEP_MAX; never stand still in a fight.
+                flip = ""
+                if sidestepping and not walked_last:
+                    side_dir, side_from, flip = -side_dir, None, " (flipped: the last step was refused)"
+                if side_from is None:
+                    side_from = list(here)
+                elif math.dist(side_from, here) >= SIDESTEP_MAX:
+                    side_dir, side_from, flip = -side_dir, list(here), f" (flipped: {SIDESTEP_MAX} blocks this way)"
+                line = [focus["x"] - here[0], focus["z"] - here[2]]
+                length = math.hypot(*line) or 1.0
+                steer = [here[0] - line[1] / length * SIDESTEP * side_dir, here[2] + line[0] / length * SIDESTEP * side_dir]
+                step_aside = True
+            else:
+                steer = [here[0], here[2]]  # close enough: hold the place
+        elif target is not None:
             # Aim where his place will be a step from now: the rank keeps marching while
             # the step's other calls run, and the next correction comes a step later.
-            aim = [target[i] + drift[i] * step_time for i in range(2)]
+            steer = [target[i] + drift[i] * step_time for i in range(2)]
+        if steer is not None:
+            aim = steer
             dx, dz = aim[0] - here[0], aim[1] - here[2]
             distance = math.hypot(dx, dz)
-            moving = distance > (0.4 if moving else 1.0)
+            moving = step_aside or distance > (0.4 if moving else 1.0)
             if moving:
                 radians = math.radians(yaw)
                 forward = dx * -math.sin(radians) + dz * math.cos(radians)
@@ -360,32 +972,53 @@ def rank(args, client: Client):
                 if me.get("horizontal_collision"):
                     wanted.add("jump")
         now = time.monotonic()
-        strike = enemy is not None and enemy["distance"] <= args.reach and now - last_attack >= interval
+        strike = (enemy is not None and args.min_reach <= eye_distance(me, enemy) <= args.reach
+                  and attack_ready(pilot.observed, now, last_attack, interval, args.charge))
         # Shield up (the ordinary use input on the off-hand shield) while an enemy is
         # close, lowered for each swing: vanilla cannot attack while blocking.
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
-        # Held keys stay down for the whole step. When the last step was so long that
-        # holding would carry him past his place, walk a bounded pulse of ticks instead.
-        pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
-        speed = 5.6 if "sprint" in pulse else 4.3
-        if pulse and step_time * speed > distance + 0.5:
-            wanted -= pulse
-        else:
-            pulse = set()
-        pilot.keys(wanted)
-        if pulse:
-            client.tool("minecraft_press_inputs",
-                        {"keys": sorted(pulse), "ticks": max(1, min(40, round(distance / speed * 20)))})
+        was_using = "use" in pilot.held
+        asked = sorted(wanted & {"forward", "back", "left", "right"})
+        if guard is not None:
+            guard.max_drop = FIGHT_DROP if contact else MAX_DROP
+        if guard is not None:
+            guard.refusals.clear()
+        walked = move(client, pilot, guard, wanted, here, yaw, distance if steer is not None else 0.0, step_time)
+        if step_aside:
+            reason = ("all enemies blocked" if enemy is None else f"jam {pilot.jam} skips: {pilot.jam_kind}" if pilot.jam >= JAM_SKIPS
+                      else f"stuck {stuck} steps: asked {asked} and did not get anywhere")
+            decision = {"reason": reason, "flip": flip, "wanted": asked, "before": list(here),
+                        "side": "right" if "right" in asked else "left" if "left" in asked else ("left" if side_dir > 0 else "right") + " (keys " + ",".join(asked) + ")",
+                        "allowed": sorted(walked), "refused": ("; guard: " + " | ".join(dict.fromkeys(guard.refusals))) if guard is not None and guard.refusals else ""}
+            episode += 1
+        elif sidestepping:
+            log(f"sidestep ended after {episode} step(s): {'fight over' if not contact else 'jam cleared (counter ' + str(pilot.jam) + ')'}")
+            episode = 0
+        sidestepping, walked_last, fought = step_aside, bool(walked), contact
+        if not step_aside:
+            side_from = None
+        nearest = enemies[0] if enemies else None
+        strength = attack_strength(pilot.observed)
+        place = ("" if contact else
+                 f", rank place {'unmeasured' if offset is None else 'unknown' if target is None else str(round(math.dist([here[0], here[2]], target), 1)) + ' blocks away'}")
+        foe = (f"no enemy within {args.radius:g} blocks" if nearest is None else
+               f"nearest enemy {nearest['distance']:.1f} blocks (eye-to-box {eye_distance(me, nearest):.1f}, "
+               f"reach {args.min_reach}..{args.reach}, engage {args.engage}), side {sides.get(nearest['entity_id'])}, "
+               f"{'blocked by a friend (all enemies)' if enemy is None else 'targeted'}")
+        stand = {"before": list(here), "swing": "none", "asked": bool(asked), "why": (
+            f"{'fight' if contact else 'rank'}; {foe}, jam {pilot.jam} {pilot.jam_kind}{place}; "
+            f"strength {None if strength is None else round(strength, 2)}/{args.charge}; "
+            f"steer {'none' if steer is None else round(distance, 2)} wanted {asked} walked {sorted(walked)}; "
+            f"{'sidestep' if step_aside else 'hold' if steer is not None and steer == [here[0], here[2]] else 'walk' if asked else 'hold place'}"
+            f"{'; guard: ' + ' | '.join(dict.fromkeys(guard.refusals)) if guard is not None and guard.refusals else ''}")}
         if strike:
-            # The ordinary attack: aim at any visible part of the enemy's box, attack
-            # input, then wait briefly for authoritative damage or removal.
-            before = enemy.get("health")
-            try:
-                result = client.tool("minecraft_attack_entity_once", {**identity(enemy), "timeout_seconds": 1.0})
-                log("hit", enemy["entity_id"], "health before", before, "->", json.dumps(result)[:240])
-            except RuntimeError as error:
-                log("swing at", enemy["entity_id"], "no confirmed damage:", str(error)[:200])
+            # The ordinary attack, with the shield let go and the client's word that nothing is in use.
+            sent = attack(client, pilot, enemy, args, sides, blocked, not was_using)
+            if sent:
+                last_sent = time.monotonic()
+            if stand is not None:
+                stand["swing"] = "sent" if sent else "tried, not sent"
             last_attack = time.monotonic()
             aimed = pilot.player()
             yaw, pitch = float(aimed.get("yaw", yaw)), float(aimed.get("pitch", pitch))
@@ -394,9 +1027,16 @@ def rank(args, client: Client):
         # still, so many per step; afterwards two, because movement keys stay held for a
         # whole step and a long step overshoots his place (each read waits a client frame).
         budget = args.classify_per_step if offset is None else 2
+        if contact:
+            # In a fight only the neighbours who can matter are read, one per step; the rest wait for the lull.
+            budget = CONTACT_CLASSIFY
+            unread = [e for e in unread if e["distance"] <= CONTACT_READ]
         for entity in unread[:budget]:
             sides[entity["entity_id"]] = side_of(client, entity)
-        client.tool("minecraft_wait_ticks", {"ticks": 2})
+        if not contact:
+            client.tool("minecraft_wait_ticks", {"ticks": 2})
+        elif not (walked or strike):
+            client.tool("minecraft_wait_ticks", {"ticks": 1})
         steps += 1
         if time.monotonic() - last_status >= 5.0:
             elapsed = time.monotonic() - last_status
@@ -404,6 +1044,83 @@ def rank(args, client: Client):
                 "nearest enemy", None if enemy is None else round(enemy["distance"], 1),
                 "keys", sorted(pilot.held), "step", round(elapsed / steps, 2), "s")
             last_status, steps = time.monotonic(), 0
+
+
+def _forget(decision, episode: int, why: str):
+    """A death or a server re-slot ends the sidestep detour: its pending outcome is unknown (the new position is not
+    the result of the step) and the counters restart. Returns (decision, stand, sidestepping, side_from, episode, jam)."""
+    if decision is not None:
+        log(f"sidestep {decision['reason']}; side {decision['side']}; outcome unknown ({why})")
+    elif episode:
+        log(f"sidestep ended after {episode} step(s): {why}")
+    return None, None, False, None, 0, 0
+
+
+def move(client: Client, pilot: Pilot, guard, wanted: set, here, yaw: float, distance: float, step_time: float):
+    """The step's keys, through the route guard: no key that walks into the keep-out box, off a drop or into
+    water or lava. With the guard on, movement is never held: a held key walks through every blocking MCP call
+    of the step (a call can stall for seconds), past the ground the guard has read. Each step is one bounded
+    pulse of ticks, shorter than the ground read ahead along every key; the next step reads the position again.
+    Returns the keys that were walked (empty when refused)."""
+    wanted = set(wanted)
+    checked = None  # blocks along each key that the guard has read ground for
+    if guard is not None:
+        # The ground is read GUARD_MARGIN blocks beyond where the pulse ends, so the pulse never ends within the margin
+        # of a cell that is refused (drop of more than 3 blocks measured from the feet now, water, lava, unread, the
+        # box), however far the stepping-down of a permitted drop carries him. A refusal inside the range shortens the
+        # read (half, then the least that still allows a 0.5-block pulse); only a refusal at the least is logged.
+        least = GUARD_MARGIN + 0.5
+        far = min(GUARD_REACH, max(least, distance + GUARD_MARGIN))
+        reaches = [far, max(least, far / 2), least] if far > least else [least]
+        for checked in reaches[:-1]:
+            kept = guard.filter(wanted, here, yaw, checked, quiet=True)
+            if kept & {"forward", "back", "left", "right"} or not wanted & {"forward", "back", "left", "right"}:
+                break
+        else:
+            checked, kept = reaches[-1], None
+        wanted = kept if kept is not None else guard.filter(wanted, here, yaw, checked)
+    pulse = wanted & {"forward", "back", "left", "right", "sprint", "jump"}
+    speed = 5.6 if "sprint" in pulse else 4.3
+    # Without the guard, held keys stay down for the whole step. When the last step was so long that
+    # holding would carry him past his place, walk a bounded pulse of ticks instead.
+    if pulse and (guard is not None or step_time * speed > distance + 0.5):
+        wanted -= pulse
+    else:
+        pulse = set()
+    pilot.keys(wanted)
+    if pulse:
+        walk = distance if checked is None else min(distance, checked - GUARD_MARGIN)
+        client.tool("minecraft_press_inputs", {"keys": sorted(pulse), "ticks": max(1, min(40, math.ceil(walk / speed * 20)))})
+    return pulse or (wanted & {"forward", "back", "left", "right"})
+
+
+def probe(args, client: Client):
+    """`--probe X Z`: walk to (X, Z) with the same route guard and bounded pulses as the rank, no rank, no
+    enemies. For checking the guard on a real client at a chosen ledge, pit, water or the keep-out box. Logs
+    `probe step ...` per step and `probe done: <reason>` (arrived / refused N steps in a row / step limit)."""
+    pilot = Pilot(client)
+    guard = None if args.no_guard else Guard(client, None if args.no_keepout else tuple(args.keepout))
+    client.tool("minecraft_wait_for_play", {"timeout_seconds": 120})
+    goal = args.probe
+    last_step, refused = time.monotonic(), 0
+    for step in range(args.probe_steps):
+        me = pilot.player()
+        here = position(me)
+        now = time.monotonic()
+        distance = math.hypot(goal[0] - here[0], goal[1] - here[2])
+        if distance < args.probe_arrive:
+            return log("probe done: arrived at", [round(v, 1) for v in here], "goal", goal)
+        yaw, _ = look_angles(here, [goal[0], here[1], goal[1]])
+        pilot.look(yaw, 8.0)
+        walked = move(client, pilot, guard, {"forward"}, here, yaw, distance, now - last_step)
+        last_step = now
+        refused = 0 if walked else refused + 1
+        log("probe step", step, "at", [round(v, 1) for v in here], "goal", goal, "distance", round(distance, 1),
+            "walked" if walked else "REFUSED")
+        if refused >= args.probe_refused:
+            return log("probe done: refused", refused, "steps in a row at", [round(v, 1) for v in here])
+        client.tool("minecraft_wait_ticks", {"ticks": 2})
+    log("probe done: step limit", args.probe_steps, "at", [round(v, 1) for v in position(pilot.player())])
 
 
 def arguments(argv=None):
@@ -416,16 +1133,30 @@ def arguments(argv=None):
     parser.add_argument("--max-offset", type=float, default=3.0,
                         help="cap (blocks) on PovRed's place relative to that centroid")
     parser.add_argument("--radius", type=float, default=24.0)
-    parser.add_argument("--reach", type=float, default=2.8, help="feet distance; the client's own limit is 3 blocks eye to box")
+    parser.add_argument("--reach", type=float, default=3.0, help="blocks from the eye to the enemy's box, measured again before each swing (the client's own limit is 3)")
     parser.add_argument("--guard", type=float, default=6.0,
                         help="raise the off-hand shield while an enemy is this close (0 = never)")
     parser.add_argument("--face-enemy", type=float, default=16.0, help="face the nearest enemy within this range")
     parser.add_argument("--turn-rate", type=float, default=6.0, help="max degrees of turn per 0.1 s step")
+    parser.add_argument("--melee-slot", default="auto",
+                        help="auto: a melee weapon without piercing_weapon from the hotbar (logged); N: hotbar slot 0..8")
+    parser.add_argument("--attack-mode", default="input", choices=("input", "once"),
+                        help="input: look at the enemy and press the attack input (default); once: minecraft_attack_entity_once")
     parser.add_argument("--attack-interval", type=float, default=0.65)
     parser.add_argument("--classify-per-step", type=int, default=8,
                         help="side reads per step until his place is measured (then 2)")
+    parser.add_argument("--keepout", type=float, nargs=4, metavar=("X0", "X1", "Z0", "Z1"), default=list(KEEPOUT),
+                        help="keep-out box in block cells, any height (default: the mine, x -192..-184, z 21..30)")
+    parser.add_argument("--no-keepout", action="store_true")
+    parser.add_argument("--no-guard", action="store_true", help="no block checks before steps (drops, water, lava)")
+    parser.add_argument("--probe", type=float, nargs=2, metavar=("X", "Z"),
+                        help="no rank: walk to X Z through the route guard and stop (guard check on a real client)")
+    parser.add_argument("--probe-steps", type=int, default=60)
+    parser.add_argument("--probe-refused", type=int, default=3, help="stop after this many refused steps in a row")
+    parser.add_argument("--probe-arrive", type=float, default=0.6)
     parser.add_argument("--limit", type=int, default=64,
                         help="nearest entities read per step (larger pages can exceed the MCP result limit)")
+    parser.set_defaults(min_reach=0.0, charge=STRENGTH_READY, engage=ENGAGE)  # the selected weapon sets them (weapon_profile)
     return parser.parse_args(argv)
 
 
@@ -437,6 +1168,9 @@ def main():
     try:
         while True:
             try:
+                if args.probe:
+                    probe(args, client)
+                    break
                 rank(args, client)
             except RuntimeError as error:
                 # Recoverable: the window lost focus, or play is between screens. The
