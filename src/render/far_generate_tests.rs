@@ -13,7 +13,10 @@ fn software_compute_does_not_take_the_render_queue_for_distant_terrain() {
         wgpu::DeviceType::VirtualGpu,
         wgpu::DeviceType::Other,
     ] {
-        assert_eq!(supported(device, true, true), device != wgpu::DeviceType::Cpu);
+        assert_eq!(
+            supported(device, true, true),
+            device != wgpu::DeviceType::Cpu
+        );
         assert!(!supported(device, false, true));
         assert!(!supported(device, true, false));
     }

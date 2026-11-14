@@ -1,5 +1,5 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::*;
+use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     entities::Handle,
     player::{BlockHit, Hit, InteractionIntent, UiTrigger, UsePrediction},
@@ -47,10 +47,12 @@ impl Session {
             }
             InputIntent::Key { key, pressed } => {
                 let key = if key == "key.keyboard.tab" && self.screen() == "game" {
-                    self.bindings.action(crate::controls::Binding::Key(winit::keyboard::KeyCode::Tab))
+                    self.bindings
+                        .action(crate::controls::Binding::Key(winit::keyboard::KeyCode::Tab))
                 } else {
                     normalize_key(&key)
-                }.ok_or_else(|| format!("unsupported ordinary key {key}"))?;
+                }
+                .ok_or_else(|| format!("unsupported ordinary key {key}"))?;
                 let edge = if pressed {
                     self.keys.insert(key.into())
                 } else {
@@ -63,10 +65,7 @@ impl Session {
                 // Title additionally runs pre-play; the dialog arm below only
                 // fires in play, the title path goes through execute_ui's gate.
                 if (self.phase == "play"
-                    || self
-                        .ui
-                        .as_ref()
-                        .is_some_and(UiState::shell_screen_active))
+                    || self.ui.as_ref().is_some_and(UiState::shell_screen_active))
                     && self.ui.as_ref().is_some_and(|ui| {
                         ui.dialog_screen_active() && !ui.has_open_container(&self.inventory)
                     })
@@ -193,7 +192,10 @@ impl Session {
         let eye = self.player.eye_position();
         let reach = self.player.attribute("minecraft:entity_interaction_range");
         let nearest: [f64; 3] = std::array::from_fn(|a| eye[a].clamp(bounds.min[a], bounds.max[a]));
-        let distance = (0..3).map(|a| (nearest[a] - eye[a]).powi(2)).sum::<f64>().sqrt();
+        let distance = (0..3)
+            .map(|a| (nearest[a] - eye[a]).powi(2))
+            .sum::<f64>()
+            .sqrt();
         let (yaw, pitch) = (self.player.yaw, self.player.pitch);
         if distance > reach {
             return Ok(Some(format!(
@@ -235,9 +237,9 @@ impl Session {
                 -delta[1].atan2(horizontal).to_degrees() as f32,
             )?;
             let content = self.content.as_ref().ok_or("content unavailable")?;
-            let hit = self
-                .player
-                .raycast(&self.world, content, &self.entities, self.client_tick)?;
+            let hit =
+                self.player
+                    .raycast(&self.world, content, &self.entities, self.client_tick)?;
             if matches!(hit, Some(Hit::Entity { handle: target, .. }) if target == handle) {
                 if !apply {
                     self.player.look(yaw, pitch)?;
@@ -253,9 +255,9 @@ impl Session {
             -delta[1].atan2(delta[0].hypot(delta[2])).to_degrees() as f32,
         )?;
         let content = self.content.as_ref().ok_or("content unavailable")?;
-        let blocker = self
-            .player
-            .raycast(&self.world, content, &self.entities, self.client_tick)?;
+        let blocker =
+            self.player
+                .raycast(&self.world, content, &self.entities, self.client_tick)?;
         self.player.look(yaw, pitch)?;
         Ok(Some(match blocker {
             Some(Hit::Block(hit)) => format!(
@@ -314,7 +316,12 @@ impl Session {
         self.player.execute(
             intent,
             &context,
-            crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
+            crate::player::InteractionWorld {
+                world: &self.world,
+                content,
+                inventory: &self.inventory,
+                entities: &self.entities,
+            },
             self.client_tick,
             &mut self.commands,
         )?;
@@ -379,7 +386,12 @@ impl Session {
         let result = self.player.minecraft_use_item_on(
             &hit,
             hand,
-            crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
+            crate::player::InteractionWorld {
+                world: &self.world,
+                content,
+                inventory: &self.inventory,
+                entities: &self.entities,
+            },
             self.client_tick,
             &mut self.commands,
         )?;
@@ -394,10 +406,7 @@ impl Session {
         // Title screen runs pre-play: the title UI is installed with real
         // Content at startup, so the full UiState::execute path works once
         // content exists. Only title-safe intents pass (no containers).
-        if self
-            .ui
-            .as_ref()
-            .is_some_and(UiState::shell_screen_active)
+        if self.ui.as_ref().is_some_and(UiState::shell_screen_active)
             && self.content.is_some()
             && is_title_intent(&intent)
         {
@@ -610,8 +619,11 @@ impl Session {
             )?),
             UiCommand::ChatAck { offset } => self.commands.push(ui_packets::chat_ack(offset)),
             UiCommand::CommandSuggestion { id, command } => {
-                if self.phase != "play" { return Err("command_suggestion_requires_play".into()); }
-                self.commands.push(ui_packets::command_suggestion(id, &command)?);
+                if self.phase != "play" {
+                    return Err("command_suggestion_requires_play".into());
+                }
+                self.commands
+                    .push(ui_packets::command_suggestion(id, &command)?);
             }
             UiCommand::Chat { message, command } => self.send_chat(&message, command)?,
             UiCommand::Sign { pos, front, lines } => {
@@ -699,8 +711,8 @@ impl Session {
         };
         match key {
             "key_bindings" => {
-                self.bindings = crate::controls::Bindings::from_value(&clean)
-                    .ok_or("invalid key bindings")?;
+                self.bindings =
+                    crate::controls::Bindings::from_value(&clean).ok_or("invalid key bindings")?;
             }
             "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" => {
                 self.presentation_settings.insert(key.into(), clean.clone());
@@ -774,7 +786,11 @@ impl Session {
         );
         out.insert("volume".into(), json!(self.volume));
         out.insert("key_bindings".into(), self.bindings.value());
-        out.extend(self.presentation_settings.iter().map(|(key, value)| (key.clone(), value.clone())));
+        out.extend(
+            self.presentation_settings
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         if let Some(ui) = &self.ui {
             if let Some(scale) = ui
                 .setting("ui_scale")
@@ -811,7 +827,8 @@ impl Session {
                     }
                 }
                 "fullscreen" | "vsync" | "max_fps" | "graphics_preset" | "ui_scale" => {
-                    self.presentation_settings.insert((*key).into(), clean.clone());
+                    self.presentation_settings
+                        .insert((*key).into(), clean.clone());
                 }
                 "render_distance" => {
                     if let Some(n) = clean.as_u64() {
@@ -850,7 +867,7 @@ impl Session {
         }
         // Far terrain distance in blocks (`far_terrain`, 0 = off); the Low
         // graphics preset (also when it is the unset default) has a shorter
-        // reach for weak GPUs. SOLARIS_CLIENT_FAR_TERRAIN overrides both for
+        // reach for weak GPUs. KRASNOKAMEN_CLIENT_FAR_TERRAIN overrides both for
         // scripted runs.
         let low = self
             .presentation_settings
@@ -858,7 +875,7 @@ impl Session {
             .and_then(crate::render::GraphicsPreset::from_setting)
             .unwrap_or_default()
             == crate::render::GraphicsPreset::Low;
-        let distance = std::env::var("SOLARIS_CLIENT_FAR_TERRAIN")
+        let distance = std::env::var("KRASNOKAMEN_CLIENT_FAR_TERRAIN")
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
             .or_else(|| {
@@ -867,17 +884,20 @@ impl Session {
                     .and_then(Value::as_u64)
                     .map(|v| v.min(u64::from(crate::far::MAX_DISTANCE)) as u32)
             })
-            .unwrap_or(if self.client_defaults.software_renderer
-                && settings.get("graphics_preset")
-                    .and_then(|value| UiState::sanitize_setting_value("graphics_preset", value))
-                    .is_none()
-            {
-                256
-            } else if low {
-                crate::far::LOW_PRESET_DISTANCE
-            } else {
-                crate::far::DEFAULT_DISTANCE
-            });
+            .unwrap_or(
+                if self.client_defaults.software_renderer
+                    && settings
+                        .get("graphics_preset")
+                        .and_then(|value| UiState::sanitize_setting_value("graphics_preset", value))
+                        .is_none()
+                {
+                    256
+                } else if low {
+                    crate::far::LOW_PRESET_DISTANCE
+                } else {
+                    crate::far::DEFAULT_DISTANCE
+                },
+            );
         self.far.set_distance(distance);
         self.client_defaults.saved = settings;
         self.camera();
@@ -885,19 +905,33 @@ impl Session {
     pub(super) fn consume_player_effects(&mut self) -> Result<()> {
         if let Some(content) = self.content.as_ref() {
             let result = self.player.apply_pending_use_release(
-                &self.world, content, &self.inventory, &self.entities, self.client_tick,
+                &self.world,
+                content,
+                &self.inventory,
+                &self.entities,
+                self.client_tick,
             );
             if let Err(error) = result {
-                let item_id = self.inventory.player_slot(36 + u16::from(self.inventory.selected_slot))
-                    .ok().flatten().map(|stack| stack.id);
-                self.player.warn_local_prediction(item_id, "item use release", &error);
+                let item_id = self
+                    .inventory
+                    .player_slot(36 + u16::from(self.inventory.selected_slot))
+                    .ok()
+                    .flatten()
+                    .map(|stack| stack.id);
+                self.player
+                    .warn_local_prediction(item_id, "item use release", &error);
             }
         }
         while let Some(prediction) = self.player.take_use_prediction() {
             if let Err(error) = self.apply_local_prediction(prediction) {
-                let item_id = self.inventory.player_slot(36 + u16::from(self.inventory.selected_slot))
-                    .ok().flatten().map(|stack| stack.id);
-                self.player.warn_local_prediction(item_id, "local effect application", &error);
+                let item_id = self
+                    .inventory
+                    .player_slot(36 + u16::from(self.inventory.selected_slot))
+                    .ok()
+                    .flatten()
+                    .map(|stack| stack.id);
+                self.player
+                    .warn_local_prediction(item_id, "local effect application", &error);
             }
         }
         while let Some(trigger) = self.player.take_ui_trigger() {
@@ -906,7 +940,7 @@ impl Session {
         Ok(())
     }
     fn apply_local_prediction(&mut self, prediction: UsePrediction) -> Result<()> {
-            match prediction {
+        match prediction {
                 UsePrediction::Sound(request) => { if let Some(audio) = &self.audio { audio.play(request)?; } }
                 UsePrediction::WorldBlock {position,state,sequence,..} => {
                     let content = self.content.as_ref().ok_or("content unavailable")?;
@@ -966,8 +1000,19 @@ impl Session {
     fn open_trigger(&mut self, trigger: UiTrigger) -> Result<()> {
         let (item_id, owner) = match &trigger {
             UiTrigger::Book { hand } | UiTrigger::ItemUsed { hand } => {
-                let slot = if *hand == 1 { 45 } else { 36 + u16::from(self.inventory.selected_slot) };
-                (self.inventory.player_slot(slot).ok().flatten().map(|stack| stack.id), "item UI")
+                let slot = if *hand == 1 {
+                    45
+                } else {
+                    36 + u16::from(self.inventory.selected_slot)
+                };
+                (
+                    self.inventory
+                        .player_slot(slot)
+                        .ok()
+                        .flatten()
+                        .map(|stack| stack.id),
+                    "item UI",
+                )
             }
             UiTrigger::Sign { .. } => (None, "Sign editor"),
             UiTrigger::Command { .. } => (None, "Command editor"),
@@ -1574,9 +1619,14 @@ mod render_distance_wire_tests {
     #[test]
     fn render_distance_wire_inputs_reuse_ui_bounds() {
         let mut session = Session::new_mode("distance-32".into(), false);
-        session.apply_client_setting("render_distance", &json!(32)).unwrap();
+        session
+            .apply_client_setting("render_distance", &json!(32))
+            .unwrap();
         assert_eq!(session.render_distance(), 32);
-        assert_eq!(session.client_settings_snapshot()["render_distance"], json!(32));
+        assert_eq!(
+            session.client_settings_snapshot()["render_distance"],
+            json!(32)
+        );
         assert_eq!(
             UiState::sanitize_setting_value("render_distance", &json!(100)),
             Some(json!(UiState::MAX_RENDER_DISTANCE)),
@@ -1590,31 +1640,38 @@ mod render_distance_wire_tests {
     /// Fog and sky use the client option capped by the server's chunk radius.
     #[test]
     fn server_chunk_radius_caps_the_effective_render_distance() {
-        use crate::protocol::{packet_ids::play::clientbound as cb, Writer};
+        use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
         use crate::session::Phase;
         let mut session = Session::new_mode("effective-distance".into(), false);
         let mut content = Content::test_cube();
         content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
         session.content = Some(content);
         session.phase = "play".into();
-        session.apply_client_setting("render_distance", &json!(8)).unwrap();
+        session
+            .apply_client_setting("render_distance", &json!(8))
+            .unwrap();
         assert_eq!(session.effective_render_distance(), 8);
         for (radius, effective) in [(4, 4), (12, 8), (0, 8)] {
             let mut packet = Writer::default();
             packet.var(radius);
-            session.apply(Phase::Play, cb::SET_CHUNK_CACHE_RADIUS, &packet.0).unwrap();
-            assert_eq!(session.effective_render_distance(), effective, "radius {radius}");
+            session
+                .apply(Phase::Play, cb::SET_CHUNK_CACHE_RADIUS, &packet.0)
+                .unwrap();
+            assert_eq!(
+                session.effective_render_distance(),
+                effective,
+                "radius {radius}"
+            );
         }
         // The option still reports what the player chose.
         assert_eq!(session.render_distance(), 8);
     }
-
 }
 
 #[cfg(test)]
 mod chat_completion_tests {
     use super::*;
-    use crate::protocol::{packet_ids::play::clientbound as cb, Writer};
+    use crate::protocol::{Writer, packet_ids::play::clientbound as cb};
     use crate::ui::Modifiers;
 
     #[test]
@@ -1629,18 +1686,39 @@ mod chat_completion_tests {
         // Root with two literal children, as encoded by the 26.3 commands packet.
         let mut packet = Writer::default();
         packet.var(3);
-        packet.byte(0); packet.var(2); packet.var(1); packet.var(2);
-        packet.byte(1); packet.var(0); packet.string("help");
-        packet.byte(1); packet.var(0); packet.string("hello");
+        packet.byte(0);
+        packet.var(2);
+        packet.var(1);
+        packet.var(2);
+        packet.byte(1);
+        packet.var(0);
+        packet.string("help");
+        packet.byte(1);
+        packet.var(0);
+        packet.string("hello");
         packet.var(0);
         session.apply(Phase::Play, cb::COMMANDS, &packet.0).unwrap();
 
         let ui = session.ui.as_mut().unwrap();
         let content = session.content.as_ref().unwrap();
-        ui.execute(UiIntent::OpenChat { command: true }, &mut session.inventory, content).unwrap();
+        ui.execute(
+            UiIntent::OpenChat { command: true },
+            &mut session.inventory,
+            content,
+        )
+        .unwrap();
         ui.rebuild_for_test(&session.inventory, content).unwrap();
-        ui.execute(UiIntent::Text { text: "he".into() }, &mut session.inventory, content).unwrap();
-        let tab = || UiIntent::Key { key: "Tab".into(), pressed: true, modifiers: Modifiers::default() };
+        ui.execute(
+            UiIntent::Text { text: "he".into() },
+            &mut session.inventory,
+            content,
+        )
+        .unwrap();
+        let tab = || UiIntent::Key {
+            key: "Tab".into(),
+            pressed: true,
+            modifiers: Modifiers::default(),
+        };
         ui.execute(tab(), &mut session.inventory, content).unwrap();
         let first = ui.fields["chat/input"].text.clone();
         assert!(first == "/help" || first == "/hello", "{first}");
@@ -1648,7 +1726,19 @@ mod chat_completion_tests {
         let second = &ui.fields["chat/input"].text;
         assert!(second == "/help" || second == "/hello", "{second}");
         assert_ne!(&first, second);
-        ui.execute(UiIntent::Key { key: "Tab".into(), pressed: true, modifiers: Modifiers { shift: true, ..Modifiers::default() } }, &mut session.inventory, content).unwrap();
+        ui.execute(
+            UiIntent::Key {
+                key: "Tab".into(),
+                pressed: true,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            },
+            &mut session.inventory,
+            content,
+        )
+        .unwrap();
         assert_eq!(ui.fields["chat/input"].text, first);
     }
 
@@ -1663,23 +1753,50 @@ mod chat_completion_tests {
         session.phase = "play".into();
         let mut tree = Writer::default();
         tree.var(3);
-        tree.byte(0); tree.var(1); tree.var(1);
-        tree.byte(1); tree.var(1); tree.var(2); tree.string("msg");
-        tree.byte(18); tree.var(0); tree.string("target");
-        tree.var(5); tree.var(0); tree.string("minecraft:ask_server");
+        tree.byte(0);
+        tree.var(1);
+        tree.var(1);
+        tree.byte(1);
+        tree.var(1);
+        tree.var(2);
+        tree.string("msg");
+        tree.byte(18);
+        tree.var(0);
+        tree.string("target");
+        tree.var(5);
+        tree.var(0);
+        tree.string("minecraft:ask_server");
         tree.var(0);
         session.apply(Phase::Play, cb::COMMANDS, &tree.0).unwrap();
         let ui = session.ui.as_mut().unwrap();
         let content = session.content.as_ref().unwrap();
-        ui.execute(UiIntent::OpenChat { command: true }, &mut session.inventory, content).unwrap();
+        ui.execute(
+            UiIntent::OpenChat { command: true },
+            &mut session.inventory,
+            content,
+        )
+        .unwrap();
         ui.rebuild_for_test(&session.inventory, content).unwrap();
-        ui.execute(UiIntent::Text { text: "msg 😀a tail".into() }, &mut session.inventory, content).unwrap();
+        ui.execute(
+            UiIntent::Text {
+                text: "msg 😀a tail".into(),
+            },
+            &mut session.inventory,
+            content,
+        )
+        .unwrap();
         let field = ui.fields.get_mut("chat/input").unwrap();
         let cursor = "/msg 😀a".len();
         field.select(cursor, cursor).unwrap();
-        let tab = || UiIntent::Key { key: "Tab".into(), pressed: true, modifiers: Modifiers::default() };
+        let tab = || UiIntent::Key {
+            key: "Tab".into(),
+            pressed: true,
+            modifiers: Modifiers::default(),
+        };
         let effects = ui.execute(tab(), &mut session.inventory, content).unwrap();
-        for command in effects.commands { session.execute_ui_command(command).unwrap(); }
+        for command in effects.commands {
+            session.execute_ui_command(command).unwrap();
+        }
         assert_eq!(session.commands.len(), 1);
         assert_eq!(session.commands[0].id, sb::COMMAND_SUGGESTION);
         let mut reader = Reader::new(&session.commands[0].payload.0);
@@ -1689,47 +1806,126 @@ mod chat_completion_tests {
         session.commands.clear(); // Simulate the outbound packet having been sent.
         let response = |id| {
             let mut w = Writer::default();
-            w.var(id); w.var(5); w.var(3); w.var(2);
-            w.string("Alice"); w.byte(0); w.string("Alex"); w.byte(0);
+            w.var(id);
+            w.var(5);
+            w.var(3);
+            w.var(2);
+            w.string("Alice");
+            w.byte(0);
+            w.string("Alex");
+            w.byte(0);
             w.0
         };
-        session.apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &response(id.wrapping_add(1))).unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().fields["chat/input"].text, "/msg 😀a tail");
-        session.apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &response(id)).unwrap();
+        session
+            .apply(
+                Phase::Play,
+                cb::COMMAND_SUGGESTIONS,
+                &response(id.wrapping_add(1)),
+            )
+            .unwrap();
+        assert_eq!(
+            session.ui.as_ref().unwrap().fields["chat/input"].text,
+            "/msg 😀a tail"
+        );
+        session
+            .apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &response(id))
+            .unwrap();
         let ui = session.ui.as_mut().unwrap();
         assert_eq!(ui.fields["chat/input"].text, "/msg Alice tail");
-        ui.execute(tab(), &mut session.inventory, session.content.as_ref().unwrap()).unwrap();
+        ui.execute(
+            tab(),
+            &mut session.inventory,
+            session.content.as_ref().unwrap(),
+        )
+        .unwrap();
         assert_eq!(ui.fields["chat/input"].text, "/msg Alex tail");
-        ui.execute(UiIntent::Key { key: "Tab".into(), pressed: true, modifiers: Modifiers { shift: true, ..Modifiers::default() } }, &mut session.inventory, session.content.as_ref().unwrap()).unwrap();
+        ui.execute(
+            UiIntent::Key {
+                key: "Tab".into(),
+                pressed: true,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Modifiers::default()
+                },
+            },
+            &mut session.inventory,
+            session.content.as_ref().unwrap(),
+        )
+        .unwrap();
         assert_eq!(ui.fields["chat/input"].text, "/msg Alice tail");
         let field = ui.fields.get_mut("chat/input").unwrap();
         field.select(5, 10).unwrap();
-        ui.execute(UiIntent::Text { text: "q".into() }, &mut session.inventory, session.content.as_ref().unwrap()).unwrap();
-        let effects = ui.execute(tab(), &mut session.inventory, session.content.as_ref().unwrap()).unwrap();
-        for command in effects.commands { session.execute_ui_command(command).unwrap(); }
+        ui.execute(
+            UiIntent::Text { text: "q".into() },
+            &mut session.inventory,
+            session.content.as_ref().unwrap(),
+        )
+        .unwrap();
+        let effects = ui
+            .execute(
+                tab(),
+                &mut session.inventory,
+                session.content.as_ref().unwrap(),
+            )
+            .unwrap();
+        for command in effects.commands {
+            session.execute_ui_command(command).unwrap();
+        }
         let mut reader = Reader::new(&session.commands.last().unwrap().payload.0);
         let new_id = reader.var().unwrap();
         assert_ne!(new_id, id);
         session.commands.clear();
         let ui = session.ui.as_mut().unwrap();
-        ui.execute(UiIntent::Text { text: "x".into() }, &mut session.inventory, session.content.as_ref().unwrap()).unwrap();
-        session.apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &response(new_id)).unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().fields["chat/input"].text, "/msg qx tail");
+        ui.execute(
+            UiIntent::Text { text: "x".into() },
+            &mut session.inventory,
+            session.content.as_ref().unwrap(),
+        )
+        .unwrap();
+        session
+            .apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &response(new_id))
+            .unwrap();
+        assert_eq!(
+            session.ui.as_ref().unwrap().fields["chat/input"].text,
+            "/msg qx tail"
+        );
         let ui = session.ui.as_mut().unwrap();
-        let effects = ui.execute(
-            UiIntent::Key { key: "Tab".into(), pressed: true, modifiers: Modifiers { shift: true, ..Modifiers::default() } },
-            &mut session.inventory, session.content.as_ref().unwrap()
-        ).unwrap();
-        for command in effects.commands { session.execute_ui_command(command).unwrap(); }
+        let effects = ui
+            .execute(
+                UiIntent::Key {
+                    key: "Tab".into(),
+                    pressed: true,
+                    modifiers: Modifiers {
+                        shift: true,
+                        ..Modifiers::default()
+                    },
+                },
+                &mut session.inventory,
+                session.content.as_ref().unwrap(),
+            )
+            .unwrap();
+        for command in effects.commands {
+            session.execute_ui_command(command).unwrap();
+        }
         let mut reader = Reader::new(&session.commands.last().unwrap().payload.0);
         let reverse_id = reader.var().unwrap();
         session.commands.clear();
         let mut reverse_response = Writer::default();
-        reverse_response.var(reverse_id); reverse_response.var(5); reverse_response.var(2); reverse_response.var(2);
-        reverse_response.string("Alice"); reverse_response.byte(0);
-        reverse_response.string("Alex"); reverse_response.byte(0);
-        session.apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &reverse_response.0).unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().fields["chat/input"].text, "/msg Alex tail");
+        reverse_response.var(reverse_id);
+        reverse_response.var(5);
+        reverse_response.var(2);
+        reverse_response.var(2);
+        reverse_response.string("Alice");
+        reverse_response.byte(0);
+        reverse_response.string("Alex");
+        reverse_response.byte(0);
+        session
+            .apply(Phase::Play, cb::COMMAND_SUGGESTIONS, &reverse_response.0)
+            .unwrap();
+        assert_eq!(
+            session.ui.as_ref().unwrap().fields["chat/input"].text,
+            "/msg Alex tail"
+        );
     }
 }
 
