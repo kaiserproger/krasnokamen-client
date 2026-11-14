@@ -35,10 +35,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from mcp_client import Client  # noqa: E402
 
 # Equipment slots read for side gear: off-hand shield, chest (surcoat or dyed
-# padding), legs (dyed). Shields and surcoats carry solaris_battle:red_*/blue_*;
+# padding), legs (dyed). Shields and surcoats carry krasnokamen_battle:red_*/blue_*;
 # plain kit is told apart by its dye (red 0x6E1414-like, blue 0x243A7F-like).
 SIDE_SLOTS = (1, 4, 3)
-SIDE = re.compile(r"solaris_battle:(red|blue)_")
+SIDE = re.compile(r"krasnokamen_battle:(red|blue)_")
 
 
 def log(*parts):

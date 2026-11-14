@@ -1,4 +1,4 @@
-//! Keyframe clip files (`assets/solaris/animations/*.animation.json`).
+//! Keyframe clip files (`assets/krasnokamen/animations/*.animation.json`).
 //!
 //! The file layout is the Bedrock entity-animation subset documented at
 //! <https://bedrock.dev/docs/stable/Animations> and the schema
@@ -17,8 +17,8 @@
 //! holds its value, otherwise linear. Before the first key the first `pre` applies, after
 //! the last key the last `post`.
 //!
-//! Solaris rules on top of the subset, all fail-closed at load:
-//! * values are numbers in the Solaris rig convention (`solaris_models.rs`): rotation in
+//! Krasnokamen rules on top of the subset, all fail-closed at load:
+//! * values are numbers in the Krasnokamen rig convention (`krasnokamen_models.rs`): rotation in
 //!   degrees applied Z, then Y, then X; position in pixels with +Y down and -Z the front.
 //!   This is not Bedrock's axis convention (Bedrock negates X/Y rotation and X position).
 //! * bones are the canonical parts in [`Part`]; MoLang strings and unknown bones are
@@ -165,19 +165,26 @@ struct BoneSpec {
 /// `[x, y, z]` or one number for all axes.
 fn vec3(value: &Value, what: &str) -> Result<Vec3> {
     let number = |value: &Value| {
-        value.as_f64().map(|v| v as f32).ok_or_else(|| format!("{what}: {value} is not a number"))
+        value
+            .as_f64()
+            .map(|v| v as f32)
+            .ok_or_else(|| format!("{what}: {value} is not a number"))
     };
     match value {
-        Value::Array(items) if items.len() == 3 => {
-            Ok(Vec3::new(number(&items[0])?, number(&items[1])?, number(&items[2])?))
-        }
+        Value::Array(items) if items.len() == 3 => Ok(Vec3::new(
+            number(&items[0])?,
+            number(&items[1])?,
+            number(&items[2])?,
+        )),
         Value::Number(_) => Ok(Vec3::splat(number(value)?)),
         _ => Err(format!("{what}: {value} is not a vector")),
     }
 }
 
 fn seconds(text: &str, what: &str) -> Result<f32> {
-    let time: f32 = text.parse().map_err(|_| format!("{what}: time {text:?} is not seconds"))?;
+    let time: f32 = text
+        .parse()
+        .map_err(|_| format!("{what}: time {text:?} is not seconds"))?;
     if !time.is_finite() || time < 0. {
         return Err(format!("{what}: time {text:?} out of range"));
     }
@@ -187,12 +194,24 @@ fn seconds(text: &str, what: &str) -> Result<f32> {
 fn key(time: f32, value: &Value, what: &str) -> Result<Key> {
     let Value::Object(fields) = value else {
         let value = vec3(value, what)?;
-        return Ok(Key { time, pre: value, post: value, lerp: Lerp::Linear, split: false });
+        return Ok(Key {
+            time,
+            pre: value,
+            post: value,
+            lerp: Lerp::Linear,
+            split: false,
+        });
     };
-    if let Some(unknown) = fields.keys().find(|name| !matches!(name.as_str(), "pre" | "post" | "lerp_mode")) {
+    if let Some(unknown) = fields
+        .keys()
+        .find(|name| !matches!(name.as_str(), "pre" | "post" | "lerp_mode"))
+    {
         return Err(format!("{what}: unknown keyframe field {unknown:?}"));
     }
-    let lerp = match fields.get("lerp_mode").map(|mode| mode.as_str().ok_or_else(|| format!("{what}: lerp_mode {mode}"))) {
+    let lerp = match fields.get("lerp_mode").map(|mode| {
+        mode.as_str()
+            .ok_or_else(|| format!("{what}: lerp_mode {mode}"))
+    }) {
         None => Lerp::Linear,
         Some(mode) => match mode? {
             "linear" => Lerp::Linear,
@@ -208,14 +227,21 @@ fn key(time: f32, value: &Value, what: &str) -> Result<Key> {
         (Some(value), None) | (None, Some(value)) => (value, value),
         (None, None) => return Err(format!("{what}: key at {time} has no value")),
     };
-    Ok(Key { time, pre, post, lerp, split: fields.contains_key("pre") && fields.contains_key("post") })
+    Ok(Key {
+        time,
+        pre,
+        post,
+        lerp,
+        split: fields.contains_key("pre") && fields.contains_key("post"),
+    })
 }
 
 fn curve(spec: &Value, what: &str) -> Result<Curve> {
     let mut keys = match spec {
-        Value::Object(map) => {
-            map.iter().map(|(time, value)| key(seconds(time, what)?, value, what)).collect::<Result<Vec<_>>>()?
-        }
+        Value::Object(map) => map
+            .iter()
+            .map(|(time, value)| key(seconds(time, what)?, value, what))
+            .collect::<Result<Vec<_>>>()?,
         constant => vec![key(0., constant, what)?],
     };
     keys.sort_by(|a, b| a.time.total_cmp(&b.time));
@@ -225,7 +251,10 @@ fn curve(spec: &Value, what: &str) -> Result<Curve> {
     if keys.windows(2).any(|pair| pair[0].time == pair[1].time) {
         return Err(format!("{what}: duplicate keyframe time"));
     }
-    if keys.iter().any(|key| !key.pre.is_finite() || !key.post.is_finite()) {
+    if keys
+        .iter()
+        .any(|key| !key.pre.is_finite() || !key.post.is_finite())
+    {
         return Err(format!("{what}: non-finite value"));
     }
     Ok(Curve { keys })
@@ -248,14 +277,17 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Clip>> {
         let mut tracks = Vec::with_capacity(spec.bones.len());
         let mut last_key = 0_f32;
         for (bone, channels) in spec.bones {
-            let part = Part::parse(&bone).ok_or_else(|| format!("{name}: unknown bone {bone:?}"))?;
+            let part =
+                Part::parse(&bone).ok_or_else(|| format!("{name}: unknown bone {bone:?}"))?;
             let what = |channel: &str| format!("{name}.{bone}.{channel}");
             let mut channel = |spec: Option<Value>, label: &str| -> Result<Option<Curve>> {
-                spec.map(|spec| curve(&spec, &what(label))).transpose().inspect(|curve| {
-                    if let Some(curve) = curve {
-                        last_key = last_key.max(curve.keys.last().unwrap().time);
-                    }
-                })
+                spec.map(|spec| curve(&spec, &what(label)))
+                    .transpose()
+                    .inspect(|curve| {
+                        if let Some(curve) = curve {
+                            last_key = last_key.max(curve.keys.last().unwrap().time);
+                        }
+                    })
             };
             let track = Track {
                 part,
@@ -295,7 +327,14 @@ pub(crate) fn parse(source: &str) -> Result<Vec<Clip>> {
                 }
             }
         }
-        clips.push(Clip { name, length, looping, replace: spec.override_previous_animation, contact, tracks });
+        clips.push(Clip {
+            name,
+            length,
+            looping,
+            replace: spec.override_previous_animation,
+            contact,
+            tracks,
+        });
     }
     Ok(clips)
 }

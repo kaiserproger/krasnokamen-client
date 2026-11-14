@@ -199,7 +199,7 @@ class MarchingRank:
                 raise RuntimeError("player inventory slot not received")
             self.entity_reads.append(arguments.get("entity_id"))
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
-            return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
+            return {"components": {"minecraft:item_model": f"krasnokamen_battle:{side}_shield"}}
         if name == "minecraft_respawn":
             self.dead, self.me = False, [30.0, 30.0]
             return {"status": "ok"}

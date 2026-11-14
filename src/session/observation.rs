@@ -13,14 +13,20 @@ impl Session {
             .map_or(Value::Null, Terrain::capture_metrics)
     }
     pub(crate) fn terrain_wait_epochs(&self) -> (u64, u64, u64) {
-        (self.connection_epoch, self.dimension_epoch, self.resource_epoch)
+        (
+            self.connection_epoch,
+            self.dimension_epoch,
+            self.resource_epoch,
+        )
     }
     pub(crate) fn terrain_settled_revisions(&self, keys: &[[i32; 3]]) -> Option<Vec<u64>> {
         let terrain = self.terrain.as_ref()?;
-        keys.iter().map(|key| {
-            let revision = terrain.settled_revision(*key)?;
-            (self.scene.chunks.get(key)?.revision == revision).then_some(revision)
-        }).collect()
+        keys.iter()
+            .map(|key| {
+                let revision = terrain.settled_revision(*key)?;
+                (self.scene.chunks.get(key)?.revision == revision).then_some(revision)
+            })
+            .collect()
     }
     pub fn minecraft_observation(&self) -> Value {
         let screen = self
@@ -66,7 +72,10 @@ impl Session {
             "spawn_meshes_presented": presented,
         });
         value["inputs"] = json!({"held": self.keys});
-        value["using"] = self.player.using_observation(self.client_tick).unwrap_or(Value::Null);
+        value["using"] = self
+            .player
+            .using_observation(self.client_tick)
+            .unwrap_or(Value::Null);
         value["loader"] = self.loader.observation();
         value["far_terrain"] = self.far.metrics();
         if let Some(error) = &self.error {
@@ -82,7 +91,10 @@ impl Session {
                 value["title_username"] = json!(ui.title_field("title/username"));
                 value["title_error"] = json!(ui.title_error_text());
             }
-            if matches!(ui.screen(), crate::ui::Screen::Singleplayer | crate::ui::Screen::SingleplayerStarting) {
+            if matches!(
+                ui.screen(),
+                crate::ui::Screen::Singleplayer | crate::ui::Screen::SingleplayerStarting
+            ) {
                 value["singleplayer"] = json!({
                     "status": if ui.screen() == crate::ui::Screen::SingleplayerStarting {
                         Some(ui.local_status.as_str())
@@ -153,17 +165,25 @@ impl Session {
                 .ok()
                 .flatten(),
         );
-        for (key, slot) in [("selected_map", 36 + u16::from(self.inventory.selected_slot)), ("offhand_map", 45)] {
-            let map = self.inventory.received_player_slot(slot)
-                .ok().flatten()
+        for (key, slot) in [
+            ("selected_map", 36 + u16::from(self.inventory.selected_slot)),
+            ("offhand_map", 45),
+        ] {
+            let map = self
+                .inventory
+                .received_player_slot(slot)
+                .ok()
+                .flatten()
                 .and_then(|stack| stack.component("minecraft:map_id"))
                 .and_then(Value::as_i64)
                 .and_then(|id| i32::try_from(id).ok())
                 .and_then(|id| self.ui.as_ref()?.maps().get(&id));
-            value[key] = map.map_or(Value::Null, |map| json!({
-                "id": map.id, "revision": map.revision, "visible_pixels": map.visible_pixels(),
-                "visible_pixel_runs": map.visible_pixel_runs(), "origin": "received_map_packets"
-            }));
+            value[key] = map.map_or(Value::Null, |map| {
+                json!({
+                    "id": map.id, "revision": map.revision, "visible_pixels": map.visible_pixels(),
+                    "visible_pixel_runs": map.visible_pixel_runs(), "origin": "received_map_packets"
+                })
+            });
         }
         let mut inventory = Vec::new();
         for slot in 0..43u16 {
@@ -332,13 +352,16 @@ impl Session {
     /// Shared transport state is execution context, not an unsolicited full
     /// world query. Canonical observations run on demand on the session owner.
     pub(crate) fn execution_observation(&self) -> Observation {
-        self.observation_envelope(json!({
-            "snapshot_kind": "execution_context",
-            "phase": self.phase,
-            "error": self.error,
-            "presentation_available": self.presentation,
-            "state_version": self.state_version,
-        }), false)
+        self.observation_envelope(
+            json!({
+                "snapshot_kind": "execution_context",
+                "phase": self.phase,
+                "error": self.error,
+                "presentation_available": self.presentation,
+                "state_version": self.state_version,
+            }),
+            false,
+        )
     }
 
     fn observation_envelope(&self, data: Value, truncated: bool) -> Observation {
@@ -387,9 +410,10 @@ impl Session {
     pub(crate) fn spawn_meshes_ready(&self) -> bool {
         self.phase == "play"
             && self.play_world_presentation_ready()
-            && self.terrain.as_ref().is_some_and(|terrain| {
-                terrain.spawn_meshes_ready(self.player.eye_position())
-            })
+            && self
+                .terrain
+                .as_ref()
+                .is_some_and(|terrain| terrain.spawn_meshes_ready(self.player.eye_position()))
     }
     pub(crate) fn note_renderer_scene_confirmation(
         &mut self,
@@ -398,9 +422,9 @@ impl Session {
         revision: u64,
     ) {
         if (connection, dimension) == self.context_epochs()
-            && !self.renderer_scene_confirmation.is_some_and(|(c, d, _)| {
-                (c, d) == (connection, dimension)
-            })
+            && !self
+                .renderer_scene_confirmation
+                .is_some_and(|(c, d, _)| (c, d) == (connection, dimension))
         {
             self.renderer_scene_confirmation = Some((connection, dimension, revision));
             self.changed_state();
@@ -410,9 +434,11 @@ impl Session {
         !self.presentation
             || self.player.death_message.is_some()
             || self.player.health.is_some_and(|health| health <= 0.)
-            || self.renderer_scene_confirmation.is_some_and(|(connection, dimension, _)| {
-                (connection, dimension) == self.context_epochs()
-            })
+            || self
+                .renderer_scene_confirmation
+                .is_some_and(|(connection, dimension, _)| {
+                    (connection, dimension) == self.context_epochs()
+                })
     }
     pub(crate) fn play_world_presentation_ready(&self) -> bool {
         if !self.player.pose_known || self.dimension.is_none() {
@@ -444,7 +470,8 @@ impl Session {
                 Some("Preparing terrain and light")
             }
             _ => None,
-        }.map(str::to_owned);
+        }
+        .map(str::to_owned);
         let local_air = self.local_air_supply();
         let scoping = self.first_person_scoping();
         if let Some(ui) = &mut self.ui {
@@ -478,24 +505,46 @@ impl Session {
                 && self.keys.contains("player_list");
             let players = if player_list_visible {
                 let board = &ui.network_hud.scoreboard;
-                let mut profiles: Vec<_> = self.entities.player_profiles().filter(|p| p.listed).collect();
+                let mut profiles: Vec<_> = self
+                    .entities
+                    .player_profiles()
+                    .filter(|p| p.listed)
+                    .collect();
                 // 26.3 PlayerTabOverlay static comparator, javap -c -p: negated
                 // order, spectator last, team name, then compareToIgnoreCase.
                 profiles.sort_by(|a, b| {
-                    a.list_order.wrapping_neg().cmp(&b.list_order.wrapping_neg())
+                    a.list_order
+                        .wrapping_neg()
+                        .cmp(&b.list_order.wrapping_neg())
                         .then_with(|| (a.game_mode == 3).cmp(&(b.game_mode == 3)))
-                        .then_with(|| board.membership.get(&a.name).map_or("", String::as_str)
-                            .encode_utf16().cmp(board.membership.get(&b.name).map_or("", String::as_str).encode_utf16()))
+                        .then_with(|| {
+                            board
+                                .membership
+                                .get(&a.name)
+                                .map_or("", String::as_str)
+                                .encode_utf16()
+                                .cmp(
+                                    board
+                                        .membership
+                                        .get(&b.name)
+                                        .map_or("", String::as_str)
+                                        .encode_utf16(),
+                                )
+                        })
                         .then_with(|| crate::ui::UiState::compare_player_names(&a.name, &b.name))
                 });
-                profiles.into_iter().take(80).map(|p| crate::ui::PlayerListEntry {
-                    id: p.uuid.clone(),
-                    name: p.display_name.clone().unwrap_or_else(|| {
-                        board.formatted_name(&p.name, None).as_ref().clone()
-                    }),
-                    latency: p.latency,
-                    game_mode: p.game_mode,
-                }).collect()
+                profiles
+                    .into_iter()
+                    .take(80)
+                    .map(|p| crate::ui::PlayerListEntry {
+                        id: p.uuid.clone(),
+                        name: p.display_name.clone().unwrap_or_else(|| {
+                            board.formatted_name(&p.name, None).as_ref().clone()
+                        }),
+                        latency: p.latency,
+                        game_mode: p.game_mode,
+                    })
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -517,7 +566,11 @@ impl Session {
                     level: Some(self.player.experience_level),
                     player_tick: Some(self.client_tick as i32),
                     attack: Some(self.player.attack_strength(0.)),
-                    vignette: if world_ready { self.environment.vignette() } else { 0. },
+                    vignette: if world_ready {
+                        self.environment.vignette()
+                    } else {
+                        0.
+                    },
                     players,
                     player_list_visible,
                     scoping,
@@ -532,15 +585,20 @@ impl Session {
                     .permission_level
                     .is_some_and(|level| level >= 2),
             })?;
-            if self.presentation && self.inventory.screen_open
+            if self.presentation
+                && self.inventory.screen_open
                 && self.inventory.menu().kind == MenuKind::Inventory
             {
-                let textures = self.player.uuid.as_deref()
+                let textures = self
+                    .player
+                    .uuid
+                    .as_deref()
                     .and_then(|uuid| self.entities.player_profile(uuid))
                     .and_then(|profile| profile.textures);
                 ui.set_player_preview(
                     self.content.as_ref().ok_or("content unavailable")?,
-                    self.player.uuid.as_deref(), textures,
+                    self.player.uuid.as_deref(),
+                    textures,
                 )?;
             }
             if ui.screen() != crate::ui::Screen::Loader {
@@ -581,7 +639,10 @@ impl Session {
         // sections gained or lost a draw; re-evaluate just those columns.
         // Rescanning every loaded column on each refresh cost milliseconds
         // per call at a 32-chunk view.
-        let changes = self.terrain.as_mut().and_then(Terrain::take_coverage_changes);
+        let changes = self
+            .terrain
+            .as_mut()
+            .and_then(Terrain::take_coverage_changes);
         let mut coverage_changed = false;
         match changes {
             Some(columns) => {
@@ -607,9 +668,12 @@ impl Session {
                 let mut covered = std::mem::take(&mut self.scene.far.covered_columns);
                 let previous = covered.clone();
                 covered.clear();
-                covered.extend(self.world.chunks()
-                    .map(|(&column, _)| column)
-                    .filter(|&column| self.far_column_ready(column)));
+                covered.extend(
+                    self.world
+                        .chunks()
+                        .map(|(&column, _)| column)
+                        .filter(|&column| self.far_column_ready(column)),
+                );
                 coverage_changed = covered != previous;
                 self.scene.far.covered_columns = covered;
             }
@@ -617,11 +681,13 @@ impl Session {
         let covered = &self.scene.far.covered_columns;
         let requests = self.far.update(
             self.scene.camera_position,
-            self.world.chunk_lifecycle_revision().wrapping_add(self.scene.revision),
+            self.world
+                .chunk_lifecycle_revision()
+                .wrapping_add(self.scene.revision),
             &|column| covered.binary_search(&column).is_ok(),
         );
         for payload in requests {
-            if let Err(error) = self.send_custom("solaris:lod/request", &payload) {
+            if let Err(error) = self.send_custom("krasnokamen:lod/request", &payload) {
                 self.event(json!({"type":"far_terrain_request_failed","error":error}));
                 break;
             }
@@ -676,7 +742,10 @@ impl Session {
         // Early v2 login may deliver player state before the spawn chunk and
         // its light. Do not submit known-lit meshes until the causal lightmap
         // can be built; that is a loading state, not a fatal renderer error.
-        let terrain_start = self.profile_scene_ms.as_ref().map(|_| std::time::Instant::now());
+        let terrain_start = self
+            .profile_scene_ms
+            .as_ref()
+            .map(|_| std::time::Instant::now());
         let mesh_changed = if !animation_only && (world_ready || self.scene.lightmap.is_some()) {
             self.terrain.as_mut().ok_or("terrain unavailable")?.update(
                 &self.world,
@@ -705,8 +774,14 @@ impl Session {
             return Ok(true);
         }
         let item_context = if world_ready {
-            let (sun_angle, moon_phase) = self.environment.item_time_attributes(&self.world, self.player.position)?;
-            let dimension = self.dimension.as_ref().ok_or("item dimension unavailable")?.clone();
+            let (sun_angle, moon_phase) = self
+                .environment
+                .item_time_attributes(&self.world, self.player.position)?;
+            let dimension = self
+                .dimension
+                .as_ref()
+                .ok_or("item dimension unavailable")?
+                .clone();
             crate::ui::items::ItemContext {
                 dimension: dimension.clone(),
                 world: Some(crate::ui::item_dynamic::ItemWorldContext {
@@ -743,13 +818,13 @@ impl Session {
         }
         self.scene.entity_presentation = Default::default();
         if !animation_only {
-        self.scene.overlay.vertices.clear();
-        for indices in &mut self.scene.overlay.indices {
-            indices.clear();
-        }
-        for indices in &mut self.scene.overlay.overlay_blends {
-            indices.clear();
-        }
+            self.scene.overlay.vertices.clear();
+            for indices in &mut self.scene.overlay.indices {
+                indices.clear();
+            }
+            for indices in &mut self.scene.overlay.overlay_blends {
+                indices.clear();
+            }
         }
         if world_ready {
             self.entities.sync_local_avatar(
@@ -761,52 +836,52 @@ impl Session {
             )?;
             self.entities.set_local_visible(self.camera_mode != 0);
             if !animation_only {
-            let medium = match self.player.eye_medium(
-                &self.world,
-                self.content.as_ref().ok_or("content unavailable")?,
-            )? {
-                Some(FluidKind::Water) => CameraMedium::Water,
-                Some(FluidKind::Lava) => CameraMedium::Lava,
-                None => CameraMedium::Atmospheric,
-            };
-            let facts = PlayerEnvironmentFacts {
-                medium,
-                spectator: self.player.game_mode == 3,
-                fire_resistance: self
-                    .player
-                    .effect_duration("minecraft:fire_resistance", self.client_tick)
-                    .is_some(),
-                night_vision_duration: self
-                    .player
-                    .effect_duration("minecraft:night_vision", self.client_tick),
-                blindness_duration: self
-                    .player
-                    .effect_duration("minecraft:blindness", self.client_tick),
-                darkness_present: self
-                    .player
-                    .effect_duration("minecraft:darkness", self.client_tick)
-                    .is_some(),
-                water_vision: self.player.water_vision,
-                conduit_power: self
-                    .player
-                    .effect_duration("minecraft:conduit_power", self.client_tick)
-                    .is_some(),
-                entity_tick: self.world_tick,
-                flat_world: self.flat_world,
-                ..Default::default()
-            };
-            self.scene.environment = self.environment.evaluate(
-                &self.world,
-                self.content.as_ref().ok_or("content unavailable")?,
-                self.scene.camera_position,
-                self.player.yaw,
-                self.player.pitch,
-                self.effective_render_distance(),
-                &facts,
-            )?;
-            self.scene.lightmap = self.environment.lightmap_texture();
-            self.scene.shader_game_time =
-                Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
+                let medium = match self.player.eye_medium(
+                    &self.world,
+                    self.content.as_ref().ok_or("content unavailable")?,
+                )? {
+                    Some(FluidKind::Water) => CameraMedium::Water,
+                    Some(FluidKind::Lava) => CameraMedium::Lava,
+                    None => CameraMedium::Atmospheric,
+                };
+                let facts = PlayerEnvironmentFacts {
+                    medium,
+                    spectator: self.player.game_mode == 3,
+                    fire_resistance: self
+                        .player
+                        .effect_duration("minecraft:fire_resistance", self.client_tick)
+                        .is_some(),
+                    night_vision_duration: self
+                        .player
+                        .effect_duration("minecraft:night_vision", self.client_tick),
+                    blindness_duration: self
+                        .player
+                        .effect_duration("minecraft:blindness", self.client_tick),
+                    darkness_present: self
+                        .player
+                        .effect_duration("minecraft:darkness", self.client_tick)
+                        .is_some(),
+                    water_vision: self.player.water_vision,
+                    conduit_power: self
+                        .player
+                        .effect_duration("minecraft:conduit_power", self.client_tick)
+                        .is_some(),
+                    entity_tick: self.world_tick,
+                    flat_world: self.flat_world,
+                    ..Default::default()
+                };
+                self.scene.environment = self.environment.evaluate(
+                    &self.world,
+                    self.content.as_ref().ok_or("content unavailable")?,
+                    self.scene.camera_position,
+                    self.player.yaw,
+                    self.player.pitch,
+                    self.effective_render_distance(),
+                    &facts,
+                )?;
+                self.scene.lightmap = self.environment.lightmap_texture();
+                self.scene.shader_game_time =
+                    Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
             }
             super::weather::append(
                 &self.world,
@@ -828,7 +903,10 @@ impl Session {
                 &self.scene.environment,
                 &mut self.scene.dynamic,
             )?;
-            let entity_start = self.profile_scene_ms.as_ref().map(|_| std::time::Instant::now());
+            let entity_start = self
+                .profile_scene_ms
+                .as_ref()
+                .map(|_| std::time::Instant::now());
             {
                 let content = self.content.as_ref().ok_or("content unavailable")?;
                 let world = &self.world;
@@ -840,21 +918,45 @@ impl Session {
                         .map(|(sky, block)| [f32::from(sky), f32::from(block)]))
                 };
                 let item_time_at = |point| self.environment.item_time_attributes(world, point);
-                let terrain = self.terrain.as_ref().ok_or("entity tint terrain unavailable")?;
+                let terrain = self
+                    .terrain
+                    .as_ref()
+                    .ok_or("entity tint terrain unavailable")?;
                 let tint_source = |tint, position| terrain.sample_tint(world, tint, position);
-                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.world_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), maps: self.ui.as_ref().ok_or("entity map UI state unavailable")?.map_render_view(), tint_source: &tint_source, light: &sample_light, bed_direction: &|position| {
-                    let state = world.block(position)?;
-                    if !content.name(state)?.ends_with("_bed") {
-                        return None;
-                    }
-                    match content.state_properties(state)?.get("facing")?.as_str() {
-                        "north" => Some([0, -1]),
-                        "south" => Some([0, 1]),
-                        "west" => Some([-1, 0]),
-                        "east" => Some([1, 0]),
-                        _ => None,
-                    }
-                } }, &mut self.scene.dynamic)?;
+                self.scene.entity_presentation = self.entities.append_geometry(
+                    crate::entities::EntityRenderFrame {
+                        content,
+                        origin: self.scene.origin,
+                        camera: self.scene.camera_position,
+                        camera_rotation: [self.scene.yaw, self.scene.pitch],
+                        radius: self.render_distance as f32 * 16.,
+                        tick: self.world_tick,
+                        partial: self.presentation_partial,
+                        game_time: self.environment.game_time(),
+                        clock_environment: Some((&item_context, &item_time_at)),
+                        maps: self
+                            .ui
+                            .as_ref()
+                            .ok_or("entity map UI state unavailable")?
+                            .map_render_view(),
+                        tint_source: &tint_source,
+                        light: &sample_light,
+                        bed_direction: &|position| {
+                            let state = world.block(position)?;
+                            if !content.name(state)?.ends_with("_bed") {
+                                return None;
+                            }
+                            match content.state_properties(state)?.get("facing")?.as_str() {
+                                "north" => Some([0, -1]),
+                                "south" => Some([0, 1]),
+                                "west" => Some([-1, 0]),
+                                "east" => Some([1, 0]),
+                                _ => None,
+                            }
+                        },
+                    },
+                    &mut self.scene.dynamic,
+                )?;
                 self.entities.append_shadow_geometry(
                     content,
                     world,
@@ -864,7 +966,13 @@ impl Session {
                     self.presentation_partial,
                     &mut self.scene.dynamic,
                 )?;
-                let entity_indices = self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>();
+                let entity_indices = self
+                    .scene
+                    .dynamic
+                    .indices
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>();
                 self.scene.entity_presentation.entity_indices = entity_indices;
                 let blocks = self.entities.append_static_block_geometry(
                     crate::entities::StaticBlockSceneFrame {
@@ -887,8 +995,14 @@ impl Session {
                     &mut self.scene.dynamic,
                 )?;
                 self.scene.portal_sprites = portal_sprites(content, &self.scene.dynamic)?;
-                self.scene.entity_presentation.block_entity_indices =
-                    self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>() - entity_indices;
+                self.scene.entity_presentation.block_entity_indices = self
+                    .scene
+                    .dynamic
+                    .indices
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    - entity_indices;
                 self.scene.entity_presentation.block_entities += blocks.block_entities;
                 self.scene.entity_presentation.vertices += blocks.vertices;
                 self.scene.entity_presentation.lighting_pending += blocks.lighting_pending;
@@ -896,12 +1010,9 @@ impl Session {
                     .entity_presentation
                     .unrendered
                     .extend(blocks.unrendered);
-                let hit = self.player.raycast(
-                    world,
-                    content,
-                    &self.entities,
-                    self.world_tick,
-                )?;
+                let hit = self
+                    .player
+                    .raycast(world, content, &self.entities, self.world_tick)?;
                 if let Some(Hit::Block(block)) = &hit {
                     super::block_outline::append(
                         content,
@@ -927,7 +1038,9 @@ impl Session {
                         &crate::entities::NameplateView {
                             crosshair,
                             // The Set Camera entity's own name is hidden, as vanilla.
-                            camera_entity: Some(self.player.camera_entity.unwrap_or(self.player.entity_id)),
+                            camera_entity: Some(
+                                self.player.camera_entity.unwrap_or(self.player.entity_id),
+                            ),
                             viewer_name: self.username.as_deref(),
                             viewer_spectator: self.player.game_mode == 3,
                             render_names: !ui
@@ -950,15 +1063,31 @@ impl Session {
                 if self.camera_mode == 0
                     && !self.first_person_scoping()
                     && (self.hidden_hud_keeps_hand
-                        || !self.ui.as_ref().and_then(|ui| ui.setting("hide_hud")).and_then(Value::as_bool).unwrap_or(false))
+                        || !self
+                            .ui
+                            .as_ref()
+                            .and_then(|ui| ui.setting("hide_hud"))
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false))
                     && let Some(light) = sample_light(self.player.eye_position())?
                 {
-                    let result = self.player.append_first_person(content, &self.inventory, &mut self.entities, &mut self.scene, crate::player::FirstPersonFrame { partial: self.local_partial, light, item_context: &item_context, ui: self.ui.as_ref() });
+                    let result = self.player.append_first_person(
+                        content,
+                        &self.inventory,
+                        &mut self.entities,
+                        &mut self.scene,
+                        crate::player::FirstPersonFrame {
+                            partial: self.local_partial,
+                            light,
+                            item_context: &item_context,
+                            ui: self.ui.as_ref(),
+                        },
+                    );
                     if let Err(reason) = result {
-                        self.scene.entity_presentation.unrendered.insert(
-                            "local:first_person".into(),
-                            reason,
-                        );
+                        self.scene
+                            .entity_presentation
+                            .unrendered
+                            .insert("local:first_person".into(), reason);
                     }
                 }
             }
@@ -995,7 +1124,10 @@ impl Session {
         }
         // This frame's crowd instances (none when the entity pass did not run).
         self.entities.take_crowd(&mut self.scene.crowd);
-        let ui_start = self.profile_scene_ms.as_ref().map(|_| std::time::Instant::now());
+        let ui_start = self
+            .profile_scene_ms
+            .as_ref()
+            .map(|_| std::time::Instant::now());
         if !animation_only && let Some(ui) = &mut self.ui {
             let content = self.content.as_ref().ok_or("content unavailable")?;
             ui.render(content, &self.inventory, &mut self.scene.overlay)?;
@@ -1026,7 +1158,11 @@ impl Session {
         let mut lines = Vec::new();
         // The renderer owns the windowed submission rate. Until its first
         // complete window, omit FPS rather than showing a bursty reciprocal.
-        if let Some(fps) = render.get("fps").and_then(Value::as_f64).filter(|fps| fps.is_finite()) {
+        if let Some(fps) = render
+            .get("fps")
+            .and_then(Value::as_f64)
+            .filter(|fps| fps.is_finite())
+        {
             let mut line = format!("{} fps", fps.round() as u64);
             if let Some(wall) = render.get("frame_wall_ms").and_then(Value::as_f64)
                 && wall.is_finite()
@@ -1132,15 +1268,18 @@ mod debug_tests {
             "no fabricated fps: {bare:?}"
         );
         let initial = session.debug_lines(&json!({"submitted_frame_interval_ms": 3.0}));
-        assert!(initial.iter().all(|line| !line.contains("fps")), "{initial:?}");
+        assert!(
+            initial.iter().all(|line| !line.contains("fps")),
+            "{initial:?}"
+        );
         assert!(bare.iter().all(|l| !l.starts_with("draws:")), "{bare:?}");
         assert!(bare.iter().any(|l| l.starts_with("XYZ: ")), "{bare:?}");
         assert!(bare.len() <= 16, "{bare:?}");
     }
     #[test]
     fn rc1_tab_roster_packet_visibility_and_release() {
-        use crate::protocol::{packet_ids::play::clientbound as cb, network::Phase, Writer};
         use crate::api::InputIntent;
+        use crate::protocol::{Writer, network::Phase, packet_ids::play::clientbound as cb};
 
         let mut session = Session::new_mode("tab-test".into(), false);
         let mut content = crate::protocol::content::Content::test_cube();
@@ -1162,7 +1301,9 @@ mod debug_tests {
             add.var(0);
             add.byte(1);
         }
-        session.apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &add.0).unwrap();
+        session
+            .apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &add.0)
+            .unwrap();
         let mut header = Writer::default();
         for text in ["Roster header\nSecond line", "Roster footer\nSecond line"] {
             header.byte(8); // network NBT string component
@@ -1173,24 +1314,40 @@ mod debug_tests {
         session.sync_ui_state(true).unwrap();
         assert!(!session.ui.as_ref().unwrap().hud.player_list_visible);
         assert!(matches!(
-            crate::minecraft::start(&mut session, "minecraft_press_inputs",
-                &json!({"keys":["key.keyboard.tab"],"ticks":1,"hold":true})).unwrap(),
+            crate::minecraft::start(
+                &mut session,
+                "minecraft_press_inputs",
+                &json!({"keys":["key.keyboard.tab"],"ticks":1,"hold":true})
+            )
+            .unwrap(),
             crate::minecraft::Outcome::Complete(_)
         ));
         session.sync_ui_state(true).unwrap();
         let ui = session.ui.as_mut().unwrap();
         assert!(ui.hud.player_list_visible);
         assert_eq!(ui.hud.players.len(), 2);
-        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap()).unwrap();
+        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap())
+            .unwrap();
         let nodes = &ui.nodes;
         let header = nodes.iter().find(|n| n.id == "tab/header").unwrap();
         let footer = nodes.iter().find(|n| n.id == "tab/footer").unwrap();
         assert_eq!(header.label, "Roster header\nSecond line");
         assert_eq!(footer.label, "Roster footer\nSecond line");
-        let names: Vec<_> = nodes.iter().filter(|n| n.id.starts_with("tab/player/")).map(|n| n.label.as_str()).collect();
+        let names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.id.starts_with("tab/player/"))
+            .map(|n| n.label.as_str())
+            .collect();
         assert_eq!(names, ["Alice 0ms", "WWWWWWWWWWWWWWWW 0ms"]);
-        let long = nodes.iter().find(|n| n.label == "WWWWWWWWWWWWWWWW 0ms").unwrap();
-        let natural_width = ui.text.layout(long.component.as_ref().unwrap(), f32::MAX).unwrap().width;
+        let long = nodes
+            .iter()
+            .find(|n| n.label == "WWWWWWWWWWWWWWWW 0ms")
+            .unwrap();
+        let natural_width = ui
+            .text
+            .layout(long.component.as_ref().unwrap(), f32::MAX)
+            .unwrap()
+            .width;
         assert!(long.bounds[2] >= natural_width);
         assert!((long.bounds[0] + long.bounds[2] / 2. - ui.width / 2.).abs() < 0.01);
         let alice = nodes.iter().find(|n| n.label == "Alice 0ms").unwrap();
@@ -1209,7 +1366,9 @@ mod debug_tests {
         update.byte(8);
         update.0.extend(5u16.to_be_bytes());
         update.0.extend(b"Alias");
-        session.apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &update.0).unwrap();
+        session
+            .apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &update.0)
+            .unwrap();
         session.sync_ui_state(true).unwrap();
         assert_eq!(session.ui.as_ref().unwrap().hud.players.len(), 1);
         let mut relist = Writer::default();
@@ -1217,30 +1376,54 @@ mod debug_tests {
         relist.var(1);
         relist.0.extend([1u8; 16]);
         relist.byte(1);
-        session.apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &relist.0).unwrap();
+        session
+            .apply(Phase::Play, cb::PLAYER_INFO_UPDATE, &relist.0)
+            .unwrap();
         session.sync_ui_state(true).unwrap();
         let ui = session.ui.as_mut().unwrap();
-        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap()).unwrap();
-        assert!(ui.nodes.iter().any(|n| n.id.starts_with("tab/player/") && n.label == "Alias 0ms"));
+        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap())
+            .unwrap();
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|n| n.id.starts_with("tab/player/") && n.label == "Alias 0ms")
+        );
         assert!(matches!(
-            crate::minecraft::start(&mut session, "minecraft_press_inputs",
-                &json!({"keys":["key.keyboard.tab"],"ticks":1,"hold":false})).unwrap(),
+            crate::minecraft::start(
+                &mut session,
+                "minecraft_press_inputs",
+                &json!({"keys":["key.keyboard.tab"],"ticks":1,"hold":false})
+            )
+            .unwrap(),
             crate::minecraft::Outcome::Complete(_)
         ));
         session.sync_ui_state(true).unwrap();
         assert!(!session.ui.as_ref().unwrap().hud.player_list_visible);
-        session.input(InputIntent::Key { key: "player_list".into(), pressed: true }).unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "player_list".into(),
+                pressed: true,
+            })
+            .unwrap();
         session.input(InputIntent::ReleaseAll).unwrap();
         session.sync_ui_state(true).unwrap();
         assert!(!session.ui.as_ref().unwrap().hud.player_list_visible);
         let ui = session.ui.as_mut().unwrap();
-        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap()).unwrap();
+        ui.rebuild_for_test(&session.inventory, session.content.as_ref().unwrap())
+            .unwrap();
         assert!(!ui.nodes.iter().any(|n| n.id.starts_with("tab/")));
-        session.input(InputIntent::Key { key: "player_list".into(), pressed: true }).unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "player_list".into(),
+                pressed: true,
+            })
+            .unwrap();
         let mut remove = Writer::default();
         remove.var(1);
         remove.0.extend([2u8; 16]);
-        session.apply(Phase::Play, cb::PLAYER_INFO_REMOVE, &remove.0).unwrap();
+        session
+            .apply(Phase::Play, cb::PLAYER_INFO_REMOVE, &remove.0)
+            .unwrap();
         session.sync_ui_state(true).unwrap();
         assert_eq!(session.ui.as_ref().unwrap().hud.players.len(), 1);
     }
@@ -1259,13 +1442,29 @@ mod debug_tests {
         session.player.pose_known = true;
         session.sync_ui_state(true).unwrap();
 
-        session.input(InputIntent::Key { key: "sneak".into(), pressed: true }).unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "sneak".into(),
+                pressed: true,
+            })
+            .unwrap();
         session.input(InputIntent::ReleaseAll).unwrap();
-        session.input(InputIntent::Key { key: "forward".into(), pressed: true }).unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "forward".into(),
+                pressed: true,
+            })
+            .unwrap();
         session.sync_ui_state(true).unwrap();
-        assert_eq!(session.minecraft_observation()["inputs"]["held"], json!(["forward"]));
+        assert_eq!(
+            session.minecraft_observation()["inputs"]["held"],
+            json!(["forward"])
+        );
         session.sync_ui_state(true).unwrap();
-        assert_eq!(session.minecraft_observation()["inputs"]["held"], json!(["forward"]));
+        assert_eq!(
+            session.minecraft_observation()["inputs"]["held"],
+            json!(["forward"])
+        );
 
         // UI-originated releases still reach the gameplay owner.
         session.ui.as_mut().unwrap().release_all();
@@ -1280,13 +1479,23 @@ mod debug_tests {
         let mut ui = crate::ui::UiState::new_state(&content).unwrap();
         ui.begin_local_start("Loading spawn");
         session.ui = Some(ui);
-        assert_eq!(session.minecraft_observation()["singleplayer"], json!({
-            "status": "Loading spawn", "error": null
-        }));
-        session.ui.as_mut().unwrap().local_start_ended(Some("failed".into()));
-        assert_eq!(session.minecraft_observation()["singleplayer"], json!({
-            "status": null, "error": "failed"
-        }));
+        assert_eq!(
+            session.minecraft_observation()["singleplayer"],
+            json!({
+                "status": "Loading spawn", "error": null
+            })
+        );
+        session
+            .ui
+            .as_mut()
+            .unwrap()
+            .local_start_ended(Some("failed".into()));
+        assert_eq!(
+            session.minecraft_observation()["singleplayer"],
+            json!({
+                "status": null, "error": "failed"
+            })
+        );
     }
     #[test]
     fn play_observation_waits_for_received_spawn_world() {
@@ -1307,30 +1516,51 @@ mod debug_tests {
             session.minecraft_observation()["in_play"].as_bool(),
             Some(false)
         );
-        assert_eq!(session.minecraft_observation()["loading_readiness"], json!({
-            "phase": "play",
-            "world_ready": false,
-            "spawn_meshes_ready": false,
-            "spawn_meshes_presented": true,
-        }));
+        assert_eq!(
+            session.minecraft_observation()["loading_readiness"],
+            json!({
+                "phase": "play",
+                "world_ready": false,
+                "spawn_meshes_ready": false,
+                "spawn_meshes_presented": true,
+            })
+        );
     }
     #[test]
     fn renderer_confirmation_is_required_and_invalidated_by_epochs() {
         let mut session = Session::new_mode("mesh-readiness-test".into(), true);
         assert!(!session.spawn_meshes_presented());
-        assert_eq!(session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"], false);
+        assert_eq!(
+            session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"],
+            false
+        );
         let epochs = session.context_epochs();
         session.note_renderer_scene_confirmation(epochs.0 + 1, epochs.1, 1);
-        assert!(!session.spawn_meshes_presented(), "stale renderer receipt must not release loading");
+        assert!(
+            !session.spawn_meshes_presented(),
+            "stale renderer receipt must not release loading"
+        );
         session.note_renderer_scene_confirmation(epochs.0, epochs.1, 1);
         assert!(session.spawn_meshes_presented());
-        assert_eq!(session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"], true);
+        assert_eq!(
+            session.minecraft_observation()["loading_readiness"]["spawn_meshes_presented"],
+            true
+        );
         session.scene.revision += 1;
-        assert!(session.spawn_meshes_presented(), "later UI frames must not relock loading");
+        assert!(
+            session.spawn_meshes_presented(),
+            "later UI frames must not relock loading"
+        );
         session.dimension_epoch += 1;
-        assert!(!session.spawn_meshes_presented(), "respawn needs a fresh presented frame");
+        assert!(
+            !session.spawn_meshes_presented(),
+            "respawn needs a fresh presented frame"
+        );
         session.presentation = false;
-        assert!(session.spawn_meshes_presented(), "headless paths have no renderer");
+        assert!(
+            session.spawn_meshes_presented(),
+            "headless paths have no renderer"
+        );
     }
 }
 impl Session {
@@ -1470,16 +1700,23 @@ fn portal_sprites(
     content: &Content,
     geometry: &crate::api::DynamicGeometry,
 ) -> Result<Option<[crate::api::ShaderSprite; 2]>> {
-    if ![crate::api::EntityMaterial::EndPortal, crate::api::EntityMaterial::EndGateway]
-        .into_iter()
-        .any(|material| !geometry.indices[material as usize].is_empty())
+    if ![
+        crate::api::EntityMaterial::EndPortal,
+        crate::api::EntityMaterial::EndGateway,
+    ]
+    .into_iter()
+    .any(|material| !geometry.indices[material as usize].is_empty())
     {
         return Ok(None);
     }
     let sprite = |name: &str| {
-        let texture = content.texture(name)
+        let texture = content
+            .texture(name)
             .ok_or_else(|| format!("missing mandatory portal texture {name}"))?;
-        Ok::<_, String>(crate::api::ShaderSprite { uv: texture.uv, layer: texture.layer })
+        Ok::<_, String>(crate::api::ShaderSprite {
+            uv: texture.uv,
+            layer: texture.layer,
+        })
     };
     Ok(Some([
         sprite("minecraft:environment/end_sky")?,
@@ -1536,12 +1773,15 @@ mod destruction_tests {
             ("minecraft:environment/end_sky", 3),
             ("minecraft:entity/end_portal/end_portal", 7),
         ] {
-            content.insert_test_texture(name, TextureRegion {
-                uv: [0., 0., 1., 1.],
-                layer,
-                width: 16,
-                height: 16,
-            });
+            content.insert_test_texture(
+                name,
+                TextureRegion {
+                    uv: [0., 0., 1., 1.],
+                    layer,
+                    width: 16,
+                    height: 16,
+                },
+            );
         }
         let sprites = portal_sprites(&content, &geometry).unwrap().unwrap();
         assert_eq!([sprites[0].layer, sprites[1].layer], [3, 7]);
@@ -1595,15 +1835,18 @@ mod destruction_tests {
     fn far_terrain_stays_visible_until_column_mesh_is_ready() {
         let mut session = session_with_cube([0, 0, 0], true);
         assert!(!session.far_column_ready([0, 0]));
-        session.scene.chunks.insert([0, 0, 0], crate::api::ChunkDraw {
-            revision: 1,
-            origin: [0.; 3],
-            bounds_min: [0.; 3],
-            bounds_max: [16.; 3],
-            visibility: 0,
-            geometry: None,
-            fade_duration_ms: Some(0),
-        });
+        session.scene.chunks.insert(
+            [0, 0, 0],
+            crate::api::ChunkDraw {
+                revision: 1,
+                origin: [0.; 3],
+                bounds_min: [0.; 3],
+                bounds_max: [16.; 3],
+                visibility: 0,
+                geometry: None,
+                fade_duration_ms: Some(0),
+            },
+        );
         assert!(session.far_column_ready([0, 0]));
     }
 
@@ -1620,40 +1863,68 @@ mod destruction_tests {
         session.player.position = [8., 2., 8.];
         session.player.pose_known = true;
         session.dimension = Some("minecraft:overworld".into());
-        session.environment.configure_registry(
-            "minecraft:worldgen/biome",
-            &[("minecraft:plains".into(), json!({"has_precipitation":false}))],
-        ).unwrap();
-        session.environment.activate_dimension(
-            "minecraft:overworld",
-            &json!({"min_y":0,"height":16,"has_skylight":false,
+        session
+            .environment
+            .configure_registry(
+                "minecraft:worldgen/biome",
+                &[(
+                    "minecraft:plains".into(),
+                    json!({"has_precipitation":false}),
+                )],
+            )
+            .unwrap();
+        session
+            .environment
+            .activate_dimension(
+                "minecraft:overworld",
+                &json!({"min_y":0,"height":16,"has_skylight":false,
                 "has_ceiling":true,"skybox":"none"}),
-            0,
-        ).unwrap();
+                0,
+            )
+            .unwrap();
         let content = session.content.as_mut().unwrap();
         for state in [0, 1] {
             content.insert_test_placement_metadata(
-                state, json!({"fluid_overlay":false,"block_entity_type":null}),
+                state,
+                json!({"fluid_overlay":false,"block_entity_type":null}),
             );
         }
-        for texture in ["water_still", "water_flow", "water_overlay", "lava_still", "lava_flow"] {
+        for texture in [
+            "water_still",
+            "water_flow",
+            "water_overlay",
+            "lava_still",
+            "lava_flow",
+        ] {
             content.insert_test_texture(
                 &format!("minecraft:block/{texture}"),
-                TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 16, height: 16 },
+                TextureRegion {
+                    uv: [0., 0., 1., 1.],
+                    layer: 0,
+                    width: 16,
+                    height: 16,
+                },
             );
         }
         content.set_registries(BTreeMap::from([(
             "minecraft:worldgen/biome".into(),
-            vec![("minecraft:plains".into(), json!({
-                "temperature":0.5,"downfall":0.5,
-                "effects":{"water_color":"#507090"},"attributes":{},
-            }))],
+            vec![(
+                "minecraft:plains".into(),
+                json!({
+                    "temperature":0.5,"downfall":0.5,
+                    "effects":{"water_color":"#507090"},"attributes":{},
+                }),
+            )],
         )]));
         content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
         session.ui = Some(UiState::new_state(content).unwrap());
         let mut terrain = Terrain::new(Arc::new(|| {})).unwrap();
-        terrain.activate(session.content.as_ref().unwrap(), [0; 3]).unwrap();
-        terrain.set_render_rules([1.; 6], false, 0, Some(0)).unwrap();
+        terrain
+            .activate(session.content.as_ref().unwrap(), [0; 3])
+            .unwrap();
+        terrain
+            .set_render_rules([1.; 6], false, 0, Some(0))
+            .unwrap();
         session.terrain = Some(terrain);
         assert!(session.play_world_presentation_ready());
         session
@@ -1664,9 +1935,16 @@ mod destruction_tests {
         let mut session = ready_presentation_session();
         session.phase = "play".into();
         session.replaying = true;
-        session.terrain.as_mut().unwrap()
-            .set_render_rules([1.; 6], false, 0, Some(750)).unwrap();
-        assert!(session.settle_replay_geometry().unwrap(), "one cube fits the CPU mesh budget");
+        session
+            .terrain
+            .as_mut()
+            .unwrap()
+            .set_render_rules([1.; 6], false, 0, Some(750))
+            .unwrap();
+        assert!(
+            session.settle_replay_geometry().unwrap(),
+            "one cube fits the CPU mesh budget"
+        );
         assert!(
             session.scene.chunks.values().any(|chunk| {
                 chunk.geometry.as_ref().is_some_and(|geometry| {
@@ -1677,7 +1955,8 @@ mod destruction_tests {
         );
         for chunk in session.scene.chunks.values() {
             assert_eq!(
-                chunk.fade_duration_ms, Some(0),
+                chunk.fade_duration_ms,
+                Some(0),
                 "zero duration admits a replay mesh immediately; None is unknown, not no fade",
             );
         }
@@ -1700,7 +1979,10 @@ mod destruction_tests {
         session.revision += 1;
         session.refresh_scene().unwrap();
         assert_eq!(
-            (session.scene.environment.render_fog_start, session.scene.environment.render_fog_end),
+            (
+                session.scene.environment.render_fog_start,
+                session.scene.environment.render_fog_end
+            ),
             (without_far.render_fog_start, without_far.render_fog_end),
             "a far-terrain offer must not push the environment-owned haze away",
         );
@@ -1899,8 +2181,15 @@ mod destruction_tests {
         assert_eq!(vertices.len(), 6 * 4);
         let lit = vertices.iter().filter(|v| v.light == [15., 15.]).count();
         let dark = vertices.iter().filter(|v| v.light == [0., 0.]).count();
-        assert_eq!(lit, 4, "only the +Y face sees the lit neighbor: {vertices:?}");
-        assert_eq!(dark, 5 * 4, "other faces keep the dark interior floor: {vertices:?}");
+        assert_eq!(
+            lit, 4,
+            "only the +Y face sees the lit neighbor: {vertices:?}"
+        );
+        assert_eq!(
+            dark,
+            5 * 4,
+            "other faces keep the dark interior floor: {vertices:?}"
+        );
     }
 }
 fn vector([x, y, z]: [f64; 3]) -> Value {

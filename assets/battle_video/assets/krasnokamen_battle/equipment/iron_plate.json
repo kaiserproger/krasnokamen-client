@@ -1,0 +1,20 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "krasnokamen_battle:iron_plate"
+      },
+      {
+        "texture": "krasnokamen_battle:iron_plate_plume",
+        "dyeable": {
+          "color_when_undyed": -4643543
+        }
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "krasnokamen_battle:iron_plate"
+      }
+    ]
+  }
+}
