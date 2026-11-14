@@ -4,17 +4,17 @@
   "target": "Minecraft Java Edition 26.1.2",
   "sources": [
     {
-      "path": "krasnokamen-loader/bridge-core/src/main/java/dev/krasnokamen/agent/mcp/ClientMcpTools.java",
+      "path": "solaris-loader/bridge-core/src/main/java/dev/solaris/agent/mcp/ClientMcpTools.java",
       "sha256": "fd15166a59c62769b4ecc9473c622b9c5ee03ca55ddc18acdfb38c0bb0f180ec",
       "bytes": 29940
     },
     {
-      "path": "krasnokamen-loader/bridge-core/src/main/java/dev/krasnokamen/agent/mcp/McpHttpServer.java",
+      "path": "solaris-loader/bridge-core/src/main/java/dev/solaris/agent/mcp/McpHttpServer.java",
       "sha256": "8fb39d463ffb9c2dfc58270399c89d4ebab4b1764be1b32b7f876f09ec78c0ba",
       "bytes": 29189
     },
     {
-      "path": "krasnokamen-loader/bridge-core/src/main/java/dev/krasnokamen/agent/mcp/McpToolDefinition.java",
+      "path": "solaris-loader/bridge-core/src/main/java/dev/solaris/agent/mcp/McpToolDefinition.java",
       "sha256": "1e8d94f7ac0ce41895b18395798aa7def25332700f3c2c3976a6f484349f8c7b",
       "bytes": 2508
     }

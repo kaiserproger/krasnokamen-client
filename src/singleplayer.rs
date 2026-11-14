@@ -145,9 +145,8 @@ pub(crate) fn worlds_dir(root: &Path) -> PathBuf {
 
 /// Java `String.hashCode` over UTF-16 code units: vanilla's text-seed rule.
 fn java_hash(text: &str) -> i32 {
-    text.encode_utf16().fold(0i32, |h, unit| {
-        h.wrapping_mul(31).wrapping_add(i32::from(unit))
-    })
+    text.encode_utf16()
+        .fold(0i32, |h, unit| h.wrapping_mul(31).wrapping_add(i32::from(unit)))
 }
 
 pub(crate) fn parse_seed(text: &str) -> Result<i64, String> {
@@ -175,9 +174,7 @@ fn folder_name(name: &str) -> String {
             }
         })
         .collect();
-    let cleaned = cleaned
-        .trim_matches(|c: char| c == '.' || c == ' ')
-        .to_owned();
+    let cleaned = cleaned.trim_matches(|c: char| c == '.' || c == ' ').to_owned();
     let reserved = ["con", "prn", "aux", "nul"];
     if cleaned.is_empty() || reserved.contains(&cleaned.to_ascii_lowercase().as_str()) {
         format!("World {cleaned}").trim().to_owned()
@@ -284,8 +281,7 @@ pub(crate) fn create_world(root: &Path, spec: &CreateSpec) -> Result<World, Stri
 
 /// Only ever deletes a direct child of `worlds/` that carries world metadata.
 pub(crate) fn delete_world(root: &Path, dir_name: &str) -> Result<(), String> {
-    if dir_name.is_empty() || dir_name.contains(['/', '\\']) || dir_name == ".." || dir_name == "."
-    {
+    if dir_name.is_empty() || dir_name.contains(['/', '\\']) || dir_name == ".." || dir_name == "." {
         return Err("invalid world folder".into());
     }
     let dir = worlds_dir(root).join(dir_name);
@@ -344,11 +340,7 @@ pub(crate) fn format_time(ms: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
-        rem / 3600,
-        rem % 3600 / 60
-    )
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}", rem / 3600, rem % 3600 / 60)
 }
 
 // ---------------------------------------------------------------------------
@@ -356,10 +348,7 @@ pub(crate) fn format_time(ms: u64) -> String {
 // ---------------------------------------------------------------------------
 
 fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .parent()
-        .map(Path::to_path_buf)
+    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
 }
 
 fn exe_name(name: &str) -> String {
@@ -408,13 +397,9 @@ fn content_cache(root: &Path) -> PathBuf {
 }
 
 fn content_ready(cache: &Path) -> bool {
-    [
-        "version.json",
-        "reports/registries.json",
-        "data/minecraft/recipe",
-    ]
-    .iter()
-    .all(|p| cache.join(p).exists())
+    ["version.json", "reports/registries.json", "data/minecraft/recipe"]
+        .iter()
+        .all(|p| cache.join(p).exists())
 }
 
 /// Copy the plugin pack minus the login plugin (singleplayer is offline and
@@ -434,10 +419,7 @@ fn sync_plugins(root: &Path) -> Result<Option<PathBuf>, String> {
         }
         let target = dest.join(&name);
         fs::create_dir_all(&target).map_err(io)?;
-        for file in fs::read_dir(entry.path())
-            .map_err(io)?
-            .filter_map(Result::ok)
-        {
+        for file in fs::read_dir(entry.path()).map_err(io)?.filter_map(Result::ok) {
             let to = target.join(file.file_name());
             let source = file.path();
             let same = fs::metadata(&to)
@@ -695,13 +677,12 @@ fn spawn_server(
         return Err("Cancelled".into());
     }
     if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
-    let log =
-        Arc::new(Mutex::new(fs::File::create(log_path).map_err(|e| {
-            format!("cannot create {}: {e}", log_path.display())
-        })?));
+    let log = Arc::new(Mutex::new(
+        fs::File::create(log_path)
+            .map_err(|e| format!("cannot create {}: {e}", log_path.display()))?,
+    ));
     let mut command = Command::new(binary);
     command
         .arg("--config")

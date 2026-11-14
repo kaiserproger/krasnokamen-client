@@ -57,11 +57,7 @@ impl Reporter {
     pub fn new(log_file: Option<&Path>, echo: bool) -> Self {
         let file = log_file.and_then(|path| {
             std::fs::create_dir_all(path.parent()?).ok()?;
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .ok()
+            std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
         });
         Self(Arc::new(Inner {
             cancel: AtomicBool::new(false),
@@ -132,9 +128,7 @@ impl Reporter {
         let _ = self
             .0
             .done
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-                Some(v.saturating_sub(bytes))
-            });
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v.saturating_sub(bytes)));
     }
 
     pub fn cancel(&self) {

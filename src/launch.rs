@@ -1,4 +1,4 @@
-use super::{App, Options, artifact_root, content_paths, headless, local_config};
+use super::{artifact_root, content_paths, headless, local_config, App, Options};
 use std::{path::PathBuf, sync::Arc};
 use winit::event_loop::EventLoop;
 
@@ -244,10 +244,7 @@ mod tests {
     }
     #[test]
     fn help_reports_target_game_version() {
-        assert!(help().contains(&format!(
-            "Minecraft Java {}",
-            crate::singleplayer::GAME_VERSION
-        )));
+        assert!(help().contains(&format!("Minecraft Java {}", crate::singleplayer::GAME_VERSION)));
         assert!(!help().contains("26.1.2"));
     }
     #[test]

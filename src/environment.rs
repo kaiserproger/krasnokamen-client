@@ -472,10 +472,7 @@ impl Environment {
         content: &Content,
         tick: u64,
     ) -> Result<bool> {
-        if !matches!(
-            id,
-            cb::GAME_EVENT | cb::SET_TIME | cb::TICKING_STATE | cb::TICKING_STEP
-        ) {
+        if !matches!(id, cb::GAME_EVENT | cb::SET_TIME | cb::TICKING_STATE | cb::TICKING_STEP) {
             return Ok(false);
         }
         if id == cb::GAME_EVENT && !matches!(r.bytes.get(r.offset), Some(1 | 2 | 7 | 8)) {
@@ -630,16 +627,9 @@ impl Environment {
         Ok(values)
     }
     /// Numeric item properties sample the owner's position, not the camera.
-    pub(crate) fn item_time_attributes(
-        &self,
-        world: &World,
-        position: [f64; 3],
-    ) -> Result<(f32, f32)> {
+    pub(crate) fn item_time_attributes(&self, world: &World, position: [f64; 3]) -> Result<(f32, f32)> {
         let values = self.camera_attributes(world, position)?;
-        Ok((
-            values[A::SunAngle as usize].float(),
-            values[A::MoonPhase as usize].float(),
-        ))
+        Ok((values[A::SunAngle as usize].float(), values[A::MoonPhase as usize].float()))
     }
     /// Rain-fog target at the camera block. A camera chunk (or its sky light)
     /// that has not arrived yet contributes no rain fog rather than failing the
@@ -1181,11 +1171,7 @@ mod tests {
         let mut apply = |event: u8, value: f32| {
             let mut bytes = vec![event];
             bytes.extend_from_slice(&value.to_be_bytes());
-            assert!(
-                environment
-                    .apply(cb::GAME_EVENT, &mut Reader::new(&bytes), &content, 0)
-                    .unwrap()
-            );
+            assert!(environment.apply(cb::GAME_EVENT, &mut Reader::new(&bytes), &content, 0).unwrap());
             (environment.rain, environment.thunder)
         };
         // Pinned 26.3 ClientPacketListener initializes start at zero and stop
@@ -1303,10 +1289,7 @@ mod unloaded_biome_tests {
         let dark = e.vignette();
         assert!(dark > 0.8, "{dark}");
         e.tick_vignette(&world, [8.5, 40.6, 8.5]).unwrap();
-        assert!(
-            e.vignette() < dark,
-            "open sky above the stored sections must clear it"
-        );
+        assert!(e.vignette() < dark, "open sky above the stored sections must clear it");
         // An unloaded camera chunk keeps the last strength.
         let held = e.vignette();
         e.tick_vignette(&world, [100.5, 8.6, 100.5]).unwrap();

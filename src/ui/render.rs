@@ -5,8 +5,8 @@ use super::{
 use crate::{
     api::{DynamicGeometry, EntityMaterial, MeshGeometry, RenderLayer, Vertex},
     protocol::{
-        Result,
         content::{Content, TextureRegion},
+        Result,
     },
 };
 use glam::{Mat4, Vec3};
@@ -928,15 +928,9 @@ mod tests {
     #[test]
     fn world_backdrops_preserve_foreground_and_polygon_offset_materials() {
         let content = Content::test_cube();
-        for material in [
-            EntityMaterial::Text,
-            EntityMaterial::TextPolygonOffset,
-            EntityMaterial::TextSeeThrough,
-        ] {
+        for material in [EntityMaterial::Text, EntityMaterial::TextPolygonOffset, EntityMaterial::TextSeeThrough] {
             let mut geometry = DynamicGeometry::default();
-            let mut painter =
-                WorldPainter::new(&content, &mut geometry, Mat4::IDENTITY, [15., 0.], material)
-                    .unwrap();
+            let mut painter = WorldPainter::new(&content, &mut geometry, Mat4::IDENTITY, [15., 0.], material).unwrap();
             painter.background([0., 0., 10., 10.], [0.; 3], 0.25);
             // Underlines/strikethroughs retain the foreground's depth/bias.
             painter.solid([0., 8., 10., 1.], [1.; 3], 1.);

@@ -7,11 +7,11 @@
 //! compute, `KRASNOKAMEN_CLIENT_FAR_GPU=0`). Generated samples rank lowest: any
 //! server or chunk sample replaces them.
 use super::program::{Column, Program};
-use super::{EDGE, Far, SAMPLES, Source, TileKey, write};
-use crate::protocol::{Result, content::Content};
+use super::{write, Far, Source, TileKey, EDGE, SAMPLES};
+use crate::protocol::{content::Content, Result};
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 /// Tiles handed out (GPU queue or CPU worker) and not yet answered: enough

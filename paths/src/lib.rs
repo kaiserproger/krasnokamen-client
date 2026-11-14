@@ -30,9 +30,7 @@ fn default_root_for(
     }
     home.filter(|value| !value.is_empty())
         .map(|home| PathBuf::from(home).join(".local/share").join(APP_NAME))
-        .ok_or_else(|| {
-            "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into()
-        })
+        .ok_or_else(|| "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into())
 }
 
 /// `explicit` wins; otherwise use the platform's conventional per-user data root.

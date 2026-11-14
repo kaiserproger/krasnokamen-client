@@ -312,16 +312,8 @@ mod tests {
         let groups = [
             ("login", "clientbound", login::clientbound::IDS),
             ("login", "serverbound", login::serverbound::IDS),
-            (
-                "configuration",
-                "clientbound",
-                configuration::clientbound::IDS,
-            ),
-            (
-                "configuration",
-                "serverbound",
-                configuration::serverbound::IDS,
-            ),
+            ("configuration", "clientbound", configuration::clientbound::IDS),
+            ("configuration", "serverbound", configuration::serverbound::IDS),
             ("play", "clientbound", play::clientbound::IDS),
             ("play", "serverbound", play::serverbound::IDS),
         ];
@@ -331,17 +323,12 @@ mod tests {
             for &(name, id) in ids {
                 let actual = report[phase][direction][name]["protocol_id"].as_i64();
                 if actual != Some(i64::from(id)) {
-                    failures.push(format!(
-                        "{phase}/{direction}/{name}: client={id}, report={actual:?}"
-                    ));
+                    failures.push(format!("{phase}/{direction}/{name}: client={id}, report={actual:?}"));
                 }
                 checked += 1;
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
-        eprintln!(
-            "checked {checked} named packet IDs against {}",
-            path.display()
-        );
+        eprintln!("checked {checked} named packet IDs against {}", path.display());
     }
 }

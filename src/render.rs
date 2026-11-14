@@ -23,10 +23,6 @@ mod far_generate;
 mod frame;
 mod graphics;
 pub use graphics::GraphicsPreset;
-#[cfg(test)]
-mod design_tests;
-#[cfg(test)]
-mod first_person_tests;
 mod material;
 mod mdi;
 mod mesh;
@@ -35,16 +31,20 @@ mod outline;
 mod packed;
 mod pipelines;
 mod post;
+mod shadow;
 mod progress;
 mod residency;
-#[cfg(test)]
-mod shader_tests;
-mod shadow;
 mod sky;
 mod timing;
 mod visibility;
 #[cfg(test)]
+mod shader_tests;
+#[cfg(test)]
 mod wgsl_validation_tests;
+#[cfg(test)]
+mod design_tests;
+#[cfg(test)]
+mod first_person_tests;
 use arena::Arena;
 use mesh::{ResidentMesh, Stream};
 use packed::{TerrainVertex, TileTable};
@@ -69,8 +69,7 @@ pub(crate) fn camera_view(eye: Vec3, yaw: f32, pitch: f32) -> Mat4 {
 #[cfg(test)]
 pub(crate) fn gpu_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 // Pinned Minecraft RGBA8 textures/targets multiply and blend display-encoded RGB.
@@ -143,10 +142,7 @@ fn gpu_instance() -> wgpu::Instance {
 pub fn doctor() -> Result<Value, String> {
     let instance = gpu_instance();
     let adapters = instance.enumerate_adapters(wgpu::Backends::all());
-    let evidence: Vec<_> = adapters
-        .iter()
-        .map(|adapter| adapter_evidence(adapter, &adapter.get_info()))
-        .collect();
+    let evidence: Vec<_> = adapters.iter().map(|adapter| adapter_evidence(adapter, &adapter.get_info())).collect();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .map_err(|e| format!("gpu_adapter_unavailable: {e}"))?;
@@ -499,6 +495,7 @@ fn classify_surface_error(error: &wgpu::SurfaceError, gpu_failed: bool) -> Surfa
     }
 }
 
+
 impl Renderer {
     pub async fn new(window: Arc<Window>, artifact_dir: PathBuf) -> Result<Self, String> {
         let instance = gpu_instance();
@@ -578,9 +575,7 @@ impl Renderer {
         } else {
             wgpu::Features::empty()
         };
-        if mdi_enabled {
-            features |= mdi::FEATURES;
-        }
+        if mdi_enabled { features |= mdi::FEATURES; }
         capabilities["multi_draw_indirect_enabled"] = json!(mdi_enabled);
         let hiz_enabled = mdi_enabled
             && mdi::hiz_supported(
@@ -637,15 +632,10 @@ impl Renderer {
             validation_failed.store(true, Ordering::Release);
             let _ = gpu_error_tx.try_send(format!("gpu_validation_failure: {error}"));
         }));
-        let present_modes = surface.as_ref().map_or_else(Vec::new, |surface| {
-            surface.get_capabilities(&adapter).present_modes
-        });
-        capabilities["surface_present_modes"] = json!(
-            present_modes
-                .iter()
-                .map(|mode| format!("{mode:?}"))
-                .collect::<Vec<_>>()
-        );
+        let present_modes = surface.as_ref().map_or_else(Vec::new, |surface|
+            surface.get_capabilities(&adapter).present_modes);
+        capabilities["surface_present_modes"] = json!(present_modes.iter()
+            .map(|mode| format!("{mode:?}")).collect::<Vec<_>>());
         let config = if let Some(surface) = &surface {
             let mut config = surface
                 .get_default_config(&adapter, width, height)
@@ -654,17 +644,15 @@ impl Renderer {
             // render to (RADV on Wayland lists Rgba16Unorm first, which needs
             // TEXTURE_FORMAT_16BIT_NORM).
             let formats = surface.get_capabilities(&adapter).formats;
-            if let Some(format) = [
-                wgpu::TextureFormat::Bgra8Unorm,
-                wgpu::TextureFormat::Rgba8Unorm,
-            ]
-            .into_iter()
-            .find(|format| formats.contains(format))
-            .or_else(|| {
-                formats.iter().copied().find(|format| {
-                    !format.is_srgb() && device.features().contains(format.required_features())
+            if let Some(format) = [wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm]
+                .into_iter()
+                .find(|format| formats.contains(format))
+                .or_else(|| {
+                    formats.iter().copied().find(|format| {
+                        !format.is_srgb() && device.features().contains(format.required_features())
+                    })
                 })
-            }) {
+            {
                 config.format = format;
             }
             config.present_mode = wgpu::PresentMode::Fifo;
@@ -768,16 +756,9 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let targets = Self::targets(&device, &config, &pipelines.blit);
-        let mut shadow =
-            shadow::Shadow::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout);
+        let mut shadow = shadow::Shadow::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout);
         let features = GraphicsPreset::default().features();
-        shadow.configure(
-            &device,
-            features.cascades,
-            features.water_ssr,
-            config.width,
-            config.height,
-        );
+        shadow.configure(&device, features.cascades, features.water_ssr, config.width, config.height);
         let outline = outline::Outline::new(&device, config.width, config.height);
         let post = post::Post::new(
             &device,
@@ -958,7 +939,9 @@ impl Renderer {
     /// there. No per-frame allocation: borrows `self` through the drain.
     /// Reference-mode deliberate full uploads omit acks so the retained
     /// source survives per-frame rewrites.
-    pub(crate) fn drain_uploaded_meshes(&mut self) -> impl Iterator<Item = ([i32; 3], u64)> + '_ {
+    pub(crate) fn drain_uploaded_meshes(
+        &mut self,
+    ) -> impl Iterator<Item = ([i32; 3], u64)> + '_ {
         self.uploaded_meshes.drain(..)
     }
 
@@ -1372,38 +1355,39 @@ impl Renderer {
         {
             None => None,
             Some(Ok(frame)) => Some(frame),
-            Some(Err(error)) => {
-                match classify_surface_error(&error, self.gpu_failed.load(Ordering::Acquire)) {
-                    SurfaceRecovery::Reconfigure => {
-                        self.surface
-                            .as_ref()
-                            .unwrap()
-                            .configure(&self.device, &self.config);
-                        if let Some(request) = capture {
-                            let _ = request
-                                .reply
-                                .send(Err("surface_reconfigured_retry_capture".into()));
-                        }
-                        return Ok(());
+            Some(Err(error)) => match classify_surface_error(
+                &error,
+                self.gpu_failed.load(Ordering::Acquire),
+            ) {
+                SurfaceRecovery::Reconfigure => {
+                    self.surface
+                        .as_ref()
+                        .unwrap()
+                        .configure(&self.device, &self.config);
+                    if let Some(request) = capture {
+                        let _ = request
+                            .reply
+                            .send(Err("surface_reconfigured_retry_capture".into()));
                     }
-                    SurfaceRecovery::Skip => {
-                        if let Some(request) = capture {
-                            let _ = request.reply.send(Err("window_not_presentable".into()));
-                        }
-                        return Ok(());
-                    }
-                    SurfaceRecovery::Fatal => {
-                        let message = match error {
-                            wgpu::SurfaceError::OutOfMemory => "surface_out_of_memory".into(),
-                            _ => format!("surface_failure_device_failed: {error}"),
-                        };
-                        if let Some(request) = capture {
-                            let _ = request.reply.send(Err(message.clone()));
-                        }
-                        return Err(message);
-                    }
+                    return Ok(());
                 }
-            }
+                SurfaceRecovery::Skip => {
+                    if let Some(request) = capture {
+                        let _ = request.reply.send(Err("window_not_presentable".into()));
+                    }
+                    return Ok(());
+                }
+                SurfaceRecovery::Fatal => {
+                    let message = match error {
+                        wgpu::SurfaceError::OutOfMemory => "surface_out_of_memory".into(),
+                        _ => format!("surface_failure_device_failed: {error}"),
+                    };
+                    if let Some(request) = capture {
+                        let _ = request.reply.send(Err(message.clone()));
+                    }
+                    return Err(message);
+                }
+            },
         };
         if self.surface.is_some() {
             self.stats.surface_acquire_ms = acquisition.elapsed().as_secs_f64() * 1000.;
@@ -1452,21 +1436,20 @@ impl Renderer {
                         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                         mapped_at_creation: false,
                     });
-                    self.capture_cull =
-                        self.mdi
-                            .as_ref()
-                            .filter(|_| !self.reference_mode)
-                            .map(|mdi| {
-                                let counters = self.device.create_buffer(&wgpu::BufferDescriptor {
-                                    label: Some("terrain culling counters of captured frame"),
-                                    size: mdi::COUNTER_BYTES,
-                                    usage: wgpu::BufferUsages::COPY_DST
-                                        | wgpu::BufferUsages::MAP_READ,
-                                    mapped_at_creation: false,
-                                });
-                                mdi.copy_counters(&mut encoder, &counters);
-                                counters
+                    self.capture_cull = self
+                        .mdi
+                        .as_ref()
+                        .filter(|_| !self.reference_mode)
+                        .map(|mdi| {
+                            let counters = self.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("terrain culling counters of captured frame"),
+                                size: mdi::COUNTER_BYTES,
+                                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                                mapped_at_creation: false,
                             });
+                            mdi.copy_counters(&mut encoder, &counters);
+                            counters
+                        });
                     encoder.copy_texture_to_buffer(
                         wgpu::TexelCopyTextureInfo {
                             texture: &self.targets.color,
@@ -1585,8 +1568,7 @@ impl Renderer {
                     metadata["gpu_timestamps"] = self.timing.latest.clone();
                     metadata["far_terrain"] = self.far.metrics();
                     metadata["submitted_frame_interval_ms"] = json!(self.frame_interval_ms);
-                    metadata["frame_interval_sample_frame_id"] =
-                        json!(self.frame_id.saturating_sub(1).to_string());
+                    metadata["frame_interval_sample_frame_id"] = json!(self.frame_id.saturating_sub(1).to_string());
                     metadata["environment"] = json!({"sky_kind":format!("{:?}",scene.environment.sky_kind),
                         "sun_angle":scene.environment.sun_angle,"moon_angle":scene.environment.moon_angle,
                         "star_angle":scene.environment.star_angle,"star_brightness":scene.environment.star_brightness,
@@ -1636,8 +1618,7 @@ impl Renderer {
             let cpu = timing::thread_cpu_seconds();
             frame.present();
             self.stats.present_call_ms = presentation.elapsed().as_secs_f64() * 1000.;
-            self.stats.present_thread_cpu_ms = cpu
-                .zip(timing::thread_cpu_seconds())
+            self.stats.present_thread_cpu_ms = cpu.zip(timing::thread_cpu_seconds())
                 .map(|(start, end)| (end - start).max(0.) * 1000.);
         }
         let now = Instant::now();
@@ -1672,8 +1653,7 @@ impl Renderer {
         }
         self.progress.submitted(submission)?;
         self.last_frame_ms = start.elapsed().as_secs_f64() * 1000.0;
-        self.stats.render_thread_cpu_ms = cpu_start
-            .zip(timing::thread_cpu_seconds())
+        self.stats.render_thread_cpu_ms = cpu_start.zip(timing::thread_cpu_seconds())
             .map(|(start, end)| (end - start).max(0.) * 1000.);
         Ok(())
     }

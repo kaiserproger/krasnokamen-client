@@ -1,9 +1,8 @@
 use parking_lot::{Condvar, Mutex};
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
     thread,
     time::Duration,

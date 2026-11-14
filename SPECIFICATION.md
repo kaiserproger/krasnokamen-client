@@ -1,10 +1,10 @@
-# Krasnokamen Native Client specification
+# Solaris Native Client specification
 
 > Naming: this product was called Solaris until 2026-11-12 and is now Krasnokamen (the name collided with Oracle and Atari SOLARIS trademarks). This immutable ledger keeps its original wording and line numbers; read "Solaris" as Krasnokamen.
 
 ## Authority and immutable requirement IDs
 
-Authority: `/home/kaiserroman/Downloads/KRASNOKAMEN_NATIVE_CLIENT_SPEC_FOR_OPUS.md`, edition 2026-10-01, SHA-256 `645ca42ff3f3083b561acc84a707ea5d4a27fcd383da1cfdc57ab6276f008c2a`, 1116 lines. The complete original text is retained below without omissions, including proposed contracts, tables, code examples, constraints, sources, and non-acceptance caveats. Russian wording is authoritative; introductions in English do not narrow it.
+Authority: `/home/kaiserroman/Downloads/SOLARIS_NATIVE_CLIENT_SPEC_FOR_OPUS.md`, edition 2026-10-01, SHA-256 `645ca42ff3f3083b561acc84a707ea5d4a27fcd383da1cfdc57ab6276f008c2a`, 1116 lines. The complete original text is retained below without omissions, including proposed contracts, tables, code examples, constraints, sources, and non-acceptance caveats. Russian wording is authoritative; introductions in English do not narrow it.
 
 `SRC-NNNN` permanently identifies the original source line NNNN. Every nonblank source line has an ID in the ledger, so every paragraph, list clause, table row, diagram and example is traceable. Adjacent IDs form a paragraph/block requirement; headings provide context, not a substitute for clauses. Acceptance names (AUTH-01 etc.), performance gates (P01–P10), and stages (C00–C10) are secondary semantic IDs, not replacements for SRC IDs. Do not renumber SRC IDs when implementation changes. Future requirements get new IDs with explicit provenance and approved changes; retain this baseline.
 
@@ -12,12 +12,12 @@ Implementation status and evidence live in [COMPATIBILITY_MATRIX.md](COMPATIBILI
 
 ## Complete authoritative baseline
 
-# Krasnokamen Native Client — техническое задание для Opus
+# Solaris Native Client — техническое задание для Opus
 
 **Редакция:** 1 октября 2026 года.  
 **Статус:** проект целевой реализации; это не отчёт о существующем Rust-клиенте или измеренной производительности.  
-**Рабочее имя:** `krasnokamen-client`. Независимый репозиторий рядом с `krasnokamen`, `krasnokamen-loader`, `krasnokamen-default-plugins`.  
-**Назначение:** самостоятельный open-source клиент Minecraft Java Edition на Rust, собственный оптимизированный рендерер, нативная поддержка Krasnokamen, безопасные клиентские WASM-расширения и полноценная агентская автоматизация через MCP.
+**Рабочее имя:** `solaris-client`. Независимый репозиторий рядом с `solaris`, `solaris-loader`, `solaris-default-plugins`.  
+**Назначение:** самостоятельный open-source клиент Minecraft Java Edition на Rust, собственный оптимизированный рендерер, нативная поддержка Solaris, безопасные клиентские WASM-расширения и полноценная агентская автоматизация через MCP.
 
 ## Инструкция исполняющему агенту
 
@@ -33,15 +33,15 @@ Implementation status and evidence live in [COMPATIBILITY_MATRIX.md](COMPATIBILI
 
 ### 1.1. Цель
 
-Пользователь запускает нативный клиент, авторизуется своей учётной записью, получает необходимые оригинальные ресурсы из разрешённых источников и играет на совместимом vanilla-сервере либо Krasnokamen. Основные движения, взаимодействия, инвентарь, звук, визуальные состояния, интерфейсы и сетевое поведение воспроизводят закреплённую Java Edition. На Krasnokamen автоматически согласуются дополнительные данные, интерфейсы и возможности аддонов. Агент может выполнять реальные игровые сценарии, видеть подтверждённые изменения и собирать доказательства рендеринга без GUI-скриптинга по координатам пикселей.
+Пользователь запускает нативный клиент, авторизуется своей учётной записью, получает необходимые оригинальные ресурсы из разрешённых источников и играет на совместимом vanilla-сервере либо Solaris. Основные движения, взаимодействия, инвентарь, звук, визуальные состояния, интерфейсы и сетевое поведение воспроизводят закреплённую Java Edition. На Solaris автоматически согласуются дополнительные данные, интерфейсы и возможности аддонов. Агент может выполнять реальные игровые сценарии, видеть подтверждённые изменения и собирать доказательства рендеринга без GUI-скриптинга по координатам пикселей.
 
 Клиентская реализация, шейдеры и инструменты проекта открыты. Minecraft-ассеты и принадлежащий Mojang код от этого не становятся open-source; они не входят в исходники и бинарные релизы проекта.
 
 ### 1.2. Первая закреплённая версия
 
-Первый compatibility target — **Minecraft Java Edition 26.1.2**, поскольку именно эта версия фигурирует в исследованном Krasnokamen Loader. Это осознанная совместимость с проектом, не заявление о новейшей Minecraft. Официальная страница подтверждает существование релиза [S01].
+Первый compatibility target — **Minecraft Java Edition 26.1.2**, поскольку именно эта версия фигурирует в исследованном Solaris Loader. Это осознанная совместимость с проектом, не заявление о новейшей Minecraft. Официальная страница подтверждает существование релиза [S01].
 
-На этапе C00 создать `compatibility.lock`: game version, протокол, hashes исходных метаданных/ресурсов, используемые ревизии Krasnokamen contracts, resource-pack/data formats, Rust toolchain, версии зависимостей. Числовой protocol ID и структуры пакетов получить из проверенных version-specific источников и тестов; не переносить числа из памяти или соседней версии.
+На этапе C00 создать `compatibility.lock`: game version, протокол, hashes исходных метаданных/ресурсов, используемые ревизии Solaris contracts, resource-pack/data formats, Rust toolchain, версии зависимостей. Числовой protocol ID и структуры пакетов получить из проверенных version-specific источников и тестов; не переносить числа из памяти или соседней версии.
 
 Не начинать с поддержки десяти версий одновременно. Расширение матрицы не должно превращать игровой код в россыпь version checks: различия сосредоточены в protocol/data adapters. Первая полная версия остаётся обязательной до масштабирования числа версий.
 
@@ -50,9 +50,9 @@ Implementation status and evidence live in [COMPATIBILITY_MATRIX.md](COMPATIBILI
 | Уровень | Что нужно доказать |
 |---|---|
 | `Java-client-compatible` | Все обязательные клиентские функции закреплённой версии, а не только несколько серверных сценариев |
-| `Krasnokamen-native` | Совместимые Loader-контракты, permissions, bundles, интерфейсы, предметы/блоки/звук; новые возможности только через negotiated extension |
+| `Solaris-native` | Совместимые Loader-контракты, permissions, bundles, интерфейсы, предметы/блоки/звук; новые возможности только через negotiated extension |
 | `Client-WASM` | Самостоятельный ограниченный клиентский ABI и полноценный lifecycle безопасных расширений |
-| `Singleplayer-Krasnokamen` | Локальный Rust-сервер Krasnokamen, управление миром, сохранение, пауза/LAN и явно выбранные правила |
+| `Singleplayer-Solaris` | Локальный Rust-сервер Solaris, управление миром, сохранение, пауза/LAN и явно выбранные правила |
 | `Singleplayer-vanilla-parity` | Дополнительно подтверждена полнота серверной симуляции и worldgen; успех клиента этого не доказывает |
 | `Official-services` | Реально проверены доступные официальные службы, включая нужные права приложения; неподдержанное явно указано |
 
@@ -75,7 +75,7 @@ Linux x86-64 и Windows x86-64 — обязательные первые desktop
 | Оптимизация данных и количества работы раньше SIMD | Rust сам по себе не устраняет лишние обходы, draw calls, allocations и синхронизации |
 | GPU-driven drawing как приоритетный fast path | Не требует одного CPU draw на сущность; baseline остаётся на той же модели данных |
 | MCP использует обычный input/action path | Тест проверяет настоящий клиент; отдельного «бот-клиента с похожими функциями» нет |
-| Client-WASM отдельно от server `krasnokamen:plugin` | Серверная экономика/инвентарь/боевые решения не исполняются повторно на машине игрока |
+| Client-WASM отдельно от server `solaris:plugin` | Серверная экономика/инвентарь/боевые решения не исполняются повторно на машине игрока |
 | Исходные ассеты отдельно от производных caches | Проверяемое происхождение, отсутствие копий Mojang в релизе, быстрый повторный запуск |
 | Полнота и быстродействие принимаются независимыми gates | Быстрые кубы не заменяют воду, прозрачность, мобов, шрифты, инвентарь и звук |
 
@@ -89,7 +89,7 @@ EULA запрещает распространять созданное Mojang �
 
 Релиз содержит собственные бинарники и только ресурсы с подходящей лицензией. Не включать client/server JAR, извлечённые текстуры, модели, звуки, fonts, скопированные Mojang shaders, декомпилированные Java sources, собранные из них производные binary caches. Исключить их из Git, release archives, container images и общедоступного CI cache.
 
-Нельзя автоматически считать код оптимизационных модов пригодным для копирования. На дату исследования Sodium в изученном upstream указывает **Polyform Shield 1.0.0**, Nvidium — LGPL-3.0 [S08, S09]. Изучение подходов и самостоятельная реализация отделяются от переноса кода; каждый заимствованный файл/алгоритмическая реализация проходит provenance/license review. Для собственного кода предпочтительна согласованная с Krasnokamen MIT/Apache-2.0 поставка без случайно несовместимых включений.
+Нельзя автоматически считать код оптимизационных модов пригодным для копирования. На дату исследования Sodium в изученном upstream указывает **Polyform Shield 1.0.0**, Nvidium — LGPL-3.0 [S08, S09]. Изучение подходов и самостоятельная реализация отделяются от переноса кода; каждый заимствованный файл/алгоритмическая реализация проходит provenance/license review. Для собственного кода предпочтительна согласованная с Solaris MIT/Apache-2.0 поставка без случайно несовместимых включений.
 
 ### 3.2. Авторизация
 
@@ -121,7 +121,7 @@ Bootstrap URL и разрешённые официальные origins фикс�
 
 Загрузка ограничена по parallelism, bytes, timeouts и повторным попыткам; resumable только при подтверждённой идентичности объекта. `.partial → verify → atomic publish`; два клиента используют lock/дедупликацию. Не запускать Java или исполняемые файлы из загружаемого archive. Безопасно обрабатывать ZIP paths, symlinks, duplicate entries, размер после распаковки, compression ratio, depth JSON/NBT, dimensions изображений и duration аудио.
 
-Не доверять произвольному download URL от игрового сервера: resource packs и Krasnokamen bundles проходят отдельную policy, consent, лимиты и origin isolation. Redirect повторно проверяется. Закрыты `file:`, произвольная локальная сеть/metadata endpoints и извлечение credentials из иных origins. Разрешённые localhost test URLs оформляются тестовым профилем.
+Не доверять произвольному download URL от игрового сервера: resource packs и Solaris bundles проходят отдельную policy, consent, лимиты и origin isolation. Redirect повторно проверяется. Закрыты `file:`, произвольная локальная сеть/metadata endpoints и извлечение credentials из иных origins. Разрешённые localhost test URLs оформляются тестовым профилем.
 
 Существующий ресурсный cache игрока можно импортировать read-only после проверки версии/digest; не модифицировать его обычную `.minecraft`. При недоступном CDN использовать уже проверенный cache либо показать точную ошибку. Заменять Mojang зеркалом без согласия и скрыто игнорировать checksum запрещено.
 
@@ -150,7 +150,7 @@ Bootstrap URL и разрешённые официальные origins фикс�
 | Audio | Music, positional/world/UI sounds, categories/volumes, weighted events, loops/streams, attenuation/pitch, subtitles, device change, mute/focus policy |
 | Resource packs | Порядок наложения, namespaces, models/blockstates/item definitions, atlas/animation, fonts/languages/sounds, dynamic reload, pack filters/metadata version |
 | Chat/services | Подписи/сертификаты и command signing где требуются версией; ошибки/неподписанные сообщения отображаются честно; reporting/social/Realms проходят отдельную проверку API |
-| Local play | Создание/выбор/удаление/backup мира, lifecycle локального Krasnokamen, LAN, paused/unpaused state, server settings, сохранение и восстановление |
+| Local play | Создание/выбор/удаление/backup мира, lifecycle локального Solaris, LAN, paused/unpaused state, server settings, сохранение и восстановление |
 
 Особенно не забыть функциональность, которую обычно теряют voxel-прототипы: точные waterlogged/slab/stair shapes, entity/block-entity animation, составные item components, состояние cursor stack, text layout, portals, beds, server corrections, звук и безопасный resource reload.
 
@@ -167,11 +167,11 @@ client-app         window, lifecycle, settings, process startup
 client-core        packet-applied world, prediction, actions, UI semantics
 client-render      scene extraction consumer, resources, meshes, GPU, capture
 client-content     assets, resource-pack stack, baking, codecs, derived cache
-client-krasnokamen     Loader adapter + client-WASM host contracts
+client-solaris     Loader adapter + client-WASM host contracts
 client-automation  typed control API, MCP adapters, scenarios, evidence
 ```
 
-Сетевой codec, auth, audio и platform modules сначала могут быть модулями этих crates; отделять после появления реального независимого consumer. Общие `mc-protocol`, `mc-nbt`, `mc-domain` брать из version-pinned Krasnokamen, если dependency audit подтверждает пригодность. Изученный `mc-protocol/Cargo.toml` зависит от `mc-data`, `mc-domain`, `mc-nbt`, а не от `mc-net` [R06]. Это кандидат на reuse, **не доказательство**, что там уже есть все clientbound decoders и online auth.
+Сетевой codec, auth, audio и platform modules сначала могут быть модулями этих crates; отделять после появления реального независимого consumer. Общие `mc-protocol`, `mc-nbt`, `mc-domain` брать из version-pinned Solaris, если dependency audit подтверждает пригодность. Изученный `mc-protocol/Cargo.toml` зависит от `mc-data`, `mc-domain`, `mc-nbt`, а не от `mc-net` [R06]. Это кандидат на reuse, **не доказательство**, что там уже есть все clientbound decoders и online auth.
 
 Не тащить `mc-net`, весь `mc-server`, `SessionRegistry` и persistence server-world в multiplayer client. Сначала audit public APIs/feature boundaries, затем одна небольшая upstream extraction там, где она действительно нужна. Не копировать protocol enums независимо в двух репозиториях и не проводить большой server refactor как условие первого окна.
 
@@ -265,7 +265,7 @@ Network corrections применяются к канонической клие�
 
 Клиент интерполирует/представляет полученные состояния, но не запускает серверный Brain, экономику поселения или damage resolution. Скрытый рендером NPC сохраняет актуальные сетевые данные. Позы/анимации могут вычисляться lazy, однако события и gameplay-relevant признаки не теряются.
 
-Для Krasnokamen допускается дополнительный negotiated animation/order presentation stream. Он не вводит вторую authority движения или здоровья и не становится обязательным для vanilla server.
+Для Solaris допускается дополнительный negotiated animation/order presentation stream. Он не вводит вторую authority движения или здоровья и не становится обязательным для vanilla server.
 
 ### 6.4. Инвентарь и взаимодействия
 
@@ -498,11 +498,11 @@ Subtitles, ремап клавиш, contrast, снижение визуальн�
 
 Нативная process lifecycle: закрытие окна отменяет задания, сохраняет settings атомарно, disconnects, завершает child singleplayer server корректно. Device lost/minimize/suspend/resume не создают новые игровые session IDs без действительного перехода. Настройки аккаунта и renderer профили разделены.
 
-## 14. Нативная поддержка Krasnokamen
+## 14. Нативная поддержка Solaris
 
 ### 14.1. Сначала совместимость с существующим Loader
 
-В исследованном рабочем дереве Krasnokamen Loader закреплены **wire protocol 3 / artifact index schema 2**, а `LoaderPlatform` перечисляет `fabric`, `neoforge`, `forge` [R01, R02]. Rust-клиент не должен притворяться Fabric.
+В исследованном рабочем дереве Solaris Loader закреплены **wire protocol 3 / artifact index schema 2**, а `LoaderPlatform` перечисляет `fabric`, `neoforge`, `forge` [R01, R02]. Rust-клиент не должен притворяться Fabric.
 
 Нужен согласованный native-client platform/capability handshake: сервер явно знает поддержанные features, форматы bundles и presentation contracts. Это может потребовать версионированного расширения manifest/ack; номер и backward compatibility решаются по фактическому codec. Старые неизвестные поля нельзя начать принимать «ради совместимости» без обновления схемы.
 
@@ -520,9 +520,9 @@ Subtitles, ремап клавиш, contrast, снижение визуальн�
 
 ### 14.3. Серверный и клиентский WASM — разные артефакты
 
-`krasnokamen:plugin` API 0.7 — существующий серверный компонентный контракт. Его модуль остаётся на сервере: не скачивать и не исполнять его повторно в клиенте. Нативная совместимость с WASM-аддонами сервера прежде всего означает правильную реализацию согласованных presentation/input/data surfaces.
+`solaris:plugin` API 0.7 — существующий серверный компонентный контракт. Его модуль остаётся на сервере: не скачивать и не исполнять его повторно в клиенте. Нативная совместимость с WASM-аддонами сервера прежде всего означает правильную реализацию согласованных presentation/input/data surfaces.
 
-Для полноценной клиентской расширяемости ввести **отдельный versioned WIT world** с рабочим именем `krasnokamen:client`. Один продукт может поставлять `server.wasm`, `client.wasm`, assets и schema, но каждое исполняется своим host, с независимыми capabilities и секретами.
+Для полноценной клиентской расширяемости ввести **отдельный versioned WIT world** с рабочим именем `solaris:client`. Один продукт может поставлять `server.wasm`, `client.wasm`, assets и schema, но каждое исполняется своим host, с независимыми capabilities и секретами.
 
 Сервер не пересылает клиенту свою private economy/AI state. Клиентский extension получает только данные, доступные этой сессии и разрешённые permissions. Изменение серверного состояния — typed request к серверному владельцу, никогда local authority.
 
@@ -566,7 +566,7 @@ Raw user/server shaders не включать в базовую sandbox-моде
 
 MCP обязателен с первых этапов, не как поздний debug-addon. Его потребители: Opus/Codex/другие агенты, canonical harness, человек-разработчик и CI. Он должен позволять пройти функциональные игровые циклы, проверить UI и rendering, воспроизвести ошибку и собрать evidence.
 
-В текущем `krasnokamen-loader` уже есть реальные инструменты `minecraft_observe`, bounded reads/waits, movement/interactions, containers, scenarios и screenshot [R03, R04]. Новая реализация переиспользует **контракт и tests**, но работает напрямую с Rust-клиентом. Не переносить Java reflection и JVM bridge в native runtime. Не создавать отдельного bot-client, который отправляет packets вместо реального контролируемого игрока.
+В текущем `solaris-loader` уже есть реальные инструменты `minecraft_observe`, bounded reads/waits, movement/interactions, containers, scenarios и screenshot [R03, R04]. Новая реализация переиспользует **контракт и tests**, но работает напрямую с Rust-клиентом. Не переносить Java reflection и JVM bridge в native runtime. Не создавать отдельного bot-client, который отправляет packets вместо реального контролируемого игрока.
 
 До changes экспортировать tool catalog текущего Loader, включая input/output schemas и semantics, в compatibility fixture. Старые имена и схемы, реально используемые harness, сохраняются thin adapters к новому typed action API. Не обещать совместимость только по совпадающим именам. Изменение completion semantics считается API change.
 
@@ -587,12 +587,12 @@ MCP обязателен с первых этапов, не как поздни�
 Поддержать локальный stdio и authenticated Streamable HTTP. Предлагаемые будущие CLI:
 
 ```text
-krasnokamen-client play --profile <profile>
-krasnokamen-client play --profile <test-profile> --automation --mcp-http 127.0.0.1:0
-krasnokamen-client mcp attach --instance <instance-id> --stdio
-krasnokamen-client mcp config --instance <instance-id> --format <host-format>
-krasnokamen-client doctor --json
-krasnokamen-client test run <scenario-id> --artifact-dir <controlled-dir>
+solaris-client play --profile <profile>
+solaris-client play --profile <test-profile> --automation --mcp-http 127.0.0.1:0
+solaris-client mcp attach --instance <instance-id> --stdio
+solaris-client mcp config --instance <instance-id> --format <host-format>
+solaris-client doctor --json
+solaris-client test run <scenario-id> --artifact-dir <controlled-dir>
 ```
 
 Это проектные команды. `mcp attach` — тонкий локальный transport bridge к уже работающему клиенту, без своего мира/игрока. Запуск тестового клиента — отдельная явная команда, не скрытая побочная реакция на `observe`.
@@ -608,9 +608,9 @@ Remote доступ только явным конфигом оператора,
 Сделать:
 
 - `AGENTS.md` с маршрутом к `docs/AGENT_TESTING.md` и правилами подключения;
-- MCP resource `krasnokamen-client://guide` с короткой инструкцией и примерами;
-- `krasnokamen-client://capabilities` с фактическими renderer/automation/target features;
-- `krasnokamen-client://instances`, `.../scenarios`, `.../limits`, `.../compatibility` с bounded pagination;
+- MCP resource `solaris-client://guide` с короткой инструкцией и примерами;
+- `solaris-client://capabilities` с фактическими renderer/automation/target features;
+- `solaris-client://instances`, `.../scenarios`, `.../limits`, `.../compatibility` с bounded pagination;
 - generated host-config examples, smoke command и schema documentation из одного typed source;
 - metadata/descriptions tools, описывающие side effects, scopes, limits и точное условие успеха;
 - MCP prompts/guide integration в форме, соответствующей negotiated protocol.
@@ -707,7 +707,7 @@ Stale handle после despawn/reopen/reconnect отвергается. Пои�
 | Containers | click/quick-move/drag/number-key/button, expected screen/container revision, server-observed result |
 | UI | inspect semantic tree, focus/type/select/scroll/click, inspect deny reason, wait view, Loader action/request view |
 | Navigation | bounded movement in known world using normal inputs; arrival predicate, progress/stuck reasons/cancel |
-| Krasnokamen | activated bundles/permissions, namespaced view/markers/selection, action receipt; only data sent to this session |
+| Solaris | activated bundles/permissions, namespaced view/markers/selection, action receipt; only data sent to this session |
 | Rendering | capture screenshot, inspect frame metadata/passes/draw stats, wait mesh/resource ready, optional bounded debug overlays |
 | Audio | inspect playback state, start bounded capture from configured sink, read levels/artifact; distinguish command vs output |
 | Performance | start/stop named capture, metrics snapshot, marker/timeline, memory residency, queues, shader/mesh compilation stats |
@@ -777,19 +777,19 @@ describe/capabilities → выбрать exact instance/profile
 
 ### 20.1. Локальный мир
 
-Singleplayer запускает локальный Krasnokamen как управляемый Rust child process с ограниченным IPC/control channel и обычным gameplay connection. Такая граница изолирует падение сервера и позволяет применять те же multiplayer tests. Встраивание server runtime в процесс клиента возможно позже только при реальном выигрыше; не создавать второй singleplayer engine.
+Singleplayer запускает локальный Solaris как управляемый Rust child process с ограниченным IPC/control channel и обычным gameplay connection. Такая граница изолирует падение сервера и позволяет применять те же multiplayer tests. Встраивание server runtime в процесс клиента возможно позже только при реальном выигрыше; не создавать второй singleplayer engine.
 
 Start/readiness/cancel/save/stop/crash recovery явны. Выход из мира сначала сохраняет авторитетный server state; forced close не обещает сохранение последнего кадра. LAN/remote players отключают обычную singleplayer pause по правилам выбранного режима. MCP wait сообщает, какой clock paused.
 
-### 20.2. Нельзя выдавать Krasnokamen-поведение за vanilla-parity
+### 20.2. Нельзя выдавать Solaris-поведение за vanilla-parity
 
-Совместимость сети не доказывает идентичный worldgen, mobs, redstone, loot или datapacks. `Singleplayer-Krasnokamen` поставляется с честным именем ruleset. Для полного native vanilla singleplayer нужен независимый server parity gate на закреплённой версии. Использование официального Java server как локального oracle не закрывает отсутствие JVM в целевом runtime.
+Совместимость сети не доказывает идентичный worldgen, mobs, redstone, loot или datapacks. `Singleplayer-Solaris` поставляется с честным именем ruleset. Для полного native vanilla singleplayer нужен независимый server parity gate на закреплённой версии. Использование официального Java server как локального oracle не закрывает отсутствие JVM в целевом runtime.
 
 Импорт существующего мира только после backup/dry-run, schema/version validation и проверки реально поддержанных данных. Не открывать vanilla save на запись «попробовать», не регенерировать неизвестные sections и не удалять неизвестные entities/items. Неподдержанная область возвращает точную ошибку. Original остается неизменным при неуспешном импорте.
 
 ### 20.3. Multiplayer matrix
 
-Минимум: официальный vanilla target server, актуальный Krasnokamen без addons, Krasnokamen со standard presentation bundles, Krasnokamen с client-WASM и adversarial server fixture. Proxy/Paper-подобные серверы — отдельная declared interoperability строка при проверке, не «любой сервер» после одного join.
+Минимум: официальный vanilla target server, актуальный Solaris без addons, Solaris со standard presentation bundles, Solaris с client-WASM и adversarial server fixture. Proxy/Paper-подобные серверы — отдельная declared interoperability строка при проверке, не «любой сервер» после одного join.
 
 Realms, social/reporting и другие официальные службы требуют своего API/access evidence. При отсутствии доступа они остаются блокирующими соответствующий service-completeness claim; не заменяются неофициальной имитацией или отключением security. Продолжать реализацию остальных независимых частей, явно сохраняя этот gap.
 
@@ -828,7 +828,7 @@ Reference candidate по имеющемуся контексту проекта:
 
 Для steady gates: минимум 5 повторов по 10 минут после одинакового warmup; cold/streaming отдельно. Хранить raw per-frame samples, p50/p95/p99/p99.9/max, count stalls, camera track, actual resolution, visible counts, content hashes, world mutations и settings. Отсутствующие/пропущенные frames входят в отчёт. Нельзя удалить худшие тики как «неинтересные» после просмотра результата.
 
-Сначала isolated renderer replay, затем live server, затем co-located client+Krasnokamen как отдельный сценарий. Стабильные frames не исправляют серверные 100+ ms ticks; network/server latency не записывать в GPU time. Конкурирующие builds, swapping, thermal throttle и CPU quota фиксируются.
+Сначала isolated renderer replay, затем live server, затем co-located client+Solaris как отдельный сценарий. Стабильные frames не исправляют серверные 100+ ms ticks; network/server latency не записывать в GPU time. Конкурирующие builds, swapping, thermal throttle и CPU quota фиксируются.
 
 Визуально эквивалентные сравнения не включают dynamic resolution, frame generation, урезанные particles или другую дальность. Сравнение Performance presets разрешено отдельно с точным описанием потери качества.
 
@@ -877,7 +877,7 @@ Resource-derived caches можно сбросить; пользовательс�
 1. Pure Rust unit/property/fuzz tests с собственными fixtures.
 2. Differential protocol/physics/UI-behavior tests против официального target-клиента/сервера.
 3. Native real-client integration через MCP, включая actual render/audio.
-4. Krasnokamen integration и full campaign client scenarios.
+4. Solaris integration и full campaign client scenarios.
 
 Совпадение собственного клиента с собственным сервером может скрывать общую ошибку. Поэтому vanilla server и Java client oracle обязательны. Reuse общего physics kernel не отменяет независимую проверку. Если источник oracle мутирует fixture, разные клиенты получают копии исходного мира или последовательно воспроизводимое состояние.
 
@@ -952,7 +952,7 @@ Export только в разрешённый artifact root; MCP возвращ�
 | MCP-10 | Screenshot подтверждает actual framebuffer; offscreen/state-only flags не выданы за onscreen evidence |
 | MCP-11 | Startup descriptor/guide/host config позволяют новому агенту обнаружить exact instance без знания прошлой беседы |
 | MCP-12 | Недоверенный текст в чате/книге не меняет permissions, tool catalog или actor instructions |
-| SP-01 | Локальный Krasnokamen start/save/exit/crash/restart и LAN выполняются без JVM клиента |
+| SP-01 | Локальный Solaris start/save/exit/crash/restart и LAN выполняются без JVM клиента |
 | SP-02 | World import сохраняет оригинал и явно отвергает неподдержанное вместо data loss |
 | SP-03 | `Singleplayer-vanilla-parity` не объявляется без отдельного server/worldgen coverage |
 | PERF-01 | P01–P10 имеют raw measurements, equality settings и неизменённые workloads |
@@ -985,7 +985,7 @@ Window lifecycle, device/capability selection, inputs, basic render scene соб
 
 ### C02 — настоящий vanilla session и первый gameplay loop
 
-Status/login/config/Play, chunk decode/light, камеры, player prediction, базовые модели/texture resources, hotbar/inventory, break/place и звук. Подключение к официальному target server и Krasnokamen. Обычный игровой survival сценарий: подойти, добыть блок, собрать, использовать, сохранить session correctness.
+Status/login/config/Play, chunk decode/light, камеры, player prediction, базовые модели/texture resources, hotbar/inventory, break/place и звук. Подключение к официальному target server и Solaris. Обычный игровой survival сценарий: подойти, добыть блок, собрать, использовать, сохранить session correctness.
 
 **Приёмка:** ordinary inputs через MCP; server-observed inventory; actual frame/audio; никаких тайных `give/teleport` для закрытия пользовательского пути. Любой fixture setup обозначен отдельно.
 
@@ -1001,7 +1001,7 @@ Bounded streaming, incremental meshing, model baker coverage, culling/instancing
 
 **Приёмка:** все обязательные функции target имеют coverage; placeholders и unsupported явно блокируют соответствующую completeness строку. Толпы и P03 уже измеряются.
 
-### C05 — Krasnokamen native compatibility
+### C05 — Solaris native compatibility
 
 Утвердить native platform/capabilities, перенести Loader codec semantics на Rust, shared test fixtures, exact permissions/activation, generic namespaced UI, custom content mapping и server disconnect cleanup. Не создавать feature shortcuts только для settlements.
 
@@ -1021,15 +1021,15 @@ Indirect submission/compaction, compact geometry/instances, shared skinning и r
 
 ### C08 — singleplayer, services и desktop completeness
 
-Управление local Krasnokamen worlds, backup/import, pause/LAN, supported official services, полнота screenshots/audio/settings/input на Windows/Linux/macOS. Закрыть внешние API blockers либо сохранить соответствующий статус и не объявлять сервисную полноту.
+Управление local Solaris worlds, backup/import, pause/LAN, supported official services, полнота screenshots/audio/settings/input на Windows/Linux/macOS. Закрыть внешние API blockers либо сохранить соответствующий статус и не объявлять сервисную полноту.
 
-**Приёмка:** Java-client-compatible и Krasnokamen-native claims основаны на матрице; native singleplayer claims ограничены фактической server parity, без скрытой JVM.
+**Приёмка:** Java-client-compatible и Solaris-native claims основаны на матрице; native singleplayer claims ограничены фактической server parity, без скрытой JVM.
 
 ### C09 — agents, reliability, security, distribution
 
 Полный MCP catalog и guides, migration существующих harness consumers, race/fuzz/adversarial/soak, evidence redaction, signed reproducible distribution, clean install, upgrade/rollback. Проверить минимум две независимые MCP host implementations, выбранные пользователем/проектом, а не только свой тестовый JSON sender.
 
-**Приёмка:** независимый агент поднимает test profile по документации, проходит gameplay+Krasnokamen UI, диагностирует преднамеренно сломанный shader/resource/state и сохраняет доказательства. Full workload повторяется на approved hardware.
+**Приёмка:** независимый агент поднимает test profile по документации, проходит gameplay+Solaris UI, диагностирует преднамеренно сломанный shader/resource/state и сохраняет доказательства. Full workload повторяется на approved hardware.
 
 ### C10 — конечная приёмка и дальнейшие эксперименты
 
@@ -1089,7 +1089,7 @@ Ray tracing/ray marching всего мира, sparse voxel octree renderer и п
 
 ### 26.6. Full client против полной игры
 
-Внешний сервер уже владеет большинством game simulation. Поэтому полноценный multiplayer client не обязан запускать весь AI. Но native singleplayer зависит от полноты local Krasnokamen. Отдельные milestones защищают от обещания полной игры на основании корректного рендеринга и networking.
+Внешний сервер уже владеет большинством game simulation. Поэтому полноценный multiplayer client не обязан запускать весь AI. Но native singleplayer зависит от полноты local Solaris. Отдельные milestones защищают от обещания полной игры на основании корректного рендеринга и networking.
 
 ## 27. Проверенная исходная точка и источники
 
@@ -1097,12 +1097,12 @@ Ray tracing/ray marching всего мира, sparse voxel octree renderer и п
 
 Рабочие деревья просмотрены 2026-10-01. Они содержали незакоммиченные изменения. Ниже hashes отдельных прочитанных файлов, не fingerprint всего проекта. Код репозиториев в этой работе не менялся; новые build/performance gates не запускались.
 
-- **[R01]** `krasnokamen-loader/AGENTS.md:33–42`: wire 3/schema 2 и распределение ответственности. SHA-256 `3066fb89debcf14a88a93afb879bd14108dbfde4f338f87808cae3e1e971839b`.
-- **[R02]** `krasnokamen-loader/loader-core/src/main/java/dev/krasnokamen/loader/LoaderPlatform.java:5–11`: enum Fabric/NeoForge/Forge. SHA-256 `57d977f8f644d2989047162a1b3d6ddef597bad90cee561b14e36de37f5779f6`.
-- **[R03]** `krasnokamen-loader/README.md:280–430`: current automation launch/catalog/waits, namespaced `view_key`, loopback/auth/producer events. SHA-256 `e53df3a8092eb83979c1a41d31f7ca121a2f8fec3b5da3601b0cae938e34a539`.
-- **[R04]** `krasnokamen-loader/bridge-core/src/main/java/dev/krasnokamen/agent/mcp/ClientMcpTools.java:17–200`: реальные typed tools, waits, entity fences, normal input semantics. SHA-256 `4b4315d67c1cffdcf21ddf7a14a5d0f608dcdb3fe362f2f2051da11d4ffb973c`. Для полного catalog C00 должен прочитать оставшуюся часть, а не ограничиться этим диапазоном.
-- **[R05]** `krasnokamen-loader/bridge-core/src/main/java/dev/krasnokamen/agent/mcp/McpHttpServer.java:35–39,233–266`: targeted search подтвердил revisions 2025-11-25/2025-06-18. Полный transport audit здесь не проводился.
-- **[R06]** `krasnokamen/crates/mc-protocol/Cargo.toml:14–21`: dependencies `mc-data/mc-domain/mc-nbt/bytes/flate2/thiserror/uuid`. SHA-256 `d6b9c32036aae5e25462749c278ecd87c877c5b757628c4a7d97fc938a8c69c4`.
+- **[R01]** `solaris-loader/AGENTS.md:33–42`: wire 3/schema 2 и распределение ответственности. SHA-256 `3066fb89debcf14a88a93afb879bd14108dbfde4f338f87808cae3e1e971839b`.
+- **[R02]** `solaris-loader/loader-core/src/main/java/dev/solaris/loader/LoaderPlatform.java:5–11`: enum Fabric/NeoForge/Forge. SHA-256 `57d977f8f644d2989047162a1b3d6ddef597bad90cee561b14e36de37f5779f6`.
+- **[R03]** `solaris-loader/README.md:280–430`: current automation launch/catalog/waits, namespaced `view_key`, loopback/auth/producer events. SHA-256 `e53df3a8092eb83979c1a41d31f7ca121a2f8fec3b5da3601b0cae938e34a539`.
+- **[R04]** `solaris-loader/bridge-core/src/main/java/dev/solaris/agent/mcp/ClientMcpTools.java:17–200`: реальные typed tools, waits, entity fences, normal input semantics. SHA-256 `4b4315d67c1cffdcf21ddf7a14a5d0f608dcdb3fe362f2f2051da11d4ffb973c`. Для полного catalog C00 должен прочитать оставшуюся часть, а не ограничиться этим диапазоном.
+- **[R05]** `solaris-loader/bridge-core/src/main/java/dev/solaris/agent/mcp/McpHttpServer.java:35–39,233–266`: targeted search подтвердил revisions 2025-11-25/2025-06-18. Полный transport audit здесь не проводился.
+- **[R06]** `solaris/crates/mc-protocol/Cargo.toml:14–21`: dependencies `mc-data/mc-domain/mc-nbt/bytes/flate2/thiserror/uuid`. SHA-256 `d6b9c32036aae5e25462749c278ecd87c877c5b757628c4a7d97fc938a8c69c4`.
 
 Наличие готового производственного Rust-клиента в этих данных не установлено. Изученные репозитории дают server contracts, Java Loader и test automation. Настоящее ТЗ проектирует новый продукт, а не описывает найденную реализацию.
 
@@ -1138,7 +1138,7 @@ Ray tracing/ray marching всего мира, sparse voxel octree renderer и п
 
 ## 28. Условия конечного результата
 
-Продукт принят для явно указанного уровня совместимости, когда пользователь может законно получить ресурсы, запустить собственный Rust-клиент, выполнить полный заявленный gameplay/UI цикл на независимом vanilla и Krasnokamen сервере, видеть корректную картинку/слышать звук, использовать согласованные Krasnokamen/client-WASM аддоны, а агент способен воспроизвести и проверить тот же путь через безопасный MCP.
+Продукт принят для явно указанного уровня совместимости, когда пользователь может законно получить ресурсы, запустить собственный Rust-клиент, выполнить полный заявленный gameplay/UI цикл на независимом vanilla и Solaris сервере, видеть корректную картинку/слышать звук, использовать согласованные Solaris/client-WASM аддоны, а агент способен воспроизвести и проверить тот же путь через безопасный MCP.
 
 Производительность подтверждается сохранёнными full-scene измерениями при одинаковых настройках. Полнота подтверждается coverage matrix и реальными сценариями. Безопасность подтверждается negative/adversarial tests и проверенной поставкой. Ни одно из этих трёх свойств не заменяет другое.
 

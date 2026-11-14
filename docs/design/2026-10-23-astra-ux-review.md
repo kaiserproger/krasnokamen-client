@@ -1,10 +1,10 @@
-# Krasnokamen: interaction language and cross-surface UX review
+# Solaris: interaction language and cross-surface UX review
 
 Independent proposal by DesignAstra, 2026-10-23. R&D design specification, **not implemented functionality or an acceptance report**. The consolidated decision belongs in `DESIGN_LANGUAGE.md`; this file retains the independent argument and source evidence for cross-review.
 
 ## 1. Position: an instrument for entering and operating a world
 
-Krasnokamen should feel like a carefully made instrument, not a SaaS landing page, a sci-fi cockpit, or a recolored Minecraft skin. Its own UI has three jobs: **get me into the right world, tell me what is happening, let me safely change it**. The world remains the hero. A good screen makes the next action obvious without shouting. Branding lives in proportion, disciplined alignment, authored icons and language—not a gradient, a card around everything, or a glow on every control.
+Solaris should feel like a carefully made instrument, not a SaaS landing page, a sci-fi cockpit, or a recolored Minecraft skin. Its own UI has three jobs: **get me into the right world, tell me what is happening, let me safely change it**. The world remains the hero. A good screen makes the next action obvious without shouting. Branding lives in proportion, disciplined alignment, authored icons and language—not a gradient, a card around everything, or a glow on every control.
 
 My independent visual recommendation is low-chroma charcoal, warm readable text, restrained amber for selection/action, squared rectangular controls with small corner treatment, no decorative blur. Primary action placement, grouping and clear text precede visual novelty. Opus owns the exact token specification and mockups; this recommendation is intentionally independent rather than copied from that draft.
 
@@ -13,8 +13,8 @@ My independent visual recommendation is low-chroma charcoal, warm readable text,
 | Surface | We own | We must not restyle |
 |---|---|---|
 | Native launcher | Selection, install/repair, local profiles, launcher settings, diagnostic presentation | System dialogs, Microsoft/browser auth UI |
-| Native client | Krasnokamen-owned options, monitor capture/share/owner dialogs, custom overlays and addon chrome | Vanilla inventory/container slots, hotbar/hearts, crafting, chat and other vanilla screens/semantics |
-| Fabric Krasnokamen Loader | Krasnokamen permission prompt, custom view renderer, operator terminal, Krasnokamen overlays | Minecraft's underlying screens, OS permission picker |
+| Native client | Solaris-owned options, monitor capture/share/owner dialogs, custom overlays and addon chrome | Vanilla inventory/container slots, hotbar/hearts, crafting, chat and other vanilla screens/semantics |
+| Fabric Solaris Loader | Solaris permission prompt, custom view renderer, operator terminal, Solaris overlays | Minecraft's underlying screens, OS permission picker |
 | First-party plugins | Plugin-authored names, item labels, action wording, custom views where supported | Vanilla inventory-menu frame/slots when a plugin uses that transport |
 | Server GUI / web | Dashboard shell, metrics, diagnostic navigation and our own web pages | Browser chrome, terminal conventions, third-party services |
 
@@ -43,13 +43,13 @@ Source roots used below:
 | C `src/computer/native.rs:91-99,130-132`; `sharing.rs:162-175` | Esc releases local control; Shift+Esc closes capture in context; F8 revokes/leaves viewing. These are different safety operations. | Persistent, contextual instruction with current binding and visible equivalent controls; never put all safety into a toast or require remembering F8. |
 | C `src/ui/desktop.rs:63-88` | Dialog content and actions wrap, selected rows are kept visible, and keyboard hint exists. These are good foundations. The layout uses a generic list for permission decisions and owner commands alike. | Preserve wrapping/semantic actions. Consent is a bounded decision with identity/scope/action footer; owner management is a grouped panel with a scrollable viewer list. |
 | C `src/ui/theme.rs:72-84,112-123` | Theme applies glow, rim, translucency and sheen to common controls/panels. Over a variable world, text depends on the composited backdrop. | One opaque-enough reading surface; border for boundaries, focus outline for keyboard, accent for action/selection. Do not use glow as the only state cue. Contrast measured over the final composition. |
-| L `loader-fabric/.../KrasnokamenFabricLoader.java:357-376`; L `README.md:70-79` | Permission prompt concatenates raw wire permission names into a sentence and offers generic Allow/Deny. Denying disconnects. A new player cannot connect technical scope names to effects or anticipate disconnection. | Named server identity, human capability descriptions, optional raw identifiers in Details. Buttons **Allow content & join** / **Decline & disconnect**, with accurate download consequence. No faux per-scope toggles if protocol decision is all-or-nothing. |
+| L `loader-fabric/.../SolarisFabricLoader.java:357-376`; L `README.md:70-79` | Permission prompt concatenates raw wire permission names into a sentence and offers generic Allow/Deny. Denying disconnects. A new player cannot connect technical scope names to effects or anticipate disconnection. | Named server identity, human capability descriptions, optional raw identifiers in Details. Buttons **Allow content & join** / **Decline & disconnect**, with accurate download consequence. No faux per-scope toggles if protocol decision is all-or-nothing. |
 | L `loader-platform-common/.../LoaderViewScreen.java:108-118` | Presenting a new model clears page, tab, input text and selections. A server refresh while typing can erase a draft or reset navigation. | Revision safety remains mandatory. Retain only compatible UI-local draft/focus by stable field identity; visibly invalidate when authoritative meaning changes. Never replay an old action. This needs implementation/state tests, not just a theme. |
 | L `loader-platform-common/.../LoaderViewScreen.java:138-167,203-206` | One view has both local layout pagination and model/data pagination. At small GUI size “Page 1 of 3” plus “2 / 4” describes two different dimensions. | One user-facing data-page control; local overflow scrolls. If pagination must remain, label **Results page** versus **Screen section** explicitly. |
 | L `loader-platform-common/.../LoaderViewScreen.java:378-389,417-421` | Enum selection cycles by clicking a button; disabled action reasons are both tooltip and visible text (good). | Real select/list for multi-option choices; preserve visible deny reasons. A click-to-cycle control is not discoverable for 8 options and hides alternatives. |
 | L `loader-fabric/.../ComputerScreen.java:30-35,53-92` | New terminal reply resets page to newest and rebuilds/focuses the input. Text wrapping uses `width / 6` character counts. Reading older output can be interrupted by a reply. | Keep reading position when scrolled back; show “New output” with an explicit jump action. Font-measured wrapping and Unicode-safe boundaries. Do not replace the terminal with decorative cards. |
 | P `sources/basic-economy/src/lib.rs:278-288,340-370,469-500` | Shop item label compresses product, price, refund and owned count into one line. Primary buys, secondary refunds; transaction closes the menu and reports outcome later. | Preserve vanilla container chrome. Give the item a short name and explicit purchase/refund instructions in supported text; show authoritative transaction result, not immediate success. A richer custom shop is a later capability-backed slice, not assumed available today. |
-| P `README.md:3-7,35-38`; `sources/krasnokamen-towns/src/lib.rs:249-292` | Current towns package is command/chat-based. Online-roster and land-claims are legacy references, not deployable current GUIs; settlements moved to core. | Do not use old Lua screenshots to claim current plugin UI. Apply shared language to real authored output and future supported custom views, without inventing existing dashboards. |
+| P `README.md:3-7,35-38`; `sources/solaris-towns/src/lib.rs:249-292` | Current towns package is command/chat-based. Online-roster and land-claims are legacy references, not deployable current GUIs; settlements moved to core. | Do not use old Lua screenshots to claim current plugin UI. Apply shared language to real authored output and future supported custom views, without inventing existing dashboards. |
 
 The owner's report about text crammed into round inventory buttons is authoritative as a reported experience. It is not a reason to replace every text button with an icon. **Small repeated tool actions use icons; consequential choices use text; vanilla inventory remains vanilla.** The exact release screenshot locator belongs in the pixel audit, not fabricated here.
 
@@ -67,7 +67,7 @@ Settings groups: Startup; Game defaults (with source-of-truth and “next launch
 
 ### Native / Loader custom UI
 
-Maintain a stable **Krasnokamen** entry for owned features: Sharing, Addons, custom preferences. Do not reorganize vanilla pause/inventory pages merely to impose brand. Shared sections use identical names and roles between native and Fabric when the capability exists. Platform differences are stated (“Window sharing unavailable on this platform”), not filled with disabled aspirational widgets.
+Maintain a stable **Solaris** entry for owned features: Sharing, Addons, custom preferences. Do not reorganize vanilla pause/inventory pages merely to impose brand. Shared sections use identical names and roles between native and Fabric when the capability exists. Platform differences are stated (“Window sharing unavailable on this platform”), not filled with disabled aspirational widgets.
 
 Custom options use category → labeled setting → current value and unit → one-line explanation. Important constraints remain visible, not exclusively in hover. Accessibility is directly reachable; it is not a hidden synonym for Interface. Restore defaults is scoped to the category and explains what changes.
 
@@ -206,11 +206,11 @@ Read sources, with their limits:
 - [NN/g vague-prompt trip planner screenshot](https://media.nngroup.com/media/editor/2026/03/18/vague-vibe-coding-trip-planner.jpg): three equal destination cards with pictograms, large whitespace, repeated activity rectangles, muted category pills. This visibly illustrates generic repeated card structure; the image alone cannot prove broken controls or poor accessibility.
 - [NN/g detailed-prompt trip planner screenshot](https://media.nngroup.com/media/editor/2026/03/18/specific-vibe-coding-trip-planner.jpg): spatial map, timeline and selected-place detail have distinct jobs. It still visibly contains placeholder photo panels/map-like artwork. More tailored composition is **not** evidence that the data/backend or usability is complete.
 
-These third-party images remain linked at their publisher. They are references, not Krasnokamen assets, and no permission to redistribute is implied. Krasnokamen audit screenshots are separately provenance-labeled by Opus.
+These third-party images remain linked at their publisher. They are references, not Solaris assets, and no permission to redistribute is implied. Solaris audit screenshots are separately provenance-labeled by Opus.
 
 ### Explicit rejection rules
 
-| Never ship | Why it fails for Krasnokamen | What replaces it |
+| Never ship | Why it fails for Solaris | What replaces it |
 |---|---|---|
 | Text crammed into small round tool buttons | Neither readable text nor recognizable icon; localization breaks immediately | Authored icon + accessible name/tooltip for a repeated tool; full text button for a decision |
 | Every noun in a pill, every line in a card | Equal emphasis destroys hierarchy and spends space on framing | Plain grouped rows, rules and spacing; a card only for a selectable entity/context |
@@ -225,7 +225,7 @@ These third-party images remain linked at their publisher. They are references, 
 | Toy command copy (“Oops!”, “Something went wrong”) | Hides cause and remedy; trivializes privacy/data risk | Concrete event, impact, next action, optional technical details |
 | Invented trust symbols, testimonials, compatibility or speed claims | Visual certainty exceeds verified product state | Honest preview boundary and actual evidence |
 | Novel asymmetric layout solely to look “not AI” | Taste theater can harm predictability as much as a template | Asymmetry only when information hierarchy earns it |
-| Recoloring vanilla screens wholesale | Violates scope and learned Minecraft interaction | Krasnokamen-owned chrome only; vanilla stays vanilla |
+| Recoloring vanilla screens wholesale | Violates scope and learned Minecraft interaction | Solaris-owned chrome only; vanilla stays vanilla |
 
 A screenshot is evidence of appearance, not behavior. A gradient, Inter, a round corner or a component library is not proof of authorship. “Slop” here means shipping unexamined decisions, not using a particular tool.
 

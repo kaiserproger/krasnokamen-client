@@ -1,10 +1,7 @@
 //! Stateful numeric item properties for a local-player presentation owner.
 use crate::inventory::Stack;
 use serde_json::Value;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct GlobalPos {
@@ -32,11 +29,7 @@ pub(crate) struct Needles {
 }
 
 #[derive(Debug, Default)]
-struct Needle {
-    tick: Option<i64>,
-    rotation: f32,
-    velocity: f32,
-}
+struct Needle { tick: Option<i64>, rotation: f32, velocity: f32 }
 
 impl Needle {
     fn sample(&mut self, tick: i64, target: f32, factor: f32, wobble: bool) -> f32 {
@@ -55,31 +48,18 @@ impl Needle {
 }
 
 fn lodestone(stack: &Stack) -> Option<GlobalPos> {
-    let target = stack
-        .component("minecraft:lodestone_tracker")?
-        .get("target")?;
+    let target = stack.component("minecraft:lodestone_tracker")?.get("target")?;
     let p = target.get("pos")?.as_array()?;
-    if p.len() != 3 {
-        return None;
-    }
+    if p.len() != 3 { return None; }
     Some(GlobalPos {
         dimension: target.get("dimension")?.as_str()?.to_owned(),
-        pos: std::array::from_fn(|i| {
-            p[i].as_i64()
-                .and_then(|n| i32::try_from(n).ok())
-                .unwrap_or(i32::MIN)
-        }),
-    })
-    .filter(|p| !p.pos.contains(&i32::MIN))
+        pos: std::array::from_fn(|i| p[i].as_i64().and_then(|n| i32::try_from(n).ok()).unwrap_or(i32::MIN)),
+    }).filter(|p| !p.pos.contains(&i32::MIN))
 }
 
 impl ItemWorldContext {
     pub(crate) fn number(&self, node: &Value, stack: &Stack, seed: i32) -> Option<f32> {
-        let property = node
-            .get("property")?
-            .as_str()?
-            .strip_prefix("minecraft:")
-            .unwrap_or(node["property"].as_str()?);
+        let property = node.get("property")?.as_str()?.strip_prefix("minecraft:").unwrap_or(node["property"].as_str()?);
         let source = match property {
             "time" => node.get("source")?.as_str()?,
             "compass" => node.get("target")?.as_str()?,
@@ -104,45 +84,21 @@ impl ItemWorldContext {
             _ => return None,
         };
         let valid = location.as_ref().filter(|target| {
-            target.dimension == self.dimension
-                && (0..3)
-                    .map(|i| {
-                        let d = f64::from(target.pos[i]) + 0.5 - self.position[i];
-                        d * d
-                    })
-                    .sum::<f64>()
-                    >= 1e-5
+            target.dimension == self.dimension && (0..3).map(|i| {
+                let d = f64::from(target.pos[i]) + 0.5 - self.position[i]; d * d
+            }).sum::<f64>() >= 1e-5
         });
         let mut needles = self.needles.lock().expect("item needle state poisoned");
         let key = (key_name, location.clone(), wobble);
-        if needles.states.len() >= 256 && !needles.states.contains_key(&key) {
-            needles.states.clear();
-        }
-        let updating = !wobble
-            || needles
-                .states
-                .get(&key)
-                .is_none_or(|state| state.tick != Some(self.game_tick));
-        let random = if updating
-            && ((property == "compass" && valid.is_none())
-                || (property == "time" && source == "random"))
-        {
-            needles.random = needles
-                .random
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+        if needles.states.len() >= 256 && !needles.states.contains_key(&key) { needles.states.clear(); }
+        let updating = !wobble || needles.states.get(&key).is_none_or(|state| state.tick != Some(self.game_tick));
+        let random = if updating && ((property == "compass" && valid.is_none()) || (property == "time" && source == "random")) {
+            needles.random = needles.random.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             ((needles.random >> 40) as f32) / 16777216.
-        } else {
-            0.
-        };
+        } else { 0. };
         let state = needles.states.entry(key).or_default();
         if property == "time" {
-            let target = match source {
-                "daytime" => self.sun_angle / 360.,
-                "moon_phase" => self.moon_phase / 8.,
-                "random" => random,
-                _ => return None,
-            };
+            let target = match source { "daytime" => self.sun_angle / 360., "moon_phase" => self.moon_phase / 8., "random" => random, _ => return None };
             return Some(state.sample(self.game_tick, target, 0.9, wobble));
         }
         if let Some(target) = valid {
@@ -171,10 +127,7 @@ mod tests {
             game_tick: 1,
             sun_angle: 90.,
             moon_phase: 2.,
-            spawn: Some(GlobalPos {
-                dimension: "minecraft:overworld".into(),
-                pos: [10, 64, 0],
-            }),
+            spawn: Some(GlobalPos { dimension: "minecraft:overworld".into(), pos: [10, 64, 0] }),
             death: None,
             needles: Arc::default(),
         }
@@ -207,14 +160,8 @@ mod tests {
         let lodestone = json!({"property":"minecraft:compass","target":"lodestone","wobble":false});
         let mut a = Stack::default();
         let mut b = Stack::default();
-        Arc::make_mut(&mut a.components).insert(
-            "minecraft:lodestone_tracker".into(),
-            json!({"target":{"dimension":"minecraft:overworld","pos":[10,64,0]}}),
-        );
-        Arc::make_mut(&mut b.components).insert(
-            "minecraft:lodestone_tracker".into(),
-            json!({"target":{"dimension":"minecraft:overworld","pos":[0,64,10]}}),
-        );
+        Arc::make_mut(&mut a.components).insert("minecraft:lodestone_tracker".into(), json!({"target":{"dimension":"minecraft:overworld","pos":[10,64,0]}}));
+        Arc::make_mut(&mut b.components).insert("minecraft:lodestone_tracker".into(), json!({"target":{"dimension":"minecraft:overworld","pos":[0,64,10]}}));
         let a_angle = world.number(&lodestone, &a, 0).unwrap();
         let b_angle = world.number(&lodestone, &b, 0).unwrap();
         assert!((a_angle - b_angle).abs() > 0.2);

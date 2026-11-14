@@ -1,6 +1,6 @@
 use super::arena::{Allocation, Arena};
 use super::packed::TerrainVertex;
-use crate::api::{FACE_GROUPS, FaceGroups, VEGETATION_GROUP, Vertex};
+use crate::api::{FaceGroups, Vertex, FACE_GROUPS, VEGETATION_GROUP};
 use std::ops::Range;
 
 const FACE_GROUPS_LAST: usize = FACE_GROUPS - 1;

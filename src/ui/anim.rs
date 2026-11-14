@@ -334,8 +334,7 @@ impl UiState {
             None => old,
         };
         let target = f32::from(self.selected_slot);
-        self.anim.hotbar =
-            ((displayed - target).abs() <= 4.5).then_some((displayed, self.anim.now));
+        self.anim.hotbar = ((displayed - target).abs() <= 4.5).then_some((displayed, self.anim.now));
     }
 
     /// Remaining slide distance (in slots) of the hotbar selection frame.
@@ -387,7 +386,7 @@ impl UiState {
                     hover,
                     press,
                     ..Fx::REST
-                };
+                }
             }
             Profile::Panel => self.anim.screen_started,
             Profile::Stagger => match entry {
@@ -494,10 +493,7 @@ mod tests {
         let (content, inventory, mut ui) = state();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         for frame in 0..30 {
-            assert!(
-                !ui.advance_animations(f64::from(frame) / 60.),
-                "HUD frame {frame}"
-            );
+            assert!(!ui.advance_animations(f64::from(frame) / 60.), "HUD frame {frame}");
         }
         ui.transition(Screen::Title);
         ui.invalidate();
@@ -526,12 +522,7 @@ mod tests {
         ui.rebuild_for_test(&inventory, &content).unwrap();
         ui.advance_animations(0.);
         ui.advance_animations(1.); // enter finished
-        let quit = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "title/quit")
-            .unwrap()
-            .bounds;
+        let quit = ui.nodes.iter().find(|n| n.id == "title/quit").unwrap().bounds;
         ui.pointer = [quit[0] + quit[2] / 2., quit[1] + quit[3] / 2.];
         let mut last = 0.;
         let mut now = 1.;
@@ -568,41 +559,19 @@ mod tests {
         ui.invalidate();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         ui.advance_animations(0.);
-        let respawn = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "death/respawn")
-            .unwrap()
-            .bounds;
-        let title = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "death/disconnect")
-            .unwrap()
-            .bounds;
+        let respawn = ui.nodes.iter().find(|n| n.id == "death/respawn").unwrap().bounds;
+        let title = ui.nodes.iter().find(|n| n.id == "death/disconnect").unwrap().bounds;
         ui.pointer = [respawn[0] + 4., respawn[1] + 4.];
         for frame in 1..30 {
             ui.advance_animations(f64::from(frame) / 60.);
         }
-        assert!(
-            !ui.nodes
-                .iter()
-                .find(|n| n.id == "death/respawn")
-                .unwrap()
-                .enabled
-        );
-        assert_eq!(
-            ui.anim.nodes["death/respawn"].hover, 0.,
-            "disabled control stays flat"
-        );
+        assert!(!ui.nodes.iter().find(|n| n.id == "death/respawn").unwrap().enabled);
+        assert_eq!(ui.anim.nodes["death/respawn"].hover, 0., "disabled control stays flat");
         ui.pointer = [title[0] + 4., title[1] + 4.];
         for frame in 30..60 {
             ui.advance_animations(f64::from(frame) / 60.);
         }
-        assert_eq!(
-            ui.anim.nodes["death/disconnect"].hover, 1.,
-            "enabled control glows"
-        );
+        assert_eq!(ui.anim.nodes["death/disconnect"].hover, 1., "enabled control glows");
     }
 
     #[test]
@@ -616,12 +585,7 @@ mod tests {
         assert!(born("pause/resume") < born("pause/settings"));
         assert!(born("pause/settings") < born("pause/disconnect"));
         assert!(born("pause/disconnect") - 5. <= 0.25, "stagger is capped");
-        let resume = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "pause/resume")
-            .unwrap()
-            .clone();
+        let resume = ui.nodes.iter().find(|n| n.id == "pause/resume").unwrap().clone();
         assert_eq!(ui.fx_enter(&resume).alpha, 0., "starts transparent");
         ui.advance_animations(5.1);
         let mid = ui.fx_enter(&resume);
@@ -645,19 +609,13 @@ mod tests {
     #[test]
     fn reduced_motion_removes_the_slide_but_keeps_the_fade() {
         let (content, inventory, mut ui) = state();
-        ui.settings
-            .insert("reduce_motion".into(), serde_json::json!(true));
+        ui.settings.insert("reduce_motion".into(), serde_json::json!(true));
         ui.transition(Screen::Pause);
         ui.invalidate();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         ui.advance_animations(1.);
         ui.advance_animations(1.1);
-        let resume = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "pause/resume")
-            .unwrap()
-            .clone();
+        let resume = ui.nodes.iter().find(|n| n.id == "pause/resume").unwrap().clone();
         let fx = ui.fx_enter(&resume);
         assert!(fx.alpha > 0. && fx.alpha < 1.);
         assert_eq!((fx.dx, fx.dy), (0., 0.));
@@ -667,19 +625,13 @@ mod tests {
     fn slider_thumb_and_switch_knob_ease_toward_new_targets() {
         let (content, mut inventory, mut ui) = state();
         ui.transition(Screen::Title);
-        ui.activate_for_test(
-            NodeAction::Screen(Screen::Settings),
-            &mut inventory,
-            &content,
-        )
-        .unwrap();
+        ui.activate_for_test(NodeAction::Screen(Screen::Settings), &mut inventory, &content).unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         ui.advance_animations(0.);
         ui.advance_animations(1.);
         let first = ui.anim_value("settings/vsync", 1.);
         assert_eq!(first, 1., "first sighting starts at the target");
-        ui.activate_for_test(NodeAction::Setting("vsync"), &mut inventory, &content)
-            .unwrap();
+        ui.activate_for_test(NodeAction::Setting("vsync"), &mut inventory, &content).unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         let mut now = 1.;
         let mut last = 1.;
@@ -705,19 +657,10 @@ mod tests {
         inventory.selected_slot = 3;
         ui.synchronize(&inventory, &content).unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let sel = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "hud/selection")
-            .unwrap()
-            .clone();
+        let sel = ui.nodes.iter().find(|n| n.id == "hud/selection").unwrap().clone();
         assert!(ui.advance_animations(0.01));
         let fx = ui.fx_enter(&sel);
-        assert!(
-            fx.dx < 0. && fx.dx > -60.,
-            "starts left of slot 3: {}",
-            fx.dx
-        );
+        assert!(fx.dx < 0. && fx.dx > -60., "starts left of slot 3: {}", fx.dx);
         assert!(ui.advance_animations(0.2));
         assert_eq!(ui.fx_enter(&sel).dx, 0.);
         ui.advance_animations(0.3); // final settled frame
@@ -728,12 +671,7 @@ mod tests {
         inventory.selected_slot = 0;
         ui.synchronize(&inventory, &content).unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let sel = ui
-            .nodes
-            .iter()
-            .find(|n| n.id == "hud/selection")
-            .unwrap()
-            .clone();
+        let sel = ui.nodes.iter().find(|n| n.id == "hud/selection").unwrap().clone();
         assert_eq!(ui.fx_enter(&sel).dx, 0.);
     }
 }

@@ -204,7 +204,12 @@ pub(super) fn flood(
 /// A monotone ray may hit that geometry in a reached neighbor without entering
 /// the model's home section. Admit those bounds conservatively, not the graph
 /// detour itself. Unusually large or invalid source bounds stay visible.
-pub(super) fn reaches_bounds(key: [i32; 3], min: Vec3, max: Vec3, reached: &Reached) -> bool {
+pub(super) fn reaches_bounds(
+    key: [i32; 3],
+    min: Vec3,
+    max: Vec3,
+    reached: &Reached,
+) -> bool {
     if reached.contains_key(&key) {
         return true;
     }

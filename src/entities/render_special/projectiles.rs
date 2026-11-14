@@ -26,13 +26,7 @@ pub(super) fn append_arrow(
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    let p::EntityDrawFrame {
-        origin,
-        transform,
-        partial,
-        light,
-        ..
-    } = frame;
+    let p::EntityDrawFrame { origin, transform, partial, light, .. } = frame;
     let family = models
         .families
         .get(&entity.type_name)
@@ -60,31 +54,9 @@ pub(super) fn append_arrow(
         family.texture.as_deref()
     }
     .ok_or("Source projectile material missing")?;
-    p::emit_rig(
-        rig,
-        transforms,
-        p::RigStyle {
-            tex: p::texture(content, texture)?,
-            color: [1.; 3],
-            layer: EntityMaterial::EntityCutout,
-            alpha: 1.,
-            light,
-        },
-        out,
-    )?;
+    p::emit_rig(rig, transforms, p::RigStyle { tex: p::texture(content, texture)?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)?;
     if is_trident && p::boolean(models, entity, "ID_FOIL") {
-        p::emit_rig(
-            rig,
-            transforms,
-            p::RigStyle {
-                tex: p::texture(content, "misc/enchanted_glint_entity")?,
-                color: [1.; 3],
-                layer: EntityMaterial::EntityGlint,
-                alpha: 1.,
-                light: [-1.; 2],
-            },
-            out,
-        )?;
+        p::emit_rig(rig, transforms, p::RigStyle { tex: p::texture(content, "misc/enchanted_glint_entity")?, color: [1.; 3], layer: EntityMaterial::EntityGlint, alpha: 1., light: [-1.; 2] }, out)?;
     }
     Ok(Handled::Rendered)
 }

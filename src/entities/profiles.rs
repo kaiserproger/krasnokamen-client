@@ -1,8 +1,8 @@
 //! Protocol-777 PlayerInfo and presentation profile lifetimes.
 //! Signature validation/download/atlas publication is parent-owned; raw properties never
 //! become trusted merely because a server supplied them.
-use super::{Store, metadata};
-use crate::protocol::{Reader, Result, content::TextureRegion};
+use super::{metadata, Store};
+use crate::protocol::{content::TextureRegion, Reader, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
@@ -177,9 +177,7 @@ pub(super) fn listed_head_profile<'a>(
 ) -> Result<&'a PlayerProfile> {
     match &profile["id"] {
         Value::Null => {
-            let name = profile["name"]
-                .as_str()
-                .or(profile.as_str())
+            let name = profile["name"].as_str().or(profile.as_str())
                 .ok_or("player head profile has neither id nor name")?;
             profiles
                 .values()
@@ -189,9 +187,7 @@ pub(super) fn listed_head_profile<'a>(
         Value::Array(words) if words.len() == 4 => {
             let mut bits = 0u128;
             for word in words {
-                let word = word
-                    .as_i64()
-                    .and_then(|v| i32::try_from(v).ok())
+                let word = word.as_i64().and_then(|v| i32::try_from(v).ok())
                     .ok_or("player head profile id is not four ints")?;
                 bits = bits << 32 | u128::from(word as u32);
             }

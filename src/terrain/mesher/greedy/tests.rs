@@ -45,11 +45,10 @@ fn greedy_uniform_rectangle_preserves_area_winding_and_repeated_texture() {
         let b = glam::Vec3::from_array(out.vertices[1].position);
         let c = glam::Vec3::from_array(out.vertices[2].position);
         assert_eq!((b - a).cross(c - a), glam::Vec3::Y * 6.);
-        assert!(
-            out.vertices
-                .iter()
-                .all(|v| v.overlay_tint == [0.125, 0.25, -1.])
-        );
+        assert!(out
+            .vertices
+            .iter()
+            .all(|v| v.overlay_tint == [0.125, 0.25, -1.]));
         // Compare every original unit face's interior with the repeated atlas UV
         // reconstructed from the merged quad's affine interpolation.
         for z in 0..3 {
@@ -155,10 +154,9 @@ fn greedy_merges_both_tangent_axes_on_every_cardinal_face() {
                 .fold(f32::NEG_INFINITY, f32::max);
             assert_eq!((min, max), (0., [2., 3.][i]));
         }
-        assert!(
-            out.vertices
-                .iter()
-                .all(|v| v.position[axis] == (face % 2) as f32)
-        );
+        assert!(out
+            .vertices
+            .iter()
+            .all(|v| v.position[axis] == (face % 2) as f32));
     }
 }

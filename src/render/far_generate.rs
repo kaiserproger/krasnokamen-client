@@ -9,9 +9,9 @@
 //! `far_terrain_generate`), at most `IN_FLIGHT` readbacks of 2 KiB per tile.
 use crate::api::FarGeneration;
 use crate::far::program::{Column, Program};
-use crate::far::{SAMPLES, TileKey};
+use crate::far::{TileKey, SAMPLES};
 use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use wgpu::util::DeviceExt;
 
 use super::timing::{self, Timing};

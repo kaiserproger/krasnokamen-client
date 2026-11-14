@@ -1,9 +1,9 @@
 //! Presentation-only packets. IDs: C00 packet-ids.json; codecs: pinned 26.1.2 javap in .analysis/ui-contract.
+use crate::protocol::packet_ids::play::clientbound as cb;
 use super::{
     render::{Painter, TextSink, WorldPainter},
     state::{EditorState, Screen, UiState},
 };
-use crate::protocol::packet_ids::play::clientbound as cb;
 use crate::{
     api::{DynamicGeometry, EntityMaterial, MeshGeometry},
     inventory::{Stack, read_template},
@@ -114,10 +114,7 @@ impl MapRenderFixture {
         }
     }
     pub(crate) fn view(&self) -> MapRenderView<'_> {
-        MapRenderView {
-            maps: &self.maps,
-            text: &self.text,
-        }
+        MapRenderView { maps: &self.maps, text: &self.text }
     }
 }
 #[derive(Clone, Debug)]
@@ -180,10 +177,7 @@ impl UiState {
         &self.maps
     }
     pub fn map_render_view(&self) -> MapRenderView<'_> {
-        MapRenderView {
-            maps: &self.maps,
-            text: &self.text,
-        }
+        MapRenderView { maps: &self.maps, text: &self.text }
     }
     pub fn advancements(&self) -> &BTreeMap<String, AdvancementState> {
         &self.advancements
@@ -284,8 +278,7 @@ impl UiState {
             self.text.language.plain(v.get("raw").unwrap_or(v))
         };
         let mut pages = Vec::new();
-        let observed_pages = content
-            .get("pages")
+        let observed_pages = content.get("pages")
             .map(|value| value.as_array().ok_or("book_pages_not_observed"))
             .transpose()?;
         for p in observed_pages.map_or(&[][..], Vec::as_slice) {
@@ -352,23 +345,7 @@ impl UiState {
         // Returning false does not advance the reader, so another owner can consume its own packet.
         if !matches!(
             id,
-            cb::AWARD_STATS
-                | cb::BOSS_EVENT
-                | cb::CLEAR_TITLES
-                | cb::DELETE_CHAT
-                | cb::DISGUISED_CHAT
-                | cb::MAP_ITEM_DATA
-                | cb::PLAYER_CHAT
-                | cb::PLAYER_COMBAT_KILL
-                | cb::SELECT_ADVANCEMENTS_TAB
-                | cb::SET_SUBTITLE_TEXT
-                | cb::SET_TITLE_TEXT
-                | cb::SET_TITLES_ANIMATION
-                | cb::SYSTEM_CHAT
-                | cb::TAB_LIST
-                | cb::UPDATE_ADVANCEMENTS
-                | cb::CLEAR_DIALOG
-                | cb::SHOW_DIALOG
+            cb::AWARD_STATS | cb::BOSS_EVENT | cb::CLEAR_TITLES | cb::DELETE_CHAT | cb::DISGUISED_CHAT | cb::MAP_ITEM_DATA | cb::PLAYER_CHAT | cb::PLAYER_COMBAT_KILL | cb::SELECT_ADVANCEMENTS_TAB | cb::SET_SUBTITLE_TEXT | cb::SET_TITLE_TEXT | cb::SET_TITLES_ANIMATION | cb::SYSTEM_CHAT | cb::TAB_LIST | cb::UPDATE_ADVANCEMENTS | cb::CLEAR_DIALOG | cb::SHOW_DIALOG
         ) {
             return Ok(false);
         }
@@ -850,13 +827,7 @@ impl UiState {
             "minecraft:map/map_background"
         };
         let mut painter = WorldPainter::new(content, out, transform, light, EntityMaterial::Text)?;
-        painter.image(
-            background,
-            [-7., -7., 142., 142.],
-            [0., 0., 1., 1.],
-            [1.; 3],
-            1.,
-        )?;
+        painter.image(background, [-7., -7., 142., 142.], [0., 0., 1., 1.], [1.; 3], 1.)?;
         if let Some(map) = map {
             map.append_world_geometry(content, &self.text, transform, light, false, out)?;
         }
@@ -1049,23 +1020,17 @@ mod disconnect_tests {
     fn disconnects_empty_book_packet_opens_writable_editor() {
         let mut content = Content::test_cube();
         content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
-        content
-            .item_names
-            .insert(1, "minecraft:writable_book".into());
+        content.item_names.insert(1, "minecraft:writable_book".into());
         content.insert_test_item_components(1, BTreeMap::new());
-        content
-            .components
-            .insert(1, "minecraft:writable_book_content".into());
+        content.components.insert(1, "minecraft:writable_book_content".into());
         // Stack count, item, added count, removed count, component id, zero pages.
         let mut reader = Reader::new(&[1, 1, 1, 0, 1, 0]);
         let stack = crate::inventory::read_stack(&mut reader, &content).unwrap();
         reader.done().unwrap();
         let mut ui = super::super::UiState::new_state(&content).unwrap();
         ui.open_book(&stack, 0).unwrap();
-        assert!(
-            matches!(ui.editor, Some(EditorState::Book { ref pages, writable: true, .. })
-            if pages == &[String::new()])
-        );
+        assert!(matches!(ui.editor, Some(EditorState::Book { ref pages, writable: true, .. })
+            if pages == &[String::new()]));
     }
 }
 
@@ -1078,24 +1043,12 @@ mod held_map_tests {
     fn held_map_uses_only_received_pixel_patch() {
         let mut content = Content::test_cube();
         content.creative_tabs_report = Arc::from(br#"{"tabs":[]}"#.as_slice());
-        for (name, layer) in [
-            ("minecraft:map/map_background", 5),
-            ("minecraft:map/map_background_checkerboard", 6),
-        ] {
-            content.insert_test_texture(
-                name,
-                TextureRegion {
-                    layer,
-                    uv: [0., 0., 1., 1.],
-                    width: 128,
-                    height: 128,
-                },
-            );
+        for (name, layer) in [("minecraft:map/map_background", 5), ("minecraft:map/map_background_checkerboard", 6)] {
+            content.insert_test_texture(name, TextureRegion { layer, uv: [0., 0., 1., 1.], width: 128, height: 128 });
         }
         let mut ui = UiState::new_state(&content).unwrap();
         let mut before = DynamicGeometry::default();
-        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut before)
-            .unwrap();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut before).unwrap();
         assert_eq!(before.vertices.len(), 4);
         assert_eq!(before.vertices[0].texture_layer, 5);
         assert!(ui.maps().get(&42).is_none());
@@ -1105,13 +1058,8 @@ mod held_map_tests {
         packet.byte(0);
         packet.byte(0);
         packet.byte(0);
-        packet.byte(2);
-        packet.byte(1);
-        packet.byte(0);
-        packet.byte(0);
-        packet.var(2);
-        packet.byte(4);
-        packet.byte(4);
+        packet.byte(2); packet.byte(1); packet.byte(0); packet.byte(0);
+        packet.var(2); packet.byte(4); packet.byte(4);
         ui.read_map(&mut Reader::new(&packet.0), &content).unwrap();
         let map = ui.maps().get(&42).unwrap();
         assert_eq!(map.revision, 1);
@@ -1119,8 +1067,7 @@ mod held_map_tests {
         assert_eq!(map.visible_pixel_runs(), 1);
         assert_eq!(map.visible_pixels(), 2);
         let mut after = DynamicGeometry::default();
-        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut after)
-            .unwrap();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut after).unwrap();
         assert_eq!(after.vertices.len(), 8);
         assert_eq!(after.vertices[0].texture_layer, 6);
     }
@@ -1131,57 +1078,23 @@ mod held_map_tests {
         content.creative_tabs_report = Arc::from(br#"{"tabs":[],"map_decorations":{"minecraft:frame":{"asset_id":"minecraft:frame","show_on_item_frame":true},"minecraft:player_off_map":{"asset_id":"minecraft:player_off_map","show_on_item_frame":false}}}"#.as_slice());
         content.set_registries(BTreeMap::from([(
             "minecraft:map_decoration_type".into(),
-            (0..7)
-                .map(|id| {
-                    (
-                        match id {
-                            1 => "minecraft:frame",
-                            6 => "minecraft:player_off_map",
-                            _ => "test:unused",
-                        }
-                        .into(),
-                        serde_json::Value::Null,
-                    )
-                })
-                .collect(),
+            (0..7).map(|id| (match id { 1 => "minecraft:frame", 6 => "minecraft:player_off_map", _ => "test:unused" }.into(), serde_json::Value::Null)).collect(),
         )]));
         for (name, layer, uv) in [
-            (
-                "minecraft:map/map_background_checkerboard",
-                6,
-                [0., 0., 1., 1.],
-            ),
+            ("minecraft:map/map_background_checkerboard", 6, [0., 0., 1., 1.]),
             ("minecraft:map/decorations/frame", 7, [0.1, 0.2, 0.3, 0.4]),
-            (
-                "minecraft:map/decorations/player_off_map",
-                8,
-                [0.4, 0.5, 0.6, 0.7],
-            ),
+            ("minecraft:map/decorations/player_off_map", 8, [0.4, 0.5, 0.6, 0.7]),
         ] {
-            content.insert_test_texture(
-                name,
-                TextureRegion {
-                    layer,
-                    uv,
-                    width: 16,
-                    height: 16,
-                },
-            );
+            content.insert_test_texture(name, TextureRegion { layer, uv, width: 16, height: 16 });
         }
         let mut ui = UiState::new_state(&content).unwrap();
         let mut packet = Writer::default();
-        for byte in [
-            42, 0, 0, 1, 2, 1, 0, 4, 4, 0, 6, 127, 1, 0, 0, 1, 1, 0, 0, 1, 4,
-        ] {
+        for byte in [42, 0, 0, 1, 2, 1, 0, 4, 4, 0, 6, 127, 1, 0, 0, 1, 1, 0, 0, 1, 4] {
             packet.byte(byte);
         }
-        assert!(
-            ui.apply(cb::MAP_ITEM_DATA, &mut Reader::new(&packet.0), &content)
-                .unwrap()
-        );
+        assert!(ui.apply(cb::MAP_ITEM_DATA, &mut Reader::new(&packet.0), &content).unwrap());
         let mut held = DynamicGeometry::default();
-        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut held)
-            .unwrap();
+        ui.append_held_map(42, &content, glam::Mat4::IDENTITY, [-1.; 2], &mut held).unwrap();
         assert_eq!(held.vertices.len(), 16);
         let face = |vertices: &[crate::api::Vertex]| {
             let a = glam::Vec3::from_array(vertices[0].position);
@@ -1194,38 +1107,18 @@ mod held_map_tests {
             (&held.vertices[8..12], 7, [63.5, 65.5], [0.1, 0.2, 0.3, 0.4]),
             (&held.vertices[12..16], 8, [127., 65.], [0.4, 0.5, 0.6, 0.7]),
         ] {
-            assert!(
-                face(quad) * background_face > 0.,
-                "decoration must face the map viewer"
-            );
+            assert!(face(quad) * background_face > 0., "decoration must face the map viewer");
             assert!(quad.iter().all(|v| v.texture_layer == layer));
-            let average = quad.iter().fold(glam::Vec3::ZERO, |sum, v| {
-                sum + glam::Vec3::from_array(v.position)
-            }) / 4.;
-            assert!(
-                (average.x - center[0]).abs() < 0.0001 && (average.y - center[1]).abs() < 0.0001
-            );
-            assert!(quad.iter().all(|v| (v.uv[0] == uv[0] || v.uv[0] == uv[2])
-                && (v.uv[1] == uv[1] || v.uv[1] == uv[3])));
+            let average = quad.iter().fold(glam::Vec3::ZERO, |sum, v| sum + glam::Vec3::from_array(v.position)) / 4.;
+            assert!((average.x - center[0]).abs() < 0.0001 && (average.y - center[1]).abs() < 0.0001);
+            assert!(quad.iter().all(|v| (v.uv[0] == uv[0] || v.uv[0] == uv[2]) && (v.uv[1] == uv[1] || v.uv[1] == uv[3])));
         }
         // A quarter turn places the atlas top-left at the upper-left of the rotated icon.
-        let frame_top_left = held.vertices[8..12]
-            .iter()
-            .find(|v| v.uv == [0.1, 0.2])
-            .unwrap();
+        let frame_top_left = held.vertices[8..12].iter().find(|v| v.uv == [0.1, 0.2]).unwrap();
         assert!((frame_top_left.position[0] - 59.5).abs() < 0.0001);
         assert!((frame_top_left.position[1] - 61.5).abs() < 0.0001);
         let mut framed = DynamicGeometry::default();
-        ui.maps()[&42]
-            .append_world_geometry(
-                &content,
-                &ui.text,
-                glam::Mat4::IDENTITY,
-                [-1.; 2],
-                true,
-                &mut framed,
-            )
-            .unwrap();
+        ui.maps()[&42].append_world_geometry(&content, &ui.text, glam::Mat4::IDENTITY, [-1.; 2], true, &mut framed).unwrap();
         assert_eq!(framed.vertices.len(), 8);
         assert_eq!(framed.vertices[4].texture_layer, 7);
         assert!(face(&framed.vertices[0..4]) * face(&framed.vertices[4..8]) > 0.);

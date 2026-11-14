@@ -97,10 +97,7 @@ fn clouds_ignore_terrain_edge_fog_but_keep_environment_fog() {
         texture_height: 1,
         texture_layers: 1,
         texture_revision: 1,
-        lightmap: Some(crate::api::LightmapTexture {
-            revision: 1,
-            rgba: Arc::new([255; 1024]),
-        }),
+        lightmap: Some(crate::api::LightmapTexture { revision: 1, rgba: Arc::new([255; 1024]) }),
         environment: crate::api::WorldEnvironment {
             display_encoded: true,
             sky_kind: SkyKind::Overworld,
@@ -110,14 +107,8 @@ fn clouds_ignore_terrain_edge_fog_but_keep_environment_fog() {
             fog_end: 200.,
             render_fog_start: 100.,
             render_fog_end: 200.,
-            sun_texture: Some(crate::api::SkyTexture {
-                uv: [0., 0., 1., 1.],
-                layer: 0,
-            }),
-            moon_texture: Some(crate::api::SkyTexture {
-                uv: [0., 0., 1., 1.],
-                layer: 0,
-            }),
+            sun_texture: Some(crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 }),
+            moon_texture: Some(crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 }),
             ..Default::default()
         },
         ..Default::default()
@@ -145,10 +136,7 @@ fn clouds_ignore_terrain_edge_fog_but_keep_environment_fog() {
         scene.environment.fog_start = 100.;
         scene.environment.fog_end = 200.;
         let clear = pixels(&mut renderer, &scene)[center];
-        assert!(
-            clear > 40,
-            "cloud fixture must be visibly rendered: {clear}"
-        );
+        assert!(clear > 40, "cloud fixture must be visibly rendered: {clear}");
         scene.environment.render_fog_start = 1.;
         scene.environment.render_fog_end = 2.;
         let short_terrain = pixels(&mut renderer, &scene)[center];
@@ -181,10 +169,7 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
         texture_height: 1,
         texture_layers: 1,
         texture_revision: 1,
-        lightmap: Some(crate::api::LightmapTexture {
-            revision: 1,
-            rgba: Arc::new([255; 1024]),
-        }),
+        lightmap: Some(crate::api::LightmapTexture { revision: 1, rgba: Arc::new([255; 1024]) }),
         environment: crate::api::WorldEnvironment {
             display_encoded: true,
             sky_kind: SkyKind::Overworld,
@@ -192,24 +177,13 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
             fog_color: [0.6; 3],
             fog_start: 100.,
             fog_end: 200.,
-            sun_texture: Some(crate::api::SkyTexture {
-                uv: [0., 0., 1., 1.],
-                layer: 0,
-            }),
-            moon_texture: Some(crate::api::SkyTexture {
-                uv: [0., 0., 1., 1.],
-                layer: 0,
-            }),
+            sun_texture: Some(crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 }),
+            moon_texture: Some(crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 }),
             ..Default::default()
         },
         ..Default::default()
     };
-    for position in [
-        [-0.3, -0.3, 4.],
-        [-0.3, 0.3, 4.],
-        [0.3, 0.3, 4.],
-        [0.3, -0.3, 4.],
-    ] {
+    for position in [[-0.3, -0.3, 4.], [-0.3, 0.3, 4.], [0.3, 0.3, 4.], [0.3, -0.3, 4.]] {
         scene.dynamic.vertices.push(crate::api::Vertex {
             position,
             color: [0.7; 3],
@@ -221,12 +195,7 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
     }
     scene.dynamic.indices[EntityMaterial::Text as usize] = vec![0, 1, 2, 0, 2, 3];
     let clear = pixels(&mut renderer, &scene);
-    for position in [
-        [-2., -2., 4.1],
-        [-2., 2., 4.1],
-        [2., 2., 4.1],
-        [2., -2., 4.1],
-    ] {
+    for position in [[-2., -2., 4.1], [-2., 2., 4.1], [2., 2., 4.1], [2., -2., 4.1]] {
         scene.dynamic.vertices.push(crate::api::Vertex {
             position,
             color: [0.; 3],
@@ -244,15 +213,13 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
         vertex.alpha = 0.5;
         scene.dynamic.vertices.push(vertex);
     }
-    scene.dynamic.indices[EntityMaterial::TextSeeThrough as usize] = vec![8, 9, 10, 8, 10, 11];
+    scene.dynamic.indices[EntityMaterial::TextSeeThrough as usize] =
+        vec![8, 9, 10, 8, 10, 11];
     scene.revision += 1;
     let backed = pixels(&mut renderer, &scene);
     let center = (32 * 64 + 32) * 4;
     let edge = (24 * 64 + 24) * 4;
-    assert!(
-        clear[center] > 150,
-        "the foreground glyph control must be visible"
-    );
+    assert!(clear[center] > 150, "the foreground glyph control must be visible");
     // The oracle's daylight glyphs are ~222/255, not full white: the solid
     // backdrop composites over the normal glyph, then the half-alpha through
     // glyph composites above it. No foreground tint correction is involved.
@@ -262,10 +229,7 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
         "normal -> backdrop -> through glyph composite: {} vs {expected}",
         backed[center],
     );
-    assert!(
-        backed[edge] + 20 < clear[edge],
-        "the backdrop must still darken the sky"
-    );
+    assert!(backed[edge] + 20 < clear[edge], "the backdrop must still darken the sky");
     scene.dynamic.indices[EntityMaterial::TextBackgroundSeeThrough as usize].clear();
     scene.dynamic.indices[EntityMaterial::TextSeeThrough as usize].clear();
     scene.dynamic.indices[EntityMaterial::TextBackground as usize] = vec![4, 5, 6, 4, 6, 7];
@@ -304,8 +268,7 @@ fn nameplate_backdrop_composites_between_foreground_and_through_glyphs() {
     scene.dynamic.indices[EntityMaterial::Clouds as usize] = vec![12, 13, 14, 12, 14, 15];
     scene.revision += 1;
     let cloud = pixels(&mut renderer, &scene);
-    scene.dynamic.indices[EntityMaterial::TextBackgroundSeeThrough as usize] =
-        vec![4, 5, 6, 4, 6, 7];
+    scene.dynamic.indices[EntityMaterial::TextBackgroundSeeThrough as usize] = vec![4, 5, 6, 4, 6, 7];
     scene.revision += 1;
     let cloud_backed = pixels(&mut renderer, &scene);
     assert!(
@@ -373,14 +336,8 @@ fn fancy_shader_gpu_toggle_preserves_ui_and_off_pixels() {
     let cutout_off = pixels(&mut renderer, &scene);
     renderer.set_graphics_preset(GraphicsPreset::Medium);
     let cutout_fancy = pixels(&mut renderer, &scene);
-    assert_eq!(
-        &cutout_off[ui_pixel..ui_pixel + 4],
-        &cutout_fancy[ui_pixel..ui_pixel + 4]
-    );
-    assert_eq!(
-        &cutout_off[ui_pixel..ui_pixel + 4],
-        &off[ui_pixel..ui_pixel + 4]
-    );
+    assert_eq!(&cutout_off[ui_pixel..ui_pixel + 4], &cutout_fancy[ui_pixel..ui_pixel + 4]);
+    assert_eq!(&cutout_off[ui_pixel..ui_pixel + 4], &off[ui_pixel..ui_pixel + 4]);
     let sky_pixel = (32 * 64 + 32) * 4;
     assert_ne!(
         &off[sky_pixel..sky_pixel + 3],
@@ -1577,10 +1534,7 @@ fn overlay_vignette_multiplies_without_changing_regular_overlay_layers() {
         std::mem::take(&mut scene.overlay.overlay_blends[0]);
     let frame = pixels(&mut renderer, &scene);
     let regular = &frame[(32 * 64 + 16) * 4..(32 * 64 + 16) * 4 + 3];
-    assert!(
-        regular.iter().all(|value| value.abs_diff(128) <= 1),
-        "{regular:?}"
-    );
+    assert!(regular.iter().all(|value| value.abs_diff(128) <= 1), "{regular:?}");
 }
 #[test]
 fn vanilla_stars_add_their_brightness_squared() {
@@ -1593,10 +1547,7 @@ fn vanilla_stars_add_their_brightness_squared() {
     .unwrap();
     renderer.set_graphics_preset(GraphicsPreset::Low);
     // A black night sky looking straight up; sun and moon both below the horizon.
-    let sprite = Some(crate::api::SkyTexture {
-        uv: [0., 0., 1., 1.],
-        layer: 0,
-    });
+    let sprite = Some(crate::api::SkyTexture { uv: [0., 0., 1., 1.], layer: 0 });
     let scene = Scene {
         environment: crate::api::WorldEnvironment {
             sky_kind: SkyKind::Overworld,

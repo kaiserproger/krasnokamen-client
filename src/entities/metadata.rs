@@ -79,9 +79,7 @@ impl Metadata {
         match self {
             Self::Byte(v) => Some(i32::from(*v)),
             Self::Int(v) => Some(*v),
-            Self::Pose(v) | Self::Arm(v) | Self::Direction(v) | Self::DyeColor(v) => {
-                Some(i32::from(*v))
-            }
+            Self::Pose(v) | Self::Arm(v) | Self::Direction(v) | Self::DyeColor(v) => Some(i32::from(*v)),
             Self::State { id, .. } | Self::Registry { id, .. } => i32::try_from(*id).ok(),
             _ => None,
         }
@@ -177,10 +175,7 @@ pub fn decode(
             34 => {
                 let holder = r.count(1_000_001)?;
                 if holder != 0 {
-                    Metadata::Registry {
-                        serializer: 34,
-                        id: holder as u32 - 1,
-                    }
+                    Metadata::Registry { serializer: 34, id: holder as u32 - 1 }
                 } else {
                     let mut variant = json!({
                         "width": r.var()?,
@@ -268,8 +263,8 @@ fn particle(r: &mut Reader<'_>, content: &Content, models: &super::Models) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::super::animation_tests::fixture;
     use super::*;
+    use super::super::animation_tests::fixture;
 
     #[test]
     fn painting_holder_metadata_resolves_registry_and_inline_variants() {
@@ -278,18 +273,12 @@ mod tests {
         for (wire, expected) in [(25, 24), (26, 25), (34, 33)] {
             let bytes = [9, 34, wire, 255];
             let metadata = decode(&mut Reader::new(&bytes), &content, &models).unwrap();
-            assert!(
-                matches!(metadata.get(&9), Some(Metadata::Registry { serializer: 34, id }) if *id == expected)
-            );
+            assert!(matches!(metadata.get(&9), Some(Metadata::Registry { serializer: 34, id }) if *id == expected));
         }
-        let bytes = [
-            9, 34, 0, 2, 3, 9, b't', b'e', b's', b't', b':', b'a', b'r', b't', b'1', 0, 0, 255,
-        ];
+        let bytes = [9, 34, 0, 2, 3, 9, b't', b'e', b's', b't', b':', b'a', b'r', b't', b'1', 0, 0, 255];
         let metadata = decode(&mut Reader::new(&bytes), &content, &models).unwrap();
-        assert!(
-            matches!(metadata.get(&9), Some(Metadata::InlinePaintingVariant(value))
-            if value["width"] == 2 && value["height"] == 3 && value["asset_id"] == "test:art1")
-        );
+        assert!(matches!(metadata.get(&9), Some(Metadata::InlinePaintingVariant(value))
+            if value["width"] == 2 && value["height"] == 3 && value["asset_id"] == "test:art1"));
         assert!(decode(&mut Reader::new(&[9, 34, 0]), &content, &models).is_err());
     }
 }

@@ -2,8 +2,8 @@
 //! not an approximate species list; server tags remain authoritative.
 use super::{Entity, Handle, Metadata, Models, Store, resources::Shape};
 use crate::{
-    player::{Bounds, collision, math},
-    protocol::{Result, content::Content, world::World},
+    player::{collision, math, Bounds},
+    protocol::{content::Content, world::World, Result},
 };
 
 /// Where `Store::candidate_slots` found a candidate.
@@ -210,10 +210,7 @@ pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Re
 }
 pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
-    if matches!(
-        e.type_name.as_str(),
-        "minecraft:item_frame" | "minecraft:glow_item_frame"
-    ) {
+    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
         let normal = direction(face)?;
@@ -309,11 +306,7 @@ impl Store {
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(
-                self.passenger_vehicles
-                    .keys()
-                    .filter_map(|id| self.get(*id)),
-            )
+            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
             .filter(|entity| {
                 !entity
                     .source
@@ -672,8 +665,7 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area)
-            {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
                 return Ok(false);
             }
         }
@@ -958,20 +950,15 @@ impl Store {
                 .saturating_add(1)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
-            if matches!(
-                owner(&models, e, "getPassengerAttachmentPoint"),
+            if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
                 "net.minecraft.world.entity.animal.equine.AbstractHorse"
-                    | "net.minecraft.world.entity.monster.Strider"
-            ) {
+                    | "net.minecraft.world.entity.monster.Strider")
+            {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
-                    &mut e.physical.seat_motion,
-                    e.handle,
-                    position,
-                    tick,
-                    e.vehicle.is_some() || e.death_tick.is_some(),
-                    standing,
+                    &mut e.physical.seat_motion, e.handle, position, tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
                 );
             }
             e.physical.peek_old = e.physical.peek;

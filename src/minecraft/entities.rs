@@ -1,13 +1,13 @@
 //! Bounded entity tools use received identity/state and the ordinary player action path.
-use super::{Outcome, lifecycle};
+use super::{lifecycle, Outcome};
 use crate::{
     api::InputIntent,
     entities::{Entity, Handle, Metadata},
     player::{Bounds, InteractionIntent},
-    protocol::{Result, content::Content},
+    protocol::{content::Content, Result},
     session::Session,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 pub(super) const SUPPORTED_TOOLS: &[&str] = &[
@@ -238,10 +238,7 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
         Some(Err(error)) => ("error", None, Some(error.as_str())),
     };
     let mut value = entity_value(session, entity)?;
-    let walk = entity
-        .source
-        .as_ref()
-        .and_then(|source| source.living.as_ref());
+    let walk = entity.source.as_ref().and_then(|source| source.living.as_ref());
     extend(
         value.as_object_mut().unwrap(),
         json!({
@@ -333,7 +330,9 @@ fn aim_entity(session: &mut Session, handle: Handle) -> Result<Option<String>> {
 }
 /// Eye-to-box distance is the vanilla entity-interaction metric, not feet-to-feet.
 fn in_reach(session: &Session, handle: Handle) -> Result<bool> {
-    let bounds = session.entities.entity_bounds(handle, session.world_tick)?;
+    let bounds = session
+        .entities
+        .entity_bounds(handle, session.world_tick)?;
     let eye = session.player.eye_position();
     let nearest: [f64; 3] =
         std::array::from_fn(|axis| eye[axis].clamp(bounds.min[axis], bounds.max[axis]));

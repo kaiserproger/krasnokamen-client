@@ -38,14 +38,7 @@ pub(super) fn append(
     transforms: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let CoatFrame {
-        baby,
-        base_rig,
-        tick,
-        partial,
-        root,
-        light,
-    } = frame;
+    let CoatFrame { baby, base_rig, tick, partial, root, light } = frame;
     if entity.type_name != "minecraft:sheep" {
         return Ok(());
     }
@@ -59,18 +52,7 @@ pub(super) fn append(
         let Ok(texture) = p::texture(content, "minecraft:entity/sheep/sheep_wool_undercoat") else {
             return Ok(());
         };
-        return p::emit_rig(
-            base_rig,
-            transforms,
-            p::RigStyle {
-                tex: texture,
-                color,
-                layer: EntityMaterial::EntityCutout,
-                alpha: 1.,
-                light,
-            },
-            out,
-        );
+        return p::emit_rig(base_rig, transforms, p::RigStyle { tex: texture, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out);
     }
     let (key, texture) = if baby {
         (
@@ -90,21 +72,8 @@ pub(super) fn append(
         return Ok(());
     };
     let rig = models.rig(key);
-    p::evaluate_rig(
-        rig, entity, models, content, tick, partial, root, transforms,
-    );
-    p::emit_rig(
-        rig,
-        transforms,
-        p::RigStyle {
-            tex: texture,
-            color,
-            layer: EntityMaterial::EntityCutout,
-            alpha: 1.,
-            light,
-        },
-        out,
-    )
+    p::evaluate_rig(rig, entity, models, content, tick, partial, root, transforms);
+    p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
 }
 
 #[cfg(test)]

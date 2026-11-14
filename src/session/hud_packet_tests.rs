@@ -41,30 +41,10 @@ fn rc1_map_slot_replacement_and_pixel_packets_update_received_state() {
     for player_inventory in [false, true] {
         let mut session = session();
         session.inventory.selected_slot = 2;
-        let id = if player_inventory {
-            cb::SET_PLAYER_INVENTORY
-        } else {
-            cb::CONTAINER_SET_SLOT
-        };
-        session
-            .apply(Phase::Play, id, &slot_packet(player_inventory, 2, None).0)
-            .unwrap();
-        assert_eq!(
-            session
-                .inventory
-                .received_player_slot(38)
-                .unwrap()
-                .unwrap()
-                .id,
-            2
-        );
-        session
-            .apply(
-                Phase::Play,
-                id,
-                &slot_packet(player_inventory, 3, Some(0)).0,
-            )
-            .unwrap();
+        let id = if player_inventory { cb::SET_PLAYER_INVENTORY } else { cb::CONTAINER_SET_SLOT };
+        session.apply(Phase::Play, id, &slot_packet(player_inventory, 2, None).0).unwrap();
+        assert_eq!(session.inventory.received_player_slot(38).unwrap().unwrap().id, 2);
+        session.apply(Phase::Play, id, &slot_packet(player_inventory, 3, Some(0)).0).unwrap();
         let received = session.inventory.received_player_slot(38).unwrap().unwrap();
         assert_eq!(received.id, 3);
         assert_eq!(received.components["minecraft:map_id"], json!(0));
@@ -80,9 +60,7 @@ fn rc1_map_slot_replacement_and_pixel_packets_update_received_state() {
         map.byte(5); // start y
         map.var(2);
         map.0.extend([17, 18]);
-        session
-            .apply(Phase::Play, cb::MAP_ITEM_DATA, &map.0)
-            .unwrap();
+        session.apply(Phase::Play, cb::MAP_ITEM_DATA, &map.0).unwrap();
         let map = &session.ui.as_ref().unwrap().maps()[&0];
         assert_eq!(&map.colors[5 * 128 + 4..5 * 128 + 6], &[17, 18]);
         assert_eq!(map.revision, 1);
@@ -96,23 +74,17 @@ fn rc1_boss_remove_packet_removes_only_addressed_bar() {
         let mut packet = Writer::default();
         packet.0.extend(id.to_be_bytes());
         packet.var(0);
-        Nbt::String("Ender Dragon".into())
-            .write_root(&mut packet)
-            .unwrap();
+        Nbt::String("Ender Dragon".into()).write_root(&mut packet).unwrap();
         packet.f32(1.);
         packet.var(0);
         packet.var(0);
         packet.byte(6);
-        session
-            .apply(Phase::Play, cb::BOSS_EVENT, &packet.0)
-            .unwrap();
+        session.apply(Phase::Play, cb::BOSS_EVENT, &packet.0).unwrap();
     }
     let mut packet = Writer::default();
     packet.0.extend(1u128.to_be_bytes());
     packet.var(1);
-    session
-        .apply(Phase::Play, cb::BOSS_EVENT, &packet.0)
-        .unwrap();
+    session.apply(Phase::Play, cb::BOSS_EVENT, &packet.0).unwrap();
     let bosses = session.ui.as_ref().unwrap().bosses();
     assert_eq!(bosses.len(), 1);
     assert!(bosses.contains_key(&uuid::Uuid::from_u128(2).to_string()));

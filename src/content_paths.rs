@@ -5,7 +5,10 @@ use std::sync::OnceLock;
 static SELECTED_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 const INPUTS: &[(&str, &str)] = &[
-    ("COLLISION_SHAPES", "facts/block_collision_shapes_26_3.bin"),
+    (
+        "COLLISION_SHAPES",
+        "facts/block_collision_shapes_26_3.bin",
+    ),
     ("TERRAIN_FACTS", "facts/terrain-facts.json"),
     (
         "BLOCK_STATE_PREDICATES",
@@ -32,11 +35,7 @@ pub(crate) fn default_root() -> Result<PathBuf, String> {
 
 /// The launch-selected data root, or the platform default outside a launch.
 pub(crate) fn selected_root() -> Result<PathBuf, String> {
-    SELECTED_ROOT
-        .get()
-        .cloned()
-        .map(Ok)
-        .unwrap_or_else(default_root)
+    SELECTED_ROOT.get().cloned().map(Ok).unwrap_or_else(default_root)
 }
 
 /// Called only by the CLI before the event loop or any application threads exist.

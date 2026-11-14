@@ -104,15 +104,7 @@ fn use_on(
     entities: &EntityStore,
 ) -> Outcome {
     player
-        .item_on_result(
-            BlockUse { hit, hand: 0 },
-            world,
-            content,
-            inventory,
-            entities,
-            1,
-            1,
-        )
+        .item_on_result(BlockUse { hit, hand: 0 }, world, content, inventory, entities, 1, 1)
         .unwrap()
 }
 
@@ -398,14 +390,7 @@ fn hanging_item_frames_predict_only_valid_server_owned_placements() {
             content.insert_test_solid_states();
             world.set([4, 4, 4], 1, |state| Ok(state == 0)).unwrap();
             assert_eq!(
-                use_on(
-                    &mut player,
-                    &hit(1, face),
-                    &world,
-                    &content,
-                    &inventory,
-                    &entities
-                ),
+                use_on(&mut player, &hit(1, face), &world, &content, &inventory, &entities),
                 Outcome::CLIENT,
                 "{name} face {face}"
             );
@@ -422,14 +407,7 @@ fn hanging_item_frames_predict_only_valid_server_owned_placements() {
         content.insert_test_item_interaction(2, "ItemFrameItem", "Item", "HangingEntityItem");
         content.insert_test_solid_states();
         assert_eq!(
-            use_on(
-                &mut player,
-                &hit(0, 2),
-                &world,
-                &content,
-                &inventory,
-                &entities
-            ),
+            use_on(&mut player, &hit(0, 2), &world, &content, &inventory, &entities),
             Outcome::CONSUME
         );
         assert!(player.take_use_prediction().is_none());
@@ -444,31 +422,11 @@ fn hanging_item_frame_blocks_and_creative_inventory_follow_use_result() {
     content.insert_test_solid_states();
     world.set([4, 4, 4], 1, |state| Ok(state == 0)).unwrap();
     world.set([4, 4, 3], 1, |state| Ok(state == 0)).unwrap();
-    assert_eq!(
-        use_on(
-            &mut player,
-            &hit(1, 2),
-            &world,
-            &content,
-            &inventory,
-            &entities
-        ),
-        Outcome::CONSUME
-    );
+    assert_eq!(use_on(&mut player, &hit(1, 2), &world, &content, &inventory, &entities), Outcome::CONSUME);
     assert!(player.take_use_prediction().is_none());
     world.set([4, 4, 3], 0, |state| Ok(state == 0)).unwrap();
     player.abilities.instabuild = true;
-    assert_eq!(
-        use_on(
-            &mut player,
-            &hit(1, 2),
-            &world,
-            &content,
-            &inventory,
-            &entities
-        ),
-        Outcome::CLIENT
-    );
+    assert_eq!(use_on(&mut player, &hit(1, 2), &world, &content, &inventory, &entities), Outcome::CLIENT);
     assert!(matches!(
         player.take_use_prediction(),
         Some(UsePrediction::PlayerSlot { slot: 36, stack: Some(stack), .. })

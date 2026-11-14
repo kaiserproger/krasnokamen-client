@@ -20,13 +20,13 @@ pub(crate) mod program;
 
 use crate::api::{FarGeneration, FarScene, FarTileDraw};
 use crate::protocol::{
-    Reader, Result,
-    content::{Content, FluidKind, TintKind},
+    content::{Collision, Content, FluidKind, TintKind},
     world::Chunk,
+    Reader, Result,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 pub(crate) const EDGE: usize = 16;
@@ -47,8 +47,8 @@ const CACHE_LOADS_PER_UPDATE: usize = 24;
 /// Tiles in one request payload (the server accepts up to 16).
 const TILES_PER_REQUEST: usize = 16;
 /// Bumped whenever cached colours change meaning (SFL1 stored gray cubes,
-/// SFL2 ignored texture coverage).
-const CACHE_MAGIC: &[u8; 4] = b"SFL3";
+/// SFL2 ignored texture coverage, SFL3 sampled plants as ground).
+const CACHE_MAGIC: &[u8; 4] = b"SFL4";
 /// Off-screen tiles fed by received chunks stay resident this long.
 const EVICT_AFTER: Duration = Duration::from_secs(30);
 
@@ -161,16 +161,11 @@ pub(crate) fn desired_tiles(
         // Keep a block-resolution band beside resident chunks, independent
         // of the camera distance (including a 32-chunk view). Coarser tiles
         // elsewhere retain the regular quadtree budget.
-        let borders_loaded = key.level <= 3
-            && key.level > MIN_LEVEL
+        let borders_loaded = key.level <= 3 && key.level > MIN_LEVEL
             && (-1..=1).any(|dx| {
                 (-1..=1).any(|dz| {
                     (dx != 0 || dz != 0)
-                        && covered(TileKey {
-                            x: key.x + dx,
-                            z: key.z + dz,
-                            ..key
-                        })
+                        && covered(TileKey { x: key.x + dx, z: key.z + dz, ..key })
                 })
             });
         if key.level > MIN_LEVEL && (d < SPLIT * key.size() as f64 || borders_loaded) {
@@ -714,23 +709,7 @@ impl Far {
         let resolved: Vec<_> = updates
             .into_iter()
             .map(|(key, index, height, state, biome)| {
-                let rgba = colours.rgba(content, state, biome);
-                if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some()
-                    && rgba & 0xff < 8
-                    && (rgba >> 8) & 0xff < 10
-                    && (rgba >> 16) & 0xff < 8
-                {
-                    eprintln!(
-                        "FARDARK ingest key={:?} idx={} h={} state={} name={:?} rgba={:#010x}",
-                        key,
-                        index,
-                        height,
-                        state,
-                        content.name(state),
-                        rgba
-                    );
-                }
-                (key, index, height, rgba)
+                (key, index, height, colours.rgba(content, state, biome))
             })
             .collect();
         for (key, index, height, rgba) in resolved {
@@ -776,24 +755,7 @@ impl Far {
             let Some(state) = block.or_else(|| colours.surface(biome, underwater)) else {
                 continue;
             };
-            let rgba = colours.rgba(content, state, biome);
-            if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some()
-                && rgba & 0xff < 8
-                && (rgba >> 8) & 0xff < 10
-                && (rgba >> 16) & 0xff < 8
-            {
-                eprintln!(
-                    "FARDARK tile key={:?} idx={} h={} src={:?} state={} name={:?} rgba={:#010x}",
-                    key,
-                    index,
-                    height,
-                    source,
-                    state,
-                    content.name(state),
-                    rgba
-                );
-            }
-            resolved.push((index, height, rgba, source));
+            resolved.push((index, height, colours.rgba(content, state, biome), source));
         }
         let tile = self.tiles.entry(key).or_insert_with(Tile::empty);
         tile.requested = true;
@@ -1195,13 +1157,10 @@ mod tests {
             };
             let tiles = desired_tiles([8., 8.], 2048., &covered);
             let edge = i64::from(radius + 1) * 16;
-            let tile = tiles
-                .iter()
-                .find(|tile| {
-                    let [x, z] = tile.origin();
-                    x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
-                })
-                .expect("far terrain just outside loaded chunks");
+            let tile = tiles.iter().find(|tile| {
+                let [x, z] = tile.origin();
+                x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
+            }).expect("far terrain just outside loaded chunks");
             assert_eq!(tile.level, 0, "radius {radius}: {tile:?}");
             assert!(tiles.len() < 4096, "radius {radius}: {} tiles", tiles.len());
         }
@@ -1311,6 +1270,11 @@ mod tests {
         assert_eq!(unpack(loaded.data[0]), (80, Source::Cached));
         assert_eq!(loaded.data[1], 0xff112233);
         assert_eq!(unpack(loaded.data[2]), (50, Source::Router));
+        // A tile cached under the previous sampling rule is not loaded.
+        let mut stale = std::fs::read(&path).expect("cache file");
+        stale[..4].copy_from_slice(b"SFL3");
+        std::fs::write(&path, stale).expect("rewrite cache file");
+        assert!(read_cache(&path).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

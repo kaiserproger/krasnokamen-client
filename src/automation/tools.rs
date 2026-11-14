@@ -1,15 +1,14 @@
 use super::{
     catalog,
-    control::{Core, nonce},
+    control::{nonce, Core},
 };
 use crate::api::{Command, Request};
 use serde_json::Value;
 use std::{
     path::{Component, Path},
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Arc,
     },
     time::Duration,
 };
@@ -244,8 +243,7 @@ pub(super) fn execute(
             return Err("owner_result_unknown".into());
         }
     };
-    if ui_respawn
-        && result.is_ok()
+    if ui_respawn && result.is_ok()
         && let Some(fence) = &mut respawn_fence
     {
         fence.retain_after_success = true;

@@ -23,54 +23,26 @@ pub(super) fn append_drowned_outer(
     light: [f32; 2],
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let Pose {
-        tick,
-        partial,
-        root,
-    } = pose;
+    let Pose { tick, partial, root } = pose;
     let (key, texture) = if p::boolean(models, entity, "DATA_BABY_ID") {
-        (
-            "minecraft:drowned_outer_baby#main",
-            "entity/zombie/drowned_outer_layer_baby",
-        )
+        ("minecraft:drowned_outer_baby#main", "entity/zombie/drowned_outer_layer_baby")
     } else {
-        (
-            "minecraft:drowned_outer#main",
-            "entity/zombie/drowned_outer_layer",
-        )
+        ("minecraft:drowned_outer#main", "entity/zombie/drowned_outer_layer")
     };
     if !models.has_authored_rig(key) {
-        return Err(format!(
-            "drowned clothing rig not activated or authored: {key}"
-        ));
+        return Err(format!("drowned clothing rig not activated or authored: {key}"));
     }
     let texture = p::texture(content, texture)?;
     let rig = models.rig(key);
-    p::evaluate_rig(
-        rig, entity, models, content, tick, partial, root, transforms,
-    );
-    p::emit_rig(
-        rig,
-        transforms,
-        p::RigStyle {
-            tex: texture,
-            color: [1.; 3],
-            layer: EntityMaterial::EntityTranslucent,
-            alpha: 1.,
-            light,
-        },
-        out,
-    )
+    p::evaluate_rig(rig, entity, models, content, tick, partial, root, transforms);
+    p::emit_rig(rig, transforms, p::RigStyle { tex: texture, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        entities::{
-            animation_tests,
-            resources::{Bone, BoneRole, Rig},
-        },
+        entities::{animation_tests, resources::{Bone, BoneRole, Rig}},
         protocol::content::TextureRegion,
     };
     use glam::Vec3;
@@ -104,26 +76,16 @@ mod tests {
         entity.type_name = "minecraft:drowned".into();
         entity.source = None;
         models.schemas.insert(entity.type_name.clone(), schema);
-        models
-            .rigs
-            .insert("minecraft:drowned_outer#main".into(), rig(2.));
-        models
-            .rigs
-            .insert("minecraft:drowned_outer_baby#main".into(), rig(5.));
+        models.rigs.insert("minecraft:drowned_outer#main".into(), rig(2.));
+        models.rigs.insert("minecraft:drowned_outer_baby#main".into(), rig(5.));
         let mut content = Content::test_cube();
         for (path, layer) in [
             ("entity/zombie/drowned_outer_layer", 11),
             ("entity/zombie/drowned_outer_layer_baby", 12),
         ] {
-            content.insert_test_texture(
-                path,
-                TextureRegion {
-                    uv: [0., 0., 1., 1.],
-                    layer,
-                    width: 64,
-                    height: 64,
-                },
-            );
+            content.insert_test_texture(path, TextureRegion {
+                uv: [0., 0., 1., 1.], layer, width: 64, height: 64,
+            });
         }
         (models, entity, content)
     }
@@ -132,20 +94,9 @@ mod tests {
     fn missing_clothing_texture_is_an_error() {
         let (models, entity, _) = fixture();
         let mut out = DynamicGeometry::default();
-        let error = append_drowned_outer(
-            &models,
-            &Content::test_cube(),
-            &entity,
-            Pose {
-                tick: 0,
-                partial: 0.,
-                root: Mat4::IDENTITY,
-            },
-            &mut Vec::new(),
-            [0.; 2],
-            &mut out,
-        )
-        .unwrap_err();
+        let error = append_drowned_outer(&models, &Content::test_cube(), &entity,
+            Pose { tick: 0, partial: 0., root: Mat4::IDENTITY },
+            &mut Vec::new(), [0.; 2], &mut out).unwrap_err();
         assert!(error.contains("entity/zombie/drowned_outer_layer"));
         assert!(out.vertices.is_empty());
     }

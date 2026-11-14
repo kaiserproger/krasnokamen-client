@@ -18,19 +18,13 @@ pub(super) fn tools() -> &'static Vec<Value> {
                 "Read received block states in y/z/x order. Responses are byte-bounded; when truncated, repeat unchanged bounds with offset=next_offset. count is returned rows; total_count is requested volume."
             );
         }
-        if let Some(inputs) = tools
-            .iter_mut()
-            .find(|tool| tool["name"] == "minecraft_press_inputs")
-        {
+        if let Some(inputs) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_press_inputs") {
             inputs["inputSchema"]["properties"]["hold"] = serde_json::json!({
                 "type": "boolean",
                 "description": "Press (true) or release (false) keys until the next explicit release or controller revocation."
             });
         }
-        if let Some(entities) = tools
-            .iter_mut()
-            .find(|tool| tool["name"] == "minecraft_list_entities")
-        {
+        if let Some(entities) = tools.iter_mut().find(|tool| tool["name"] == "minecraft_list_entities") {
             entities["inputSchema"]["properties"]["entity_type"] = serde_json::json!({
                 "type":"string","minLength":1,"maxLength":128,
                 "description":"Filter received entity types before limiting the page."

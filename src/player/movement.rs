@@ -1,8 +1,8 @@
+use crate::protocol::packet_ids::play::serverbound as sb;
 use super::collision;
 use super::*;
 use crate::inventory::Stack;
 use crate::protocol::content::FluidState;
-use crate::protocol::packet_ids::play::serverbound as sb;
 
 #[derive(Default)]
 struct Environment {
@@ -77,13 +77,9 @@ impl Player {
         }
         if let Some(vehicle) = entities.vehicle_of(self.entity_id) {
             self.vehicle = Some(vehicle);
-            self.predict_vehicle(
-                world, content, inventory, entities, input, tick, world_tick, out,
-            )?;
+            self.predict_vehicle(world, content, inventory, entities, input, tick, world_tick, out)?;
             self.inside_blocks(world, content, inventory, input, tick_start_position)?;
-            self.update_auto_spin(
-                world, content, inventory, entities, input, world_tick, spin_start,
-            )?;
+            self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
             self.update_eye_environment(world, content)?;
             return Ok(());
         }
@@ -160,13 +156,8 @@ impl Player {
         if self.sprinting != self.sent_sprinting {
             // Hunger, collision and use effects can deny a held sprint key.
             self.entity_command(
-                if self.sprinting {
-                    PlayerCommand::StartSprinting
-                } else {
-                    PlayerCommand::StopSprinting
-                },
-                0,
-                out,
+                if self.sprinting { PlayerCommand::StartSprinting } else { PlayerCommand::StopSprinting },
+                0, out,
             );
             self.sent_sprinting = self.sprinting;
         }
@@ -310,9 +301,7 @@ impl Player {
                 drag = 0.96;
             }
             self.add_relative(movement, acceleration);
-            self.move_player(
-                world, content, entities, input, inventory, world_tick, movement,
-            )?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if self.horizontal_collision && env.climbable {
                 self.velocity[1] = 0.2;
             }
@@ -331,9 +320,7 @@ impl Player {
             )?;
         } else if env.lava > 0. && !flight {
             self.add_relative(movement, 0.02);
-            self.move_player(
-                world, content, entities, input, inventory, world_tick, movement,
-            )?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if env.lava <= 0.4 {
                 self.velocity[0] *= 0.5;
                 self.velocity[1] *= f64::from(0.8f32);
@@ -356,9 +343,7 @@ impl Player {
             )?;
         } else if self.gliding {
             self.glide(gravity);
-            self.move_player(
-                world, content, entities, input, inventory, world_tick, movement,
-            )?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
         } else {
             let friction = if self.grounded {
                 content.info(env.below_state)?.friction
@@ -384,9 +369,7 @@ impl Player {
                 }
                 self.fall_distance = 0.;
             }
-            self.move_player(
-                world, content, entities, input, inventory, world_tick, movement,
-            )?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if (self.horizontal_collision || input.has(4))
                 && (env.climbable || (env.powder && can_walk_powder(inventory, content)))
             {
@@ -420,9 +403,7 @@ impl Player {
         if !input.has(5) {
             self.accumulate_steps(world, content, tick_start_position)?;
         }
-        self.update_auto_spin(
-            world, content, inventory, entities, input, world_tick, spin_start,
-        )?;
+        self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
         Ok(())
     }
     fn update_auto_spin(
@@ -1411,19 +1392,15 @@ mod tests {
     #[test]
     fn dimension_lava_rate_uses_received_environment_attribute_not_legacy_ultrawarm() {
         assert!(!dimension_fast_lava(&serde_json::json!({"ultrawarm":true})).unwrap());
-        assert!(
-            dimension_fast_lava(
-                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
-            )
-            .unwrap()
-        );
+        assert!(dimension_fast_lava(
+            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
+        )
+        .unwrap());
         assert!(!dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"and","argument":true}}})).unwrap());
         assert!(dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"nand","argument":true}}})).unwrap());
-        assert!(
-            dimension_fast_lava(
-                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
-            )
-            .is_err()
-        );
+        assert!(dimension_fast_lava(
+            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
+        )
+        .is_err());
     }
 }

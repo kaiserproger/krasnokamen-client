@@ -55,16 +55,9 @@ impl Player {
         pitch: f32,
     ) -> Result<()> {
         let mut request = SoundRequest::positional(
-            event,
-            category,
-            self.position,
-            volume,
-            pitch,
-            world.sound_seed()?,
+            event, category, self.position, volume, pitch, world.sound_seed()?,
         );
-        request.source = SoundOrigin::LocalPlayer {
-            position: self.position,
-        };
+        request.source = SoundOrigin::LocalPlayer { position: self.position };
         self.predict_use(UsePrediction::Sound(request))
     }
 

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 
-pub const DEFAULT_MANIFEST: &str = "http://135.106.208.217:8080/static/krasnokamen-content.json";
+pub const DEFAULT_MANIFEST: &str = "http://135.106.208.217:8080/static/solaris-content.json";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Profile {

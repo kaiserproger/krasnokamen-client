@@ -18,9 +18,9 @@
 //! `aces_tonemap`), 21 (`god_rays`) and 22 (`taa_resolve`), so A/B totals stay
 //! comparable across modes.
 
-use super::COLOR;
 use super::graphics::Features;
 use super::timing::Timing;
+use super::COLOR;
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 

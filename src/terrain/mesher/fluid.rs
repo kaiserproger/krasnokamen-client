@@ -1,13 +1,13 @@
-use super::{NORMALS, Rules, Samples, add, append_quad, greedy::Greedy, quantize};
+use super::{add, append_quad, greedy::Greedy, quantize, Rules, Samples, NORMALS};
 use crate::{
     api::{MeshGeometry, RenderLayer, Vertex},
     protocol::{
-        Result,
         content::{FluidKind, FluidState, TextureRegion},
         models::{
             fluids::{self, FluidSample},
             shapes::rectangles_cover,
         },
+        Result,
     },
 };
 

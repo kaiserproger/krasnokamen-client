@@ -35,7 +35,7 @@ if [[ ! "$GAME_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
   echo "publish_facts: launcher GAME_VERSION is not a release version: $GAME_VERSION" >&2
   exit 1
 fi
-NAME="krasnokamen-facts-${GAME_VERSION}-r${REV}"
+NAME="solaris-facts-${GAME_VERSION}-r${REV}"
 BASE_URL="http://135.106.208.217:8080/static"
 
 FACTS_FILES=(
@@ -135,7 +135,7 @@ tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
 
 SHA="$(sha256sum "$OUT" | awk '{print $1}')"
 SIZE="$(stat -c%s "$OUT")"
-JSON="$OUT_DIR/krasnokamen-content.json"
+JSON="$OUT_DIR/solaris-content.json"
 if [[ -f "$JSON" ]]; then
   BASE="$(cat "$JSON")"
 else

@@ -450,9 +450,7 @@ mod tests {
     fn tag_slot_display_decodes_26_3_direct_item_holder_set() {
         let mut content = Content::test_cube();
         content.item_names.insert(4, "minecraft:birch_log".into());
-        content
-            .item_names
-            .insert(7, "minecraft:stripped_birch_log".into());
+        content.item_names.insert(7, "minecraft:stripped_birch_log".into());
         let tag = item_holder_set(&mut Reader::new(&[3, 4, 7]), &content).unwrap();
         assert_eq!(
             tag,
