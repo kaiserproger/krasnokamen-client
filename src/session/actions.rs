@@ -148,7 +148,14 @@ impl Session {
                         json!({"phase":"applied","origin":"dialog_screen_key","held_inputs":self.keys,"selected_slot":self.inventory.selected_slot}),
                     );
                 }
-                if edge && pressed {
+                // Vanilla calls `KeyMapping.click` on every key-down event, GLFW_REPEAT
+                // included: `KeyboardHandler.keyPress` returns early only for action 0
+                // and reaches `set(key,true)` + `click(key)` for press and repeat
+                // (client.jar javap, offsets 971-1176; `KeyMapping.click` increments a
+                // clickCount that `consumeClick` drains). One press event is one action,
+                // and a held key is one action unless the OS repeats it. Mouse buttons
+                // have no repeat, so a held mouse click still means one click.
+                if pressed {
                     match key {
                         "ui_cancel" if self.phase == "play" => {
                             self.execute_ui(UiIntent::Key {
@@ -174,6 +181,9 @@ impl Session {
                         "drop" if self.phase == "play" => {
                             self.interact(InteractionIntent::Drop { whole_stack: false })?;
                         }
+                        // A press is one click at the next tick even when its
+                        // release arrives before that tick (KeyMapping.click).
+                        "attack" | "use" if self.phase == "play" => self.player.click(key),
                         "swap_offhand" if self.phase == "play" => {
                             self.interact(InteractionIntent::SwapHands)?;
                         }
@@ -2255,3 +2265,288 @@ mod book_edit_tests;
 #[cfg(test)]
 #[path = "hardware_defaults_tests.rs"]
 mod hardware_defaults_tests;
+
+/// QA5-FAST-CLICK: a fast physical click arrives as press+release before the
+/// next tick. Vanilla counts the press (`KeyMapping.click`) and starts the
+/// attack at the next tick, so the block under the crosshair is destroyed.
+#[cfg(test)]
+mod fast_click_tests {
+    use super::*;
+
+    #[test]
+    fn press_released_before_the_next_tick_still_starts_the_attack() {
+        let mut session = crate::session::mining_start_tests::session();
+        let _peer = crate::session::mining_start_tests::connect(&mut session);
+        let content = session.content.as_mut().unwrap();
+        content.states[1].hardness = 0.;
+        content.insert_test_block_sound(
+            1,
+            1.,
+            1.,
+            BTreeMap::from([
+                ("break".into(), "test:break".into()),
+                ("hit".into(), "test:hit".into()),
+            ]),
+        );
+        let target = [4, 5, 6];
+        session
+            .world
+            .set(target, 1, |state| Ok(state == 0))
+            .unwrap();
+        session
+            .input(InputIntent::Look { yaw: 0., pitch: 0. })
+            .unwrap();
+        assert_eq!(session.world.block(target), Some(1));
+        for pressed in [true, false] {
+            session
+                .input(InputIntent::Key {
+                    key: "attack".into(),
+                    pressed,
+                })
+                .unwrap();
+        }
+        assert!(
+            session.keys.is_empty(),
+            "the release arrived before the tick"
+        );
+        session.tick_after_events(true);
+        assert_eq!(
+            session.world.block(target),
+            Some(0),
+            "a released press still attacks at the next tick"
+        );
+    }
+}
+
+/// Drop and pick are `KeyMapping.consumeClick` keys: vanilla
+/// `Minecraft.handleKeybinds` drains them with a `while (consumeClick())` loop
+/// (client jar, `net.minecraft.client.Minecraft#handleKeybinds`, offsets
+/// 568-615 for `keyDrop`, 759-819 for `keyAttack`/`keyUse`/`keyPickItem`), so
+/// one press is one action and a held key never repeats. These tests count the
+/// packets the real `InputIntent::Key` path puts on the wire.
+#[cfg(test)]
+mod item_key_tests {
+    use super::*;
+    use crate::protocol::{
+        Reader,
+        packet_ids::play::{clientbound as cb, serverbound as sb},
+    };
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+
+    fn read_packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
+        let mut header = Vec::new();
+        loop {
+            let mut byte = [0];
+            socket.read_exact(&mut byte).unwrap();
+            header.push(byte[0]);
+            if byte[0] & 128 == 0 {
+                break;
+            }
+            assert!(header.len() < 5);
+        }
+        let mut body = vec![0; Reader::new(&header).count(32768).unwrap()];
+        socket.read_exact(&mut body).unwrap();
+        let mut reader = Reader::new(&body);
+        let id = reader.var().unwrap();
+        (id, body[reader.offset..].to_vec())
+    }
+
+    fn send_packet(socket: &mut TcpStream, id: i32, body: &[u8]) {
+        socket
+            .write_all(&crate::protocol::frame(id, body, None).unwrap())
+            .unwrap();
+    }
+
+    /// One client tick of outbound frames, ending at `CLIENT_TICK_END`.
+    fn tick_window(frames: &mpsc::Receiver<(i32, Vec<u8>)>) -> Vec<(i32, Vec<u8>)> {
+        let mut out = Vec::new();
+        loop {
+            let frame = frames
+                .recv_timeout(Duration::from_secs(10))
+                .expect("a live peer reads every outbound frame");
+            let end = frame.0 == sb::CLIENT_TICK_END;
+            out.push(frame);
+            if end {
+                return out;
+            }
+        }
+    }
+
+    /// Wire ordinals `write_action` emits: 4 drops the stack, 5 drops one item,
+    /// 7 swaps hands (`Player::write_action` sends `action + 1`).
+    fn drop_actions(window: &[(i32, Vec<u8>)]) -> usize {
+        window
+            .iter()
+            .filter(|(id, _)| *id == sb::PLAYER_ACTION)
+            .filter(|(_, body)| matches!(Reader::new(body).var().unwrap(), 4 | 5))
+            .count()
+    }
+
+    fn count_id(window: &[(i32, Vec<u8>)], id: i32) -> usize {
+        window.iter().filter(|(frame, _)| *frame == id).count()
+    }
+
+    /// All-air chunk with the eye at (4.5, 5.62, 4.5) and one cube at (4,5,6).
+    fn session_with_peer() -> (Session, mpsc::Receiver<(i32, Vec<u8>)>, mpsc::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (frame_tx, frame_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        thread::spawn(move || {
+            let (mut login, _) = listener.accept().unwrap();
+            let (mut status, _) = listener.accept().unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            login
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            read_packet(&mut status);
+            read_packet(&mut status);
+            let mut status_response = Writer::default();
+            status_response.string(r#"{"version":{"protocol":777}}"#);
+            send_packet(&mut status, 0, &status_response.0);
+            read_packet(&mut login);
+            read_packet(&mut login);
+            let mut success = Writer(vec![0; 16]);
+            success.string("ItemKeyTest");
+            success.var(0);
+            send_packet(&mut login, 2, &success.0);
+            assert_eq!(read_packet(&mut login).0, 3);
+            assert_eq!(read_packet(&mut login).0, 0);
+            send_packet(&mut login, 3, &[]);
+            assert_eq!(read_packet(&mut login).0, 3);
+            send_packet(&mut login, cb::KEEP_ALIVE, &456i64.to_be_bytes());
+            assert_eq!(
+                read_packet(&mut login),
+                (sb::KEEP_ALIVE, 456i64.to_be_bytes().to_vec())
+            );
+            ready_tx.send(()).unwrap();
+            while stop_rx.try_recv().is_err() {
+                match read_packet(&mut login) {
+                    // The client already answered the login keepalive.
+                    (id, body) if id == sb::KEEP_ALIVE && body == 456i64.to_be_bytes() => continue,
+                    frame => {
+                        if frame_tx.send(frame).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        let network = Network::connect(
+            address.to_string(),
+            "ItemKeyTest".into(),
+            8,
+            true,
+            "en_us",
+            Arc::new(|| {}),
+            None,
+        )
+        .unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let mut session = crate::session::mining_start_tests::session();
+        session.network = Some(network);
+        let content = session.content.as_mut().unwrap();
+        content.states[1].hardness = 1.;
+        content.insert_test_block_sound(1, 1., 1., BTreeMap::new());
+        session
+            .world
+            .set([4, 5, 6], 1, |state| Ok(state == 0))
+            .unwrap();
+        session
+            .input(InputIntent::Look { yaw: 0., pitch: 0. })
+            .unwrap();
+        // Drain what the handshake and the look already queued.
+        session.tick_after_events(true);
+        let _ = tick_window(&frame_rx);
+        (session, frame_rx, stop_tx)
+    }
+
+    fn press(session: &mut Session, key: &str, pressed: bool) {
+        session
+            .input(InputIntent::Key {
+                key: key.into(),
+                pressed,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn one_drop_press_sends_one_drop_and_a_held_key_does_not_repeat() {
+        let (mut session, frames, _stop) = session_with_peer();
+        press(&mut session, "drop", true);
+        press(&mut session, "drop", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            drop_actions(&window),
+            1,
+            "one press is one drop: {window:?}"
+        );
+        press(&mut session, "drop", true);
+        session.tick_after_events(true);
+        let first = tick_window(&frames);
+        session.tick_after_events(true);
+        let second = tick_window(&frames);
+        press(&mut session, "drop", false);
+        assert_eq!(
+            drop_actions(&first) + drop_actions(&second),
+            1,
+            "a held drop key does not repeat: {first:?} {second:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_key_down_events_are_extra_clicks() {
+        // GLFW_REPEAT reaches `KeyMapping.click` in vanilla, so holding Q drops
+        // one item per OS repeat: two repeat events after the press are 3 drops.
+        let (mut session, frames, _stop) = session_with_peer();
+        for _ in 0..3 {
+            press(&mut session, "drop", true);
+        }
+        press(&mut session, "drop", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            drop_actions(&window),
+            3,
+            "each repeat is one more drop: {window:?}"
+        );
+        // A repeat event on pick is one more pick; the key is never released
+        // between them.
+        press(&mut session, "pick", true);
+        session.tick_after_events(true);
+        let _ = tick_window(&frames);
+        press(&mut session, "pick", true);
+        session.tick_after_events(true);
+        let repeated = tick_window(&frames);
+        press(&mut session, "pick", false);
+        assert_eq!(
+            count_id(&repeated, sb::PICK_ITEM_FROM_BLOCK),
+            1,
+            "the repeat event is a second pick, the press itself was the first: {repeated:?}"
+        );
+    }
+
+    #[test]
+    fn one_pick_press_sends_one_pick_item() {
+        let (mut session, frames, _stop) = session_with_peer();
+        press(&mut session, "pick", true);
+        press(&mut session, "pick", false);
+        session.tick_after_events(true);
+        let window = tick_window(&frames);
+        assert_eq!(
+            count_id(&window, sb::PICK_ITEM_FROM_BLOCK),
+            1,
+            "one press is one pick: {window:?}"
+        );
+    }
+}

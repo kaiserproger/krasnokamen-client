@@ -1500,17 +1500,29 @@ impl ApplicationHandler for App {
                 _ => {}
             },
             WindowEvent::KeyboardInput { event, .. }
-                if self.focused && (!event.repeat || self.session.text_field_focused()) =>
+                if self.focused
+                    && (!event.repeat
+                        || self.session.text_field_focused()
+                        // GLFW_REPEAT is a new click for gameplay bindings: vanilla
+                        // `KeyboardHandler.keyPress` calls `KeyMapping.click` for
+                        // action 1 and 2 alike (client.jar javap: action 0 returns
+                        // at offset 971, set+click at 1168-1176, screen keyPressed
+                        // at 632-639). The screen gate keeps repeats out of dialogs,
+                        // text fields and the title; F11 and F1 stay press-only
+                        // (keyPress reaches them only under `action == 1`, offset 275).
+                        || self.session.screen() == "game") =>
             {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
                 };
                 let pressed = event.state == ElementState::Pressed;
-                self.voice_key(code, pressed);
-                if pressed && self.capture_binding(controls::Binding::Key(code)) {
+                if !event.repeat {
+                    self.voice_key(code, pressed);
+                }
+                if pressed && !event.repeat && self.capture_binding(controls::Binding::Key(code)) {
                     return;
                 }
-                if toggle_fullscreen_key(&mut self.session, code, pressed) {
+                if !event.repeat && toggle_fullscreen_key(&mut self.session, code, pressed) {
                     self.sync_native_window();
                     self.publish_session();
                     self.dispatch_binding(controls::Binding::Key(code), pressed);
@@ -1520,7 +1532,7 @@ impl ApplicationHandler for App {
                     frame_trace::toggle(self);
                     return;
                 }
-                if code == KeyCode::F1 && self.session.screen() == "game" {
+                if !event.repeat && code == KeyCode::F1 && self.session.screen() == "game" {
                     self.manual(InputIntent::Key {
                         key: "hide_hud".into(),
                         pressed,

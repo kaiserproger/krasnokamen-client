@@ -391,7 +391,7 @@ impl Player {
         if self.miss_delay > 0 {
             self.miss_delay -= 1;
         }
-        if !input.attack {
+        if !input.attack && input.attack_clicks == 0 {
             self.abort_break(out)?;
             self.miss_delay = 0;
         }
@@ -406,62 +406,55 @@ impl Player {
         if inventory.screen_open || !self.pose_known || self.health.is_some_and(|h| h <= 0.) {
             return Ok(());
         }
-        if input.swap_hands && !self.last_input.swap_hands {
-            self.perform(
-                InteractionIntent::SwapHands,
-                None,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
-        if input.drop && !self.last_input.drop {
-            self.perform(
-                InteractionIntent::Drop { whole_stack: false },
-                None,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
-        if input.pick && !self.last_input.pick {
-            let target = self.raycast(world, content, entities, world_tick)?;
-            self.perform(
-                InteractionIntent::Pick {
-                    include_data: false,
-                },
-                target,
-                resources,
-                tick,
-                world_tick,
-                out,
-            )?;
-        }
-        if input.attack && self.miss_delay == 0 {
+        // Swap hands, drop and pick are `consumeClick` keys: the press edge in
+        // `Session::input` dispatches them once (vanilla `Minecraft.handleKeybinds`
+        // drains them with `while (consumeClick())`), so the tick must not repeat
+        // a key that is still held.
+        // Minecraft.handleKeybinds: each press since the last tick starts one
+        // attack (`startAttack`), then a still-held button continues mining.
+        if (input.attack || input.attack_clicks > 0) && self.miss_delay == 0 {
             let target = self.raycast(world, content, entities, world_tick)?;
             if !self.last_input.attack {
-                self.attack(
-                    target.clone(),
-                    world,
-                    content,
-                    inventory,
-                    entities,
-                    tick,
-                    out,
-                )?;
+                for _ in 0..input.attack_clicks.max(1) {
+                    if self.miss_delay > 0 {
+                        break;
+                    }
+                    self.attack(
+                        target.clone(),
+                        world,
+                        content,
+                        inventory,
+                        entities,
+                        tick,
+                        out,
+                    )?;
+                }
             } else if let Some(Hit::Block(hit)) = target {
                 self.break_block(hit, world, content, inventory, entities, tick, out)?;
             } else {
                 self.abort_break(out)?;
             }
         }
-        if input.use_item && self.use_delay == 0 {
+        if !input.attack && input.attack_clicks > 0 {
+            // continueAttack(false) for a press already released this tick.
+            self.abort_break(out)?;
+            self.miss_delay = 0;
+        }
+        // Each press starts one use (`startUseItem`); a held button repeats it
+        // once `use_delay` runs out.
+        let uses = input
+            .use_clicks
+            .max(u8::from(input.use_item && self.use_delay == 0));
+        if uses > 0 {
             let target = self.raycast(world, content, entities, world_tick)?;
             let hand = u8::from(input.offhand);
-            self.use_target(target, hand, resources, tick, world_tick, out)?;
-            self.use_delay = 4;
+            for _ in 0..uses {
+                self.use_target(target.clone(), hand, resources, tick, world_tick, out)?;
+                self.use_delay = 4;
+                if self.using.is_some() {
+                    break;
+                }
+            }
         }
         Ok(())
     }

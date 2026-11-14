@@ -131,10 +131,11 @@ pub struct HeldInput {
     pub flags: u8,
     pub attack: bool,
     pub use_item: bool,
-    pub pick: bool,
     pub offhand: bool,
-    pub drop: bool,
-    pub swap_hands: bool,
+    /// Presses since the previous tick (vanilla `KeyMapping.consumeClick`):
+    /// each one starts an attack or use even when released before the tick.
+    pub attack_clicks: u8,
+    pub use_clicks: u8,
 }
 impl HeldInput {
     pub fn from_keys(keys: &BTreeSet<String>, blocked: bool) -> Self {
@@ -156,10 +157,9 @@ impl HeldInput {
             flags,
             attack: keys.contains("attack"),
             use_item: keys.contains("use"),
-            pick: keys.contains("pick"),
             offhand: keys.contains("offhand"),
-            drop: keys.contains("drop"),
-            swap_hands: keys.contains("swap_hands"),
+            attack_clicks: 0,
+            use_clicks: 0,
         }
     }
     pub fn has(self, bit: u8) -> bool {
@@ -177,10 +177,7 @@ impl HeldInput {
         let actions = [
             ("attack", self.attack),
             ("use", self.use_item),
-            ("pick", self.pick),
             ("offhand", self.offhand),
-            ("drop", self.drop),
-            ("swap_hands", self.swap_hands),
         ]
         .into_iter()
         .filter(|(_, set)| *set)
@@ -287,6 +284,10 @@ pub struct Player {
     world_game_time: Option<i64>,
     fast_lava: bool,
     last_input: HeldInput,
+    /// Attack/use presses a tick has not consumed yet: a fast physical click
+    /// arrives as press+release before the next tick (`Player::click`).
+    attack_clicks: u8,
+    use_clicks: u8,
     last_sent_input: u8,
     sent_sprinting: bool,
     stuck_multiplier: [f64; 3],
@@ -381,6 +382,8 @@ impl Default for Player {
             world_game_time: None,
             fast_lava: false,
             last_input: HeldInput::default(),
+            attack_clicks: 0,
+            use_clicks: 0,
             last_sent_input: 0,
             sent_sprinting: false,
             stuck_multiplier: [0.; 3],
@@ -497,6 +500,9 @@ impl Player {
         self.fishing_hook = None;
         self.auto_spin_ticks = 0;
         self.last_input = HeldInput::default();
+        // KeyMapping.release drops presses no tick has consumed yet.
+        self.attack_clicks = 0;
+        self.use_clicks = 0;
         self.last_sent_input = 0;
         self.sent_sprinting = false;
         self.stuck_multiplier = [0.; 3];
@@ -1010,12 +1016,19 @@ impl Player {
         if !self.pose_known {
             return Ok(());
         }
-        let input = HeldInput::from_keys(
-            keys,
-            inventory.screen_open
-                || self.health.is_some_and(|h| h <= 0.)
-                || self.pose == Pose::Sleeping,
+        let blocked = inventory.screen_open
+            || self.health.is_some_and(|h| h <= 0.)
+            || self.pose == Pose::Sleeping;
+        let mut input = HeldInput::from_keys(keys, blocked);
+        // A press is one click at the next tick even when its release arrived
+        // first; blocked input (open inventory, dead, sleeping) drops them.
+        let clicks = (
+            std::mem::take(&mut self.attack_clicks),
+            std::mem::take(&mut self.use_clicks),
         );
+        if !blocked {
+            (input.attack_clicks, input.use_clicks) = clicks;
+        }
         self.sync_input(input, out);
         let previous_position = self.position;
         self.movement_blocked = None;
@@ -1045,6 +1058,15 @@ impl Player {
         self.pose_revision = self.pose_revision.wrapping_add(1);
         out.push(PacketCommand::new(sb::CLIENT_TICK_END, Writer::default()));
         Ok(())
+    }
+    /// Vanilla `KeyMapping.click`: a press of attack or use counts at the next
+    /// tick even when its release arrives before that tick.
+    pub fn click(&mut self, key: &str) {
+        match key {
+            "attack" => self.attack_clicks = self.attack_clicks.saturating_add(1),
+            "use" => self.use_clicks = self.use_clicks.saturating_add(1),
+            _ => {}
+        }
     }
     fn sync_input(&mut self, input: HeldInput, out: &mut Vec<PacketCommand>) {
         if input.flags != self.last_sent_input {
