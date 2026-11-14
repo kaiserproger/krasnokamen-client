@@ -1378,6 +1378,12 @@ pub(super) fn draw_entity(
                 }
                 super::sheep::append(
                     entity,
+                    rig,
+                    transforms: store.transforms,
+                },
+                store.items,
+                store.equipment_cache,
+                super::equipment::Frame {
                     models,
                     content,
                     super::sheep::CoatFrame {
