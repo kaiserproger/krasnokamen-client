@@ -179,7 +179,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     const OGG: &[u8] =
-        include_bytes!("../../fixtures/content/assets/solaris_fixture/sounds/confirmation.ogg");
+        include_bytes!("../../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg");
 
     fn assets(names: &[String]) -> BTreeMap<String, Arc<[u8]>> {
         names
