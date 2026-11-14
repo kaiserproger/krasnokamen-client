@@ -8,7 +8,11 @@ pub(super) const SINGLE_RADIUS: f32 = 80.;
 pub(super) const CASCADE_RADII: [f32; MAX_CASCADES] = [18., 52., 144.];
 const LIGHT_DISTANCE: f32 = 192.;
 
-fn texture_entry(binding: u32, sample_type: wgpu::TextureSampleType, dimension: wgpu::TextureViewDimension) -> wgpu::BindGroupLayoutEntry {
+fn texture_entry(
+    binding: u32,
+    sample_type: wgpu::TextureSampleType,
+    dimension: wgpu::TextureViewDimension,
+) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -203,7 +207,14 @@ impl Shadow {
         atlas: &wgpu::BindGroupLayout,
     ) -> Self {
         let (map, view, layers) = Self::map(device, 0);
-        let opaque_depth = depth_texture(device, "Fancy depth texture", 1, 1, 1, wgpu::TextureUsages::COPY_DST);
+        let opaque_depth = depth_texture(
+            device,
+            "Fancy depth texture",
+            1,
+            1,
+            1,
+            wgpu::TextureUsages::COPY_DST,
+        );
         let opaque_depth_view = opaque_depth.create_view(&Default::default());
         let (scene_copy, scene_copy_view) = Self::scene_copy(device, 1, 1);
         let bind = Self::binding(device, &view, &opaque_depth_view, &scene_copy_view);
@@ -218,49 +229,50 @@ impl Shadow {
         });
         let attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2,3=>Float32x2,4=>Float32x3,5=>Float32,6=>Uint32,8=>Float32x2,9=>Float32x3];
         let instance_attributes = wgpu::vertex_attr_array![7=>Float32x4];
-        let build = |label: &'static str, entry: &'static str, vertex: wgpu::VertexBufferLayout<'_>| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    buffers: &[
-                        vertex,
-                        wgpu::VertexBufferLayout {
-                            array_stride: 16,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &instance_attributes,
-                        },
-                    ],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("shadow_fragment"),
-                    compilation_options: Default::default(),
-                    targets: &[],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: None,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 2,
-                        slope_scale: 2.,
-                        clamp: 0.,
+        let build =
+            |label: &'static str, entry: &'static str, vertex: wgpu::VertexBufferLayout<'_>| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: Some(entry),
+                        compilation_options: Default::default(),
+                        buffers: &[
+                            vertex,
+                            wgpu::VertexBufferLayout {
+                                array_stride: 16,
+                                step_mode: wgpu::VertexStepMode::Instance,
+                                attributes: &instance_attributes,
+                            },
+                        ],
                     },
-                }),
-                multisample: Default::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: Some("shadow_fragment"),
+                        compilation_options: Default::default(),
+                        targets: &[],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: Default::default(),
+                        bias: wgpu::DepthBiasState {
+                            constant: 2,
+                            slope_scale: 2.,
+                            clamp: 0.,
+                        },
+                    }),
+                    multisample: Default::default(),
+                    multiview: None,
+                    cache: None,
+                })
+            };
         let pipeline = build(
             "sun moon alpha-tested shadow map",
             "shadow_vertex",
@@ -329,9 +341,12 @@ impl Shadow {
     /// colour copy (placeholders when the preset has the feature off).
     pub fn target_bytes(&self) -> u64 {
         let map = &self.map;
-        let shadow = u64::from(map.width()) * u64::from(map.height())
-            * u64::from(map.depth_or_array_layers()) * 4;
-        let depth = u64::from(self.opaque_depth.width()) * u64::from(self.opaque_depth.height()) * 4;
+        let shadow = u64::from(map.width())
+            * u64::from(map.height())
+            * u64::from(map.depth_or_array_layers())
+            * 4;
+        let depth =
+            u64::from(self.opaque_depth.width()) * u64::from(self.opaque_depth.height()) * 4;
         let copy = u64::from(self.scene_copy.width()) * u64::from(self.scene_copy.height()) * 8;
         shadow + depth + copy
     }
@@ -365,7 +380,11 @@ impl Shadow {
             .collect();
         (map, view, layer_views)
     }
-    fn scene_copy(device: &wgpu::Device, width: u32, height: u32) -> (wgpu::Texture, wgpu::TextureView) {
+    fn scene_copy(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("opaque scene colour copy"),
             size: wgpu::Extent3d {
@@ -459,7 +478,12 @@ impl Shadow {
         let (copy, copy_view) = Self::scene_copy(device, copy_width, copy_height);
         self.scene_copy = copy;
         self.scene_copy_view = copy_view;
-        self.bind = Self::binding(device, &self.view, &self.opaque_depth_view, &self.scene_copy_view);
+        self.bind = Self::binding(
+            device,
+            &self.view,
+            &self.opaque_depth_view,
+            &self.scene_copy_view,
+        );
     }
     /// `light` points from the scene toward the sun/moon; `cascades` are the
     /// camera-relative orthographic light projections used by the shadow passes.
@@ -537,9 +561,7 @@ impl Shadow {
                     if material == 0 {
                         // Opaque faces turned away from the light never hold the
                         // nearest depth of a closed solid surface.
-                        chunk
-                            .mesh
-                            .light_facing_runs(0, light.to_array(), &mut push);
+                        chunk.mesh.light_facing_runs(0, light.to_array(), &mut push);
                     } else if !chunk.mesh.ranges[1].is_empty() {
                         push(chunk.mesh.ranges[1].clone());
                     }
@@ -605,11 +627,20 @@ fn outside_light_box(matrix: &Mat4, min: Vec3, max: Vec3) -> bool {
 
 /// Append the indirect argument of one caster run, preserving the exact
 /// per-section instance index (`null 0 + dynamic 1 + chunks i+2`).
-fn push_shadow_draw(mesh: &ResidentMesh, run: &ShadowRun, vertex_stride: u64, batch: &mut ShadowBatch) {
+fn push_shadow_draw(
+    mesh: &ResidentMesh,
+    run: &ShadowRun,
+    vertex_stride: u64,
+    batch: &mut ShadowBatch,
+) {
     let (Some(vertices), Some(indices)) = (mesh.vertices, mesh.indices) else {
         return;
     };
-    debug_assert_eq!(vertices.offset % vertex_stride, 0, "unaligned shadow base vertex");
+    debug_assert_eq!(
+        vertices.offset % vertex_stride,
+        0,
+        "unaligned shadow base vertex"
+    );
     let base_vertex = (vertices.offset / vertex_stride) as i32;
     batch.draws.push(ShadowDraw {
         index_count: run.range.end - run.range.start,
@@ -637,7 +668,11 @@ pub(super) fn radii(count: u32) -> [f32; MAX_CASCADES] {
 /// the light's right/up axes. Shadow edges therefore do not swim as the
 /// camera moves (`camera_world` is f64 so a far-from-origin camera still snaps).
 fn cascade_matrix(light: Vec3, radius: f32, camera_world: [f64; 3]) -> Mat4 {
-    let up = if light.y.abs() > 0.98 { Vec3::Z } else { Vec3::Y };
+    let up = if light.y.abs() > 0.98 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
     let forward = -light;
     let right = forward.cross(up).normalize();
     let up = right.cross(forward);
@@ -711,7 +746,11 @@ mod tests {
         assert_eq!(cascades.radii, CASCADE_RADII);
         assert!(cascades.radii.windows(2).all(|pair| pair[0] < pair[1]));
         // Texel density falls monotonically with the cascade index.
-        let density: Vec<f32> = cascades.radii.iter().map(|r| SIZE as f32 / (2. * r)).collect();
+        let density: Vec<f32> = cascades
+            .radii
+            .iter()
+            .map(|r| SIZE as f32 / (2. * r))
+            .collect();
         assert!(density.windows(2).all(|pair| pair[0] > pair[1]));
         let single = radii(1);
         assert_eq!(single, [SINGLE_RADIUS, 0., 0.]);
@@ -723,7 +762,11 @@ mod tests {
     #[test]
     fn cascade_centre_is_texel_snapped_in_world_space() {
         let (light, _) = sky::dominant_light(50., 230.);
-        for camera in [[0.3, 64., 0.7], [1.0e6 + 0.123, 70., -2.5e5 - 0.77], [-33.9, 10., 12.2]] {
+        for camera in [
+            [0.3, 64., 0.7],
+            [1.0e6 + 0.123, 70., -2.5e5 - 0.77],
+            [-33.9, 10., 12.2],
+        ] {
             for radius in CASCADE_RADII {
                 let matrix = cascade_matrix(light, radius, camera);
                 let texel = f64::from(2. * radius / SIZE as f32);
@@ -731,7 +774,11 @@ mod tests {
                 // The relative centre projects to NDC (0,0): invert to find it.
                 let inverse = matrix.inverse();
                 let centre = inverse.project_point3(Vec3::new(0., 0., 0.5));
-                let up = if light.y.abs() > 0.98 { Vec3::Z } else { Vec3::Y };
+                let up = if light.y.abs() > 0.98 {
+                    Vec3::Z
+                } else {
+                    Vec3::Y
+                };
                 let right = (-light).cross(up).normalize();
                 let up = right.cross(-light);
                 for axis in [right, up] {

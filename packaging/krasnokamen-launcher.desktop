@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Krasnokamen Launcher
+Comment=Launch Krasnokamen (Minecraft 26.1.2 client)
+Exec=krasnokamen-launcher
+Icon=krasnokamen-launcher
+Terminal=false
+Type=Application
+Categories=Game;
+StartupWMClass=krasnokamen-launcher

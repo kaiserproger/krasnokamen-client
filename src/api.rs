@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -462,7 +462,7 @@ pub struct Scene {
     /// Physical-pixel UI geometry, composited in painter order without depth.
     pub overlay: MeshGeometry,
     pub environment: WorldEnvironment,
-    /// Far-terrain tiles beyond the loaded chunks (Solaris `[lod]` servers).
+    /// Far-terrain tiles beyond the loaded chunks (Krasnokamen `[lod]` servers).
     pub far: FarScene,
 }
 

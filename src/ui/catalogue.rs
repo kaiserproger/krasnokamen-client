@@ -159,7 +159,12 @@ impl UiState {
             self.compact_button(
                 &format!("recipe/category/{category}"),
                 label,
-                [x - RECIPE_CATEGORY_WIDTH - 2., y + index as f32 * 22., RECIPE_CATEGORY_WIDTH, 20.],
+                [
+                    x - RECIPE_CATEGORY_WIDTH - 2.,
+                    y + index as f32 * 22.,
+                    RECIPE_CATEGORY_WIDTH,
+                    20.,
+                ],
                 NodeAction::RecipeCategory(category.clone()),
                 true,
                 None,

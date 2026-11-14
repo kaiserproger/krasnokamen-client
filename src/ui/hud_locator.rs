@@ -4,7 +4,7 @@ use super::{
     hud_math,
     state::{NodeAction, Paint, UiState},
 };
-use crate::protocol::{content::Content, parse_identifier, Result};
+use crate::protocol::{Result, content::Content, parse_identifier};
 use serde_json::Value;
 use std::sync::Arc;
 
