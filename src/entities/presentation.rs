@@ -1911,6 +1911,21 @@ pub(super) fn draw_entity(
                     .unrendered
                     .insert(entity.type_name.clone(), reason.clone());
             }
+            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+            if entity.type_name == "minecraft:creeper"
+                && let Err(reason) = super::creeper::append_charge(
+                    entity,
+                    models,
+                    content,
+                    (tick, partial, matrix),
+                    store.transforms,
+                    out,
+                )
+            {
+                stats
+                    .unrendered
+                    .insert(format!("{}:charge", entity.type_name), reason);
+            }
         }
     }
     Ok(())
@@ -3494,6 +3509,7 @@ pub fn special_item(
     content: &Content,
     stack: &Stack,
     special: &Value,
+    profiles: Option<&BTreeMap<String, super::PlayerProfile>>,
 ) -> Result<BakedModel> {
     let kind = special["type"]
         .as_str()
@@ -3578,10 +3594,20 @@ pub fn special_item(
                     "minecraft:dragon_skull#main",
                     "entity/enderdragon/dragon".to_owned(),
                 ),
-                "player" => (
-                    "minecraft:player_head#main",
-                    "entity/player/wide/steve".to_owned(),
-                ),
+                "player" => {
+                    // A profiled head uses the listed player's published skin when the
+                    // client has one; unresolved profiles keep Steve (heads never fetch).
+                    if let Some(profile) = stack.component("minecraft:profile")
+                        && let Some(profiles) = profiles
+                        && let Ok(skin) = super::profiles::head_skin(profiles, profile)
+                    {
+                        head_skin = Some(skin);
+                    }
+                    (
+                        "minecraft:player_head#main",
+                        "entity/player/wide/steve".to_owned(),
+                    )
+                }
                 _ => return Err(format!("unknown special head family {kind}")),
             }
         }
@@ -3616,7 +3642,10 @@ pub fn special_item(
         }
     }
     let rig = models.rig(rig);
-    let tex = texture(content, &texture_name)?;
+    let tex = match head_skin {
+        Some(region) => region,
+        None => texture(content, &texture_name)?,
+    };
     let mut model = BakedModel::default();
     let mut banner_layers = Vec::new();
     if kind == "banner" || shield_patterned {
@@ -5403,7 +5432,7 @@ mod tests {
             },
         );
         let special = serde_json::json!({"type":"minecraft:chest","texture":"normal"});
-        let item = special_item(&models, &content, &Stack::default(), &special).unwrap();
+        let item = special_item(&models, &content, &Stack::default(), &special, None).unwrap();
         let y_bounds = |quads: &[BakedQuad]| {
             quads
                 .iter()

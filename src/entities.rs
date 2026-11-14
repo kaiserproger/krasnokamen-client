@@ -288,6 +288,9 @@ pub struct Store {
     pub(crate) fishing_hooks: BTreeMap<i32, Handle>,
     pub(crate) uuid_entities: BTreeMap<String, BTreeSet<i32>>,
     pub(crate) profiles: BTreeMap<String, PlayerProfile>,
+    /// Bumped whenever `profiles` gains, loses or re-publishes a member; item
+    /// bakes read a snapshot of the map through `ItemModels`.
+    pub(crate) profiles_revision: u64,
     pub(crate) profile_requests: BTreeMap<String, ProfileTextureRequest>,
     pub(crate) profile_bytes: usize,
     pub(crate) local_entity_id: Option<i32>,

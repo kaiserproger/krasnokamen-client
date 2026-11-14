@@ -437,7 +437,7 @@ fn chest_item_variants_resolve_authored_rig_without_explicit_registry_entry() {
             "type": "minecraft:chest",
             "texture": format!("minecraft:{texture}"),
         });
-        let model = crate::entities::special_item(&models, &content, &stack, &special)
+        let model = crate::entities::special_item(&models, &content, &stack, &special, None)
             .unwrap_or_else(|e| panic!("chest item {texture}: {e}"));
         let expected: usize = authored.bones.iter().map(|b| b.quads.len()).sum();
         assert!(expected > 0);
@@ -513,7 +513,8 @@ fn copper_statue_item_uses_complete_texture_resource_location() {
             "pose": "standing",
             "texture": format!("minecraft:textures/entity/copper_golem/{name}.png"),
         });
-        let model = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+        let model =
+            crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
         assert!(model.quads.iter().all(|quad| quad.texture_layer == layer));
         assert!(!model.quads.is_empty());
     }
@@ -611,7 +612,7 @@ fn trident_special_item_uses_entity_texture() {
     let mut content = Content::test_cube();
     content.insert_test_texture("minecraft:entity/trident/trident", test_region(5));
     let special = serde_json::json!({"type":"minecraft:trident"});
-    let model = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+    let model = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert!(!model.quads.is_empty());
     assert!(model.quads.iter().all(|quad| quad.texture_layer == 5));
 }
@@ -629,7 +630,7 @@ fn banner_item_bakes_colored_flag_and_patterns() {
         serde_json::json!([{"pattern":{"asset_id":"minecraft:stripe_bottom"},"color":"blue"}]),
     )]));
     let special = serde_json::json!({"type":"minecraft:banner","color":"red"});
-    let model = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+    let model = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert!(model.quads.iter().any(|q| q.texture_layer == 5));
     let red = super::super::render_blocks::dye("red").0;
     let blue = super::super::render_blocks::dye("blue").0;
@@ -673,7 +674,7 @@ fn shield_item_renders_plain_and_patterned_components() {
     content.insert_test_texture("minecraft:entity/shield/stripe_bottom", test_region(13));
     let special = serde_json::json!({"type":"minecraft:shield"});
     let mut stack = crate::inventory::Stack::default();
-    let plain = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+    let plain = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert!(!plain.quads.is_empty());
     assert!(plain.quads.iter().all(|q| q.texture_layer == 10));
     stack.components = Arc::new(BTreeMap::from([
@@ -685,7 +686,8 @@ fn shield_item_renders_plain_and_patterned_components() {
             ]),
         ),
     ]));
-    let patterned = crate::entities::special_item(&models, &content, &stack, &special).unwrap();
+    let patterned =
+        crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert!(patterned.quads.iter().any(|q| q.texture_layer == 11));
     let red = super::super::render_blocks::dye("red").0;
     let blue = super::super::render_blocks::dye("blue").0;

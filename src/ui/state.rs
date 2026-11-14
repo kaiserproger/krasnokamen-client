@@ -987,6 +987,14 @@ impl UiState {
         self.player_preview = None;
         self.invalidate();
     }
+    /// Refresh the listed-player snapshot behind player-head item icons.
+    pub fn set_entity_profiles(
+        &mut self,
+        profiles: Arc<BTreeMap<String, crate::entities::PlayerProfile>>,
+    ) {
+        self.models.set_entity_profiles(profiles);
+        self.invalidate();
+    }
     pub(crate) fn set_player_preview(
         &mut self,
         content: &Content,

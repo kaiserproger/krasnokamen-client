@@ -821,6 +821,17 @@ impl Session {
         } else {
             crate::ui::items::ItemContext::default()
         };
+        if self.entities.profiles_revision != self.profiles_synced {
+            let profiles = Arc::new(self.entities.profiles.clone());
+            self.entities
+                .items
+                .set_entity_profiles(Arc::clone(&profiles));
+            self.player.set_visual_profiles(Arc::clone(&profiles));
+            if let Some(ui) = &mut self.ui {
+                ui.set_entity_profiles(Arc::clone(&profiles));
+            }
+            self.profiles_synced = self.entities.profiles_revision;
+        }
         if let Some(ui) = &mut self.ui {
             ui.set_item_context(item_context.clone());
         }

@@ -119,6 +119,22 @@ pub(crate) fn item_model_id<'a>(content: &'a Content, stack: &'a Stack) -> Optio
 pub(crate) fn item_model_location(id: &str) -> (&str, &str) {
     id.split_once(':').unwrap_or(("minecraft", id))
 }
+/// `swap_animation_scale` from the item definition (26.3): scales the
+/// hotbar-switch equip animation of the newly selected item. Default 1.
+pub(crate) fn swap_animation_scale(content: &Content, stack: &Stack) -> f32 {
+    let Some(id) = item_model_id(content, stack) else {
+        return 1.;
+    };
+    let (ns, path) = item_model_location(id);
+    let Ok(bytes) = content.resource_bytes(&format!("assets/{ns}/items/{path}.json")) else {
+        return 1.;
+    };
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| value["swap_animation_scale"].as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(1.)
+}
 
 /// The presentation-context inputs one selection read on its graph path. A selection is a
 /// function of the definition, the stack, the display context and exactly these inputs, so a
@@ -182,6 +198,15 @@ impl ItemModels {
         self.entities = Some(models);
         self.selected.clear();
         self.release();
+    }
+    /// Refresh the listed-player snapshot used to resolve player-head skins;
+    /// profiled heads depend on it, so the selection cache is cleared with it.
+    pub fn set_entity_profiles(
+        &mut self,
+        profiles: Arc<BTreeMap<String, entities::PlayerProfile>>,
+    ) {
+        self.profiles = Some(profiles);
+        self.selected.clear();
     }
     /// Registers `model` under `id` with a one-node item graph (test fixtures only).
     #[cfg(test)]
@@ -351,7 +376,13 @@ impl ItemModels {
                             .entities
                             .as_ref()
                             .ok_or("entity model resources not activated")?;
-                        let mut special = entities::special_item(models, c, s, &node["model"])?;
+                        let mut special = entities::special_item(
+                            models,
+                            c,
+                            s,
+                            &node["model"],
+                            self.profiles.as_deref(),
+                        )?;
                         let base = c.bake_model(
                             node["base"].as_str().ok_or("special item base missing")?,
                         )?;
@@ -871,14 +902,17 @@ fn graph_transform(t: &Value) -> Result<Mat4> {
             a[3].as_f64().ok_or("item quaternion")? as f32,
         ))
     }
-    let translation = vec3(t, "translation", [0.; 3])?;
+    // Vanilla parses item transforms in pixel units (translation * 1/16,
+    // clamped) and ItemTransform.apply ends with a -0.5 model-space centering.
+    let translation = vec3(t, "translation", [0.; 3])? * (1. / 16.);
     let scale = vec3(t, "scale", [1.; 3])?;
     let left = quat(t, "left_rotation")?;
     let right = quat(t, "right_rotation")?;
     Ok(Mat4::from_translation(translation)
         * Mat4::from_quat(left)
         * Mat4::from_scale(scale)
-        * Mat4::from_quat(right))
+        * Mat4::from_quat(right)
+        * Mat4::from_translation(Vec3::splat(-0.5)))
 }
 
 fn apply_graph_transform(m: &mut BakedModel, transformation: Mat4) {
@@ -1222,7 +1256,7 @@ mod tests {
         let model = models.model_with(&content, &stack, &ctx).unwrap();
         assert_eq!(model.quads.len(), source.quads.len());
         let [x, y, z] = source.quads[0].positions[0];
-        assert_eq!(model.quads[0].positions[0], [x, -y, -z]);
+        assert_eq!(model.quads[0].positions[0], [x - 0.5, 0.5 - y, 0.5 - z]);
     }
 
     #[test]
