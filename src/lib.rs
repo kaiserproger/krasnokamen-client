@@ -1104,6 +1104,7 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        self.session.set_software_renderer(renderer.software_adapter());
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.renderer

@@ -3,7 +3,7 @@
 //! (`far_generate.wgsl`, one invocation per column) and their columns are
 //! read back to the session (`Renderer::drain_far_generated`), which colours
 //! and stores them like any other sample. `far/program.rs` is the f64
-//! reference and the CPU fallback when compute is unavailable.
+//! reference and the CPU fallback when hardware compute is unavailable.
 //!
 //! Budget: `TILES_PER_DISPATCH` tiles per frame (timestamp pass
 //! `far_terrain_generate`), at most `IN_FLIGHT` readbacks of 2 KiB per tile.
@@ -22,6 +22,12 @@ use super::timing::{self, Timing};
 const TILES_PER_DISPATCH: usize = 16;
 const IN_FLIGHT: usize = 3;
 const WORKGROUP: usize = 64;
+
+pub(super) fn supported(device_type: wgpu::DeviceType, compute: bool, enabled: bool) -> bool {
+    // Software adapters execute these long shaders on the same CPUs as the
+    // frame loop; keep distant generation on the existing background CPU path.
+    device_type != wgpu::DeviceType::Cpu && compute && enabled
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]

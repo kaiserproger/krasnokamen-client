@@ -31,7 +31,6 @@ const AUTH_PLUGIN: &str = "solaris-auth";
 const READY_MARKER: &str = "is listening";
 const WORLD_FILE: &str = "solaris-world.json";
 const TAIL_LINES: usize = 40;
-const START_TIMEOUT: Duration = Duration::from_secs(180);
 const STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -477,7 +476,7 @@ pub(crate) fn server_config(spec: &ConfigSpec) -> String {
          [auth]\nonline_mode = false\n\n\
          [dashboard]\nenabled = false\n\n\
          [lod]\n# Loopback-only world: the seed's terrain program stays on this\n\
-         # machine, which generates far terrain on its own GPU.\n\
+         # machine, where the client generates far terrain locally.\n\
          share_terrain_keys = true\n\n",
         toml_str(spec.name),
         view.min(8),
@@ -517,6 +516,8 @@ pub(crate) fn ops_json(username: &str) -> String {
 pub(crate) enum Event {
     /// The server is accepting connections; carries the port it actually bound.
     Listening(Option<u16>),
+    /// A startup log line, relayed by the output reader without polling.
+    Progress(String),
     /// One output stream reached EOF.
     Closed,
     Cancel,
@@ -607,6 +608,7 @@ fn pump(
     log: Arc<Mutex<fs::File>>,
     tail: Arc<Mutex<VecDeque<String>>>,
     events: Sender<Event>,
+    starting: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         for line in BufReader::new(reader).lines().map_while(Result::ok) {
@@ -621,6 +623,8 @@ fn pump(
             }
             if line.contains(READY_MARKER) {
                 let _ = events.send(Event::Listening(listening_port(&line)));
+            } else if starting.load(Ordering::Acquire) {
+                let _ = events.send(Event::Progress(strip_ansi(&line)));
             }
         }
         let _ = events.send(Event::Closed);
@@ -655,6 +659,7 @@ pub(crate) fn spawn_fake_server(root: &Path, script: &str) -> Result<Server, Str
         &root.join("logs/server.log"),
         &cancel,
         events,
+        &|_| {},
     )
 }
 
@@ -666,6 +671,7 @@ fn spawn_server(
     log_path: &Path,
     cancel: &Cancel,
     events: Receiver<Event>,
+    progress: &dyn Fn(String),
 ) -> Result<Server, String> {
     if cancel.cancelled() {
         return Err("Cancelled".into());
@@ -698,17 +704,20 @@ fn spawn_server(
         .spawn()
         .map_err(|e| format!("cannot start {}: {e}", binary.display()))?;
     let tail = Arc::new(Mutex::new(VecDeque::new()));
+    let starting = Arc::new(AtomicBool::new(true));
     pump(
         child.stdout.take().expect("piped stdout"),
         log.clone(),
         tail.clone(),
         cancel.events.clone(),
+        starting.clone(),
     );
     pump(
         child.stderr.take().expect("piped stderr"),
         log,
         tail.clone(),
         cancel.events.clone(),
+        starting.clone(),
     );
     let mut server = Server {
         #[cfg(windows)]
@@ -722,8 +731,11 @@ fn spawn_server(
         closed: 0,
     };
     loop {
-        match server.events.recv_timeout(START_TIMEOUT) {
+        // A live server may take arbitrarily long to prepare a fresh world.
+        // Its output readers and cancellation send the events that wake us.
+        match server.events.recv() {
             Ok(Event::Listening(Some(port))) => {
+                starting.store(false, Ordering::Release);
                 server.port = port;
                 return Ok(server);
             }
@@ -732,6 +744,7 @@ fn spawn_server(
                 let _ = server.stop();
                 return Err(reason);
             }
+            Ok(Event::Progress(line)) => progress(line),
             Ok(Event::Closed) => {
                 server.closed += 1;
                 if server.closed == 2 {
@@ -746,7 +759,7 @@ fn spawn_server(
                 return Err("Cancelled".into());
             }
             Err(_) => {
-                let reason = server.crash_report("Server did not start in time");
+                let reason = server.crash_report("Server startup event stream closed");
                 let _ = server.stop();
                 return Err(reason);
             }
@@ -1005,6 +1018,7 @@ pub(crate) fn start(
         &dir.join("logs/server.log"),
         cancel,
         events,
+        progress,
     )?;
     Ok((server, meta))
 }
@@ -1211,7 +1225,44 @@ mod tests {
             &root.join("logs/server.log"),
             &cancel,
             events,
+            &|_| {},
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_pushes_progress_before_waiting_for_server_readiness() {
+        let root = temp_root("progress");
+        let binary = fake_server(
+            &root,
+            "mkfifo ready-gate\n\
+             echo 'Preparing spawn: 1/9 chunks'\n\
+             read token < ready-gate\n\
+             echo 'Solaris is listening addr=127.0.0.1:41239'",
+        );
+        let (cancel, events) = start_channel();
+        let seen = Mutex::new(Vec::new());
+        let mut server = spawn_server(
+            &binary,
+            &root.join("server.toml"),
+            &root,
+            &root.join("logs/server.log"),
+            &cancel,
+            events,
+            &|line| {
+                assert_eq!(line, "Preparing spawn: 1/9 chunks");
+                seen.lock().unwrap().push(line);
+                // The child cannot announce readiness until progress reaches
+                // its consumer. This is a causal handshake, not a delay.
+                fs::write(root.join("ready-gate"), b"continue\n").unwrap();
+            },
+        )
+        .unwrap();
+        assert_eq!(server.port, 41239);
+        assert_eq!(*seen.lock().unwrap(), ["Preparing spawn: 1/9 chunks"]);
+        assert!(server.exited_within(Duration::from_secs(10)).is_some());
+        server.stop().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -1305,6 +1356,7 @@ mod tests {
             &root.join("logs/server.log"),
             &cancel,
             events,
+            &|_| {},
         )
         .err()
         .unwrap();
