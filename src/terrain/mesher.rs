@@ -2,13 +2,13 @@ use super::catalog::Catalog;
 use crate::{
     api::{DynamicGeometry, EntityMaterial, MeshGeometry, RenderLayer, Vertex},
     protocol::{
+        Result,
         content::TintKind,
         models::{
-            lighting::{quad_lighting, LightSample},
             BakedQuad,
+            lighting::{LightSample, quad_lighting},
         },
         world::Neighborhood,
-        Result,
     },
 };
 use glam::{Mat4, Vec3};
@@ -235,7 +235,8 @@ pub(super) fn sample_tint(
         unknown_light: 0,
         unknown_biome: 0,
         hidden: &[],
-    }.tint(tint, position, radius)
+    }
+    .tint(tint, position, radius)
 }
 pub(super) fn geometry_bytes(geometry: &MeshGeometry) -> usize {
     geometry.vertices.len() * std::mem::size_of::<Vertex>()
@@ -569,7 +570,7 @@ pub(super) fn moving_block(
 
 #[cfg(test)]
 mod tests {
-    use super::{model_color, shader_class, ShaderClass};
+    use super::{ShaderClass, model_color, shader_class};
 
     #[test]
     fn model_lighting_packs_ao_then_shade_before_integer_tint_multiplication() {
