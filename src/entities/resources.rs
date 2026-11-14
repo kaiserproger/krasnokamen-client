@@ -225,7 +225,9 @@ impl Ids {
     }
 }
 
-/// The parts of a schema `Models::dimensions` consults on every call, resolved once.
+/// The parts of a schema `Models::dimensions` and `physical::bounds_at` consult on every
+/// call, resolved once from its names (kind, classes, method owners, dimension constants), so
+/// a call reads only the entity's metadata and attributes.
 #[derive(Debug)]
 pub struct Sizing {
     pose: Option<u8>,
@@ -244,6 +246,42 @@ pub struct Sizing {
     baby_scale: f32,
     /// Owner of `getDefaultDimensions`.
     owner: SizeOwner,
+    /// `minecraft:armor_stand`: marker, small or type dimensions by its client flags.
+    armor_stand: bool,
+    /// The kind has a `POSES` table (avatars): dimensions by pose name.
+    avatar: bool,
+    goat: bool,
+    /// A sniffer's `State` ids named `DIGGING` (empty for every other kind).
+    digging_states: Vec<i32>,
+    /// `*_DIMENSIONS` constants of the kind (`None`: the kind has none).
+    sleeping: Option<Dimensions>,
+    marker: Option<Dimensions>,
+    baby_dimensions: Option<Dimensions>,
+    sitting: Option<Dimensions>,
+    long_jumping: Option<Dimensions>,
+    digging: Option<Dimensions>,
+    standing: Option<Dimensions>,
+    /// The kind's box rule in `physical::bounds_at`.
+    shape: Shape,
+}
+
+/// How `physical::bounds_at` derives a kind's box from its dimensions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shape {
+    /// Width and height around the position.
+    Box,
+    /// `item_frame`, `glow_item_frame`: a thin plate on the attached face.
+    ItemFrame,
+    /// `interaction`: received width and height.
+    Interaction,
+    /// `polar_bear`: taller while standing.
+    PolarBear,
+    /// `warden`: 1 block high while emerging or digging.
+    Warden,
+    /// `shulker`: widened toward its attach face by its peek.
+    Shulker,
+    /// `AbstractWindCharge`: moved down 0.15.
+    WindCharge,
 }
 
 /// `sanitizeScale` owner of a kind.
@@ -265,10 +303,14 @@ enum SizeOwner {
 }
 
 impl Sizing {
-    fn of(schema: &EntitySchema) -> Self {
+    fn of(schema: &EntitySchema, kind: &str) -> Self {
         let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
         let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
         let owner = |method: &str| schema.method_owners.get(method).map(String::as_str);
+        let constant = |name: &str| match schema.dimension_constants.get(name) {
+            Some(DimensionConstant::Dimensions(value)) => Some(value.clone()),
+            _ => None,
+        };
         Self {
             pose: id("DATA_POSE"),
             client_flags: id("DATA_CLIENT_FLAGS"),
@@ -304,6 +346,32 @@ impl Sizing {
                 Some("net.minecraft.world.entity.animal.fish.Salmon") => SizeOwner::Salmon,
                 Some("net.minecraft.world.entity.monster.Phantom") => SizeOwner::Phantom,
                 _ => SizeOwner::Other,
+            },
+            armor_stand: kind == "minecraft:armor_stand",
+            avatar: matches!(schema.dimension_constants.get("POSES"), Some(DimensionConstant::Poses(_))),
+            goat: schema.class == "net.minecraft.world.entity.animal.goat.Goat",
+            digging_states: if schema.class == "net.minecraft.world.entity.animal.sniffer.Sniffer" {
+                schema.enum_ids.get("State").map_or_else(Vec::new, |ids| {
+                    ids.iter().filter(|(_, name)| *name == "DIGGING").map(|(id, _)| *id).collect()
+                })
+            } else {
+                Vec::new()
+            },
+            sleeping: constant("SLEEPING_DIMENSIONS"),
+            marker: constant("MARKER_DIMENSIONS"),
+            baby_dimensions: constant("BABY_DIMENSIONS"),
+            sitting: constant("SITTING_DIMENSIONS"),
+            long_jumping: constant("LONG_JUMPING_DIMENSIONS"),
+            digging: constant("DIGGING_DIMENSIONS"),
+            standing: constant("STANDING_DIMENSIONS"),
+            shape: match kind {
+                "minecraft:item_frame" | "minecraft:glow_item_frame" => Shape::ItemFrame,
+                "minecraft:interaction" => Shape::Interaction,
+                "minecraft:polar_bear" => Shape::PolarBear,
+                "minecraft:warden" => Shape::Warden,
+                "minecraft:shulker" => Shape::Shulker,
+                _ if inherits("net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge") => Shape::WindCharge,
+                _ => Shape::Box,
             },
         }
     }
@@ -634,8 +702,16 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32)> {
+        self.sized(entity).map(|(dimensions, scale, _)| (dimensions, scale))
+    }
+    /// `dimensions` and the kind's box rule (`physical::bounds_at`).
+    pub(crate) fn sized<'a>(
+        &'a self,
+        entity: &super::Entity,
+    ) -> Result<(&'a Dimensions, f32, Shape)> {
         let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
-        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema));
+        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name));
+        let shape = sizing.shape;
         let number = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
         };
@@ -643,10 +719,6 @@ impl Models {
             id.and_then(|id| entity.metadata_value(id))
                 .and_then(super::Metadata::boolean)
                 .unwrap_or(false)
-        };
-        let constant = |name: &str| match schema.dimension_constants.get(name) {
-            Some(DimensionConstant::Dimensions(value)) => Some(value),
-            _ => None,
         };
         let pose = self
             .poses
@@ -669,84 +741,71 @@ impl Models {
         };
         if living && pose == "SLEEPING" {
             return Ok((
-                constant("SLEEPING_DIMENSIONS").ok_or("source sleeping dimensions missing")?,
+                sizing.sleeping.as_ref().ok_or("source sleeping dimensions missing")?,
                 1.,
+                shape,
             ));
         }
-        if entity.type_name == "minecraft:armor_stand" {
+        if sizing.armor_stand {
             let flags = number(sizing.client_flags).unwrap_or(0);
             return Ok((
                 if flags & 16 != 0 {
-                    constant("MARKER_DIMENSIONS").ok_or("source marker dimensions missing")?
+                    sizing.marker.as_ref().ok_or("source marker dimensions missing")?
                 } else if flags & 1 != 0 {
-                    constant("BABY_DIMENSIONS")
+                    sizing
+                        .baby_dimensions
+                        .as_ref()
                         .ok_or("source small armor stand dimensions missing")?
                 } else {
                     &schema.dimensions
                 },
                 attribute_scale,
+                shape,
             ));
         }
-        if let Some(DimensionConstant::Poses(poses)) = schema.dimension_constants.get("POSES") {
+        if sizing.avatar
+            && let Some(DimensionConstant::Poses(poses)) = schema.dimension_constants.get("POSES")
+        {
             return Ok((
                 poses
                     .get(pose)
-                    .or_else(|| constant("STANDING_DIMENSIONS"))
+                    .or(sizing.standing.as_ref())
                     .ok_or("source avatar dimensions missing")?,
                 attribute_scale,
+                shape,
             ));
         }
-        let camel = sizing.camel;
-        let age_scale = if boolean(sizing.baby) { sizing.baby_scale } else { 1. };
-        if camel && pose == "SITTING" {
+        let baby = boolean(sizing.baby);
+        let age_scale = if baby { sizing.baby_scale } else { 1. };
+        if sizing.camel && pose == "SITTING" {
             return Ok((
-                constant("SITTING_DIMENSIONS").ok_or("source camel sitting dimensions missing")?,
+                sizing.sitting.as_ref().ok_or("source camel sitting dimensions missing")?,
                 age_scale * attribute_scale,
+                shape,
             ));
         }
-        if pose == "LONG_JUMPING" && schema.class == "net.minecraft.world.entity.animal.goat.Goat" {
-            let d =
-                constant("LONG_JUMPING_DIMENSIONS").ok_or("source goat jump dimensions missing")?;
-            return Ok((
-                d,
-                if d.fixed {
-                    1.
-                } else {
-                    age_scale * attribute_scale
-                },
-            ));
-        }
-        if schema.class == "net.minecraft.world.entity.animal.sniffer.Sniffer"
-            && schema
-                .enum_ids
-                .get("State")
-                .and_then(|ids| ids.get(&number(sizing.state).unwrap_or(0)))
-                .is_some_and(|v| v == "DIGGING")
+        let special = if sizing.goat && pose == "LONG_JUMPING" {
+            Some(sizing.long_jumping.as_ref().ok_or("source goat jump dimensions missing")?)
+        } else if !sizing.digging_states.is_empty()
+            && sizing.digging_states.contains(&number(sizing.state).unwrap_or(0))
         {
-            let d = constant("DIGGING_DIMENSIONS")
-                .ok_or("source sniffer digging dimensions missing")?;
-            return Ok((
-                d,
-                if d.fixed {
-                    1.
-                } else {
-                    age_scale * attribute_scale
-                },
-            ));
+            Some(sizing.digging.as_ref().ok_or("source sniffer digging dimensions missing")?)
+        } else {
+            None
+        };
+        if let Some(d) = special {
+            return Ok((d, if d.fixed { 1. } else { age_scale * attribute_scale }, shape));
         }
-        if let Some(baby) = constant("BABY_DIMENSIONS") {
+        if let Some(baby_dimensions) = &sizing.baby_dimensions {
             return Ok((
-                if boolean(sizing.baby) {
-                    baby
-                } else {
-                    &schema.dimensions
-                },
+                if baby { baby_dimensions } else { &schema.dimensions },
                 attribute_scale,
+                shape,
             ));
         }
         let owner = &sizing.owner;
-        if *owner == SizeOwner::ChestedHorse && !boolean(sizing.baby) {
-            return Ok((&schema.dimensions, attribute_scale));
+        if *owner == SizeOwner::ChestedHorse && !baby {
+            return Ok((&schema.dimensions, attribute_scale, shape));
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
@@ -774,6 +833,7 @@ impl Models {
             } else {
                 age_scale * attribute_scale * family_scale
             },
+            shape,
         ))
     }
 }
@@ -1407,6 +1467,56 @@ mod tests {
             assert_eq!((dimensions.width, dimensions.height), (0.49, 0.49));
             assert_eq!(scale, 2., "baby={baby}");
         }
+    }
+
+    #[test]
+    fn sizing_constants_and_box_rules_resolve_per_kind_and_follow_schema_changes() {
+        use super::super::metadata::Metadata;
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        let mut models = Models::load_state(&content).unwrap();
+        let entity = |kind: &str| {
+            let (_, mut e) = super::super::animation_tests::fixture();
+            e.type_name = kind.into();
+            e.metadata.clear();
+            e
+        };
+        let size = |models: &Models, e: &super::super::Entity| {
+            let (d, scale) = models.dimensions(e).unwrap();
+            (d.width, d.height, scale)
+        };
+        let mut husk = entity("minecraft:husk");
+        husk.metadata.insert(16, Metadata::Bool(true));
+        assert_eq!(size(&models, &husk), (0.49, 0.98, 1.), "a baby husk takes BABY_DIMENSIONS");
+        husk.metadata.insert(16, Metadata::Bool(false));
+        assert_eq!(size(&models, &husk), (0.6, 1.95, 1.));
+        husk.metadata.insert(6, Metadata::Pose(2));
+        assert_eq!(size(&models, &husk), (0.2, 0.2, 1.), "a sleeping husk takes SLEEPING_DIMENSIONS");
+        // A changed schema forgets what was resolved from it: the next call reads the new
+        // constant, not the one resolved on the first call.
+        let DimensionConstant::Dimensions(sleeping) = models.schemas.get_mut("minecraft:husk").unwrap()
+            .dimension_constants.get_mut("SLEEPING_DIMENSIONS").unwrap() else { panic!("dimensions") };
+        sleeping.width = 0.3;
+        assert_eq!(size(&models, &husk), (0.3, 0.2, 1.));
+        husk.metadata.insert(6, Metadata::Pose(0));
+        let mut stand = entity("minecraft:armor_stand");
+        stand.metadata.insert(15, Metadata::Byte(1));
+        assert_eq!(size(&models, &stand), (0.25, 0.9875, 1.), "a small armor stand");
+        stand.metadata.insert(15, Metadata::Byte(16));
+        assert_eq!(size(&models, &stand), (0., 0., 1.), "a marker armor stand");
+        let mut player = entity("minecraft:player");
+        player.metadata.insert(6, Metadata::Pose(5));
+        assert_eq!(size(&models, &player), (0.6, 1.5, 1.), "a crouching avatar takes its POSES entry");
+        player.metadata.insert(6, Metadata::Pose(8));
+        assert_eq!(size(&models, &player), (0.6, 1.8, 1.), "an avatar pose without an entry stands");
+        // Box rules: a wind charge's box is 0.15 below its position, a husk's stands on it.
+        let charge = entity("minecraft:wind_charge");
+        let b = super::super::physical::bounds_at(&models, &charge, [0., 10., 0.]).unwrap();
+        assert_eq!(b.min[1], 10. - f64::from(0.15f32));
+        let b = super::super::physical::bounds_at(&models, &husk, [0., 10., 0.]).unwrap();
+        assert_eq!((b.min[1], b.max[1]), (10., 10. + f64::from(1.95f32)));
     }
 
     #[test]

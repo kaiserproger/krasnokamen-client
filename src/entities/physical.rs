@@ -1,6 +1,6 @@
 //! Version-pinned entity shape and query rules. Predicates follow declaring Java owners,
 //! not an approximate species list; server tags remain authoritative.
-use super::{Entity, Handle, Metadata, Models, Store};
+use super::{resources::Shape, Entity, Handle, Metadata, Models, Store};
 use crate::{
     player::{collision, math, Bounds},
     protocol::{content::Content, world::World, Result},
@@ -154,8 +154,8 @@ pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Re
     bounds_at(models, e, e.presented_transform(tick, partial).position)
 }
 pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Result<Bounds> {
-    let (dimensions, scale) = models.dimensions(e)?;
-    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    let (dimensions, scale, shape) = models.sized(e)?;
+    if shape == Shape::ItemFrame {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
         let normal = direction(face)?;
@@ -167,17 +167,18 @@ pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Resu
     }
     let mut width = dimensions.width * scale;
     let mut height = dimensions.height * scale;
-    if e.type_name == "minecraft:interaction" {
-        width = float(models, e, "DATA_WIDTH_ID", 1.);
-        height = float(models, e, "DATA_HEIGHT_ID", 1.);
-    }
-    if e.type_name == "minecraft:polar_bear" {
+    match shape {
+        Shape::Interaction => {
+            width = float(models, e, "DATA_WIDTH_ID", 1.);
+            height = float(models, e, "DATA_HEIGHT_ID", 1.);
+        }
         // refreshDimensions precedes this tick's stand update in the source.
-        height *= 1. + e.physical.bear_stand_old / 6.;
-    }
-    if e.type_name == "minecraft:warden" && matches!(number(models, e, "DATA_POSE", 0), 13 | 14) {
-        width = dimensions.width;
-        height = 1.;
+        Shape::PolarBear => height *= 1. + e.physical.bear_stand_old / 6.,
+        Shape::Warden if matches!(number(models, e, "DATA_POSE", 0), 13 | 14) => {
+            width = dimensions.width;
+            height = 1.;
+        }
+        _ => {}
     }
     if width < 0. || height < 0. || !width.is_finite() || !height.is_finite() {
         return Err("invalid entity physical dimensions".into());
@@ -191,17 +192,13 @@ pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Resu
             position[2] + half,
         ],
     };
-    if e.type_name == "minecraft:shulker" {
+    if shape == Shape::Shulker {
         let face = direction(number(models, e, "DATA_ATTACH_FACE_ID", 0))?;
         b = b.expanded(
             face.map(|v| -v * f64::from(physical_peek(e.physical.peek)) * f64::from(scale)),
         );
     }
-    if hierarchy(
-        models,
-        e,
-        "net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge",
-    ) {
+    if shape == Shape::WindCharge {
         b = b.moved([0., -f64::from(0.15f32), 0.]);
     }
     Ok(b)
