@@ -275,7 +275,8 @@ pub struct Store {
     pub(crate) profile_bytes: usize,
     pub(crate) local_entity_id: Option<i32>,
     pub(crate) local_uuid: Option<String>,
-    pub(crate) visible_ids: Vec<i32>,
+    /// The frame's candidate slots (`presentation::append`), kept for their allocation.
+    pub(crate) visible_slots: Vec<usize>,
     pub(crate) physical_active: BTreeSet<i32>,
     pub(crate) falling_colliders: Vec<crate::player::Bounds>,
     pub(crate) redirectable_projectiles: BTreeSet<u32>,
@@ -391,7 +392,7 @@ impl Store {
         self.presentation_tick = 0;
         self.leash_holders.clear();
         self.predicted_leash_holders.clear();
-        self.visible_ids.clear();
+        self.visible_slots.clear();
         self.passenger_vehicles.clear();
         self.fishing_hooks.clear();
         self.uuid_entities.clear();
