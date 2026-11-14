@@ -29,14 +29,14 @@ const INPUTS: &[(&str, &str)] = &[
 pub(crate) fn default_root() -> Result<PathBuf, String> {
     #[cfg(windows)]
     if let Some(app) = std::env::var_os("APPDATA").filter(|s| !s.is_empty()) {
-        return Ok(PathBuf::from(app).join("solaris-client"));
+        return Ok(PathBuf::from(app).join("krasnokamen-client"));
     }
     if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|s| !s.is_empty()) {
-        return Ok(PathBuf::from(data).join("solaris-client"));
+        return Ok(PathBuf::from(data).join("krasnokamen-client"));
     }
     std::env::var_os("HOME")
         .filter(|s| !s.is_empty())
-        .map(|home| PathBuf::from(home).join(".local/share/solaris-client"))
+        .map(|home| PathBuf::from(home).join(".local/share/krasnokamen-client"))
         .ok_or_else(|| {
             "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir DIR".into()
         })
@@ -46,16 +46,16 @@ pub(crate) fn default_root() -> Result<PathBuf, String> {
 /// Explicit environment overrides are retained, including for harness launches.
 pub(crate) fn apply_defaults(root: &Path) {
     for (suffix, relative) in INPUTS {
-        let var = format!("SOLARIS_CLIENT_{suffix}");
+        let var = format!("KRASNOKAMEN_CLIENT_{suffix}");
         if std::env::var_os(&var).is_none() {
             // SAFETY: startup is single-threaded; no environment readers exist yet.
             unsafe { std::env::set_var(var, root.join(relative)) };
         }
     }
     // Singleplayer keeps worlds and the managed server beside the content.
-    if std::env::var_os("SOLARIS_CLIENT_ROOT").is_none() {
+    if std::env::var_os("KRASNOKAMEN_CLIENT_ROOT").is_none() {
         // SAFETY: same single-threaded startup window as above.
-        unsafe { std::env::set_var("SOLARIS_CLIENT_ROOT", root) };
+        unsafe { std::env::set_var("KRASNOKAMEN_CLIENT_ROOT", root) };
     }
 }
 
@@ -69,7 +69,7 @@ fn require(path: &Path, directory: bool) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "missing content {}: {} (run solaris-launcher once to download it, or solaris-client setup --from-dist DIR --assets DIR)",
+            "missing content {}: {} (run krasnokamen-launcher once to download it, or krasnokamen-client setup --from-dist DIR --assets DIR)",
             if directory { "directory" } else { "file" },
             path.display()
         ))
@@ -82,14 +82,14 @@ pub(crate) fn validate(presentation: bool) -> Result<(), String> {
         if !presentation && matches!(*suffix, "ASSET_ROOT" | "ASSET_INDEX" | "RESOURCE_ROOT") {
             continue;
         }
-        let var = format!("SOLARIS_CLIENT_{suffix}");
+        let var = format!("KRASNOKAMEN_CLIENT_{suffix}");
         let path = std::env::var_os(&var).ok_or_else(|| format!("missing content path: {var}"))?;
         require(
             Path::new(&path),
             matches!(*suffix, "ASSET_ROOT" | "DATA_DIR" | "RESOURCE_ROOT"),
         )?;
     }
-    let data = PathBuf::from(std::env::var_os("SOLARIS_CLIENT_DATA_DIR").unwrap());
+    let data = PathBuf::from(std::env::var_os("KRASNOKAMEN_CLIENT_DATA_DIR").unwrap());
     for file in [
         "blocks.json",
         "block_mining.json",
@@ -99,7 +99,7 @@ pub(crate) fn validate(presentation: bool) -> Result<(), String> {
         require(&data.join("reports").join(file), false)?;
     }
     if presentation {
-        let assets = PathBuf::from(std::env::var_os("SOLARIS_CLIENT_ASSET_ROOT").unwrap());
+        let assets = PathBuf::from(std::env::var_os("KRASNOKAMEN_CLIENT_ASSET_ROOT").unwrap());
         require(&assets.join("objects"), true)?;
     }
     Ok(())

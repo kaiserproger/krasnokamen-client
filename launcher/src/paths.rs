@@ -1,8 +1,8 @@
-//! Data-root discovery and the on-disk layout shared with `solaris-client`.
+//! Data-root discovery and the on-disk layout shared with `krasnokamen-client`.
 //!
 //! ```text
 //! <root>/
-//!   facts/ data/vanilla/                Solaris data bundle (see `bootstrap`)
+//!   facts/ data/vanilla/                Krasnokamen data bundle (see `bootstrap`)
 //!   resources/assets/                   extracted from the official client.jar
 //!   assets/asset-index.json, objects/   Mojang asset index + sound/lang objects
 //!   mojang/versions/<ver>/              official version json + client.jar
@@ -23,16 +23,18 @@ pub fn data_root(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
         if let Some(app) = std::env::var_os("APPDATA").filter(|s| !s.is_empty()) {
-            return Ok(PathBuf::from(app).join("solaris-client"));
+            return Ok(PathBuf::from(app).join("krasnokamen-client"));
         }
     }
     if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|s| !s.is_empty()) {
-        return Ok(PathBuf::from(data).join("solaris-client"));
+        return Ok(PathBuf::from(data).join("krasnokamen-client"));
     }
     std::env::var_os("HOME")
         .filter(|s| !s.is_empty())
-        .map(|home| PathBuf::from(home).join(".local/share/solaris-client"))
-        .ok_or_else(|| "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into())
+        .map(|home| PathBuf::from(home).join(".local/share/krasnokamen-client"))
+        .ok_or_else(|| {
+            "data directory unavailable: set HOME/XDG_DATA_HOME or pass --data-dir".into()
+        })
 }
 
 pub struct Layout {

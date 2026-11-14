@@ -743,7 +743,10 @@ mod tests {
         )]));
         let ctx = ItemContext::default();
         let error = models.model_with(&content, &stack, &ctx).unwrap_err();
-        assert!(error.contains("unknown special item render family"), "{error}");
+        assert!(
+            error.contains("unknown special item render family"),
+            "{error}"
+        );
         let icon = models.icon_model(&content, &stack, &ctx);
         assert!(icon.quads.is_empty());
         // Repeated frames stay non-fatal.

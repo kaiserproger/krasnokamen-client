@@ -19,17 +19,16 @@ mod surfaces;
 #[path = "render_blocks/village_tests.rs"]
 mod village_tests;
 use super::{
-    blocks,
+    BlockEntity, Models, blocks,
     presentation::{emit_rig, texture},
     resources::{self, Rig},
-    BlockEntity, Models,
 };
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     protocol::{
+        Result,
         content::{Content, TextureRegion},
         world::World,
-        Result,
     },
     ui::render::TextRenderer,
 };
@@ -1199,7 +1198,7 @@ mod tests {
 
     #[test]
     fn p1_review_native_sign_pass_renders_received_text_and_keeps_entity_geometry() {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         use crate::protocol::{Reader, Writer};
         for (kind, name, key, texture_name) in [
             (
@@ -1387,9 +1386,10 @@ mod tests {
                 );
                 let text = &geometry.indices[EntityMaterial::TextPolygonOffset as usize];
                 assert!(!text.is_empty());
-                assert!(text
-                    .iter()
-                    .all(|index| geometry.vertices[*index as usize].light == [15.; 2]));
+                assert!(
+                    text.iter()
+                        .all(|index| geometry.vertices[*index as usize].light == [15.; 2])
+                );
                 let board_z = if kind == "minecraft:sign" && name.contains("_wall_") {
                     0.9375
                 } else {
@@ -1402,9 +1402,11 @@ mod tests {
                     let [a, b, c] = [point(a), point(b), point(c)];
                     // At rotation8/north-facing attachment, glyphs sit outside
                     // the board's north face and their source winding faces north.
-                    assert!([a, b, c]
-                        .iter()
-                        .all(|point| { point.z < board_z && point.z > board_z - 0.1 }));
+                    assert!(
+                        [a, b, c]
+                            .iter()
+                            .all(|point| { point.z < board_z && point.z > board_z - 0.1 })
+                    );
                     assert!((b - a).cross(c - a).z < 0.);
                 }
             }

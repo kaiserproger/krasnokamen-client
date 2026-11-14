@@ -138,49 +138,50 @@ impl Shadow {
         });
         let attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2,3=>Float32x2,4=>Float32x3,5=>Float32,6=>Uint32,8=>Float32x2,9=>Float32x3];
         let instance_attributes = wgpu::vertex_attr_array![7=>Float32x4];
-        let build = |label: &'static str, entry: &'static str, vertex: wgpu::VertexBufferLayout<'_>| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    buffers: &[
-                        vertex,
-                        wgpu::VertexBufferLayout {
-                            array_stride: 16,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &instance_attributes,
-                        },
-                    ],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("shadow_fragment"),
-                    compilation_options: Default::default(),
-                    targets: &[],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: None,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 2,
-                        slope_scale: 2.,
-                        clamp: 0.,
+        let build =
+            |label: &'static str, entry: &'static str, vertex: wgpu::VertexBufferLayout<'_>| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: Some(entry),
+                        compilation_options: Default::default(),
+                        buffers: &[
+                            vertex,
+                            wgpu::VertexBufferLayout {
+                                array_stride: 16,
+                                step_mode: wgpu::VertexStepMode::Instance,
+                                attributes: &instance_attributes,
+                            },
+                        ],
                     },
-                }),
-                multisample: Default::default(),
-                multiview: None,
-                cache: None,
-            })
-        };
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: Some("shadow_fragment"),
+                        compilation_options: Default::default(),
+                        targets: &[],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: None,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: Default::default(),
+                        bias: wgpu::DepthBiasState {
+                            constant: 2,
+                            slope_scale: 2.,
+                            clamp: 0.,
+                        },
+                    }),
+                    multisample: Default::default(),
+                    multiview: None,
+                    cache: None,
+                })
+            };
         let pipeline = build(
             "sun moon alpha-tested shadow map",
             "shadow_vertex",
@@ -327,9 +328,7 @@ impl Shadow {
                 if material == 0 {
                     // Opaque faces turned away from the light never hold the
                     // nearest depth of a closed solid surface.
-                    chunk
-                        .mesh
-                        .light_facing_runs(0, light.to_array(), &mut push);
+                    chunk.mesh.light_facing_runs(0, light.to_array(), &mut push);
                 } else if !chunk.mesh.ranges[1].is_empty() {
                     push(chunk.mesh.ranges[1].clone());
                 }
@@ -393,11 +392,20 @@ fn outside_light_box(matrix: &Mat4, min: Vec3, max: Vec3) -> bool {
 
 /// Append the indirect argument of one caster run, preserving the exact
 /// per-section instance index (`null 0 + dynamic 1 + chunks i+2`).
-fn push_shadow_draw(mesh: &ResidentMesh, run: &ShadowRun, vertex_stride: u64, batch: &mut ShadowBatch) {
+fn push_shadow_draw(
+    mesh: &ResidentMesh,
+    run: &ShadowRun,
+    vertex_stride: u64,
+    batch: &mut ShadowBatch,
+) {
     let (Some(vertices), Some(indices)) = (mesh.vertices, mesh.indices) else {
         return;
     };
-    debug_assert_eq!(vertices.offset % vertex_stride, 0, "unaligned shadow base vertex");
+    debug_assert_eq!(
+        vertices.offset % vertex_stride,
+        0,
+        "unaligned shadow base vertex"
+    );
     let base_vertex = (vertices.offset / vertex_stride) as i32;
     batch.draws.push(ShadowDraw {
         index_count: run.range.end - run.range.start,

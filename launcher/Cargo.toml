@@ -1,14 +1,14 @@
 [package]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Launcher for the Solaris native Minecraft client: downloads game content and starts the client"
+description = "Launcher for the Krasnokamen native Minecraft client: downloads game content and starts the client"
 publish = false
 
 [[bin]]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 path = "src/main.rs"
 
 [dependencies]

@@ -1382,15 +1382,19 @@ mod tests {
     #[test]
     fn dimension_lava_rate_uses_received_environment_attribute_not_legacy_ultrawarm() {
         assert!(!dimension_fast_lava(&serde_json::json!({"ultrawarm":true})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
-        )
-        .unwrap());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
+            )
+            .unwrap()
+        );
         assert!(!dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"and","argument":true}}})).unwrap());
         assert!(dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"nand","argument":true}}})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
-        )
-        .is_err());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
+            )
+            .is_err()
+        );
     }
 }

@@ -3,8 +3,8 @@ pub mod lighting;
 pub(crate) mod mipmaps;
 pub(crate) mod shapes;
 use super::{
-    content::{ResourceSource, TextureRegion},
     Result,
+    content::{ResourceSource, TextureRegion},
 };
 use crate::api::RenderLayer;
 use glam::{Mat3, Vec3};
@@ -947,10 +947,11 @@ mod tests {
         )
         .unwrap();
         assert!(qs.iter().any(|q| q.quad.cullface == Some(0)));
-        assert!(qs
-            .iter()
-            .flat_map(|q| q.quad.positions)
-            .all(|p| p[1] >= 0.49999));
+        assert!(
+            qs.iter()
+                .flat_map(|q| q.quad.positions)
+                .all(|p| p[1] >= 0.49999)
+        );
         // Vanilla `Quadrant.fromXYAngles` composes `y.compose(x)`, i.e. the X
         // rotation applies first: for {x:180,y:90} north maps to WEST (face 4),
         // verified against decompiled `OctahedralGroup`/`SymmetricGroup3`
@@ -990,11 +991,13 @@ mod tests {
     }
     #[test]
     fn cyclic_texture_is_rejected() {
-        assert!(texture_ref(
-            &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
-            "#a".into()
-        )
-        .is_err());
+        assert!(
+            texture_ref(
+                &serde_json::json!({"textures":{"a":"#b","b":"#a"}}),
+                "#a".into()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn java_random_weight_choice_matches_known_jdk_sequence() {
@@ -1084,7 +1087,7 @@ mod tests {
         }
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let holder = TempRoot(std::env::temp_dir().join(format!(
-            "solaris-models-test-{}-{}",
+            "krasnokamen-models-test-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         )));

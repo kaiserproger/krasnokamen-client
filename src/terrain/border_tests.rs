@@ -8,14 +8,14 @@
 //! before and after the parent's mesher edits.
 
 use super::catalog::Catalog;
-use super::mesher::{self, BuiltSection, Rules, NORMALS};
+use super::mesher::{self, BuiltSection, NORMALS, Rules};
 use crate::api::{MeshGeometry, RenderLayer};
 use crate::protocol::content::{Content, TextureRegion};
 use crate::protocol::world::{
-    empty_block_entities, Chunk, Palette, Section, SurfaceHeightmap, World,
+    Chunk, Palette, Section, SurfaceHeightmap, World, empty_block_entities,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::{Arc, atomic::AtomicU64};
 
 const AIR: u32 = 0;
 const CUBE: u32 = 1;
@@ -524,9 +524,11 @@ fn mesh_view_retires_geometry_bytes_and_changes_reentered_revision() {
             fade_duration_ms: Some(0),
         },
     );
-    assert!(terrain
-        .sync_view(&world, [56., 8., 8.], 1, &mut draws)
-        .unwrap());
+    assert!(
+        terrain
+            .sync_view(&world, [56., 8., 8.], 1, &mut draws)
+            .unwrap()
+    );
     assert!(draws.is_empty());
     assert_eq!(terrain.resident_bytes, 0);
     assert!(terrain.sections.is_empty());
@@ -765,8 +767,10 @@ fn leaf_canopy_keeps_only_the_two_outer_layers_per_direction() {
         .filter(|quad| {
             let at = |i: u32| section.geometry.vertices[i as usize].position;
             let (a, c) = (at(quad[0]), at(quad[2]));
-            (0..3).all(|axis| a[axis].min(c[axis]) >= center[axis] - 0.01
-                && a[axis].max(c[axis]) <= center[axis] + 1.01)
+            (0..3).all(|axis| {
+                a[axis].min(c[axis]) >= center[axis] - 0.01
+                    && a[axis].max(c[axis]) <= center[axis] + 1.01
+            })
         })
         .count();
     assert_eq!(inside, 0, "buried leaf block must emit no faces");

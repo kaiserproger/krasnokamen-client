@@ -1,14 +1,15 @@
 use super::{
     catalog,
-    control::{nonce, Core},
+    control::{Core, nonce},
 };
 use crate::api::{Command, Request};
 use serde_json::Value;
 use std::{
     path::{Component, Path},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     time::Duration,
 };

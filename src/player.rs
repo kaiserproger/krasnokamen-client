@@ -15,10 +15,9 @@ use crate::{
     entities::{Handle, Store as EntityStore},
     inventory::{InventoryStore, PacketCommand},
     protocol::{
-        self,
+        self, Reader, Result, Writer,
         content::{Content, FluidKind},
         world::World,
-        Reader, Result, Writer,
     },
 };
 pub use collision::Bounds;
@@ -1210,9 +1209,11 @@ mod tests {
         let mut packet = Writer::default();
         packet.var(7);
         packet.f32(90.);
-        assert!(player
-            .apply(42, &mut Reader::new(&packet.0), &content, 100)
-            .unwrap());
+        assert!(
+            player
+                .apply(42, &mut Reader::new(&packet.0), &content, 100)
+                .unwrap()
+        );
         assert_eq!(player.hurt_tick, Some(100));
         assert_eq!(player.hurt_direction, 90.);
         assert_eq!((player.yaw, player.pitch), (30., 12.));
@@ -1224,14 +1225,18 @@ mod tests {
         assert_eq!(reader.offset, 0);
         assert_eq!(player.hurt_tick, Some(100));
         packet.0.push(0);
-        assert!(player
-            .apply(42, &mut Reader::new(&packet.0), &content, 102)
-            .is_err());
+        assert!(
+            player
+                .apply(42, &mut Reader::new(&packet.0), &content, 102)
+                .is_err()
+        );
         assert_eq!(player.hurt_tick, Some(100));
         packet.0.pop();
-        assert!(player
-            .apply(42, &mut Reader::new(&packet.0), &content, 107)
-            .unwrap());
+        assert!(
+            player
+                .apply(42, &mut Reader::new(&packet.0), &content, 107)
+                .unwrap()
+        );
         assert_eq!(player.hurt_tick, Some(107));
     }
 }

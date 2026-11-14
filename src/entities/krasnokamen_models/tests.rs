@@ -192,7 +192,7 @@ fn parser_rejects_malformed_models() {
 
 fn texture_root() -> Option<PathBuf> {
     let candidates = [
-        std::env::var_os("SOLARIS_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
+        std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map(PathBuf::from),
         Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist/resources")),
     ];
     candidates
@@ -211,7 +211,10 @@ fn png_size(path: &std::path::Path) -> [u32; 2] {
 #[test]
 fn every_shipped_model_is_well_formed() {
     let textures = texture_root();
-    assert!(!EMBEDDED.is_empty(), "no Solaris entity models embedded");
+    assert!(
+        !EMBEDDED.is_empty(),
+        "no Krasnokamen entity models embedded"
+    );
     let mut ids = std::collections::BTreeSet::new();
     for (file, source) in EMBEDDED {
         let model = ModelFile::parse(source).unwrap_or_else(|e| panic!("{file}: {e}"));
@@ -301,37 +304,58 @@ fn goat_body_origin_tracks_observed_front_silhouette() {
     let parent = &rig.bones[body.parent.unwrap()];
     // The fixed-distance 26.3 front capture places the body four screen pixels
     // to the right of the former centered rig; this is the fitted model-space offset.
-    assert!((parent.pivot.x * 16. - 0.5).abs() < 0.01, "goat body parent: {:?}", parent.pivot);
+    assert!(
+        (parent.pivot.x * 16. - 0.5).abs() < 0.01,
+        "goat body parent: {:?}",
+        parent.pivot
+    );
 }
 
 #[test]
 fn goat_ears_and_beard_stay_upright_at_rest() {
     let rig = authored("minecraft:goat#main").unwrap();
     let face = &rig.bones[rig.part_by_name["face"]];
-    let face_transform = crate::entities::resources::transform(face.pivot, face.rotation, face.scale);
+    let face_transform =
+        crate::entities::resources::transform(face.pivot, face.rotation, face.scale);
     for name in ["right_ear", "left_ear", "beard"] {
         let bone = &rig.bones[rig.part_by_name[name]];
-        let part_transform = crate::entities::resources::transform(bone.pivot, bone.rotation, bone.scale);
-        let axis = (face_transform * part_transform).transform_vector3(Vec3::Y).normalize();
+        let part_transform =
+            crate::entities::resources::transform(bone.pivot, bone.rotation, bone.scale);
+        let axis = (face_transform * part_transform)
+            .transform_vector3(Vec3::Y)
+            .normalize();
         // Java 26.3 front capture: ears are full-height and the beard hangs vertically.
         assert!(axis.z.abs() < 0.02, "{name} vertical axis: {axis:?}");
     }
     let left = rig.bones[rig.part_by_name["left_ear"]].pivot.x;
     let right = rig.bones[rig.part_by_name["right_ear"]].pivot.x;
-    assert!(((left - right).abs() * 16. - 8.).abs() < 0.01, "ear spacing");
+    assert!(
+        ((left - right).abs() * 16. - 8.).abs() < 0.01,
+        "ear spacing"
+    );
 }
 
 #[test]
 fn spider_legs_form_single_sloped_oracle_silhouettes() {
-    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "spider.json").unwrap();
+    let (_, source) = EMBEDDED
+        .iter()
+        .find(|(name, _)| *name == "spider.json")
+        .unwrap();
     let model = ModelFile::parse(source).unwrap();
     for index in 0..8 {
         let name = format!("leg{index}");
         let leg = model.bones.iter().find(|bone| bone.name == name).unwrap();
         // Java 26.3 reference: the visible legs are straight, sloped bars,
         // not horizontal bars with vertical downward extensions at their ends.
-        assert_eq!(leg.cubes.len(), 1, "{name} must not have an extra vertical foot");
-        assert!((28. ..=40.).contains(&leg.rotation[2].abs()), "{name} slope");
+        assert_eq!(
+            leg.cubes.len(),
+            1,
+            "{name} must not have an extra vertical foot"
+        );
+        assert!(
+            (28. ..=40.).contains(&leg.rotation[2].abs()),
+            "{name} slope"
+        );
     }
 }
 
@@ -364,25 +388,46 @@ fn sheep_and_wool_use_the_vanilla_quadruped_part_offsets() {
 /// that begin under the robe hem and leave the feet visible.
 #[test]
 fn villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe() {
-    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "villager.json").unwrap();
+    let (_, source) = EMBEDDED
+        .iter()
+        .find(|(name, _)| *name == "villager.json")
+        .unwrap();
     let model = ModelFile::parse(source).unwrap();
-    let right = model.bones.iter().find(|bone| bone.name == "right_leg").unwrap();
-    let left = model.bones.iter().find(|bone| bone.name == "left_leg").unwrap();
+    let right = model
+        .bones
+        .iter()
+        .find(|bone| bone.name == "right_leg")
+        .unwrap();
+    let left = model
+        .bones
+        .iter()
+        .find(|bone| bone.name == "left_leg")
+        .unwrap();
     let body = model.bones.iter().find(|bone| bone.name == "body").unwrap();
-    let robe = body.bones.iter().find(|bone| bone.name == "jacket").unwrap();
+    let robe = body
+        .bones
+        .iter()
+        .find(|bone| bone.name == "jacket")
+        .unwrap();
     assert_eq!(right.cubes.len(), 1);
     assert_eq!(left.cubes.len(), 1);
     let (a, b) = (&right.cubes[0], &left.cubes[0]);
     assert_eq!(a.size, b.size);
     assert_eq!(a.uv, b.uv);
     assert!(!a.mirror && b.mirror);
-    assert!(a.faces.is_empty() && b.faces.is_empty(), "legs use the box unwrap, not custom texture faces");
+    assert!(
+        a.faces.is_empty() && b.faces.is_empty(),
+        "legs use the box unwrap, not custom texture faces"
+    );
     assert_eq!(right.pivot[2], body.pivot[2]);
     assert_eq!(left.pivot[2], body.pivot[2]);
     let hem = body.pivot[1] + robe.pivot[1] + robe.cubes[0].origin[1] + robe.cubes[0].size[1];
     let hip = right.pivot[1] + a.origin[1];
     let feet = hip + a.size[1];
-    assert!(hip < hem && hem < feet, "the robe covers the upper legs but leaves the feet visible");
+    assert!(
+        hip < hem && hem < feet,
+        "the robe covers the upper legs but leaves the feet visible"
+    );
 }
 
 /// ISSUE-1-01: the child villager kept the pre-fix legacy rig (8x2x4 body, 4x13x4 arms, 4x8x4
@@ -390,17 +435,39 @@ fn villager_legs_use_one_mirrored_box_unwrap_beneath_the_robe() {
 /// hem, one cube each, using the box unwrap.
 #[test]
 fn baby_villager_legs_hang_from_the_jacket_hem_as_single_cubes() {
-    let (_, source) = EMBEDDED.iter().find(|(name, _)| *name == "villager_baby.json").unwrap();
+    let (_, source) = EMBEDDED
+        .iter()
+        .find(|(name, _)| *name == "villager_baby.json")
+        .unwrap();
     let model = ModelFile::parse(source).unwrap();
-    let right = model.bones.iter().find(|bone| bone.name == "right_leg").unwrap();
-    let left = model.bones.iter().find(|bone| bone.name == "left_leg").unwrap();
+    let right = model
+        .bones
+        .iter()
+        .find(|bone| bone.name == "right_leg")
+        .unwrap();
+    let left = model
+        .bones
+        .iter()
+        .find(|bone| bone.name == "left_leg")
+        .unwrap();
     let body = model.bones.iter().find(|bone| bone.name == "body").unwrap();
-    let jacket = body.bones.iter().find(|bone| bone.name == "jacket").unwrap();
+    let jacket = body
+        .bones
+        .iter()
+        .find(|bone| bone.name == "jacket")
+        .unwrap();
     for leg in [right, left] {
         assert_eq!(leg.cubes.len(), 1, "{}", leg.name);
         assert_eq!(leg.cubes[0].size, [2., 3., 2.], "{}", leg.name);
-        assert!(leg.cubes[0].faces.is_empty(), "{} uses the box unwrap", leg.name);
+        assert!(
+            leg.cubes[0].faces.is_empty(),
+            "{} uses the box unwrap",
+            leg.name
+        );
     }
     let hem = body.pivot[1] + jacket.pivot[1] + jacket.cubes[0].origin[1] + jacket.cubes[0].size[1];
-    assert!(right.pivot[1] + right.cubes[0].origin[1] >= hem, "legs start at the jacket hem");
+    assert!(
+        right.pivot[1] + right.cubes[0].origin[1] >= hem,
+        "legs start at the jacket hem"
+    );
 }

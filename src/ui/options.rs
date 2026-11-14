@@ -4,7 +4,7 @@
 //! the same `UiCommand::Settings` path the old cycling buttons used.
 use super::state::{NodeAction, Paint, Screen, UiState};
 use crate::protocol::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -513,7 +513,11 @@ mod tests {
         ui.rebuild_for_test(inventory, content).unwrap();
     }
     fn node_bounds(ui: &UiState, id: &str) -> [f32; 4] {
-        ui.nodes.iter().find(|n| n.id == id).unwrap_or_else(|| panic!("{id}")).bounds
+        ui.nodes
+            .iter()
+            .find(|n| n.id == id)
+            .unwrap_or_else(|| panic!("{id}"))
+            .bounds
     }
     fn pointer(
         ui: &mut UiState,
@@ -553,14 +557,29 @@ mod tests {
         open_options(&mut ui, &mut inventory, &content);
         let ids: Vec<_> = ui.nodes.iter().map(|n| n.id.as_str()).collect();
         for tab in 0..4 {
-            assert!(ids.contains(&format!("options/tab/{tab}").as_str()), "{ids:?}");
+            assert!(
+                ids.contains(&format!("options/tab/{tab}").as_str()),
+                "{ids:?}"
+            );
         }
-        for key in ["fov", "render_distance", "max_fps", "vsync", "fullscreen", "fancy_shaders"] {
+        for key in [
+            "fov",
+            "render_distance",
+            "max_fps",
+            "vsync",
+            "fullscreen",
+            "fancy_shaders",
+        ] {
             assert!(ids.contains(&format!("settings/{key}").as_str()), "{key}");
         }
         for node in &ui.nodes {
             let [x, y, w, h] = node.bounds;
-            assert!(x >= 0. && y >= 0. && x + w <= 427. && y + h <= 240., "{} {:?}", node.id, node.bounds);
+            assert!(
+                x >= 0. && y >= 0. && x + w <= 427. && y + h <= 240.,
+                "{} {:?}",
+                node.id,
+                node.bounds
+            );
             if matches!(node.role, "slider" | "switch" | "tab" | "button") {
                 // 32 physical px at GUI scale 2 is 16 logical px.
                 assert!(h >= 22., "{} is {h}px tall", node.id);
@@ -569,7 +588,14 @@ mod tests {
         let fov = ui.nodes.iter().find(|n| n.id == "settings/fov").unwrap();
         assert_eq!(fov.role, "slider");
         assert!(fov.label.starts_with("Field of view: "), "{}", fov.label);
-        assert_eq!(ui.nodes.iter().find(|n| n.id == "settings/vsync").unwrap().role, "switch");
+        assert_eq!(
+            ui.nodes
+                .iter()
+                .find(|n| n.id == "settings/vsync")
+                .unwrap()
+                .role,
+            "switch"
+        );
     }
 
     #[test]
@@ -579,23 +605,63 @@ mod tests {
         let bounds = node_bounds(&ui, "settings/fov");
         let (tx, tw) = track_span(bounds);
         let y = bounds[1] + 11.;
-        let down = pointer(&mut ui, &mut inventory, &content, PointerPhase::Down, tx + 3., y);
+        let down = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Down,
+            tx + 3.,
+            y,
+        );
         assert_eq!(setting_commands(&down, "fov"), vec![json!(30.)]);
         assert!(ui.slider_drag.is_some());
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let moved = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + tw + 80., y);
+        let moved = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + tw + 80.,
+            y,
+        );
         assert_eq!(setting_commands(&moved, "fov"), vec![json!(110.)]);
         assert_eq!(ui.setting("fov"), Some(&json!(110.)));
         // Same stop again emits nothing.
-        let again = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + tw + 90., y);
+        let again = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + tw + 90.,
+            y,
+        );
         assert!(setting_commands(&again, "fov").is_empty());
-        pointer(&mut ui, &mut inventory, &content, PointerPhase::Up, tx + tw, y);
+        pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Up,
+            tx + tw,
+            y,
+        );
         assert!(ui.slider_drag.is_none());
         // A move after release no longer drags.
-        let after = pointer(&mut ui, &mut inventory, &content, PointerPhase::Move, tx + 3., y);
+        let after = pointer(
+            &mut ui,
+            &mut inventory,
+            &content,
+            PointerPhase::Move,
+            tx + 3.,
+            y,
+        );
         assert!(setting_commands(&after, "fov").is_empty());
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        let label = &ui.nodes.iter().find(|n| n.id == "settings/fov").unwrap().label;
+        let label = &ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "settings/fov")
+            .unwrap()
+            .label;
         assert_eq!(label, "Field of view: 110");
     }
 
@@ -630,7 +696,10 @@ mod tests {
                 UiIntent::Key {
                     key: name.into(),
                     pressed: true,
-                    modifiers: Modifiers { shift, ..Default::default() },
+                    modifiers: Modifiers {
+                        shift,
+                        ..Default::default()
+                    },
                 },
                 inventory,
                 &content,
@@ -675,22 +744,37 @@ mod tests {
     fn interface_tab_scrolls_and_accessibility_opens_it() {
         let (content, mut inventory, mut ui) = state();
         ui.transition(Screen::Pause);
-        ui.activate_for_test(NodeAction::Screen(Screen::Accessibility), &mut inventory, &content)
-            .unwrap();
+        ui.activate_for_test(
+            NodeAction::Screen(Screen::Accessibility),
+            &mut inventory,
+            &content,
+        )
+        .unwrap();
         ui.rebuild_for_test(&inventory, &content).unwrap();
         assert_eq!(ui.options_tab, INTERFACE_TAB);
         assert!(ui.nodes.iter().any(|n| n.id == "settings/ui_scale"));
-        let first_rows = ui.nodes.iter().filter(|n| n.id.starts_with("settings/") && n.id != "settings/done").count();
-        assert!(first_rows < 8, "8 interface rows overflow a 240px viewport: {first_rows}");
+        let first_rows = ui
+            .nodes
+            .iter()
+            .filter(|n| n.id.starts_with("settings/") && n.id != "settings/done")
+            .count();
+        assert!(
+            first_rows < 8,
+            "8 interface rows overflow a 240px viewport: {first_rows}"
+        );
         assert!(ui.nodes.iter().any(|n| n.id == "options/scrollbar"));
         ui.scroll = 99;
         ui.rebuild_for_test(&inventory, &content).unwrap();
-        assert!(ui.nodes.iter().any(|n| n.id == "settings/text_background_opacity"), "scroll clamps to the last row");
+        assert!(
+            ui.nodes
+                .iter()
+                .any(|n| n.id == "settings/text_background_opacity"),
+            "scroll clamps to the last row"
+        );
         assert!(!ui.nodes.iter().any(|n| n.id == "settings/ui_scale"));
         // Done returns to the pause menu.
         assert_eq!(ui.settings_parent, Screen::Pause);
     }
-
 
     #[test]
     fn every_slider_round_trips_through_every_stop() {

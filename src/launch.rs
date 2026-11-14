@@ -1,22 +1,22 @@
-use super::{artifact_root, content_paths, headless, local_config, App, Options};
+use super::{App, Options, artifact_root, content_paths, headless, local_config};
 use std::{path::PathBuf, sync::Arc};
 use winit::event_loop::EventLoop;
 
-pub(crate) const HELP: &str = "Solaris native client (Minecraft Java 26.1.2 offline preview)
+pub(crate) const HELP: &str = "Krasnokamen native client (Minecraft Java 26.1.2 offline preview)
 Usage:
-  solaris-client                         Open the title screen
-  solaris-client --server HOST[:PORT] [--username NAME]
+  krasnokamen-client                         Open the title screen
+  krasnokamen-client --server HOST[:PORT] [--username NAME]
                  [--width W --height H] [--fullscreen] [--data-dir DIR]
-  solaris-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
-  solaris-client play [launch options] [--profile fixture|offline-test]
+  krasnokamen-client setup --from-dist DIR --assets PRISM_ASSETS [--data-dir DIR]
+  krasnokamen-client play [launch options] [--profile fixture|offline-test]
                  [--automation --mcp-http 127.0.0.1:0] [--headless|--windowed]
                  [--artifact-dir DIR] [--runtime-dir DIR]
-  solaris-client doctor [--json]
-  solaris-client mcp attach --instance ID --stdio [--descriptor FILE]
+  krasnokamen-client doctor [--json]
+  krasnokamen-client mcp attach --instance ID --stdio [--descriptor FILE]
 
-Default data: $XDG_DATA_HOME/solaris-client (or ~/.local/share/solaris-client);
+Default data: $XDG_DATA_HOME/krasnokamen-client (or ~/.local/share/krasnokamen-client);
 relative --artifact-dir/--runtime-dir resolve there (defaults artifacts/, runtime/).
-SOLARIS_CLIENT_* environment variables optionally override individual content paths.
+KRASNOKAMEN_CLIENT_* environment variables optionally override individual content paths.
 Default username: Player. Server port defaults to 25565. --help / -h prints this text.
 WASD move, Space jump, Shift sneak, Ctrl sprint, mouse look, left break/right use,
 1–9 hotbar, E inventory, Escape menu.";

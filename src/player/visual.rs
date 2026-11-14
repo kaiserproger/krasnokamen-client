@@ -4,7 +4,7 @@ use crate::{
     api::EntityMaterial,
     inventory::Stack,
     motion::{self, HandPose, ViewInput, ViewMotion},
-    ui::items::{display_matrix, ItemContext, ItemModels},
+    ui::items::{ItemContext, ItemModels, display_matrix},
 };
 use glam::{Mat4, Vec3};
 use std::cell::Cell;

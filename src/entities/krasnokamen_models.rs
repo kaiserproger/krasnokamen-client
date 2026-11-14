@@ -1,7 +1,7 @@
-//! Solaris-authored entity geometry (`assets/solaris/models/entity/*.json`).
+//! Krasnokamen-authored entity geometry (`assets/krasnokamen/models/entity/*.json`).
 //!
 //! Model files are embedded at build time (`build.rs`) and baked into [`Rig`]s on first use.
-//! Geometry is authored by the Solaris project and is UV-compatible with the vanilla entity
+//! Geometry is authored by the Krasnokamen project and is UV-compatible with the vanilla entity
 //! texture layouts, which the player supplies at runtime. Nothing here reads Mojang data.
 //!
 //! Coordinate conventions (identical to the renderer's model space):
@@ -19,10 +19,10 @@ use glam::Vec3;
 use serde::Deserialize;
 use std::{collections::BTreeMap, sync::LazyLock};
 
-include!(concat!(env!("OUT_DIR"), "/solaris_models_embedded.rs"));
+include!(concat!(env!("OUT_DIR"), "/krasnokamen_models_embedded.rs"));
 
 pub(crate) const SCHEMA: u32 = 1;
-pub(crate) const PLACEHOLDER_BONE: &str = "solaris_placeholder";
+pub(crate) const PLACEHOLDER_BONE: &str = "krasnokamen_placeholder";
 const MAX_BONES: usize = 256;
 const MAX_CUBES: usize = 2048;
 const MAX_DEPTH: usize = 16;
@@ -112,7 +112,7 @@ impl ModelFile {
         let model: Self = serde_json::from_str(source).map_err(|e| e.to_string())?;
         if model.schema != SCHEMA {
             return Err(format!(
-                "solaris model {} schema {}",
+                "krasnokamen model {} schema {}",
                 model.id, model.schema
             ));
         }
@@ -152,7 +152,7 @@ impl ModelFile {
     pub(crate) fn bake(&self) -> Result<Rig> {
         let [tw, th] = self.texture.size;
         if tw == 0 || th == 0 || tw > 4096 || th > 4096 {
-            return Err(format!("solaris model {} texture size", self.id));
+            return Err(format!("krasnokamen model {} texture size", self.id));
         }
         let mut bones = vec![Bone {
             parent: None,
@@ -180,9 +180,9 @@ impl ModelFile {
             (BoneRole::Nose, &self.roles.nose),
         ] {
             for name in names {
-                let index = part_by_name
-                    .get(name)
-                    .ok_or_else(|| format!("solaris model {} role bone {name} missing", self.id))?;
+                let index = part_by_name.get(name).ok_or_else(|| {
+                    format!("krasnokamen model {} role bone {name} missing", self.id)
+                })?;
                 bones[*index].role = role;
             }
         }
@@ -200,11 +200,11 @@ impl ModelFile {
         cubes: &mut usize,
     ) -> Result<()> {
         if depth > MAX_DEPTH || bones.len() >= MAX_BONES {
-            return Err(format!("solaris model {} bone bounds", self.id));
+            return Err(format!("krasnokamen model {} bone bounds", self.id));
         }
         *cubes += spec.cubes.len();
         if *cubes > MAX_CUBES {
-            return Err(format!("solaris model {} cube bounds", self.id));
+            return Err(format!("krasnokamen model {} cube bounds", self.id));
         }
         let [tw, th] = self.texture.size.map(|v| v as f32);
         let mut quads = Vec::with_capacity(spec.cubes.len() * 6);
@@ -224,7 +224,7 @@ impl ModelFile {
             .any(|v| !v.is_finite())
         {
             return Err(format!(
-                "solaris model {} nonfinite bone {}",
+                "krasnokamen model {} nonfinite bone {}",
                 self.id, spec.name
             ));
         }
@@ -379,7 +379,7 @@ fn cube_quads(cube: &CubeSpec, tw: f32, th: f32) -> Vec<([[f32; 5]; 4], [f32; 3]
         .collect()
 }
 
-/// Maps a renderer rig key to the id of the Solaris model that supplies its geometry.
+/// Maps a renderer rig key to the id of the Krasnokamen model that supplies its geometry.
 ///
 /// Keys look like `minecraft:cow#renderer_main`, `minecraft:cow_baby#main`,
 /// `minecraft:oak_chest_boat#renderer/model`, `minecraft:sign/wall/oak#main` or
@@ -456,13 +456,13 @@ impl Catalog {
             let (model, rig) = match baked {
                 Ok(baked) => baked,
                 Err(error) => {
-                    eprintln!("solaris entity model {file} rejected: {error}");
+                    eprintln!("krasnokamen entity model {file} rejected: {error}");
                     continue;
                 }
             };
             if rigs.contains_key(&model.id) {
                 eprintln!(
-                    "solaris entity model {file} rejected: duplicate id {}",
+                    "krasnokamen entity model {file} rejected: duplicate id {}",
                     model.id
                 );
                 continue;
@@ -477,7 +477,7 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(Catalog::build);
 fn catalog() -> &'static Catalog {
     &CATALOG
 }
-/// Authored rig for a renderer key, if Solaris ships one.
+/// Authored rig for a renderer key, if Krasnokamen ships one.
 pub(crate) fn authored(key: &str) -> Option<&'static Rig> {
     catalog().rigs.get(&model_id(key))
 }

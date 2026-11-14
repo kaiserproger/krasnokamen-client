@@ -1,10 +1,10 @@
-# Solaris entity models
+# Krasnokamen entity models
 
-Entity and block-entity geometry is **authored by Solaris** and shipped inside the client binary
-(`assets/solaris/models/entity/<id>.json`, embedded by `build.rs`, baked by
-`src/entities/solaris_models.rs`). Entity metadata (protocol ids, dimensions, metadata accessors,
-texture/variant selection, head/body turn limits) is the Solaris-owned data table
-`assets/solaris/entities/entity-facts.json`, embedded via `include_str!` in
+Entity and block-entity geometry is **authored by Krasnokamen** and shipped inside the client binary
+(`assets/krasnokamen/models/entity/<id>.json`, embedded by `build.rs`, baked by
+`src/entities/krasnokamen_models.rs`). Entity metadata (protocol ids, dimensions, metadata accessors,
+texture/variant selection, head/body turn limits) is the Krasnokamen-owned data table
+`assets/krasnokamen/entities/entity-facts.json`, embedded via `include_str!` in
 `src/entities/resources.rs`. Nothing is read from `dist/entities` any more.
 
 Models are UV-compatible with the vanilla entity textures, which the player supplies at runtime.
@@ -48,7 +48,7 @@ mesh dumps are copied.
 
 The renderer asks for rigs by key (`minecraft:cow#renderer_main`, `minecraft:cow_baby#main`,
 `minecraft:oak_chest_boat#renderer/model`, `minecraft:zombie#layer3/modelSet/head`...).
-`solaris_models::model_id` maps a key to a model id (file stem): qualifiers are dropped, wood
+`krasnokamen_models::model_id` maps a key to a model id (file stem): qualifiers are dropped, wood
 variants collapse (`boat`, `chest_boat`, `raft`, `chest_raft`, every `*_minecart` -> `minecart`),
 signs map to `sign_<attachment>` / `hanging_sign_<attachment>`, armor-layer slots to
 `armor_<slot>` / `armor_baby_<slot>`.
@@ -63,10 +63,10 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
 
 * `python3 tools/entity_models.py fmt|check|preview` - canonical formatting, validation
   (schema, UV bounds, texture existence/size, unique bones, roles, texel coverage) and a textured
-  four-view + UV-map preview using the vanilla PNG (`SOLARIS_TEXTURES` overrides the texture root).
-* `cargo test --lib solaris_models` - geometry winding/unwrap/mirror tests, key resolution, and a
+  four-view + UV-map preview using the vanilla PNG (`KRASNOKAMEN_TEXTURES` overrides the texture root).
+* `cargo test --lib krasnokamen_models` - geometry winding/unwrap/mirror tests, key resolution, and a
   sanity test over every shipped model (UVs inside the declared texture, roles/bones valid, and -
-  when vanilla textures are available under `SOLARIS_CLIENT_RESOURCE_ROOT` or `dist/resources` -
+  when vanilla textures are available under `KRASNOKAMEN_CLIENT_RESOURCE_ROOT` or `dist/resources` -
   the texture exists with the declared size).
 
 ## Coverage and known limits
@@ -83,7 +83,7 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
 * Quality tier is visible in `python3 tools/entity_models.py check` coverage: classic nets
   (cow, wolf, cat, creeper, skeleton family, humanoids...) are near 100%; fitted models list the
   deliberately unmapped texels.
-* Entity metadata is Solaris-owned data: `assets/solaris/entities/entity-facts.json` (embedded in
+* Entity metadata is Krasnokamen-owned data: `assets/krasnokamen/entities/entity-facts.json` (embedded in
   the binary; protocol ids, dimensions, metadata accessors, texture/variant selection, head/body
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
   the launcher needs no JDK and nothing is derived from the client jar for entities.

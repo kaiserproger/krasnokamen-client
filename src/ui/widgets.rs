@@ -7,7 +7,7 @@ use super::{
     state::{Paint, SemanticNode, UiState},
     theme::*,
 };
-use crate::{api::MeshGeometry, protocol::content::Content, protocol::Result};
+use crate::{api::MeshGeometry, protocol::Result, protocol::content::Content};
 use glam::{Mat4, Vec3};
 use serde_json::json;
 
@@ -95,14 +95,7 @@ impl UiState {
             Paint::Slider { t, .. } => {
                 self.row_body(&mut p, node, fx);
                 let (label, value) = node.label.split_once(": ").unwrap_or((&node.label, ""));
-                self.themed_text(
-                    content,
-                    p.out,
-                    transform,
-                    label,
-                    [x + 8., text_y(9.)],
-                    TEXT,
-                )?;
+                self.themed_text(content, p.out, transform, label, [x + 8., text_y(9.)], TEXT)?;
                 let shown = self.anim_value(&node.id, *t);
                 let (tx, tw) = track_span(node.bounds);
                 p.themed_slider([tx, y + 3., tw, h - 6.], shown, fx.hover, fx.press);
@@ -120,14 +113,7 @@ impl UiState {
             Paint::Toggle { on, .. } => {
                 self.row_body(&mut p, node, fx);
                 let (label, value) = node.label.split_once(": ").unwrap_or((&node.label, ""));
-                self.themed_text(
-                    content,
-                    p.out,
-                    transform,
-                    label,
-                    [x + 8., text_y(9.)],
-                    TEXT,
-                )?;
+                self.themed_text(content, p.out, transform, label, [x + 8., text_y(9.)], TEXT)?;
                 let knob = self.anim_value(&node.id, f32::from(u8::from(*on)));
                 let sw = [x + w - 8. - 28., y + ((h - 12.) / 2.).floor(), 28., 12.];
                 p.themed_switch(sw, knob, fx.hover);
@@ -146,14 +132,7 @@ impl UiState {
                 self.row_body(&mut p, node, fx);
                 let (left, right) = node.label.split_once(*delim).unwrap_or((&node.label, ""));
                 let rw = self.text_width(right)?;
-                self.themed_text(
-                    content,
-                    p.out,
-                    transform,
-                    left,
-                    [x + 8., text_y(9.)],
-                    TEXT,
-                )?;
+                self.themed_text(content, p.out, transform, left, [x + 8., text_y(9.)], TEXT)?;
                 let color = if fx.hover > 0.4 { 0xffffd98a } else { TEXT_DIM };
                 self.themed_text(
                     content,
@@ -208,7 +187,11 @@ impl UiState {
         transform: Mat4,
     ) -> Result<()> {
         let strength = fx.hover.max(if node.focused { 1. } else { 0. });
-        if strength <= 0.02 || desc.is_empty() || !self.is_options_screen() || self.options_footer[2] <= 0. {
+        if strength <= 0.02
+            || desc.is_empty()
+            || !self.is_options_screen()
+            || self.options_footer[2] <= 0.
+        {
             return Ok(());
         }
         let [fx0, fy0, fw, fh] = self.options_footer;
@@ -241,9 +224,15 @@ impl UiState {
                 break;
             }
             let (color, alpha) = if shell {
-                (mix([0.030, 0.018, 0.012], [0.30, 0.12, 0.03], s * s), 0.60 + 0.16 * s)
+                (
+                    mix([0.030, 0.018, 0.012], [0.30, 0.12, 0.03], s * s),
+                    0.60 + 0.16 * s,
+                )
             } else {
-                (mix([0.030, 0.018, 0.012], [0.12, 0.05, 0.02], s * s), 0.46 + 0.20 * s)
+                (
+                    mix([0.030, 0.018, 0.012], [0.12, 0.05, 0.02], s * s),
+                    0.46 + 0.20 * s,
+                )
             };
             p.solid([x, top, w, bh], color, alpha);
         }

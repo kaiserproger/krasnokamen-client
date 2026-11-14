@@ -8,12 +8,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Singleplayer ships the Solaris server and the default plugin pack. Both are
+  # Singleplayer ships the Krasnokamen server and the default plugin pack. Both are
   # pinned to FULL commit SHAs (never tags), like the server's own CI pins its
   # siblings; bump deliberately. The server must contain the SDK/WIT and the
   # `local_addr` listening-line change the singleplayer port discovery relies on.
-  SOLARIS_REVISION: ab1fa2401944af42070e9faf38e04146c394679b
-  SOLARIS_PLUGINS_REVISION: 2e6d6869d6f58c5fb5a377038cea1f7f69485fb8
+  KRASNOKAMEN_REVISION: ab1fa2401944af42070e9faf38e04146c394679b
+  KRASNOKAMEN_PLUGINS_REVISION: 2e6d6869d6f58c5fb5a377038cea1f7f69485fb8
 
 permissions:
   contents: read
@@ -78,37 +78,37 @@ jobs:
           echo "CFLAGS_x86_64_pc_windows_msvc=/I$(cygpath -w "$zlib")" >> "$GITHUB_ENV"
       - name: Build release binaries
         run: cargo build --release --locked
-      - name: Check out Solaris server (pinned)
+      - name: Check out Krasnokamen server (pinned)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/solaris
-          ref: ${{ env.SOLARIS_REVISION }}
-          path: solaris-server
+          repository: ${{ github.repository_owner }}/krasnokamen
+          ref: ${{ env.KRASNOKAMEN_REVISION }}
+          path: krasnokamen-server
       - name: Check out default plugins (pinned)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/solaris-default-plugins
-          ref: ${{ env.SOLARIS_PLUGINS_REVISION }}
+          repository: ${{ github.repository_owner }}/krasnokamen-default-plugins
+          ref: ${{ env.KRASNOKAMEN_PLUGINS_REVISION }}
           path: solaris-default-plugins
       # The server pins its own toolchain; its rust-toolchain.toml selects it.
       - uses: dtolnay/rust-toolchain@1.94
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Build Solaris server
-        working-directory: solaris-server
-        run: cargo build --release --locked -p mc-edge --bin solaris-v2
+      - name: Build Krasnokamen server
+        working-directory: krasnokamen-server
+        run: cargo build --release --locked -p mc-edge --bin krasnokamen
       - name: Stage Linux package
         if: matrix.name == 'linux-x86_64'
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          dir="solaris-client-${TAG}-linux-x86_64"
+          dir="krasnokamen-client-${TAG}-linux-x86_64"
           rm -rf stage && mkdir -p "stage/$dir"
-          install -m 0755 target/release/solaris-client "stage/$dir/solaris-client"
-          install -m 0755 target/release/solaris-launcher "stage/$dir/solaris-launcher"
-          install -m 0644 launcher/assets/icon.png "stage/$dir/solaris-launcher.png"
-          install -m 0644 packaging/solaris-launcher.desktop "stage/$dir/solaris-launcher.desktop"
+          install -m 0755 target/release/krasnokamen-client "stage/$dir/krasnokamen-client"
+          install -m 0755 target/release/krasnokamen-launcher "stage/$dir/krasnokamen-launcher"
+          install -m 0644 launcher/assets/icon.png "stage/$dir/krasnokamen-launcher.png"
+          install -m 0644 packaging/krasnokamen-launcher.desktop "stage/$dir/krasnokamen-launcher.desktop"
           install -m 0755 packaging/install-desktop.sh "stage/$dir/install-desktop.sh"
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE "stage/$dir/"
           packaging/stage-singleplayer.sh "stage/$dir"
@@ -118,8 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf stage && mkdir stage
-          install -m 0755 target/release/solaris-client.exe stage/solaris-client.exe
-          install -m 0755 target/release/solaris-launcher.exe stage/solaris-launcher.exe
+          install -m 0755 target/release/krasnokamen-client.exe stage/krasnokamen-client.exe
+          install -m 0755 target/release/krasnokamen-launcher.exe stage/krasnokamen-launcher.exe
           install -m 0644 launcher/assets/icon.png stage/icon.png
           install -m 0644 README.md LICENSE-MIT LICENSE-APACHE stage/
           packaging/stage-singleplayer.sh stage .exe
@@ -141,8 +141,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tar -C stage -czf "solaris-client-${TAG}-linux-x86_64.tar.gz" \
-            "solaris-client-${TAG}-linux-x86_64"
+          tar -C stage -czf "krasnokamen-client-${TAG}-linux-x86_64.tar.gz" \
+            "krasnokamen-client-${TAG}-linux-x86_64"
       # The packaged binary must start without the build checkout: extract it
       # outside the workspace and make the workspace unwritable while it runs.
       - name: Smoke packaged Linux client
@@ -151,16 +151,16 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tar -C "$RUNNER_TEMP" -xzf "solaris-client-${TAG}-linux-x86_64.tar.gz"
+          tar -C "$RUNNER_TEMP" -xzf "krasnokamen-client-${TAG}-linux-x86_64.tar.gz"
           chmod a-w "$GITHUB_WORKSPACE"
           trap 'chmod u+w "$GITHUB_WORKSPACE"' EXIT
-          packaging/smoke-release.sh "$RUNNER_TEMP/solaris-client-${TAG}-linux-x86_64/solaris-client"
+          packaging/smoke-release.sh "$RUNNER_TEMP/krasnokamen-client-${TAG}-linux-x86_64/krasnokamen-client"
       - name: Package Windows zip
         if: matrix.name == 'windows-x86_64'
         env:
           TAG: ${{ github.ref_name }}
         shell: pwsh
-        run: Compress-Archive -Path stage/* -DestinationPath "solaris-client-${env:TAG}-windows-x86_64.zip"
+        run: Compress-Archive -Path stage/* -DestinationPath "krasnokamen-client-${env:TAG}-windows-x86_64.zip"
       # Uploaded straight to the release: no Actions artifact storage involved.
       - name: Checksum
         if: startsWith(github.ref, 'refs/tags/v')
@@ -168,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          for f in solaris-client-*.tar.gz solaris-client-*.zip; do
+          for f in krasnokamen-client-*.tar.gz krasnokamen-client-*.zip; do
             sha256sum "$f" > "$f.sha256"
           done
       - uses: softprops/action-gh-release@v2
@@ -176,6 +176,6 @@ jobs:
         with:
           prerelease: true
           files: |
-            solaris-client-*.tar.gz
-            solaris-client-*.zip
-            solaris-client-*.sha256
+            krasnokamen-client-*.tar.gz
+            krasnokamen-client-*.zip
+            krasnokamen-client-*.sha256

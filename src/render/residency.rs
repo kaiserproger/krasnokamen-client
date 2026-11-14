@@ -286,7 +286,8 @@ impl Renderer {
                     return Err(format!(
                         "terrain_cpu_payload_missing key={key:?} revision={} resident={} same_world={same_world}",
                         chunk.revision,
-                        resident.map_or_else(|| "absent".to_string(), |old| old.revision.to_string()),
+                        resident
+                            .map_or_else(|| "absent".to_string(), |old| old.revision.to_string()),
                     ));
                 };
                 mesh::validate(

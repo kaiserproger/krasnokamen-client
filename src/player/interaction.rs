@@ -549,7 +549,7 @@ impl Player {
         let hit = match target {
             Some(Hit::Block(hit)) => hit,
             Some(Hit::Entity { .. }) => {
-                return refused("an entity, not a block, is under the crosshair")
+                return refused("an entity, not a block, is under the crosshair");
             }
             None => return refused("no block is under the crosshair within reach"),
         };

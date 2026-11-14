@@ -1,6 +1,6 @@
-# Playing Solaris with the native client
+# Playing Krasnokamen with the native client
 
-Target: Minecraft Java Edition 26.1.2-compatible Solaris server. Offline/test
+Target: Minecraft Java Edition 26.1.2-compatible Krasnokamen server. Offline/test
 identity only (`offline-test` profile); official Microsoft auth is NOT
 implemented (see Checklist row `connect-auth` in
 `.analysis/native-ui-20261008/RESULT.md`).
@@ -9,27 +9,27 @@ implemented (see Checklist row `connect-auth` in
 
 Harness path (owns server/Xvfb/client lifecycle, picks a free port, writes a
 receipt under `/home/kaiserroman/solaris/.analysis/validation/`). It needs the
-content env from `docs/AGENT_TESTING.md` (`SOLARIS_CLIENT_DATA_DIR`,
+content env from `docs/AGENT_TESTING.md` (`KRASNOKAMEN_CLIENT_DATA_DIR`,
 `_RESOURCE_ROOT`, `_ASSET_ROOT`, `_ASSET_INDEX` plus the fact files); the
 Title-screen leg is a separate profile that also needs a built server:
 
 ```sh
 cd /home/kaiserroman/solaris
 python3 -m tools.harness run survival --client native --windowed --timeout-seconds 120
-SOLARIS_SERVER_BINARY=$PWD/target/debug/solaris-v2 \
+KRASNOKAMEN_SERVER_BINARY=$PWD/target/debug/krasnokamen \
   python3 -m tools.harness run title-connect --client native --windowed --timeout-seconds 120
 ```
 
 Manual server (same binary the harness drives; v1 `mc-server` is retired, the
-server is `solaris-v2` from `mc-edge`):
+server is `krasnokamen` from `mc-edge`):
 
 ```sh
 cd /home/kaiserroman/solaris
 # build once; on the shared host wrap it: .analysis/tools/mem-run.sh -m 6G <cmd>
-cargo build -p mc-edge --bin solaris-v2
+cargo build -p mc-edge --bin krasnokamen
 # offline loopback profile: 127.0.0.1:25565, view/simulation distance 4,
 # world .analysis/test-world-v12, content cache data/vanilla
-target/debug/solaris-v2 --config playable.toml
+target/debug/krasnokamen --config playable.toml
 ```
 
 `stop` on its stdin (or Ctrl+C) writes the final checkpoint. Edit
@@ -37,7 +37,7 @@ target/debug/solaris-v2 --config playable.toml
 
 ## 2. Start the client
 
-`dist/solaris-client` is a copied binary and goes stale: rebuild the current
+`dist/krasnokamen-client` is a copied binary and goes stale: rebuild the current
 source and refresh it before playing (needs the ALSA sysroot env below):
 
 ```sh
@@ -46,21 +46,21 @@ export PKG_CONFIG_PATH=$PWD/.analysis/build-support/usr/lib/x86_64-linux-gnu/pkg
 export LIBRARY_PATH=$PWD/.analysis/build-support/usr/lib/x86_64-linux-gnu
 export LD_LIBRARY_PATH=$PWD/.analysis/build-support/usr/lib/x86_64-linux-gnu
 CARGO_INCREMENTAL=0 /home/kaiserroman/solaris/.analysis/tools/mem-run.sh -m 6G nice -n 19 cargo build --release -j 2
-cp target/release/solaris-client dist/solaris-client
+cp target/release/krasnokamen-client dist/krasnokamen-client
 ```
 
 The player-ready bundle reads resource, username and address defaults next to
 the executable. Flags/environment still win.
 
-- `./dist/solaris-client play` opens the Title screen even when `client.toml`
+- `./dist/krasnokamen-client play` opens the Title screen even when `client.toml`
   supplies a server. Choose **Multiplayer** for the saved list, **Add Server**
   to persist an address, or **Direct Connect** to type an address and offline
   username.
 - An explicit `--server` retains direct joining:
 
 ```sh
-./dist/solaris-client play
-./dist/solaris-client play --profile offline-test --server 127.0.0.1:25565 --username Steve
+./dist/krasnokamen-client play
+./dist/krasnokamen-client play --profile offline-test --server 127.0.0.1:25565 --username Steve
 ```
 
 Saved servers live in `<exe-dir>/servers.json`; managed Options live in
@@ -71,7 +71,7 @@ After joining, the client stays on a Loading screen until the spawn chunk,
 its received light, and the spawn-area meshes have been uploaded and drawn.
 Gameplay input is not applied while this screen is visible.
 
-**Singleplayer** starts the bundled `solaris-v2` (next to the client or in
+**Singleplayer** starts the bundled `krasnokamen` (next to the client or in
 `<data>/servers/`) on a free loopback port for a world under `<data>/worlds/`;
 the pause menu then reads **Save & Quit to Title** and stops the server
 gracefully so the world checkpoints. See README.md for the full flow.

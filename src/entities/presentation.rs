@@ -1,14 +1,14 @@
 use super::{
-    resources::{self, BoneRole, Rig},
     Entity, Metadata, Models, Store,
+    resources::{self, BoneRole, Rig},
 };
 use crate::{
     api::{DynamicGeometry, EntityMaterial, RenderLayer, Vertex},
     inventory::Stack,
     protocol::{
+        Result,
         content::{Content, TextureRegion},
         models::{BakedModel, BakedQuad, TintKind},
-        Result,
     },
 };
 use glam::{Mat4, Vec3};
@@ -695,7 +695,10 @@ pub(super) fn evaluate_rig(
         && boolean(models, e, "DATA_BABY_ID")
         && e.equipment_value(0).is_some_and(|stack| !stack.empty()));
     let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
-    let spider = matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider");
+    let spider = matches!(
+        e.type_name.as_str(),
+        "minecraft:spider" | "minecraft:cave_spider"
+    );
     for bone in &rig.bones {
         let mut rotation = bone.rotation;
         let mut pivot = bone.pivot;
@@ -722,7 +725,11 @@ pub(super) fn evaluate_rig(
                 rotation.x += (phase + std::f32::consts::PI).cos() * 1.4 * amplitude * leg_swing
             }
             BoneRole::RightArm | BoneRole::LeftArm if zombie_arms => {
-                let side = if bone.role == BoneRole::RightArm { 1. } else { -1. };
+                let side = if bone.role == BoneRole::RightArm {
+                    1.
+                } else {
+                    -1.
+                };
                 rotation = zombie_arm_rotation(side, (zombie_arms_raised, aggressive), age, attack);
             }
             BoneRole::RightArm => {
@@ -794,9 +801,16 @@ pub(super) fn zombie_arm_rotation(
     use std::f32::consts::PI;
     let direction = if raised { 1. } else { -1. };
     let (swing, recover) = attack.map_or((0., 0.), |a| {
-        (direction * (a * PI).sin(), ((1. - (1. - a) * (1. - a)) * PI).sin())
+        (
+            direction * (a * PI).sin(),
+            ((1. - (1. - a) * (1. - a)) * PI).sin(),
+        )
     });
-    let base = if raised { -PI / if aggressive { 1.5 } else { 2.25 } } else { 0. };
+    let base = if raised {
+        -PI / if aggressive { 1.5 } else { 2.25 }
+    } else {
+        0.
+    };
     Vec3::new(
         base + swing * 1.2 - recover * 0.4 + side * (age * 0.067).sin() * 0.05,
         -direction * side * (0.1 - swing * 0.6),
@@ -1239,11 +1253,12 @@ pub fn special_item(
         ),
         _ => return Err(format!("unknown special item render family {kind}")),
     };
-    // Solaris-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
+    // Krasnokamen-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
     // resolves both. A key with neither renders the placeholder box (logged once) rather than
     // failing the GUI/hand item bake and with it the session.
     if !models.has_authored_rig(rig) {
-        static REPORTED: std::sync::Mutex<BTreeSet<String>> = std::sync::Mutex::new(BTreeSet::new());
+        static REPORTED: std::sync::Mutex<BTreeSet<String>> =
+            std::sync::Mutex::new(BTreeSet::new());
         if REPORTED
             .lock()
             .map_or(true, |mut seen| seen.insert(rig.to_owned()))

@@ -310,13 +310,16 @@ impl Session {
     /// Shared transport state is execution context, not an unsolicited full
     /// world query. Canonical observations run on demand on the session owner.
     pub(crate) fn execution_observation(&self) -> Observation {
-        self.observation_envelope(json!({
-            "snapshot_kind": "execution_context",
-            "phase": self.phase,
-            "error": self.error,
-            "presentation_available": self.presentation,
-            "state_version": self.state_version,
-        }), false)
+        self.observation_envelope(
+            json!({
+                "snapshot_kind": "execution_context",
+                "phase": self.phase,
+                "error": self.error,
+                "presentation_available": self.presentation,
+                "state_version": self.state_version,
+            }),
+            false,
+        )
     }
 
     fn observation_envelope(&self, data: Value, truncated: bool) -> Observation {
@@ -365,9 +368,10 @@ impl Session {
     pub(crate) fn spawn_meshes_ready(&self) -> bool {
         self.phase == "play"
             && self.play_world_presentation_ready()
-            && self.terrain.as_ref().is_some_and(|terrain| {
-                terrain.spawn_meshes_ready(self.player.eye_position())
-            })
+            && self
+                .terrain
+                .as_ref()
+                .is_some_and(|terrain| terrain.spawn_meshes_ready(self.player.eye_position()))
     }
     pub(crate) fn note_renderer_scene_confirmation(
         &mut self,
@@ -376,9 +380,9 @@ impl Session {
         revision: u64,
     ) {
         if (connection, dimension) == self.context_epochs()
-            && !self.renderer_scene_confirmation.is_some_and(|(c, d, _)| {
-                (c, d) == (connection, dimension)
-            })
+            && !self
+                .renderer_scene_confirmation
+                .is_some_and(|(c, d, _)| (c, d) == (connection, dimension))
         {
             self.renderer_scene_confirmation = Some((connection, dimension, revision));
             self.changed_state();
@@ -388,9 +392,11 @@ impl Session {
         !self.presentation
             || self.player.death_message.is_some()
             || self.player.health.is_some_and(|health| health <= 0.)
-            || self.renderer_scene_confirmation.is_some_and(|(connection, dimension, _)| {
-                (connection, dimension) == self.context_epochs()
-            })
+            || self
+                .renderer_scene_confirmation
+                .is_some_and(|(connection, dimension, _)| {
+                    (connection, dimension) == self.context_epochs()
+                })
     }
     pub(crate) fn play_world_presentation_ready(&self) -> bool {
         if !self.player.pose_known || self.dimension.is_none() {
@@ -422,7 +428,8 @@ impl Session {
                 Some("Preparing terrain and light")
             }
             _ => None,
-        }.map(str::to_owned);
+        }
+        .map(str::to_owned);
         let local_air = self.local_air_supply();
         if let Some(ui) = &mut self.ui {
             // armor: LivingEntity.getArmorValue floors minecraft:armor.
@@ -479,15 +486,20 @@ impl Session {
                     .permission_level
                     .is_some_and(|level| level >= 2),
             })?;
-            if self.presentation && self.inventory.screen_open
+            if self.presentation
+                && self.inventory.screen_open
                 && self.inventory.menu().kind == MenuKind::Inventory
             {
-                let textures = self.player.uuid.as_deref()
+                let textures = self
+                    .player
+                    .uuid
+                    .as_deref()
                     .and_then(|uuid| self.entities.player_profile(uuid))
                     .and_then(|profile| profile.textures);
                 ui.set_player_preview(
                     self.content.as_ref().ok_or("content unavailable")?,
-                    self.player.uuid.as_deref(), textures,
+                    self.player.uuid.as_deref(),
+                    textures,
                 )?;
             }
             if ui.screen() != crate::ui::Screen::Loader {
@@ -550,7 +562,11 @@ impl Session {
             false
         };
         let state_changed = self.scene_state_revision != self.revision;
-        if !animation_only && !state_changed && !mesh_changed && (self.scene.lightmap.is_some() || !world_ready) {
+        if !animation_only
+            && !state_changed
+            && !mesh_changed
+            && (self.scene.lightmap.is_some() || !world_ready)
+        {
             return Ok(false);
         }
         if !animation_only && !state_changed && self.scene.lightmap.is_some() {
@@ -572,10 +588,10 @@ impl Session {
         }
         self.scene.entity_presentation = Default::default();
         if !animation_only {
-        self.scene.overlay.vertices.clear();
-        for indices in &mut self.scene.overlay.indices {
-            indices.clear();
-        }
+            self.scene.overlay.vertices.clear();
+            for indices in &mut self.scene.overlay.indices {
+                indices.clear();
+            }
         }
         if world_ready {
             self.entities.sync_local_avatar(
@@ -587,52 +603,52 @@ impl Session {
             )?;
             self.entities.set_local_visible(self.camera_mode != 0);
             if !animation_only {
-            let medium = match self.player.eye_medium(
-                &self.world,
-                self.content.as_ref().ok_or("content unavailable")?,
-            )? {
-                Some(FluidKind::Water) => CameraMedium::Water,
-                Some(FluidKind::Lava) => CameraMedium::Lava,
-                None => CameraMedium::Atmospheric,
-            };
-            let facts = PlayerEnvironmentFacts {
-                medium,
-                spectator: self.player.game_mode == 3,
-                fire_resistance: self
-                    .player
-                    .effect_duration("minecraft:fire_resistance", self.client_tick)
-                    .is_some(),
-                night_vision_duration: self
-                    .player
-                    .effect_duration("minecraft:night_vision", self.client_tick),
-                blindness_duration: self
-                    .player
-                    .effect_duration("minecraft:blindness", self.client_tick),
-                darkness_present: self
-                    .player
-                    .effect_duration("minecraft:darkness", self.client_tick)
-                    .is_some(),
-                water_vision: self.player.water_vision,
-                conduit_power: self
-                    .player
-                    .effect_duration("minecraft:conduit_power", self.client_tick)
-                    .is_some(),
-                entity_tick: self.client_tick,
-                flat_world: self.flat_world,
-                ..Default::default()
-            };
-            self.scene.environment = self.environment.evaluate(
-                &self.world,
-                self.content.as_ref().ok_or("content unavailable")?,
-                self.scene.camera_position,
-                self.player.yaw,
-                self.player.pitch,
-                self.render_distance,
-                &facts,
-            )?;
-            self.scene.lightmap = self.environment.lightmap_texture();
-            self.scene.shader_game_time =
-                Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
+                let medium = match self.player.eye_medium(
+                    &self.world,
+                    self.content.as_ref().ok_or("content unavailable")?,
+                )? {
+                    Some(FluidKind::Water) => CameraMedium::Water,
+                    Some(FluidKind::Lava) => CameraMedium::Lava,
+                    None => CameraMedium::Atmospheric,
+                };
+                let facts = PlayerEnvironmentFacts {
+                    medium,
+                    spectator: self.player.game_mode == 3,
+                    fire_resistance: self
+                        .player
+                        .effect_duration("minecraft:fire_resistance", self.client_tick)
+                        .is_some(),
+                    night_vision_duration: self
+                        .player
+                        .effect_duration("minecraft:night_vision", self.client_tick),
+                    blindness_duration: self
+                        .player
+                        .effect_duration("minecraft:blindness", self.client_tick),
+                    darkness_present: self
+                        .player
+                        .effect_duration("minecraft:darkness", self.client_tick)
+                        .is_some(),
+                    water_vision: self.player.water_vision,
+                    conduit_power: self
+                        .player
+                        .effect_duration("minecraft:conduit_power", self.client_tick)
+                        .is_some(),
+                    entity_tick: self.client_tick,
+                    flat_world: self.flat_world,
+                    ..Default::default()
+                };
+                self.scene.environment = self.environment.evaluate(
+                    &self.world,
+                    self.content.as_ref().ok_or("content unavailable")?,
+                    self.scene.camera_position,
+                    self.player.yaw,
+                    self.player.pitch,
+                    self.render_distance,
+                    &facts,
+                )?;
+                self.scene.lightmap = self.environment.lightmap_texture();
+                self.scene.shader_game_time =
+                    Some((self.environment.game_time().rem_euclid(24000) as f32) / 24000.);
             }
             {
                 let content = self.content.as_ref().ok_or("content unavailable")?;
@@ -655,7 +671,13 @@ impl Session {
                     &sample_light,
                     &mut self.scene.dynamic,
                 )?;
-                let entity_indices = self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>();
+                let entity_indices = self
+                    .scene
+                    .dynamic
+                    .indices
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>();
                 self.scene.entity_presentation.entity_indices = entity_indices;
                 let blocks = self.entities.append_static_block_geometry(
                     content,
@@ -670,8 +692,14 @@ impl Session {
                     &sample_light,
                     &mut self.scene.dynamic,
                 )?;
-                self.scene.entity_presentation.block_entity_indices =
-                    self.scene.dynamic.indices.iter().map(Vec::len).sum::<usize>() - entity_indices;
+                self.scene.entity_presentation.block_entity_indices = self
+                    .scene
+                    .dynamic
+                    .indices
+                    .iter()
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    - entity_indices;
                 self.scene.entity_presentation.block_entities += blocks.block_entities;
                 self.scene.entity_presentation.vertices += blocks.vertices;
                 self.scene.entity_presentation.lighting_pending += blocks.lighting_pending;
@@ -731,10 +759,10 @@ impl Session {
                             light,
                         );
                         if let Err(reason) = result {
-                            self.scene.entity_presentation.unrendered.insert(
-                                "local:first_person".into(),
-                                reason,
-                            );
+                            self.scene
+                                .entity_presentation
+                                .unrendered
+                                .insert("local:first_person".into(), reason);
                         }
                     }
                 }
@@ -921,15 +949,27 @@ mod debug_tests {
         assert!(!session.spawn_meshes_presented());
         let epochs = session.context_epochs();
         session.note_renderer_scene_confirmation(epochs.0 + 1, epochs.1, 1);
-        assert!(!session.spawn_meshes_presented(), "stale renderer receipt must not release loading");
+        assert!(
+            !session.spawn_meshes_presented(),
+            "stale renderer receipt must not release loading"
+        );
         session.note_renderer_scene_confirmation(epochs.0, epochs.1, 1);
         assert!(session.spawn_meshes_presented());
         session.scene.revision += 1;
-        assert!(session.spawn_meshes_presented(), "later UI frames must not relock loading");
+        assert!(
+            session.spawn_meshes_presented(),
+            "later UI frames must not relock loading"
+        );
         session.dimension_epoch += 1;
-        assert!(!session.spawn_meshes_presented(), "respawn needs a fresh presented frame");
+        assert!(
+            !session.spawn_meshes_presented(),
+            "respawn needs a fresh presented frame"
+        );
         session.presentation = false;
-        assert!(session.spawn_meshes_presented(), "headless paths have no renderer");
+        assert!(
+            session.spawn_meshes_presented(),
+            "headless paths have no renderer"
+        );
     }
 }
 impl Session {
@@ -1340,8 +1380,15 @@ mod destruction_tests {
         assert_eq!(vertices.len(), 6 * 4);
         let lit = vertices.iter().filter(|v| v.light == [15., 15.]).count();
         let dark = vertices.iter().filter(|v| v.light == [0., 0.]).count();
-        assert_eq!(lit, 4, "only the +Y face sees the lit neighbor: {vertices:?}");
-        assert_eq!(dark, 5 * 4, "other faces keep the dark interior floor: {vertices:?}");
+        assert_eq!(
+            lit, 4,
+            "only the +Y face sees the lit neighbor: {vertices:?}"
+        );
+        assert_eq!(
+            dark,
+            5 * 4,
+            "other faces keep the dark interior floor: {vertices:?}"
+        );
     }
 }
 fn vector([x, y, z]: [f64; 3]) -> Value {

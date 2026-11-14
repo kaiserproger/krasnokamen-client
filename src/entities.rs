@@ -1,14 +1,15 @@
 //! Native protocol-775 remote presentation. Session remains the local physics/health owner.
 //! Derived model data is explicitly activated; no Java process is used by the client.
 mod analog;
+#[cfg(test)]
+mod animation_tests;
 mod block_components;
 mod blocks;
 mod display;
 mod dragon;
 mod equipment;
+mod krasnokamen_models;
 mod local;
-#[cfg(test)]
-mod animation_tests;
 mod metadata;
 mod nameplates;
 mod physical;
@@ -20,22 +21,21 @@ mod render_living;
 mod render_nameplates;
 mod render_special;
 mod resources;
+mod sheep;
 mod source_commands;
 mod source_state;
-mod sheep;
-mod solaris_models;
 mod villagers;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
-    protocol::{content::Content, Reader, Result},
+    protocol::{Reader, Result, content::Content},
 };
 use glam::Mat4;
 pub use metadata::Metadata;
 pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
-pub use presentation::{special_item, PresentationStats};
+pub use presentation::{PresentationStats, special_item};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
@@ -45,7 +45,7 @@ pub(crate) use render_blocks::{
 };
 pub use resources::Models;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::Path,
@@ -649,7 +649,11 @@ impl Store {
         let old = self.get(id).map(|e| cell(e.position));
         let new = cell(target.position);
         let revision = self.revision;
-        let phase = if self.frame_tick == tick { self.frame_partial } else { 0. };
+        let phase = if self.frame_tick == tick {
+            self.frame_partial
+        } else {
+            0.
+        };
         let old_span = self.get(id).map_or(0, |e| e.physical.lerp_span);
         self.remove_motion_span(old_span);
         if let Some(e) = self.get_mut(id) {
@@ -1589,7 +1593,9 @@ impl Store {
     ) -> Result<PresentationStats> {
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
-        if self.render_local_avatar && let Some(avatar) = self.local_avatar.take() {
+        if self.render_local_avatar
+            && let Some(avatar) = self.local_avatar.take()
+        {
             self.local_render_slot = Some(self.slots.len());
             self.slots.push(avatar);
         }

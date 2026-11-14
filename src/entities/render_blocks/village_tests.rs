@@ -387,7 +387,7 @@ fn village_bell_body_renders_and_swing_moves_it() {
 }
 
 /// Chest, trapped chest, ender chest and the festive/copper variants all select the one
-/// `minecraft:chest#main` rig; the Solaris-authored catalog must supply it even though the
+/// `minecraft:chest#main` rig; the Krasnokamen-authored catalog must supply it even though the
 /// activated `Models` carries no explicit entry (regression: the item bake used to demand an
 /// explicit `models.rigs` entry and killed the session with "special model rig not activated").
 #[test]

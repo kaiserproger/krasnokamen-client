@@ -8,7 +8,7 @@ use crate::{
     inventory::{InventoryStore, MenuKind},
     protocol::Result,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 impl UiState {
     pub(crate) fn rebuild(&mut self, inventory: &InventoryStore, content: &Content) -> Result<()> {
         self.nodes.clear();

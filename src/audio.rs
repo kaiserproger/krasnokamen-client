@@ -1233,8 +1233,9 @@ mod tests {
     use super::*;
     #[test]
     fn bundle_sound_rejects_compressed_codebook_allocation_bombs_before_decode() {
-        let bytes =
-            include_bytes!("../fixtures/content/assets/solaris_fixture/sounds/confirmation.ogg");
+        let bytes = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg"
+        );
         let (setup, _) = validate_bundle_ogg(bytes).unwrap();
         validate_vorbis_codebooks(&setup).unwrap();
         let mut bomb = b"\x05vorbis".to_vec();
@@ -1250,8 +1251,9 @@ mod tests {
     }
     #[test]
     fn bundle_sound_rejects_corrupt_truncated_or_non_vorbis_content() {
-        let bytes =
-            include_bytes!("../fixtures/content/assets/solaris_fixture/sounds/confirmation.ogg");
+        let bytes = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.ogg"
+        );
         let clip = PreparedSound::from_ogg(Arc::from(&bytes[..])).unwrap();
         assert_eq!(clip.rate, 48000);
         assert_eq!(clip.samples.len(), 12_000); // Authored quarter-second clip, without codec padding.
@@ -1266,8 +1268,9 @@ mod tests {
         appended.extend_from_slice(bytes);
         assert!(PreparedSound::from_ogg(Arc::from(appended)).is_err());
         assert!(PreparedSound::from_ogg(Arc::from(vec![0; 256 * 1024 + 1])).is_err());
-        let wav =
-            include_bytes!("../fixtures/content/assets/solaris_fixture/sounds/confirmation.wav");
+        let wav = include_bytes!(
+            "../fixtures/content/assets/krasnokamen_fixture/sounds/confirmation.wav"
+        );
         assert!(PreparedSound::from_ogg(Arc::from(&wav[..])).is_err());
     }
     #[test]

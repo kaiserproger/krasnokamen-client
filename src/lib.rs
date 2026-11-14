@@ -57,8 +57,8 @@ struct Options {
 }
 
 /// Resolves an artifact/runtime directory: absolute paths as given, relative ones
-/// under the client's data root (`--data-dir`, `$XDG_DATA_HOME/solaris-client`,
-/// `~/.local/share/solaris-client`). Never a compile-time path: release builds run
+/// under the client's data root (`--data-dir`, `$XDG_DATA_HOME/krasnokamen-client`,
+/// `~/.local/share/krasnokamen-client`). Never a compile-time path: release builds run
 /// on machines without the build checkout.
 fn artifact_root(path: &Path, data_root: &Path) -> Result<PathBuf, String> {
     if path
@@ -78,7 +78,10 @@ fn artifact_root(path: &Path, data_root: &Path) -> Result<PathBuf, String> {
 
 pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
     let mut args = args.into_iter().peekable();
-    if args.peek().is_some_and(|arg| arg.starts_with('-') && arg != "--help" && arg != "-h") {
+    if args
+        .peek()
+        .is_some_and(|arg| arg.starts_with('-') && arg != "--help" && arg != "-h")
+    {
         return launch::play(args);
     }
     match args.next().as_deref() {
@@ -86,7 +89,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
             let json_output = match args.next().as_deref() {
                 Some("--json") => true,
                 None => false,
-                _ => return Err("usage: solaris-client doctor [--json]".into()),
+                _ => return Err("usage: krasnokamen-client doctor [--json]".into()),
             };
             if args.next().is_some() {
                 return Err("unexpected_doctor_argument".into());
@@ -99,7 +102,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
                 );
             } else {
                 println!(
-                    "Solaris GPU doctor\n{}",
+                    "Krasnokamen GPU doctor\n{}",
                     serde_json::to_string_pretty(&evidence).map_err(|e| e.to_string())?
                 );
             }
@@ -108,7 +111,7 @@ pub fn cli(args: impl IntoIterator<Item = String>) -> Result<(), String> {
         Some("mcp") => {
             if args.next().as_deref() != Some("attach") {
                 return Err(
-                    "usage: solaris-client mcp attach --instance ID --stdio [--descriptor FILE]"
+                    "usage: krasnokamen-client mcp attach --instance ID --stdio [--descriptor FILE]"
                         .into(),
                 );
             }
@@ -256,8 +259,13 @@ impl App {
         // Synchronize derived UI state before building the snapshot. An idle
         // publication gate cannot rely on another turn to publish these nodes.
         if self.debug_overlay {
-            let render = self.shared.observation.lock().unwrap_or_else(|e| e.into_inner())
-                .data["render"].clone();
+            let render = self
+                .shared
+                .observation
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .data["render"]
+                .clone();
             let lines = self.session.debug_lines(&render);
             if let Some(ui) = self.session.ui_mut() {
                 ui.set_debug_lines(lines);
@@ -595,9 +603,13 @@ impl App {
             },
             None => None,
         };
-        let remaining = self.next_tick.saturating_duration_since(Instant::now()).as_secs_f32();
+        let remaining = self
+            .next_tick
+            .saturating_duration_since(Instant::now())
+            .as_secs_f32();
         let prepare_start = Instant::now();
-        self.session.prepare_frame((1. - remaining / 0.05).clamp(0., 1.))?;
+        self.session
+            .prepare_frame((1. - remaining / 0.05).clamp(0., 1.))?;
         let prepare_ms = prepare_start.elapsed().as_secs_f64() * 1000.;
         if let Some(renderer) = &mut self.renderer {
             let mut shared = self
@@ -610,14 +622,19 @@ impl App {
                 shared.data["gait_capture"] = self.session.capture_gait_frame();
             }
             renderer.render(self.session.scene(), capture, &shared)?;
-            self.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());
+            self.session
+                .release_uploaded_terrain(renderer.drain_uploaded_meshes());
             renderer.update_metrics(&mut shared.data["render"]);
             let epochs = self.session.context_epochs();
             if renderer.spawn_meshes_presented(
-                self.session.scene(), epochs, self.session.spawn_meshes_ready(),
+                self.session.scene(),
+                epochs,
+                self.session.spawn_meshes_ready(),
             ) {
                 self.session.note_renderer_scene_confirmation(
-                    epochs.0, epochs.1, self.session.scene().revision,
+                    epochs.0,
+                    epochs.1,
+                    self.session.scene().revision,
                 );
             }
             self.shared.changed.notify_all();
@@ -632,7 +649,10 @@ impl App {
             render["client_publish_skipped"] = json!(self.publish_skipped);
             render["cpu_session_tick_ms"] = json!(self.tick_cpu_ms);
             render["cpu_session_events_ms"] = json!(self.events_cpu_ms);
-            for (key, value) in session::TICK_DETAIL_NAMES.iter().zip(self.session.take_tick_detail()) {
+            for (key, value) in session::TICK_DETAIL_NAMES
+                .iter()
+                .zip(self.session.take_tick_detail())
+            {
                 render["cpu_session_tick_detail_ms"][*key] = json!(value);
             }
             self.advance_cpu_ms = 0.;
@@ -674,7 +694,9 @@ impl App {
         let mut advanced = 0;
         while now >= self.next_tick && advanced < 4 {
             let tick_start = Instant::now();
-            changed |= self.session.tick_after_events(events_drained && advanced == 0);
+            changed |= self
+                .session
+                .tick_after_events(events_drained && advanced == 0);
             self.tick_cpu_ms += tick_start.elapsed().as_secs_f64() * 1000.;
             self.next_tick += Duration::from_millis(50);
             advanced += 1;
@@ -698,7 +720,12 @@ impl App {
     }
 
     fn frame_interval(&self) -> Duration {
-        match self.session.native_setting("max_fps").and_then(serde_json::Value::as_u64).unwrap_or(120) {
+        match self
+            .session
+            .native_setting("max_fps")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(120)
+        {
             0 => Duration::ZERO,
             fps => Duration::from_secs_f64(1. / fps as f64),
         }
@@ -706,24 +733,45 @@ impl App {
 
     fn sync_native_window(&mut self) {
         let Some(window) = &self.window else { return };
-        let fullscreen = self.session.native_setting("fullscreen").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let fullscreen = self
+            .session
+            .native_setting("fullscreen")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
         if fullscreen != window.fullscreen().is_some() {
-            window.set_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
+            window
+                .set_fullscreen(fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
         }
         if let Some(renderer) = &mut self.renderer {
-            renderer.set_vsync(self.session.native_setting("vsync").and_then(serde_json::Value::as_bool).unwrap_or(true));
-            renderer.set_fancy_shaders(self.session.native_setting("fancy_shaders").and_then(serde_json::Value::as_bool).unwrap_or(true));
+            renderer.set_vsync(
+                self.session
+                    .native_setting("vsync")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+            );
+            renderer.set_fancy_shaders(
+                self.session
+                    .native_setting("fancy_shaders")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true),
+            );
         }
-        let game_input = self.focused && !self.occluded && self.session.phase() == "play"
-            && self.session.screen() == "game" && !self.session.chat_open()
+        let game_input = self.focused
+            && !self.occluded
+            && self.session.phase() == "play"
+            && self.session.screen() == "game"
+            && !self.session.chat_open()
             && !self.session.dialog_screen_active();
         if !game_input && self.cursor_locked {
             let _ = window.set_cursor_grab(CursorGrabMode::None);
             window.set_cursor_visible(true);
             self.cursor_locked = false;
-        } else if game_input && self.last_dialog_screen
-            && window.set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined)).is_ok()
+        } else if game_input
+            && self.last_dialog_screen
+            && window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                .is_ok()
         {
             window.set_cursor_visible(false);
             self.cursor_locked = true;
@@ -745,15 +793,22 @@ impl ApplicationHandler for App {
             return;
         }
         let title = if self.options.automation {
-            "Solaris Native Client — AUTOMATION ENABLED"
+            "Krasnokamen Native Client — AUTOMATION ENABLED"
         } else {
-            "Solaris Native Client"
+            "Krasnokamen Native Client"
         };
         let window = match event_loop.create_window(
             Window::default_attributes()
                 .with_title(title)
-                .with_inner_size(winit::dpi::PhysicalSize::new(self.options.width, self.options.height))
-                .with_fullscreen(self.options.fullscreen.then_some(winit::window::Fullscreen::Borderless(None))),
+                .with_inner_size(winit::dpi::PhysicalSize::new(
+                    self.options.width,
+                    self.options.height,
+                ))
+                .with_fullscreen(
+                    self.options
+                        .fullscreen
+                        .then_some(winit::window::Fullscreen::Borderless(None)),
+                ),
         ) {
             Ok(window) => Arc::new(window),
             Err(e) => {
@@ -1236,8 +1291,8 @@ impl ApplicationHandler for App {
             let revision = server.controller_revision();
             if revision != self.controller_revision {
                 let title = match server.controller_label() {
-                    Some(label) => format!("Solaris Native Client — Controller: {label}"),
-                    None => "Solaris Native Client — AUTOMATION ENABLED (no controller)".into(),
+                    Some(label) => format!("Krasnokamen Native Client — Controller: {label}"),
+                    None => "Krasnokamen Native Client — AUTOMATION ENABLED (no controller)".into(),
                 };
                 window.set_title(&title);
                 self.controller_revision = revision;
@@ -1272,11 +1327,14 @@ mod cpu_hotpath_advance_tests {
         assert!(!session.observation_changed_since_publish());
         // Any of the three triple components opens the gate.
         session.client_tick += 1;
-        assert!(session.observation_changed_since_publish(),
-            "client_tick movement (wait_ticks) must open the publish gate");
+        assert!(
+            session.observation_changed_since_publish(),
+            "client_tick movement (wait_ticks) must open the publish gate"
+        );
         session.note_published();
-        assert!(!session.observation_changed_since_publish(),
-            "noted publish must close the gate for the next idle turn");
+        assert!(
+            !session.observation_changed_since_publish(),
+            "noted publish must close the gate for the next idle turn"
+        );
     }
-
 }

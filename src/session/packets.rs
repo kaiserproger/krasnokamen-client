@@ -1,5 +1,5 @@
 use super::*;
-use crate::protocol::{self, world::Chunk, Reader};
+use crate::protocol::{self, Reader, world::Chunk};
 impl Session {
     fn initialize_player_attributes(&mut self) -> Result<()> {
         let schema = self
@@ -93,17 +93,17 @@ impl Session {
     }
     fn custom_payload(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let channel = r.string(32767)?;
-        if channel.starts_with("solaris:loader") {
+        if channel.starts_with("krasnokamen:loader") {
             let payload = r.take(r.bytes.len() - r.offset)?;
             match channel.as_str() {
-                "solaris:loader/manifest" if self.phase == "configuration" => {
+                "krasnokamen:loader/manifest" if self.phase == "configuration" => {
                     let grants = crate::loader::Loader::local_permissions()?;
                     let outgoing = self.loader.begin(payload, &grants)?;
                     self.send_loader(outgoing)?;
                 }
-                "solaris:loader/artifact" if self.phase == "configuration" => {
+                "krasnokamen:loader/artifact" if self.phase == "configuration" => {
                     if let Some(outgoing) = self.loader.artifact(payload)? {
-                        let activated = outgoing.channel == "solaris:loader/ack";
+                        let activated = outgoing.channel == "krasnokamen:loader/ack";
                         if activated {
                             self.activate_loader_content()?;
                             self.event(json!({"type":"loader_activated","platform":"native","origin":"hash_verified_received_bundle"}));
@@ -111,7 +111,7 @@ impl Session {
                         self.send_loader(outgoing)?;
                     }
                 }
-                "solaris:loader/view" if self.phase == "play" => {
+                "krasnokamen:loader/view" if self.phase == "play" => {
                     let ui = self
                         .ui
                         .as_mut()
@@ -124,7 +124,7 @@ impl Session {
                         Err(error) => self.event(json!({"type":"loader_view_rejected","error":error,"origin":"received_optional_payload"})),
                     }
                 }
-                "solaris:loader/sound" => {
+                "krasnokamen:loader/sound" => {
                     match self.loader.sound(
                         payload,
                         self.phase == "play" && self.network.is_some(),
@@ -854,10 +854,12 @@ mod tests {
             geometry.indices[crate::api::EntityMaterial::EntityCutout as usize].len(),
             64 * 6
         );
-        assert!(geometry
-            .vertices
-            .iter()
-            .all(|vertex| vertex.light == [15., 0.]));
+        assert!(
+            geometry
+                .vertices
+                .iter()
+                .all(|vertex| vertex.light == [15., 0.])
+        );
         let a = glam::Vec3::from_array(geometry.vertices[0].position);
         let b = glam::Vec3::from_array(geometry.vertices[1].position);
         let c = glam::Vec3::from_array(geometry.vertices[2].position);
@@ -1156,7 +1158,7 @@ mod tests {
     }
 
     fn sign_data_bytes(position: [i32; 3], kind: i32) -> Vec<u8> {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let text = |line: &str| {
             Tag::record([
                 (
@@ -1258,9 +1260,11 @@ mod tests {
             },
         );
         session.reconcile_ack(6).unwrap();
-        assert!(session.entities.block_entities[&position]
-            .predicted_data
-            .is_some());
+        assert!(
+            session.entities.block_entities[&position]
+                .predicted_data
+                .is_some()
+        );
         session.reconcile_ack(7).unwrap();
         assert_eq!(session.world.block(position), Some(0));
         assert_eq!(session.entities.block_entity_data(position), None);
@@ -1388,7 +1392,7 @@ mod tests {
 
     #[test]
     fn p1_review_non_sign_editor_preserves_open_menu_and_admission() {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let position = [-1, 3, -1];
         let mut session = sign_session(position, "minecraft:sign");
         session.receive_block(position, 0).unwrap();

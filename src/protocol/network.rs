@@ -1,12 +1,12 @@
-use super::{extract, frame, Reader, Result, Writer, MAX_FRAME};
+use super::{MAX_FRAME, Reader, Result, Writer, extract, frame};
 use parking_lot::Mutex;
 use std::{
     io::{Read, Write},
     net::{Shutdown, TcpStream, ToSocketAddrs},
     sync::{
+        Arc,
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender},
-        Arc,
     },
     thread,
     time::Duration,

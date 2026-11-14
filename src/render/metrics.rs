@@ -132,9 +132,10 @@ impl Renderer {
         });
         target["uploaded_texture_revision"] =
             json!(self.texture_revision.map(|revision| revision.to_string()));
-        target["gpu_activated_texture_revision"] = json!(self
-            .resource_revision()
-            .map(|revision| revision.to_string()));
+        target["gpu_activated_texture_revision"] = json!(
+            self.resource_revision()
+                .map(|revision| revision.to_string())
+        );
         target["resource_activation_frame_id"] =
             json!(self.texture_activation_frame.map(|frame| frame.to_string()));
         target["gpu_failed"] = json!(self.gpu_failed.load(Ordering::Acquire));
@@ -159,11 +160,11 @@ impl Renderer {
         });
         target["desired_maximum_frame_latency"] = json!(self.config.desired_maximum_frame_latency);
         target["terrain_multi_draw_indirect"] = json!(self.mdi.is_some() && !self.reference_mode);
-        target["terrain_indirect_candidates"] = json!(self.mdi.as_ref().map_or(0, |mdi| mdi
-            .candidates
-            .iter()
-            .map(Vec::len)
-            .sum::<usize>()));
+        target["terrain_indirect_candidates"] = json!(
+            self.mdi
+                .as_ref()
+                .map_or(0, |mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>())
+        );
         target["terrain_indirect_candidates_opaque"] = json!(self.stats.terrain_candidates_opaque);
         target["terrain_indirect_candidates_cutout"] = json!(self.stats.terrain_candidates_cutout);
         target["terrain_hiz_occlusion"] =
@@ -185,11 +186,12 @@ impl Renderer {
         target["shadow_terrain_api_calls"] = json!(self.stats.shadow_terrain_api_calls);
         target["shadow_terrain_logical_draws"] = json!(self.stats.shadow_terrain_logical_draws);
         target["shadow_terrain_indices"] = json!(self.stats.shadow_terrain_indices);
-        target["shadow_indirect_reserved_bytes"] = json!(self
-            .shadow
-            .batch
-            .as_ref()
-            .map_or(0, shadow::ShadowBatch::reserved_bytes));
+        target["shadow_indirect_reserved_bytes"] = json!(
+            self.shadow
+                .batch
+                .as_ref()
+                .map_or(0, shadow::ShadowBatch::reserved_bytes)
+        );
         target["entity_draws"] = json!(self.stats.entity_draws);
         target["entity_submitted_indices"] = json!(self.stats.entity_submitted_indices);
         // Entity/block-entity contributions share material draws.
@@ -210,10 +212,10 @@ impl Renderer {
         target["index_count"] = json!(self.stats.submitted_indices);
         target["draw_calls"] = json!(self.stats.draw_calls);
         target["frame_wall_ms"] = json!(self.last_frame_ms);
-        target["cpu_prepare_submit_ms"] = json!((self.last_frame_ms
-            - self.stats.surface_acquire_ms
-            - self.stats.present_call_ms)
-            .max(0.));
+        target["cpu_prepare_submit_ms"] = json!(
+            (self.last_frame_ms - self.stats.surface_acquire_ms - self.stats.present_call_ms)
+                .max(0.)
+        );
         target["cpu_upload_ms"] = json!(self.stats.upload_ms);
         target["cpu_visibility_sort_ms"] = json!(self.stats.visibility_ms);
         target["cpu_draw_encode_ms"] = json!(self.stats.draw_encode_ms);

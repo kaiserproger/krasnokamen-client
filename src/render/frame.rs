@@ -85,8 +85,8 @@ impl Renderer {
             && env.sky_kind == SkyKind::Overworld
             && env.fog_alpha >= 1.;
         let fog_sphere = (env.fog_start < env.fog_end).then_some(env.fog_end + FOG_MARGIN);
-        let fog_cylinder = (env.render_fog_start < env.render_fog_end)
-            .then_some(env.render_fog_end + FOG_MARGIN);
+        let fog_cylinder =
+            (env.render_fog_start < env.render_fog_end).then_some(env.render_fog_end + FOG_MARGIN);
         for (&key, chunk) in &mut self.chunks {
             if chunk.fade_duration_ms.is_none() {
                 self.stats.unknown_fade_policy_sections += 1;
@@ -122,8 +122,8 @@ impl Renderer {
             };
             let bounds_min = Vec3::from_array(chunk.bounds_min) - wind;
             let bounds_max = Vec3::from_array(chunk.bounds_max) + wind;
-            let in_frustum = self.reference_mode
-                || frustum.intersects(bounds_min + offset, bounds_max + offset);
+            let in_frustum =
+                self.reference_mode || frustum.intersects(bounds_min + offset, bounds_max + offset);
             if !self.reference_mode
                 && occlusion
                 && !visibility::reaches_bounds(key, bounds_min, bounds_max, &self.occlusion_reached)
@@ -142,9 +142,7 @@ impl Renderer {
                 continue;
             }
             // Nearest point of the section bounds to the camera (the origin).
-            let nearest = Vec3::ZERO
-                .max(bounds_min + offset)
-                .min(bounds_max + offset);
+            let nearest = Vec3::ZERO.max(bounds_min + offset).min(bounds_max + offset);
             // A section wholly past either fog end (spherical or the render
             // distance cylinder) is painted pure sky by the Fancy shader, so
             // drawing it only overpaints identical sky pixels. This is the
@@ -162,8 +160,9 @@ impl Renderer {
             self.instance_data
                 .push([offset.x, offset.y, offset.z, visibility]);
             self.visible.push(Visible { key, instance });
-            let local: [f32; 3] =
-                std::array::from_fn(|axis| (scene.camera_position[axis] - chunk.origin[axis]) as f32);
+            let local: [f32; 3] = std::array::from_fn(|axis| {
+                (scene.camera_position[axis] - chunk.origin[axis]) as f32
+            });
             let vegetation = nearest.length_squared() <= VEGETATION_RANGE * VEGETATION_RANGE;
             for material in 0..2 {
                 let runs = &mut self.terrain_runs[material];
@@ -172,13 +171,21 @@ impl Renderer {
                     // Reference path: whole layers, no facing partition.
                     let range = chunk.mesh.ranges[material].clone();
                     if !range.is_empty() {
-                        runs.push(TerrainRun { key, instance, range });
+                        runs.push(TerrainRun {
+                            key,
+                            instance,
+                            range,
+                        });
                     }
                 } else {
                     chunk
                         .mesh
                         .facing_runs(material, local, FACING_SLACK, vegetation, |range| {
-                            runs.push(TerrainRun { key, instance, range })
+                            runs.push(TerrainRun {
+                                key,
+                                instance,
+                                range,
+                            })
                         });
                     if runs.len() > mesh::MAX_CHUNKS {
                         // Candidate buffers are bounded: fall back to the whole layer.
@@ -478,7 +485,7 @@ impl Renderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Solaris complete frame"),
+                label: Some("Krasnokamen complete frame"),
             });
         self.timing.begin();
         let hiz = !self.reference_mode && self.mdi.as_ref().is_some_and(mdi::Indirect::hiz);
@@ -516,7 +523,8 @@ impl Renderer {
             pass.set_vertex_buffer(1, self.shadow.instances.slice(..));
             // Both terrain materials share the alpha-tested shadow pipeline.
             // Preserve caster/instance order in one native indirect batch.
-            let shadow_mdi = !self.reference_mode && self.mdi.is_some() && self.shadow.batch.is_some();
+            let shadow_mdi =
+                !self.reference_mode && self.mdi.is_some() && self.shadow.batch.is_some();
             if shadow_mdi {
                 let batch = self.shadow.batch.as_ref().expect("shadow batch armed");
                 let issued = u64::from(!batch.draws.is_empty());
@@ -613,7 +621,12 @@ impl Renderer {
         // blended entity geometry, which must still draw over all terrain.
         // (material, terrain, dynamic geometry)
         let stages: &[(usize, bool, bool)] = if hiz {
-            &[(0, true, false), (1, true, false), (1, false, true), (2, true, true)]
+            &[
+                (0, true, false),
+                (1, true, false),
+                (1, false, true),
+                (2, true, true),
+            ]
         } else {
             &[(0, true, true), (1, true, true), (2, true, true)]
         };
@@ -830,7 +843,11 @@ impl Renderer {
                 pass.set_bind_group(1, &self.atlas_bind, &[]);
                 pass.set_bind_group(2, &self.shadow.bind, &[]);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
-                if mdi.candidates.iter().any(|candidates| !candidates.is_empty()) {
+                if mdi
+                    .candidates
+                    .iter()
+                    .any(|candidates| !candidates.is_empty())
+                {
                     // Arenas exist only once something is resident.
                     pass.set_vertex_buffer(0, self.vertex_arena.whole());
                     pass.set_index_buffer(self.index_arena.whole(), wgpu::IndexFormat::Uint32);
@@ -1139,9 +1156,11 @@ mod terrain_translucency_tests {
         );
         assert!(draws[0].source == Source::Chunk([2, 0, 0]));
         assert!(draws[1].source == Source::Chunk([0, 0, 0]));
-        assert!(draws
-            .iter()
-            .all(|draw| draw.first == 12 && draw.count == 24));
+        assert!(
+            draws
+                .iter()
+                .all(|draw| draw.first == 12 && draw.count == 24)
+        );
         assert_eq!(draws.iter().map(|draw| draw.count).sum::<u32>(), 48);
         let dynamic = &renderer.transparent[renderer.transparent_ranges[0].clone()];
         assert_eq!(
@@ -1237,7 +1256,10 @@ mod terrain_translucency_tests {
         assert_eq!(renderer.stats.graph_reached_sections, 0);
         // Candidate counts need MDI hardware; the fallback path submits zero.
         let expected_candidates = u64::from(renderer.mdi.is_some());
-        assert_eq!(renderer.stats.terrain_candidates_opaque, expected_candidates);
+        assert_eq!(
+            renderer.stats.terrain_candidates_opaque,
+            expected_candidates
+        );
         assert_eq!(renderer.stats.terrain_candidates_cutout, 0);
         // Two base instance slots (null + presentation origin) plus exactly
         // the one visible section: the culled section takes no slot.
@@ -1260,10 +1282,15 @@ mod terrain_translucency_tests {
             renderer.stats.terrain_candidates_opaque,
             renderer.stats.terrain_candidates_cutout,
             renderer.instance_data.len(),
-            renderer.mdi.as_ref().map(|mdi| {
-                mdi.candidates.iter().map(Vec::len).sum::<usize>()
-            }),
-            renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>(),
+            renderer
+                .mdi
+                .as_ref()
+                .map(|mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>()),
+            renderer
+                .visible
+                .iter()
+                .map(|visible| visible.key)
+                .collect::<Vec<_>>(),
         );
         let empty_view = Mat4::from_translation(Vec3::new(10_000., 0., 0.));
         renderer.prepare_visibility(&scene, empty_view).unwrap();
@@ -1277,16 +1304,32 @@ mod terrain_translucency_tests {
             renderer.stats.terrain_candidates_opaque,
             renderer.stats.terrain_candidates_cutout,
             renderer.instance_data.len(),
-            renderer.mdi.as_ref().map(|mdi| {
-                mdi.candidates.iter().map(Vec::len).sum::<usize>()
-            }),
-            renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>(),
+            renderer
+                .mdi
+                .as_ref()
+                .map(|mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>()),
+            renderer
+                .visible
+                .iter()
+                .map(|visible| visible.key)
+                .collect::<Vec<_>>(),
         );
-        assert_eq!(restored, snapshot, "A-B-A view must restore identical submission");
-        let mut keys = renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>();
+        assert_eq!(
+            restored, snapshot,
+            "A-B-A view must restore identical submission"
+        );
+        let mut keys = renderer
+            .visible
+            .iter()
+            .map(|visible| visible.key)
+            .collect::<Vec<_>>();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), renderer.visible.len(), "visible keys must not duplicate");
+        assert_eq!(
+            keys.len(),
+            renderer.visible.len(),
+            "visible keys must not duplicate"
+        );
     }
 
     #[test]

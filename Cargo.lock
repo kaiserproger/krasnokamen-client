@@ -3316,7 +3316,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solaris-client"
+name = "krasnokamen-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3351,7 +3351,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solaris-launcher"
+name = "krasnokamen-launcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",

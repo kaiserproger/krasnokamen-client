@@ -1,14 +1,14 @@
 [package]
-name = "solaris-client"
+name = "krasnokamen-client"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Independent native Minecraft Java client for Solaris"
+description = "Independent native Minecraft Java client for Krasnokamen"
 publish = false
 
 [[bin]]
-name = "solaris-client"
+name = "krasnokamen-client"
 path = "src/main.rs"
 
 [dependencies]
@@ -58,5 +58,5 @@ codegen-units = 16
 
 [patch.crates-io]
 # Vendored winit 0.30.12 with one X11 fix: wheel buttons 4..=7 ignore Released
-# (see vendor/winit/SOLARIS_PATCH.md). Upstream 0.30.13 still has the bug.
+# (see vendor/winit/KRASNOKAMEN_PATCH.md). Upstream 0.30.13 still has the bug.
 winit = { path = "vendor/winit" }

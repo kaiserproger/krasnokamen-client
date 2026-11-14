@@ -1,8 +1,8 @@
 //! Protocol-775 PlayerInfo and presentation profile lifetimes.
 //! Signature validation/download/atlas publication is parent-owned; raw properties never
 //! become trusted merely because a server supplied them.
-use super::{metadata, Store};
-use crate::protocol::{content::TextureRegion, Reader, Result};
+use super::{Store, metadata};
+use crate::protocol::{Reader, Result, content::TextureRegion};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};

@@ -3,8 +3,9 @@ use crate::api::{Observation, Shared};
 use parking_lot::Mutex;
 use serde_json::json;
 use std::sync::{
+    Arc, Condvar,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Condvar,
+    mpsc,
 };
 use std::time::{Duration, Instant};
 

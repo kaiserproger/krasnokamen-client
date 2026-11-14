@@ -1,4 +1,4 @@
-# Solaris Native Client agent route
+# Krasnokamen Native Client agent route
 
 Read `SPECIFICATION.md` for the complete immutable source/requirement ledger, `LONG_TERM_PLAN.md` for the **single** live cursor, `COMPATIBILITY_MATRIX.md` for actual coverage, then `docs/AGENT_TESTING.md` before controlling/testing a client. A new session uses live describe/capabilities/schemas and chooses an exact instance/profile; proposed commands are not proof of implemented CLI. Runtime evidence overrides aspirations.
 

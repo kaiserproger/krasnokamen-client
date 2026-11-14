@@ -46,10 +46,7 @@ impl Session {
                 // Title additionally runs pre-play; the dialog arm below only
                 // fires in play, the title path goes through execute_ui's gate.
                 if (self.phase == "play"
-                    || self
-                        .ui
-                        .as_ref()
-                        .is_some_and(UiState::shell_screen_active))
+                    || self.ui.as_ref().is_some_and(UiState::shell_screen_active))
                     && self.ui.as_ref().is_some_and(|ui| {
                         ui.dialog_screen_active() && !ui.has_open_container(&self.inventory)
                     })
@@ -168,7 +165,10 @@ impl Session {
         let eye = self.player.eye_position();
         let reach = self.player.attribute("minecraft:entity_interaction_range");
         let nearest: [f64; 3] = std::array::from_fn(|a| eye[a].clamp(bounds.min[a], bounds.max[a]));
-        let distance = (0..3).map(|a| (nearest[a] - eye[a]).powi(2)).sum::<f64>().sqrt();
+        let distance = (0..3)
+            .map(|a| (nearest[a] - eye[a]).powi(2))
+            .sum::<f64>()
+            .sqrt();
         let (yaw, pitch) = (self.player.yaw, self.player.pitch);
         if distance > reach {
             return Ok(Some(format!(
@@ -210,9 +210,9 @@ impl Session {
                 -delta[1].atan2(horizontal).to_degrees() as f32,
             )?;
             let content = self.content.as_ref().ok_or("content unavailable")?;
-            let hit = self
-                .player
-                .raycast(&self.world, content, &self.entities, self.client_tick)?;
+            let hit =
+                self.player
+                    .raycast(&self.world, content, &self.entities, self.client_tick)?;
             if matches!(hit, Some(Hit::Entity { handle: target, .. }) if target == handle) {
                 if !apply {
                     self.player.look(yaw, pitch)?;
@@ -228,9 +228,9 @@ impl Session {
             -delta[1].atan2(delta[0].hypot(delta[2])).to_degrees() as f32,
         )?;
         let content = self.content.as_ref().ok_or("content unavailable")?;
-        let blocker = self
-            .player
-            .raycast(&self.world, content, &self.entities, self.client_tick)?;
+        let blocker =
+            self.player
+                .raycast(&self.world, content, &self.entities, self.client_tick)?;
         self.player.look(yaw, pitch)?;
         Ok(Some(match blocker {
             Some(Hit::Block(hit)) => format!(
@@ -375,10 +375,7 @@ impl Session {
         // Title screen runs pre-play: the title UI is installed with real
         // Content at startup, so the full UiState::execute path works once
         // content exists. Only title-safe intents pass (no containers).
-        if self
-            .ui
-            .as_ref()
-            .is_some_and(UiState::shell_screen_active)
+        if self.ui.as_ref().is_some_and(UiState::shell_screen_active)
             && self.content.is_some()
             && is_title_intent(&intent)
         {
@@ -741,7 +738,11 @@ impl Session {
             json!(self.damage_tilt_strength),
         );
         out.insert("volume".into(), json!(self.volume));
-        out.extend(self.presentation_settings.iter().map(|(key, value)| (key.clone(), value.clone())));
+        out.extend(
+            self.presentation_settings
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         if let Some(ui) = &self.ui {
             if let Some(scale) = ui
                 .setting("ui_scale")
@@ -769,7 +770,8 @@ impl Session {
             }
             match *key {
                 "fullscreen" | "vsync" | "max_fps" | "fancy_shaders" | "ui_scale" => {
-                    self.presentation_settings.insert((*key).into(), clean.clone());
+                    self.presentation_settings
+                        .insert((*key).into(), clean.clone());
                 }
                 "render_distance" => {
                     if let Some(n) = clean.as_u64() {
@@ -1457,5 +1459,4 @@ mod render_distance_wire_tests {
             Some(json!(UiState::MIN_RENDER_DISTANCE)),
         );
     }
-
 }

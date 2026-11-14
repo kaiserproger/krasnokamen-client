@@ -16,8 +16,8 @@
 //! (`bloom_horizontal`), 14 (`bloom_vertical`) and 15 (Off copy, Fancy
 //! `aces_tonemap`), so A/B totals stay comparable across modes.
 
-use super::timing::Timing;
 use super::COLOR;
+use super::timing::Timing;
 use wgpu::util::DeviceExt;
 
 pub(super) const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -161,7 +161,7 @@ impl Post {
         });
 
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solaris HDR postprocess"),
+            label: Some("Krasnokamen HDR postprocess"),
             source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").into()),
         });
         let fullscreen = |fragment: &str, format: wgpu::TextureFormat| {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the data-only Solaris facts bundle from <repo>/dist and the matching
+# Build the data-only Krasnokamen facts bundle from <repo>/dist and the matching
 # content manifest for the static file server.
 #
 # Public-bundle allowlist (owner rule): the bundle may contain only pure
@@ -30,7 +30,7 @@ REPO="$(dirname "$SCRIPT_DIR")"
 DIST="${DIST:-$REPO/dist}"
 OUT_DIR="${OUT_DIR:-$REPO/target/publish}"
 GAME_VERSION="26.1.2"
-NAME="solaris-facts-${GAME_VERSION}-r${REV}"
+NAME="krasnokamen-facts-${GAME_VERSION}-r${REV}"
 BASE_URL="http://135.106.208.217:8080/static"
 
 FACTS_FILES=(
@@ -130,7 +130,7 @@ tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
 
 SHA="$(sha256sum "$OUT" | awk '{print $1}')"
 SIZE="$(stat -c%s "$OUT")"
-JSON="$OUT_DIR/solaris-content.json"
+JSON="$OUT_DIR/krasnokamen-content.json"
 cat > "$JSON" <<EOF
 {
   "schema": 1,

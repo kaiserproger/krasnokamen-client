@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 
-pub const DEFAULT_MANIFEST: &str = "http://135.106.208.217:8080/static/solaris-content.json";
+pub const DEFAULT_MANIFEST: &str = "http://135.106.208.217:8080/static/krasnokamen-content.json";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Profile {
@@ -35,7 +35,7 @@ impl Default for Config {
             }],
             selected_profile: 0,
             servers: vec![Server {
-                name: "Solaris test".into(),
+                name: "Krasnokamen test".into(),
                 address: "135.106.208.217:25565".into(),
             }],
             selected_server: 0,
@@ -156,7 +156,10 @@ pub fn render_distance(settings: &ClientSettings) -> u32 {
 }
 
 pub fn fullscreen(settings: &ClientSettings) -> bool {
-    settings.get("fullscreen").and_then(|v| v.as_bool()).unwrap_or(false)
+    settings
+        .get("fullscreen")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

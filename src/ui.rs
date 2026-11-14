@@ -280,7 +280,7 @@ pub enum UiIntent {
 /// Closed shape shared by the MCP catalog and the ordinary typed input parser.
 /// Availability and context fences belong to the UI executor, not this schema.
 pub fn intent_schema() -> serde_json::Value {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::sync::LazyLock;
     static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
         fn object(fields: Value, required: &[&str]) -> Value {

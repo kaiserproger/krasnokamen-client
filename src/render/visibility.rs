@@ -62,11 +62,11 @@ const OFFSETS: [[i32; 3]; 6] = [
 ];
 
 static OCCLUSION: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
-    std::env::var_os("SOLARIS_CLIENT_OCCLUSION").is_none_or(|v| v != "0")
+    std::env::var_os("KRASNOKAMEN_CLIENT_OCCLUSION").is_none_or(|v| v != "0")
 });
 
-/// Same-binary A/B bypass: `SOLARIS_CLIENT_OCCLUSION=0` restores frustum-only
-/// culling. Captured once at process startup, like `SOLARIS_CLIENT_GREEDY`.
+/// Same-binary A/B bypass: `KRASNOKAMEN_CLIENT_OCCLUSION=0` restores frustum-only
+/// culling. Captured once at process startup, like `KRASNOKAMEN_CLIENT_GREEDY`.
 pub(super) fn occlusion_enabled() -> bool {
     *OCCLUSION
 }

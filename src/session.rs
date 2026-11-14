@@ -2,9 +2,9 @@
 mod actions;
 mod block_effects;
 mod block_motion;
-mod local_server;
 #[cfg(test)]
 mod entity_aim_tests;
+mod local_server;
 #[cfg(test)]
 mod mining_start_tests;
 mod observation;
@@ -46,9 +46,17 @@ struct Loaded {
 }
 
 pub(crate) const TICK_DETAIL_NAMES: [&str; 11] = [
-    "events", "environment", "player_environment_context", "world_border",
-    "block_effects", "player", "entities_presentation", "entities_block_sources",
-    "ui_synchronize", "commands_effects_atlas", "refresh_scene",
+    "events",
+    "environment",
+    "player_environment_context",
+    "world_border",
+    "block_effects",
+    "player",
+    "entities_presentation",
+    "entities_block_sources",
+    "ui_synchronize",
+    "commands_effects_atlas",
+    "refresh_scene",
 ];
 
 pub struct Session {
@@ -270,7 +278,11 @@ impl Session {
                 _ => {}
             }
         }
-        if self.inventory.screen_open { "inventory" } else { "game" }
+        if self.inventory.screen_open {
+            "inventory"
+        } else {
+            "game"
+        }
     }
     pub fn enable_native_shell(&mut self) {
         self.title_allowed = true;
@@ -332,7 +344,8 @@ impl Session {
     }
 
     pub(crate) fn release_uploaded_terrain(
-        &mut self, uploaded: impl IntoIterator<Item = ([i32; 3], u64)>,
+        &mut self,
+        uploaded: impl IntoIterator<Item = ([i32; 3], u64)>,
     ) {
         if let Some(terrain) = &mut self.terrain {
             terrain.release_uploaded(&mut self.scene.chunks, uploaded);
@@ -436,10 +449,10 @@ impl Session {
         let username = username.to_owned();
         // Sanitized Options radius (chunks); the worker echoes it in every
         // Configuration ClientInformation instead of the old hardcoded 4.
-        let view_distance = self.render_distance.clamp(
-            UiState::MIN_RENDER_DISTANCE,
-            UiState::MAX_RENDER_DISTANCE,
-        ) as u8;
+        let view_distance = self
+            .render_distance
+            .clamp(UiState::MIN_RENDER_DISTANCE, UiState::MAX_RENDER_DISTANCE)
+            as u8;
         let wake = self.wake_callback();
         let presentation = self.presentation;
         thread::Builder::new()
@@ -459,7 +472,8 @@ impl Session {
                         crate::entities::Models::load_state(&content)?
                     });
                     eprintln!("session startup: connecting network");
-                    let network = Network::connect(endpoint, username, view_distance, wake.clone())?;
+                    let network =
+                        Network::connect(endpoint, username, view_distance, wake.clone())?;
                     Ok(Loaded {
                         content,
                         network,
@@ -569,7 +583,9 @@ impl Session {
         self.events.push_back(value);
     }
     fn connection_defaults(&self) -> Option<(String, String)> {
-        self.address.clone().zip(self.username.clone())
+        self.address
+            .clone()
+            .zip(self.username.clone())
             .or_else(|| self.ui.as_ref().map(UiState::title_defaults))
     }
     fn fail(&mut self, error: String) {
@@ -748,10 +764,8 @@ impl Session {
                 if let Some(network) = self.network.as_ref() {
                     network.set_view_distance(
                         self.render_distance
-                            .clamp(
-                                UiState::MIN_RENDER_DISTANCE,
-                                UiState::MAX_RENDER_DISTANCE,
-                            ) as u8,
+                            .clamp(UiState::MIN_RENDER_DISTANCE, UiState::MAX_RENDER_DISTANCE)
+                            as u8,
                     );
                 }
                 if self.presentation && self.terrain.is_none() {
@@ -807,12 +821,7 @@ impl Session {
                 (self.wake_callback())();
             }
         }
-        if self.phase == "play"
-            || self
-                .ui
-                .as_ref()
-                .is_some_and(UiState::shell_screen_active)
-        {
+        if self.phase == "play" || self.ui.as_ref().is_some_and(UiState::shell_screen_active) {
             match self.refresh_scene() {
                 Ok(value) => changed |= value,
                 Err(error) => {
@@ -836,7 +845,11 @@ impl Session {
     /// stay in `prepare_frame`.
     pub fn tick_after_events(&mut self, events_drained: bool) -> bool {
         let events_start = Instant::now();
-        let mut changed = if events_drained { false } else { self.process_events() };
+        let mut changed = if events_drained {
+            false
+        } else {
+            self.process_events()
+        };
         self.tick_detail_ms[0] += events_start.elapsed().as_secs_f64() * 1000.;
         if self.phase == "fixture" {
             self.client_tick += 1;
@@ -971,7 +984,11 @@ impl Session {
                 self.scene.pitch = -self.scene.pitch;
             }
         }
-        self.scene.roll_deg = if self.camera_mode == 0 { view.roll_deg } else { 0. };
+        self.scene.roll_deg = if self.camera_mode == 0 {
+            view.roll_deg
+        } else {
+            0.
+        };
         self.scene.fov_deg = self.fov_deg * view.fov;
         self.scene.hurt_tilt_deg = self.player.hurt_tilt_deg(
             self.client_tick,
@@ -1032,7 +1049,11 @@ impl Session {
     pub(crate) fn prepare_frame(&mut self, partial: f32) -> Result<()> {
         self.animate_ui();
         if self.presentation && self.phase == "play" && self.player.pose_known {
-            self.presentation_partial = if self.server_frozen { 0. } else { partial.clamp(0., 1.) };
+            self.presentation_partial = if self.server_frozen {
+                0.
+            } else {
+                partial.clamp(0., 1.)
+            };
             self.player
                 .visual_animate(self.client_tick as f64 + f64::from(self.presentation_partial));
             if let Some(terrain) = &mut self.terrain {
@@ -1185,11 +1206,29 @@ mod title_connection_tests {
         session.ui = Some(UiState::new_state(&content).unwrap());
         session.content = Some(content);
         session.phase = "play".into();
-        session.input(InputIntent::Key { key: "forward".into(), pressed: true }).unwrap();
-        session.input(InputIntent::Key { key: "ui_cancel".into(), pressed: true }).unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "forward".into(),
+                pressed: true,
+            })
+            .unwrap();
+        session
+            .input(InputIntent::Key {
+                key: "ui_cancel".into(),
+                pressed: true,
+            })
+            .unwrap();
         assert_eq!(session.screen(), "pause");
-        assert!(session.keys.is_empty(), "opening pause must release movement");
-        session.input(InputIntent::Key { key: "ui_cancel".into(), pressed: true }).unwrap();
+        assert!(
+            session.keys.is_empty(),
+            "opening pause must release movement"
+        );
+        session
+            .input(InputIntent::Key {
+                key: "ui_cancel".into(),
+                pressed: true,
+            })
+            .unwrap();
         assert_eq!(session.screen(), "game");
     }
     #[test]
@@ -1207,7 +1246,10 @@ mod title_connection_tests {
         let mut session = Session::new_mode("shell-settings".into(), false);
         session.apply_persisted_settings(BTreeMap::from([("ui_scale".into(), json!(2.))]));
         assert!(session.ui.is_none());
-        assert_eq!(session.client_settings_snapshot().get("ui_scale"), Some(&json!(2.)));
+        assert_eq!(
+            session.client_settings_snapshot().get("ui_scale"),
+            Some(&json!(2.))
+        );
     }
 
     #[test]
@@ -1266,7 +1308,11 @@ mod cpu_hotpath_tests {
         let mut session = Session::new_mode("cpu-fixture".into(), false);
         let tick = session.client_tick;
         assert!(session.tick(), "fixture tick must report changed");
-        assert_eq!(session.client_tick, tick + 1, "block effects stay on the 20Hz tick");
+        assert_eq!(
+            session.client_tick,
+            tick + 1,
+            "block effects stay on the 20Hz tick"
+        );
     }
 
     #[test]
@@ -1280,9 +1326,15 @@ mod cpu_hotpath_tests {
         // Frozen server: the whole 20Hz game tick (block effects included)
         // is skipped until steps arrive.
         assert!(!session.tick(), "frozen idle tick must report unchanged");
-        assert_eq!(session.client_tick, tick, "frozen server must not advance game ticks");
+        assert_eq!(
+            session.client_tick, tick,
+            "frozen server must not advance game ticks"
+        );
         // Drained-first entry agrees with the direct entry when frozen.
-        assert!(!session.tick_after_events(true), "drained frozen tick must also report unchanged");
+        assert!(
+            !session.tick_after_events(true),
+            "drained frozen tick must also report unchanged"
+        );
         assert_eq!(session.client_tick, tick);
     }
 
@@ -1317,17 +1369,28 @@ mod cpu_hotpath_tests {
         session.phase = "play".into();
         session.player.pose_known = true;
         session.world = World::new(0, 16);
-        session.environment.activate_dimension("minecraft:overworld", &json!({
-            "min_y": 0, "height": 16, "has_skylight": true, "has_ceiling": false,
-            "attributes": {},
-        }), session.client_tick).unwrap();
+        session
+            .environment
+            .activate_dimension(
+                "minecraft:overworld",
+                &json!({
+                    "min_y": 0, "height": 16, "has_skylight": true, "has_ceiling": false,
+                    "attributes": {},
+                }),
+                session.client_tick,
+            )
+            .unwrap();
         // Missing chunk short-circuits the game tick after environment work,
         // so detail must still carry those stages without a content install.
         session.tick_after_events(true);
         let detail = session.take_tick_detail();
         assert!(detail[1] > 0., "environment work must be measured");
         assert!(detail[2] > 0., "player context work must be measured");
-        assert_eq!(session.take_tick_detail(), [0.; 11], "take must drain accumulators");
+        assert_eq!(
+            session.take_tick_detail(),
+            [0.; 11],
+            "take must drain accumulators"
+        );
     }
 
     #[test]
@@ -1349,11 +1412,18 @@ mod cpu_hotpath_tests {
     fn cpu_publish_snapshot_contains_current_debug_nodes_without_another_turn() {
         use crate::protocol::world::{Chunk, Palette, Section, SurfaceHeightmap};
         let options = crate::Options {
-            automation: false, bind: "127.0.0.1:0".parse().unwrap(),
-            artifacts: ".analysis/clientcpu-regression".into(), headless: Some(true),
+            automation: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            artifacts: ".analysis/clientcpu-regression".into(),
+            headless: Some(true),
             runtime_dir: ".analysis/clientcpu-regression/runtime".into(),
-            profile: "fixture".into(), server: None, direct_join: false, username: None,
-            width: 1280, height: 720, fullscreen: false,
+            profile: "fixture".into(),
+            server: None,
+            direct_join: false,
+            username: None,
+            width: 1280,
+            height: 720,
+            fullscreen: false,
         };
         let mut app = crate::App::new(options, Arc::new(|| {})).unwrap();
         let mut content = Content::test_cube();
@@ -1366,35 +1436,60 @@ mod cpu_hotpath_tests {
         app.session.dimension = Some("minecraft:overworld".into());
         app.session.player.pose_known = true;
         app.session.world = World::new(0, 16);
-        let uniform = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
+        let uniform = |size| Palette {
+            bits: 0,
+            values: vec![0],
+            words: Vec::new(),
+            size,
+        };
         for x in -1..=1 {
             for z in -1..=1 {
-                app.session.world.insert([x, z], Chunk {
-                    sections: vec![Arc::new(Section {
-                        blocks: uniform(4096), biomes: uniform(64), non_empty_block_count: 0,
-                    })],
-                    sky: BTreeMap::from([(1, Arc::new(vec![0xff; 2048]))]),
-                    block: BTreeMap::from([(1, Arc::new(vec![0; 2048]))]),
-                    block_entities: crate::protocol::world::empty_block_entities(),
-                    surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
-                    surface_heightmap_received: false,
-                }).unwrap();
+                app.session
+                    .world
+                    .insert(
+                        [x, z],
+                        Chunk {
+                            sections: vec![Arc::new(Section {
+                                blocks: uniform(4096),
+                                biomes: uniform(64),
+                                non_empty_block_count: 0,
+                            })],
+                            sky: BTreeMap::from([(1, Arc::new(vec![0xff; 2048]))]),
+                            block: BTreeMap::from([(1, Arc::new(vec![0; 2048]))]),
+                            block_entities: crate::protocol::world::empty_block_entities(),
+                            surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+                            surface_heightmap_received: false,
+                        },
+                    )
+                    .unwrap();
             }
         }
         app.publish_session();
         let has_debug = |app: &crate::App| {
             let observed = app.session.minecraft_observation();
-            observed["ui_nodes"].as_array().unwrap().iter()
+            observed["ui_nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
                 .any(|node| node["id"] == "debug/line/0")
         };
         app.debug_overlay = true;
         app.publish_session();
-        assert!(has_debug(&app), "the enabling publication itself must contain fresh nodes");
+        assert!(
+            has_debug(&app),
+            "the enabling publication itself must contain fresh nodes"
+        );
         app.publish_session_if_changed(false);
-        assert!(has_debug(&app), "idle skipping must not conceal the fresh nodes");
+        assert!(
+            has_debug(&app),
+            "idle skipping must not conceal the fresh nodes"
+        );
         app.debug_overlay = false;
         app.publish_session();
-        assert!(!has_debug(&app), "the disabling publication must remove old debug nodes");
+        assert!(
+            !has_debug(&app),
+            "the disabling publication must remove old debug nodes"
+        );
     }
 }
 
@@ -1414,14 +1509,32 @@ fn cpu_hotpath_execution_context_is_bounded_and_preserves_fences() {
     assert_eq!(compact.dimension_epoch, full.dimension_epoch);
     assert_eq!(compact.resource_epoch, full.resource_epoch);
     assert_eq!(compact.state_revision, full.state_revision);
-    assert_eq!(compact.last_applied_packet_sequence, full.last_applied_packet_sequence);
+    assert_eq!(
+        compact.last_applied_packet_sequence,
+        full.last_applied_packet_sequence
+    );
     assert_eq!(compact.client_tick, full.client_tick);
     assert_eq!(compact.data["snapshot_kind"], json!("execution_context"));
     assert_eq!(compact.data["presentation_available"], json!(false));
     assert_eq!(compact.data.as_object().unwrap().len(), 5);
-    for heavy in ["entities", "inventory", "loaded_blocks", "minecraft", "terrain"] {
-        assert!(compact.data.get(heavy).is_none(), "{heavy} must stay on-demand");
+    for heavy in [
+        "entities",
+        "inventory",
+        "loaded_blocks",
+        "minecraft",
+        "terrain",
+    ] {
+        assert!(
+            compact.data.get(heavy).is_none(),
+            "{heavy} must stay on-demand"
+        );
     }
-    assert!(full.data["entities"].is_object(), "explicit full snapshots remain available");
-    assert!(session.minecraft_observation().is_object(), "canonical queries still run on the real owner");
+    assert!(
+        full.data["entities"].is_object(),
+        "explicit full snapshots remain available"
+    );
+    assert!(
+        session.minecraft_observation().is_object(),
+        "canonical queries still run on the real owner"
+    );
 }

@@ -1,7 +1,7 @@
 //! Native shell menus. Only addresses/settings are persisted, never server resources.
 use super::{
-    state::{NodeAction, Paint},
     Screen, UiState,
+    state::{NodeAction, Paint},
 };
 use crate::protocol::Result;
 use serde::{Deserialize, Serialize};
@@ -131,7 +131,11 @@ impl UiState {
         self.panel();
         let cx = self.width / 2.;
         let mark_y = (self.height * 0.13).floor();
-        self.label("title/name", "Solaris".into(), [cx - 150., mark_y, 300., 36.])?;
+        self.label(
+            "title/name",
+            "Krasnokamen".into(),
+            [cx - 150., mark_y, 300., 36.],
+        )?;
         self.label(
             "title/subtitle",
             "Minecraft 26.1.2 · Native client".into(),
@@ -184,7 +188,11 @@ impl UiState {
             "multiplayer/panel",
             [cx - 172., 6., 344., (self.height - 12.).max(120.)],
         )?;
-        self.label("multiplayer/title", "Play Multiplayer".into(), [cx - 150., 15., 300., 12.])?;
+        self.label(
+            "multiplayer/title",
+            "Play Multiplayer".into(),
+            [cx - 150., 15., 300., 12.],
+        )?;
         let list_top = 34.;
         let buttons_y = self.height - 68.;
         let rows = (((buttons_y - 6. - list_top) / 30.).floor().max(1.)) as usize;
@@ -197,7 +205,12 @@ impl UiState {
                 format!("server/{index}"),
                 "button",
                 label,
-                [cx - 160., list_top + (index - start) as f32 * 30., 320., 26.],
+                [
+                    cx - 160.,
+                    list_top + (index - start) as f32 * 30.,
+                    320.,
+                    26.,
+                ],
                 true,
                 None,
                 NodeAction::JoinServer(index),

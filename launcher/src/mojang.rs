@@ -9,7 +9,8 @@ use reqwest::blocking::Client;
 use serde_json::Value;
 use std::fs;
 
-pub const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+pub const VERSION_MANIFEST: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 pub const RESOURCES_URL: &str = "https://resources.download.minecraft.net";
 
 #[derive(Clone, Debug)]
@@ -21,7 +22,11 @@ pub struct FileRef {
 
 impl FileRef {
     fn parse(value: &Value, what: &str) -> Result<Self> {
-        let field = |key: &str| value.get(key).ok_or_else(|| anyhow!("version json: {what}.{key} missing"));
+        let field = |key: &str| {
+            value
+                .get(key)
+                .ok_or_else(|| anyhow!("version json: {what}.{key} missing"))
+        };
         Ok(Self {
             url: field("url")?.as_str().context("url")?.to_owned(),
             sha1: field("sha1")?.as_str().context("sha1")?.to_owned(),
@@ -48,7 +53,10 @@ pub struct Release {
 fn parse_release(text: &[u8]) -> Result<Release> {
     let json: Value = serde_json::from_slice(text).context("parsing version json")?;
     if json["id"] != GAME_VERSION {
-        anyhow::bail!("version json is for {}, expected {GAME_VERSION}", json["id"]);
+        anyhow::bail!(
+            "version json is for {}, expected {GAME_VERSION}",
+            json["id"]
+        );
     }
     Ok(Release {
         client: FileRef::parse(&json["downloads"]["client"], "downloads.client")?,
@@ -62,7 +70,8 @@ pub fn resolve(client: &Client, layout: &Layout, rep: &Reporter) -> Result<Relea
     let cached = fs::read(layout.version_json()).ok();
     let online = || -> Result<Vec<u8>> {
         let manifest = net::fetch_bytes(client, VERSION_MANIFEST, None)?;
-        let manifest: Value = serde_json::from_slice(&manifest).context("parsing version manifest")?;
+        let manifest: Value =
+            serde_json::from_slice(&manifest).context("parsing version manifest")?;
         let entry = manifest["versions"]
             .as_array()
             .and_then(|list| list.iter().find(|v| v["id"] == GAME_VERSION))
@@ -79,7 +88,9 @@ pub fn resolve(client: &Client, layout: &Layout, rep: &Reporter) -> Result<Relea
         }
         Err(error) => match cached {
             Some(bytes) => {
-                rep.log(format!("Mojang manifest unavailable ({error:#}); using cached version json"));
+                rep.log(format!(
+                    "Mojang manifest unavailable ({error:#}); using cached version json"
+                ));
                 bytes
             }
             None => return Err(error.context("cannot reach Mojang version manifest")),
@@ -91,12 +102,18 @@ pub fn resolve(client: &Client, layout: &Layout, rep: &Reporter) -> Result<Relea
 /// Download jobs for every object in the (already verified) asset index.
 pub fn asset_jobs(layout: &Layout, index: &[u8]) -> Result<Vec<Job>> {
     let index: Value = serde_json::from_slice(index).context("parsing asset index")?;
-    let objects = index["objects"].as_object().context("asset index has no objects")?;
+    let objects = index["objects"]
+        .as_object()
+        .context("asset index has no objects")?;
     let mut seen = std::collections::BTreeSet::new();
     let mut jobs = Vec::new();
     for (name, object) in objects {
-        let hash = object["hash"].as_str().with_context(|| format!("asset {name}: hash"))?;
-        let size = object["size"].as_u64().with_context(|| format!("asset {name}: size"))?;
+        let hash = object["hash"]
+            .as_str()
+            .with_context(|| format!("asset {name}: hash"))?;
+        let size = object["size"]
+            .as_u64()
+            .with_context(|| format!("asset {name}: size"))?;
         if hash.len() < 3 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             anyhow::bail!("asset {name}: malformed hash {hash}");
         }

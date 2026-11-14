@@ -1,18 +1,19 @@
 use crate::{
     api::{ChunkDraw, DynamicGeometry},
     protocol::{
+        Result,
         content::Content,
         world::{Neighborhood, World},
-        Result,
     },
 };
 use glam::Mat4;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     sync::{
+        Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     thread,
     time::Instant,

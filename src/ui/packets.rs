@@ -297,7 +297,22 @@ impl UiState {
         // Returning false does not advance the reader, so another owner can consume its own packet.
         if !matches!(
             id,
-            3 | 9 | 14 | 31 | 33 | 51 | 65 | 68 | 85 | 112 | 114 | 115 | 121 | 122 | 130 | 139 | 140
+            3 | 9
+                | 14
+                | 31
+                | 33
+                | 51
+                | 65
+                | 68
+                | 85
+                | 112
+                | 114
+                | 115
+                | 121
+                | 122
+                | 130
+                | 139
+                | 140
         ) {
             return Ok(false);
         }

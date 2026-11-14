@@ -20,7 +20,7 @@
     "authority": "version.json embedded in verified official client and server archives; protocol IDs and C02 layouts independently inspected with javap"
   },
   "upstream": {
-    "solaris": {
+    "krasnokamen": {
       "head_at_audit": "4865344edb3733eacd5a942cdd7b548f39a80126",
       "working_tree_policy": "read-only; potentially concurrent dirty changes; source digests below, HEAD alone is not tree fingerprint",
       "files": {
@@ -37,19 +37,19 @@
         "crates/mc-net/src/loader.rs": "fd160a9ae19815ec32e5da658e3238e95574d2d8c3e276fa1d9926022eb390ca"
       }
     },
-    "solaris-loader": {
+    "krasnokamen-loader": {
       "head_at_audit": "bab2329c707d4bff026f22b65162e93b432ab50c",
       "working_tree_policy": "read-only; potentially concurrent dirty changes; source digests below, HEAD alone is not tree fingerprint",
       "files": {
         "AGENTS.md": "3066fb89debcf14a88a93afb879bd14108dbfde4f338f87808cae3e1e971839b",
-        "loader-core/src/main/java/dev/solaris/loader/LoaderPlatform.java": "57d977f8f644d2989047162a1b3d6ddef597bad90cee561b14e36de37f5779f6",
-        "loader-core/src/main/java/dev/solaris/loader/LoaderHandshake.java": "e307f01302f7efb46a29c42f45e9cae2a9834e6e0a685d8cc09167990cc72de5",
-        "loader-core/src/main/java/dev/solaris/loader/LoaderClientAck.java": "219daaa626105c757a18a5b9744fc0202b6a87af75141b6991585c4d25726885",
-        "loader-core/src/main/java/dev/solaris/loader/LoaderContentArchive.java": "5b4fbe8549faaa57e3df862013861071940e217d7802445426952d53dc5e2152",
-        "loader-core/src/main/java/dev/solaris/loader/LoaderPermissionController.java": "0a622763bc00fcc7eb5bac826ad198e42e5ce86428f7f41499ea0454fd890871"
+        "loader-core/src/main/java/dev/krasnokamen/loader/LoaderPlatform.java": "57d977f8f644d2989047162a1b3d6ddef597bad90cee561b14e36de37f5779f6",
+        "loader-core/src/main/java/dev/krasnokamen/loader/LoaderHandshake.java": "e307f01302f7efb46a29c42f45e9cae2a9834e6e0a685d8cc09167990cc72de5",
+        "loader-core/src/main/java/dev/krasnokamen/loader/LoaderClientAck.java": "219daaa626105c757a18a5b9744fc0202b6a87af75141b6991585c4d25726885",
+        "loader-core/src/main/java/dev/krasnokamen/loader/LoaderContentArchive.java": "5b4fbe8549faaa57e3df862013861071940e217d7802445426952d53dc5e2152",
+        "loader-core/src/main/java/dev/krasnokamen/loader/LoaderPermissionController.java": "0a622763bc00fcc7eb5bac826ad198e42e5ce86428f7f41499ea0454fd890871"
       }
     },
-    "solaris-default-plugins": {
+    "krasnokamen-default-plugins": {
       "head_at_audit": "9adf5aebceb7595ca75f8e93ad82ef01739d328a",
       "working_tree_policy": "read-only; potentially concurrent dirty changes; source digests below, HEAD alone is not tree fingerprint",
       "files": {
@@ -156,7 +156,7 @@
         "activated_asset_bytes": 67108864
       }
     },
-    "server_wasm_api": "solaris:plugin@0.7.0",
+    "server_wasm_api": "krasnokamen:plugin@0.7.0",
     "client_wasm_api": null,
     "mcp": {
       "Loader_existing": [

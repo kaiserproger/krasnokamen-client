@@ -4,11 +4,11 @@
 use crate::{
     jdk, mojang,
     net::{self, Check, Job},
-    paths::{self, Layout, GAME_VERSION},
+    paths::{self, GAME_VERSION, Layout},
     pins,
     progress::{Cancelled, Reporter},
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -68,8 +68,9 @@ struct Bundle {
 }
 
 fn fetch_bundles(client: &Client, manifest_url: &str) -> Result<Vec<Bundle>> {
-    let bytes = net::fetch_bytes(client, manifest_url, None)
-        .with_context(|| format!("cannot reach the Solaris content manifest at {manifest_url}"))?;
+    let bytes = net::fetch_bytes(client, manifest_url, None).with_context(|| {
+        format!("cannot reach the Krasnokamen content manifest at {manifest_url}")
+    })?;
     parse_bundles(&bytes)
 }
 
@@ -138,7 +139,7 @@ fn install_bundle(layout: &Layout, archive: &Path, rep: &Reporter) -> Result<()>
     let decoder = zstd::stream::read::Decoder::new(fs::File::open(archive)?)?;
     tar::Archive::new(decoder)
         .unpack(&staging)
-        .context("unpacking Solaris data bundle")?;
+        .context("unpacking Krasnokamen data bundle")?;
     for entry in fs::read_dir(&staging)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -206,7 +207,7 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     rep.stage(1, STAGES, "Checking Mojang version metadata");
     let release = mojang::resolve(&client, layout, rep)?;
 
-    rep.stage(2, STAGES, "Downloading Solaris game data");
+    rep.stage(2, STAGES, "Downloading Krasnokamen game data");
     let bundles = fetch_bundles(&client, &options.manifest_url)?;
     for bundle in &bundles {
         let present = installed.bundles.get(&bundle.name) == Some(&bundle.sha256)
@@ -273,7 +274,7 @@ pub fn run(layout: &Layout, options: &Options, force: bool, rep: &Reporter) -> R
     Ok(())
 }
 
-/// Singleplayer only, run lazily on its first use (`solaris-launcher --singleplayer-runtime`,
+/// Singleplayer only, run lazily on its first use (`krasnokamen-launcher --singleplayer-runtime`,
 /// started by the client): the Minecraft server jar and a Temurin JDK. The local server's
 /// content import derives datapack data from that jar with Java extractors, and that data
 /// cannot be published, so it has to be derived on the player's machine. Multiplayer never
@@ -322,7 +323,13 @@ mod tests {
 
     #[test]
     fn unpinned_bundle_name_is_never_installed() {
-        assert!(parse_bundles(&manifest("solaris-facts-26.1.2-r99", pins::FACTS_SHA256)).is_err());
+        assert!(
+            parse_bundles(&manifest(
+                "krasnokamen-facts-26.1.2-r99",
+                pins::FACTS_SHA256
+            ))
+            .is_err()
+        );
     }
 
     #[test]

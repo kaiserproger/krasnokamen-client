@@ -5,8 +5,8 @@ use super::{
 use crate::{
     api::{DynamicGeometry, EntityMaterial, MeshGeometry, RenderLayer, Vertex},
     protocol::{
-        content::{Content, TextureRegion},
         Result,
+        content::{Content, TextureRegion},
     },
 };
 use glam::{Mat4, Vec3};

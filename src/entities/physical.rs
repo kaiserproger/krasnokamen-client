@@ -2,8 +2,8 @@
 //! not an approximate species list; server tags remain authoritative.
 use super::{Entity, Handle, Metadata, Models, Store};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 #[derive(Clone, Copy, Debug)]

@@ -3,11 +3,11 @@ use super::Outcome;
 use crate::{
     api::InputIntent,
     inventory::{Stack, UiContext},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     session::Session,
     ui::{ClickMode, UiIntent},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
     time::{Duration, Instant},

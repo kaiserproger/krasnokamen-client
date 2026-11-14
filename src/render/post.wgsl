@@ -1,4 +1,4 @@
-// Solaris HDR postprocess: Off passthrough copy, Fancy ACES + light bloom.
+// Krasnokamen HDR postprocess: Off passthrough copy, Fancy ACES + light bloom.
 //
 // The world target is always Rgba16Float. Off mode writes display-encoded
 // color into it and copies those texels through unchanged. Fancy mode writes

@@ -1,13 +1,13 @@
 //! Received humanoid armor uses activated, source-baked per-slot rigs, not item icons.
 //! Contracts: local 26.1.2 ArmorStandRenderer, HumanoidArmorLayer,
 //! ArmorStandArmorModel and EquipmentLayerRenderer javap (ignored QA receipts).
-use super::{presentation as p, Entity, Models};
+use super::{Entity, Models, presentation as p};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     inventory::Stack,
     protocol::{
-        content::{Content, TextureRegion},
         Result,
+        content::{Content, TextureRegion},
     },
 };
 use glam::Mat4;
@@ -423,10 +423,11 @@ mod tests {
                     out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
                     6
                 );
-                assert!(out
-                    .vertices
-                    .iter()
-                    .all(|v| v.texture_layer == if slot == 3 { 3 } else { 2 }));
+                assert!(
+                    out.vertices
+                        .iter()
+                        .all(|v| v.texture_layer == if slot == 3 { 3 } else { 2 })
+                );
                 store
                     .apply(
                         102,
@@ -463,20 +464,22 @@ mod tests {
                     Some(format!("test:baby/{part}").as_str())
                 );
                 let mut out = DynamicGeometry::default();
-                assert!(cache
-                    .append(
-                        entity,
-                        slot,
-                        entity.equipment_value(slot).unwrap(),
-                        &models,
-                        &content,
-                        Mat4::IDENTITY,
-                        2,
-                        0.,
-                        [15.; 2],
-                        &mut out,
-                    )
-                    .unwrap());
+                assert!(
+                    cache
+                        .append(
+                            entity,
+                            slot,
+                            entity.equipment_value(slot).unwrap(),
+                            &models,
+                            &content,
+                            Mat4::IDENTITY,
+                            2,
+                            0.,
+                            [15.; 2],
+                            &mut out,
+                        )
+                        .unwrap()
+                );
                 assert_eq!(out.vertices.len(), 4);
                 assert!(out.vertices.iter().all(|v| v.texture_layer == 4));
             }
@@ -508,20 +511,22 @@ mod tests {
             serde_json::json!(true),
         );
         let mut out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                &stack,
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    &stack,
+                    &models,
+                    &content,
+                    Mat4::IDENTITY,
+                    2,
+                    0.,
+                    [15.; 2],
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 12);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
@@ -573,35 +578,39 @@ mod tests {
             .unwrap();
         assert_ne!(before.vertices[2].position, after.vertices[2].position);
         let mut fallback = DynamicGeometry::default();
-        assert!(!cache
-            .append(
-                entity,
-                3,
-                entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut fallback
-            )
-            .unwrap());
+        assert!(
+            !cache
+                .append(
+                    entity,
+                    3,
+                    entity.equipment_value(4).unwrap(),
+                    &models,
+                    &content,
+                    Mat4::IDENTITY,
+                    2,
+                    0.,
+                    [15.; 2],
+                    &mut fallback
+                )
+                .unwrap()
+        );
         models.armor_models.clear();
-        assert!(!cache
-            .append(
-                entity,
-                4,
-                entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut fallback
-            )
-            .unwrap());
+        assert!(
+            !cache
+                .append(
+                    entity,
+                    4,
+                    entity.equipment_value(4).unwrap(),
+                    &models,
+                    &content,
+                    Mat4::IDENTITY,
+                    2,
+                    0.,
+                    [15.; 2],
+                    &mut fallback
+                )
+                .unwrap()
+        );
         assert!(fallback.vertices.is_empty());
     }
 
@@ -676,8 +685,8 @@ mod tests {
     #[test]
     fn p1_received_armor_stand_equipment_emits_armor_and_clears_on_removal() {
         use super::super::{
-            resources::{Bone, BoneRole, Rig},
             Store,
+            resources::{Bone, BoneRole, Rig},
         };
         use crate::protocol::{Reader, Writer};
         use glam::Vec3;
@@ -764,20 +773,22 @@ mod tests {
         );
         let entity = store.get(4).unwrap();
         let mut out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                entity.equipment_value(4).unwrap(),
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    entity.equipment_value(4).unwrap(),
+                    &models,
+                    &content,
+                    Mat4::IDENTITY,
+                    2,
+                    0.,
+                    [15.; 2],
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 4);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
@@ -802,20 +813,22 @@ mod tests {
                 dyeable: None,
             });
         out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                &glinted,
-                &models,
-                &content,
-                Mat4::IDENTITY,
-                2,
-                0.,
-                [15.; 2],
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    &glinted,
+                    &models,
+                    &content,
+                    Mat4::IDENTITY,
+                    2,
+                    0.,
+                    [15.; 2],
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 12);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),

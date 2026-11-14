@@ -307,7 +307,11 @@ mod tests {
     #[test]
     fn view_motion_lands_leans_and_lags_without_drift() {
         let mut m = ViewMotion::default();
-        let mut input = ViewInput { yaw: 10., grounded: true, ..Default::default() };
+        let mut input = ViewInput {
+            yaw: 10.,
+            grounded: true,
+            ..Default::default()
+        };
         m.step(0.016, &input);
         m.land(4.);
         let mut peak = 0f32;
@@ -347,14 +351,22 @@ mod tests {
     #[test]
     fn view_motion_hand_is_perfectly_still_at_rest() {
         let mut m = ViewMotion::default();
-        let input = ViewInput { yaw: 25., pitch: 10., grounded: true, ..Default::default() };
+        let input = ViewInput {
+            yaw: 25.,
+            pitch: 10.,
+            grounded: true,
+            ..Default::default()
+        };
         for _ in 0..2000 {
             m.step(1. / 60., &input);
         }
         for walking in [0., 0.5, 1.] {
             let hand = m.hand(walking, 25., 10.);
             // The old sway was +-0.004/0.005 blocks and 0.5 degrees.
-            assert!(hand.offset.iter().all(|v| v.abs() < 1e-4), "walking {walking}: {hand:?}");
+            assert!(
+                hand.offset.iter().all(|v| v.abs() < 1e-4),
+                "walking {walking}: {hand:?}"
+            );
             assert!(hand.roll_deg.abs() < 1e-3, "walking {walking}: {hand:?}");
             m.step(0.37, &input);
         }
@@ -362,7 +374,12 @@ mod tests {
 
     #[test]
     fn view_motion_time_split_does_not_change_the_result() {
-        let input = ViewInput { yaw: 40., strafe: -1., grounded: true, ..Default::default() };
+        let input = ViewInput {
+            yaw: 40.,
+            strafe: -1.,
+            grounded: true,
+            ..Default::default()
+        };
         let mut one = ViewMotion::default();
         let mut split = ViewMotion::default();
         one.step(0., &ViewInput { yaw: 0., ..input });
@@ -375,7 +392,10 @@ mod tests {
         }
         close(one.dip.x, split.dip.x);
         close(one.roll.x, split.roll.x);
-        close(one.hand(0.5, 40., 0.).offset[0], split.hand(0.5, 40., 0.).offset[0]);
+        close(
+            one.hand(0.5, 40., 0.).offset[0],
+            split.hand(0.5, 40., 0.).offset[0],
+        );
     }
 
     #[test]
@@ -400,7 +420,10 @@ mod tests {
     fn eating_blend_eases_in_and_out() {
         let mut m = ViewMotion::default();
         m.step(0., &ViewInput::default());
-        let eat = ViewInput { consume: 1., ..Default::default() };
+        let eat = ViewInput {
+            consume: 1.,
+            ..Default::default()
+        };
         m.step(0.05, &eat);
         let early = m.consume;
         assert!(early > 0.2 && early < 0.7);
@@ -430,10 +453,26 @@ mod tests {
     #[test]
     fn entity_landing_squash_follows_a_real_fall_only() {
         let mut m = EntityMotion::default();
-        m.tick(&EntityTick { on_ground: false, y: 67., ..standing(1) });
-        m.tick(&EntityTick { on_ground: false, y: 66., ..standing(2) });
-        m.tick(&EntityTick { on_ground: false, y: 65., ..standing(3) });
-        m.tick(&EntityTick { on_ground: true, y: 64., ..standing(4) });
+        m.tick(&EntityTick {
+            on_ground: false,
+            y: 67.,
+            ..standing(1)
+        });
+        m.tick(&EntityTick {
+            on_ground: false,
+            y: 66.,
+            ..standing(2)
+        });
+        m.tick(&EntityTick {
+            on_ground: false,
+            y: 65.,
+            ..standing(3)
+        });
+        m.tick(&EntityTick {
+            on_ground: true,
+            y: 64.,
+            ..standing(4)
+        });
         let squash = (0..=19)
             .map(|i| m.squash(4, i as f32 * 0.05))
             .fold(0., f32::max);
@@ -442,14 +481,34 @@ mod tests {
         assert_eq!(m.squash(3, 0.5), 0.);
         // Stepping onto the ground by sub-threshold motion does not squash.
         let mut calm = EntityMotion::default();
-        calm.tick(&EntityTick { on_ground: false, y: 64.05, ..standing(1) });
-        calm.tick(&EntityTick { on_ground: true, y: 64., ..standing(2) });
+        calm.tick(&EntityTick {
+            on_ground: false,
+            y: 64.05,
+            ..standing(1)
+        });
+        calm.tick(&EntityTick {
+            on_ground: true,
+            y: 64.,
+            ..standing(2)
+        });
         assert_eq!(calm.squash(2, 0.1), 0.);
         // Walking down a stair: one airborne tick, a big drop, still no squash.
         let mut stairs = EntityMotion::default();
-        stairs.tick(&EntityTick { on_ground: true, y: 65., ..standing(1) });
-        stairs.tick(&EntityTick { on_ground: false, y: 64.6, ..standing(2) });
-        stairs.tick(&EntityTick { on_ground: true, y: 64., ..standing(3) });
+        stairs.tick(&EntityTick {
+            on_ground: true,
+            y: 65.,
+            ..standing(1)
+        });
+        stairs.tick(&EntityTick {
+            on_ground: false,
+            y: 64.6,
+            ..standing(2)
+        });
+        stairs.tick(&EntityTick {
+            on_ground: true,
+            y: 64.,
+            ..standing(3)
+        });
         assert_eq!(stairs.squash(3, 0.1), 0.);
     }
 
@@ -458,12 +517,18 @@ mod tests {
         let mut m = EntityMotion::default();
         let near = Some([3., 65.6, 3.]);
         for tick in 1..=9 {
-            m.tick(&EntityTick { target: near, ..standing(tick) });
+            m.tick(&EntityTick {
+                target: near,
+                ..standing(tick)
+            });
         }
         // Must stand still for half a second before reacting.
         assert_eq!(m.look(1.).2, 0.);
         for tick in 10..=60 {
-            m.tick(&EntityTick { target: near, ..standing(tick) });
+            m.tick(&EntityTick {
+                target: near,
+                ..standing(tick)
+            });
         }
         let (yaw, pitch, weight) = m.look(1.);
         assert!(weight > 0.95);
@@ -472,15 +537,25 @@ mod tests {
         assert!(pitch.abs() < 15.);
         // Behind the body or out of range or walking releases the look.
         for tick in 61..=140 {
-            m.tick(&EntityTick { target: Some([0., 65., -4.]), ..standing(tick) });
+            m.tick(&EntityTick {
+                target: Some([0., 65., -4.]),
+                ..standing(tick)
+            });
         }
         assert!(m.look(1.).2 < 0.01);
         for tick in 141..=200 {
-            m.tick(&EntityTick { target: near, ..standing(tick) });
+            m.tick(&EntityTick {
+                target: near,
+                ..standing(tick)
+            });
         }
         assert!(m.look(1.).2 > 0.9);
         for tick in 201..=260 {
-            m.tick(&EntityTick { target: near, walk_speed: 0.5, ..standing(tick) });
+            m.tick(&EntityTick {
+                target: near,
+                walk_speed: 0.5,
+                ..standing(tick)
+            });
         }
         assert!(m.look(1.).2 < 0.01);
     }
@@ -505,7 +580,13 @@ mod tests {
         use std::hint::black_box;
         use std::time::Instant;
         let n = 2_000_000u32;
-        let input = ViewInput { yaw: 10., pitch: 5., strafe: 1., grounded: true, consume: 0. };
+        let input = ViewInput {
+            yaw: 10.,
+            pitch: 5.,
+            strafe: 1.,
+            grounded: true,
+            consume: 0.,
+        };
         let mut view = ViewMotion::default();
         view.step(0., &input);
         let t = Instant::now();
@@ -518,7 +599,10 @@ mod tests {
         let target = Some([3., 65.6, 3.]);
         let t = Instant::now();
         for tick in 0..u64::from(n) {
-            entity.tick(&EntityTick { target, ..standing(black_box(tick)) });
+            entity.tick(&EntityTick {
+                target,
+                ..standing(black_box(tick))
+            });
         }
         let tick_ns = t.elapsed().as_nanos() as f64 / f64::from(n);
         let base = Mat4::from_translation(Vec3::new(1., 2., 3.));
@@ -600,7 +684,11 @@ impl EntityMotion {
         let airborne = self.air_ticks;
         // A real fall is airborne for a few ticks; stepping down a stair or slab
         // flips the ground flag for one tick and must not squash the mob.
-        self.air_ticks = if t.on_ground { 0 } else { self.air_ticks.saturating_add(1) };
+        self.air_ticks = if t.on_ground {
+            0
+        } else {
+            self.air_ticks.saturating_add(1)
+        };
         if t.on_ground && !self.was_ground && vy < -0.12 && airborne >= 3 {
             self.land_tick = t.tick;
             self.land_amp = (-vy * 0.6).clamp(0.05, 0.2);
@@ -645,7 +733,10 @@ impl EntityMotion {
         if self.land_amp == 0. || tick < self.land_tick {
             return 0.;
         }
-        landing_squash((tick - self.land_tick) as f32 * 0.05 + partial * 0.05, self.land_amp)
+        landing_squash(
+            (tick - self.land_tick) as f32 * 0.05 + partial * 0.05,
+            self.land_amp,
+        )
     }
     /// Head look-at `(absolute_yaw, pitch, weight)` sampled between ticks.
     pub fn look(&self, partial: f32) -> (f32, f32, f32) {

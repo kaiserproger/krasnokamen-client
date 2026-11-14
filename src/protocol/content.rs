@@ -172,25 +172,25 @@ fn interaction_facts(
     names: &[String],
     items: &BTreeMap<u32, String>,
 ) -> Result<(Vec<BlockInteraction>, BTreeMap<u32, ItemInteraction>)> {
-    let block_path = std::env::var("SOLARIS_CLIENT_BLOCK_USE_FACTS")
+    let block_path = std::env::var("KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/block_use_classes.json"));
     let block_bytes = bounded_bytes(&block_path, 1 << 20)?;
     let blocks: BlockUseReport<'_> = serde_json::from_slice(&block_bytes)
         .map_err(|error| format!("invalid block use facts: {error}"))?;
-    let item_path = std::env::var("SOLARIS_CLIENT_ITEM_USE_FACTS")
+    let item_path = std::env::var("KRASNOKAMEN_CLIENT_ITEM_USE_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/item_use_owners.json"));
     let item_bytes = bounded_bytes(&item_path, 1 << 20)?;
     let item_use: BTreeMap<&str, ItemUseSource<'_>> = serde_json::from_slice(&item_bytes)
         .map_err(|error| format!("invalid item use facts: {error}"))?;
-    let interaction_path = std::env::var("SOLARIS_CLIENT_INTERACTION_FACTS")
+    let interaction_path = std::env::var("KRASNOKAMEN_CLIENT_INTERACTION_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/interaction_facts.json"));
     let interaction_bytes = bounded_bytes(&interaction_path, 1 << 20)?;
     let interaction: InteractionReport<'_> = serde_json::from_slice(&interaction_bytes)
         .map_err(|error| format!("invalid interaction facts: {error}"))?;
-    let properties_path = std::env::var("SOLARIS_CLIENT_ITEM_PROPERTIES")
+    let properties_path = std::env::var("KRASNOKAMEN_CLIENT_ITEM_PROPERTIES")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/item_properties.json"));
     let properties_bytes = bounded_bytes(&properties_path, 1 << 20)?;
@@ -909,8 +909,8 @@ impl Content {
     }
     pub(crate) fn load_state() -> Result<Self> {
         let data = PathBuf::from(
-            std::env::var("SOLARIS_CLIENT_DATA_DIR")
-                .map_err(|_| "SOLARIS_CLIENT_DATA_DIR required for pinned local data")?,
+            std::env::var("KRASNOKAMEN_CLIENT_DATA_DIR")
+                .map_err(|_| "KRASNOKAMEN_CLIENT_DATA_DIR required for pinned local data")?,
         );
         Self::load_from_mode(
             ResourceSource {
@@ -924,25 +924,24 @@ impl Content {
         )
     }
     fn load_mode(presentation: bool) -> Result<Self> {
-        let root =
-            PathBuf::from(std::env::var("SOLARIS_CLIENT_RESOURCE_ROOT").map_err(
-                |_| "SOLARIS_CLIENT_RESOURCE_ROOT required for verified local resources",
-            )?);
+        let root = PathBuf::from(std::env::var("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map_err(
+            |_| "KRASNOKAMEN_CLIENT_RESOURCE_ROOT required for verified local resources",
+        )?);
         let data = PathBuf::from(
-            std::env::var("SOLARIS_CLIENT_DATA_DIR")
-                .map_err(|_| "SOLARIS_CLIENT_DATA_DIR required for pinned local data")?,
+            std::env::var("KRASNOKAMEN_CLIENT_DATA_DIR")
+                .map_err(|_| "KRASNOKAMEN_CLIENT_DATA_DIR required for pinned local data")?,
         );
-        let index = std::env::var("SOLARIS_CLIENT_ASSET_INDEX")
+        let index = std::env::var("KRASNOKAMEN_CLIENT_ASSET_INDEX")
             .ok()
             .map(PathBuf::from);
-        let assets = std::env::var("SOLARIS_CLIENT_ASSET_ROOT")
+        let assets = std::env::var("KRASNOKAMEN_CLIENT_ASSET_ROOT")
             .ok()
             .map(PathBuf::from);
         if index.is_some() != assets.is_some() {
             return Err("verified asset index/root must be supplied together".into());
         }
         let mut roots = vec![root];
-        if let Some(packs) = std::env::var_os("SOLARIS_CLIENT_RESOURCE_PACKS") {
+        if let Some(packs) = std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_PACKS") {
             roots.extend(std::env::split_paths(&packs));
         }
         let source = ResourceSource::new(
@@ -1004,14 +1003,14 @@ impl Content {
             .as_u64()
             .filter(|v| *v < 1000000)
             .ok_or("block state count bound")? as usize;
-        let collision_path = std::env::var("SOLARIS_CLIENT_COLLISION_SHAPES")
+        let collision_path = std::env::var("KRASNOKAMEN_CLIENT_COLLISION_SHAPES")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/block_collision_shapes.bin"));
         let mut collision = ShapeTable::load(&collision_path)?;
         if collision.state_ids.len() != max + 1 {
             return Err("collision report state count mismatch".into());
         }
-        let terrain_path = std::env::var("SOLARIS_CLIENT_TERRAIN_FACTS")
+        let terrain_path = std::env::var("KRASNOKAMEN_CLIENT_TERRAIN_FACTS")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/terrain_facts.json"));
         let (terrain, property_domains, required_features) =
@@ -1026,7 +1025,7 @@ impl Content {
             }
         }
         collision.normalize_offsets(&terrain);
-        let predicate_path = std::env::var("SOLARIS_CLIENT_BLOCK_STATE_PREDICATES")
+        let predicate_path = std::env::var("KRASNOKAMEN_CLIENT_BLOCK_STATE_PREDICATES")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/block_state_predicates.json"));
         let mut predicates = state_predicates(&bounded_bytes(&predicate_path, 8 << 20)?, max + 1)?;
@@ -1242,7 +1241,7 @@ impl Content {
                 return Err("block-item default state outside received source table".into());
             }
         }
-        let creative_path = std::env::var("SOLARIS_CLIENT_CREATIVE_TABS")
+        let creative_path = std::env::var("KRASNOKAMEN_CLIENT_CREATIVE_TABS")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/creative_tabs.json"));
         let creative_tabs_report: Arc<[u8]> = Arc::from(bounded_bytes(&creative_path, 16 << 20)?);
@@ -2536,14 +2535,17 @@ impl Atlas {
         let mut materials = BTreeMap::new();
         let mut animations = Vec::new();
         let mut animation_bytes = 0usize;
-        for name in ["solaris:white", "minecraft:missingno"].into_iter().chain(
-            names
-                .iter()
-                .map(String::as_str)
-                .filter(|name| *name != "solaris:white" && *name != "minecraft:missingno"),
-        ) {
+        for name in ["krasnokamen:white", "minecraft:missingno"]
+            .into_iter()
+            .chain(
+                names
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|name| *name != "krasnokamen:white" && *name != "minecraft:missingno"),
+            )
+        {
             let image = match name {
-                "solaris:white" => Image {
+                "krasnokamen:white" => Image {
                     width: 1,
                     height: 1,
                     rgba: vec![255; 4],
@@ -2561,7 +2563,7 @@ impl Atlas {
                 return Err("sprite preprocessing CPU peak byte budget exceeded".into());
             }
             let (_, path) = split_id(name)?;
-            let metadata = if name == "solaris:white" || name == "minecraft:missingno" {
+            let metadata = if name == "krasnokamen:white" || name == "minecraft:missingno" {
                 Value::Null
             } else {
                 source.texture_metadata(name)?

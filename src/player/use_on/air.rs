@@ -443,8 +443,8 @@ impl Player {
 mod p1_helmet_tests {
     use super::*;
     use crate::protocol::{
-        world::{Chunk, Palette, Section, SurfaceHeightmap},
         Reader,
+        world::{Chunk, Palette, Section, SurfaceHeightmap},
     };
     use serde_json::json;
 

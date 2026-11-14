@@ -6,7 +6,7 @@ use crate::{
     paths::Layout,
     progress::Reporter,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::{
@@ -53,16 +53,19 @@ fn platform() -> Result<(&'static str, &'static str)> {
     Ok((os, arch))
 }
 
-/// A usable JDK: `$SOLARIS_JDK` if set, else the managed copy under `<root>/jdk`,
+/// A usable JDK: `$KRASNOKAMEN_JDK` if set, else the managed copy under `<root>/jdk`,
 /// downloading it first when absent.
 pub fn ensure(client: &Client, layout: &Layout, rep: &Reporter) -> Result<PathBuf> {
-    if let Some(custom) = std::env::var_os("SOLARIS_JDK").map(PathBuf::from) {
+    if let Some(custom) = std::env::var_os("KRASNOKAMEN_JDK").map(PathBuf::from) {
         if usable(&custom) {
-            rep.log(format!("Using JDK from SOLARIS_JDK: {}", custom.display()));
+            rep.log(format!(
+                "Using JDK from KRASNOKAMEN_JDK: {}",
+                custom.display()
+            ));
             return Ok(custom);
         }
         bail!(
-            "SOLARIS_JDK={} has no bin/java, javac and javap",
+            "KRASNOKAMEN_JDK={} has no bin/java, javac and javap",
             custom.display()
         );
     }

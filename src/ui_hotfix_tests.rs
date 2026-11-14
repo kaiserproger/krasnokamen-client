@@ -514,9 +514,11 @@ fn inventory_captions_clear_slots_and_preview_pin_exists() {
     let title = rect("menu/title");
     // InventoryScreen.extractLabels draws Crafting only; an Inventory
     // caption at y72 would intersect the boots slot (y62..78).
-    assert!(!nodes
-        .iter()
-        .any(|node| node["id"] == "menu/inventory_label"));
+    assert!(
+        !nodes
+            .iter()
+            .any(|node| node["id"] == "menu/inventory_label")
+    );
     assert!(title[2] <= 72.0, "title label must stay narrow: {title:?}");
     let slots: Vec<Vec<f32>> = nodes
         .iter()
@@ -803,9 +805,11 @@ fn pause_and_options_seams() {
         .find(|n| n["id"] == "settings/fov")
         .expect("FOV row must exist");
     assert_eq!(fov["role"], "slider");
-    assert!(fov["label"]
-        .as_str()
-        .is_some_and(|l| l.starts_with("Field of view:")));
+    assert!(
+        fov["label"]
+            .as_str()
+            .is_some_and(|l| l.starts_with("Field of view:"))
+    );
     assert!(ui.observed_settings().get("fov").is_some() || true);
     // Escape on Pause goes back (Close path), not stuck.
     ui.execute(

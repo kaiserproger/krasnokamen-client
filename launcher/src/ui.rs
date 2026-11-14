@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::Result;
 use eframe::egui::{
-    self, Align, Align2, Color32, CornerRadius, FontId, Layout as UiLayout, Margin, Rect, RichText, Sense, Stroke,
-    StrokeKind, Vec2,
+    self, Align, Align2, Color32, CornerRadius, FontId, Layout as UiLayout, Margin, Rect, RichText,
+    Sense, Stroke, StrokeKind, Vec2,
 };
 use std::{
     process::Child,
@@ -42,7 +42,10 @@ enum Tab {
 
 enum Phase {
     Idle,
-    Installing { play_after: bool, done: mpsc::Receiver<Result<(), String>> },
+    Installing {
+        play_after: bool,
+        done: mpsc::Receiver<Result<(), String>>,
+    },
     Running(Child),
 }
 
@@ -89,8 +92,8 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
     let autoplay = args.autoplay;
     let icon = load_icon();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Solaris Launcher")
-        .with_app_id("solaris-launcher")
+        .with_title("Krasnokamen Launcher")
+        .with_app_id("krasnokamen-launcher")
         .with_inner_size([980.0, 620.0])
         .with_min_inner_size([820.0, 540.0]);
     if let Some(icon) = icon {
@@ -101,7 +104,7 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "Solaris Launcher",
+        "Krasnokamen Launcher",
         options,
         Box::new(move |cc| {
             apply_theme(&cc.egui_ctx);
@@ -155,13 +158,21 @@ fn apply_theme(ctx: &egui::Context) {
     w.active.bg_stroke = Stroke::new(1.0, ACCENT_HI);
     w.active.fg_stroke = Stroke::new(1.5, ACCENT_HI);
     w.open = w.hovered;
-    for state in [&mut w.noninteractive, &mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+    for state in [
+        &mut w.noninteractive,
+        &mut w.inactive,
+        &mut w.hovered,
+        &mut w.active,
+        &mut w.open,
+    ] {
         state.corner_radius = radius;
     }
     ctx.set_visuals(visuals);
     ctx.style_mut(|style| {
         use egui::TextStyle::*;
-        style.text_styles.insert(Heading, FontId::proportional(24.0));
+        style
+            .text_styles
+            .insert(Heading, FontId::proportional(24.0));
         style.text_styles.insert(Body, FontId::proportional(15.0));
         style.text_styles.insert(Button, FontId::proportional(15.0));
         style.text_styles.insert(Small, FontId::proportional(12.5));
@@ -175,12 +186,42 @@ fn apply_theme(ctx: &egui::Context) {
 
 // 5x7 pixel glyphs for the wordmark.
 const GLYPHS: &[(char, [&str; 7])] = &[
-    ('S', [".####", "#....", "#....", ".###.", "....#", "....#", "####."]),
-    ('O', [".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."]),
-    ('L', ["#....", "#....", "#....", "#....", "#....", "#....", "#####"]),
-    ('A', [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"]),
-    ('R', ["####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"]),
-    ('I', ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####"]),
+    (
+        'S',
+        [
+            ".####", "#....", "#....", ".###.", "....#", "....#", "####.",
+        ],
+    ),
+    (
+        'O',
+        [
+            ".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###.",
+        ],
+    ),
+    (
+        'L',
+        [
+            "#....", "#....", "#....", "#....", "#....", "#....", "#####",
+        ],
+    ),
+    (
+        'A',
+        [
+            ".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#",
+        ],
+    ),
+    (
+        'R',
+        [
+            "####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#",
+        ],
+    ),
+    (
+        'I',
+        [
+            "#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####",
+        ],
+    ),
 ];
 
 fn wordmark(ui: &mut egui::Ui, text: &str, cell: f32) {
@@ -188,15 +229,24 @@ fn wordmark(ui: &mut egui::Ui, text: &str, cell: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 8.0 * cell), Sense::hover());
     let painter = ui.painter_at(rect.expand(cell));
     for (index, ch) in text.chars().enumerate() {
-        let Some((_, rows)) = GLYPHS.iter().find(|(c, _)| *c == ch) else { continue };
+        let Some((_, rows)) = GLYPHS.iter().find(|(c, _)| *c == ch) else {
+            continue;
+        };
         let origin = rect.min + Vec2::new(index as f32 * 6.0 * cell, 0.0);
         for (y, row) in rows.iter().enumerate() {
             for (x, bit) in row.bytes().enumerate() {
                 if bit != b'#' {
                     continue;
                 }
-                let cell_rect = Rect::from_min_size(origin + Vec2::new(x as f32, y as f32) * cell, Vec2::splat(cell));
-                painter.rect_filled(cell_rect.translate(Vec2::splat(cell * 0.6)), 0.0, Color32::from_rgb(70, 38, 10));
+                let cell_rect = Rect::from_min_size(
+                    origin + Vec2::new(x as f32, y as f32) * cell,
+                    Vec2::splat(cell),
+                );
+                painter.rect_filled(
+                    cell_rect.translate(Vec2::splat(cell * 0.6)),
+                    0.0,
+                    Color32::from_rgb(70, 38, 10),
+                );
                 let shade = if y < 3 { ACCENT_HI } else { ACCENT };
                 painter.rect_filled(cell_rect, 0.0, shade);
             }
@@ -215,7 +265,11 @@ fn panel() -> egui::Frame {
 /// Wrapping, non-selectable status text (selectable labels would steal clicks
 /// from overlapping buttons).
 fn note(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) {
-    ui.add(egui::Label::new(RichText::new(text).color(color)).wrap().selectable(false));
+    ui.add(
+        egui::Label::new(RichText::new(text).color(color))
+            .wrap()
+            .selectable(false),
+    );
 }
 
 fn heading(ui: &mut egui::Ui, text: &str) {
@@ -224,7 +278,8 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 
 /// A selectable list row: title + dim subtitle.
 fn row(ui: &mut egui::Ui, selected: bool, title: &str, subtitle: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::click());
     let fill = if response.is_pointer_button_down_on() {
         CONTROL_DOWN
     } else if response.hovered() {
@@ -233,18 +288,44 @@ fn row(ui: &mut egui::Ui, selected: bool, title: &str, subtitle: &str) -> egui::
         CONTROL
     };
     let painter = ui.painter();
-    painter.rect(rect, CornerRadius::same(2), fill, Stroke::new(1.0, if selected { ACCENT } else { RIM }), StrokeKind::Inside);
+    painter.rect(
+        rect,
+        CornerRadius::same(2),
+        fill,
+        Stroke::new(1.0, if selected { ACCENT } else { RIM }),
+        StrokeKind::Inside,
+    );
     if selected {
-        painter.rect_filled(Rect::from_min_size(rect.min + Vec2::new(0.0, 4.0), Vec2::new(3.0, rect.height() - 8.0)), 0.0, ACCENT);
+        painter.rect_filled(
+            Rect::from_min_size(
+                rect.min + Vec2::new(0.0, 4.0),
+                Vec2::new(3.0, rect.height() - 8.0),
+            ),
+            0.0,
+            ACCENT,
+        );
     }
-    painter.text(rect.min + Vec2::new(14.0, 8.0), Align2::LEFT_TOP, title, FontId::proportional(16.0), TEXT);
-    painter.text(rect.min + Vec2::new(14.0, 27.0), Align2::LEFT_TOP, subtitle, FontId::proportional(12.5), TEXT_DIM);
+    painter.text(
+        rect.min + Vec2::new(14.0, 8.0),
+        Align2::LEFT_TOP,
+        title,
+        FontId::proportional(16.0),
+        TEXT,
+    );
+    painter.text(
+        rect.min + Vec2::new(14.0, 27.0),
+        Align2::LEFT_TOP,
+        subtitle,
+        FontId::proportional(12.5),
+        TEXT_DIM,
+    );
     response
 }
 
 fn nav_button(ui: &mut egui::Ui, current: &mut Tab, tab: Tab, label: &str) {
     let selected = *current == tab;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 38.0), Sense::click());
     let fill = if selected {
         CONTROL_HOT
     } else if response.hovered() {
@@ -254,7 +335,11 @@ fn nav_button(ui: &mut egui::Ui, current: &mut Tab, tab: Tab, label: &str) {
     };
     ui.painter().rect_filled(rect, CornerRadius::same(2), fill);
     if selected {
-        ui.painter().rect_filled(Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height())), 0.0, ACCENT);
+        ui.painter().rect_filled(
+            Rect::from_min_size(rect.min, Vec2::new(3.0, rect.height())),
+            0.0,
+            ACCENT,
+        );
     }
     ui.painter().text(
         rect.min + Vec2::new(16.0, rect.height() / 2.0),
@@ -278,11 +363,15 @@ impl App {
     }
 
     fn address(&self) -> String {
-        self.args_server.clone().unwrap_or_else(|| self.config.address().trim().to_owned())
+        self.args_server
+            .clone()
+            .unwrap_or_else(|| self.config.address().trim().to_owned())
     }
 
     fn username(&self) -> String {
-        self.args_username.clone().unwrap_or_else(|| self.config.username().to_owned())
+        self.args_username
+            .clone()
+            .unwrap_or_else(|| self.config.username().to_owned())
     }
 
     fn save_config(&self) {
@@ -317,7 +406,10 @@ impl App {
             let _ = tx.send(result);
             ctx.request_repaint();
         });
-        self.phase = Phase::Installing { play_after, done: rx };
+        self.phase = Phase::Installing {
+            play_after,
+            done: rx,
+        };
     }
 
     fn start_client(&mut self) {
@@ -366,7 +458,8 @@ impl App {
                 if let Ok(Some(status)) = child.try_wait() {
                     self.rep.log(format!("Client exited: {status}"));
                     if !status.success() {
-                        self.status = Some((format!("Client exited with {status} - see Logs"), true));
+                        self.status =
+                            Some((format!("Client exited with {status} - see Logs"), true));
                     }
                     self.phase = Phase::Idle;
                 }
@@ -387,11 +480,18 @@ impl App {
     fn bottom_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("bottom")
             .exact_height(120.0)
-            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0, RIM)).inner_margin(Margin::symmetric(20, 14)))
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .stroke(Stroke::new(1.0, RIM))
+                    .inner_margin(Margin::symmetric(20, 14)),
+            )
             .show(ctx, |ui| {
                 ui.with_layout(UiLayout::right_to_left(Align::Center), |ui| {
                     self.play_button(ui, ctx);
-                    ui.with_layout(UiLayout::left_to_right(Align::Center), |ui| self.status_area(ui));
+                    ui.with_layout(UiLayout::left_to_right(Align::Center), |ui| {
+                        self.status_area(ui)
+                    });
                 });
             });
     }
@@ -404,7 +504,12 @@ impl App {
             Phase::Installing { .. } => ("INSTALLING...", false),
             Phase::Running(_) => ("RUNNING", false),
         };
-        let button = egui::Button::new(RichText::new(label).size(20.0).strong().color(if enabled { Color32::from_rgb(40, 22, 6) } else { TEXT_OFF }))
+        let button =
+            egui::Button::new(RichText::new(label).size(20.0).strong().color(if enabled {
+                Color32::from_rgb(40, 22, 6)
+            } else {
+                TEXT_OFF
+            }))
             .fill(if enabled { ACCENT } else { CONTROL })
             .stroke(Stroke::new(1.0, if enabled { ACCENT_HI } else { RIM }))
             .min_size(Vec2::new(210.0, 56.0));
@@ -428,9 +533,12 @@ impl App {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     ui.label(
-                        RichText::new(format!("Step {}/{}  -  {}", snap.stage_index, snap.stage_count, snap.title))
-                            .color(HEADING)
-                            .strong(),
+                        RichText::new(format!(
+                            "Step {}/{}  -  {}",
+                            snap.stage_index, snap.stage_count, snap.title
+                        ))
+                        .color(HEADING)
+                        .strong(),
                     );
                     // Unknown totals (unpacking, deriving) show a sweeping bar instead of a stuck zero.
                     let fraction = if snap.total > 0 {
@@ -449,28 +557,47 @@ impl App {
                         "working...".to_owned()
                     };
                     let width = (ui.available_width() - 20.0).max(200.0);
-                    ui.add(egui::ProgressBar::new(fraction).desired_width(width).desired_height(16.0).fill(ACCENT));
+                    ui.add(
+                        egui::ProgressBar::new(fraction)
+                            .desired_width(width)
+                            .desired_height(16.0)
+                            .fill(ACCENT),
+                    );
                     ui.horizontal(|ui| {
                         ui.set_width(width);
                         note(ui, detail, TEXT);
                     });
                     let stage_fraction = if snap.total > 0 { fraction } else { 0.0 };
-                    let overall = ((snap.stage_index.saturating_sub(1)) as f32 + stage_fraction) / snap.stage_count.max(1) as f32;
-                    ui.add(egui::ProgressBar::new(overall.clamp(0.0, 1.0)).desired_width(width).desired_height(5.0).fill(RIM));
+                    let overall = ((snap.stage_index.saturating_sub(1)) as f32 + stage_fraction)
+                        / snap.stage_count.max(1) as f32;
+                    ui.add(
+                        egui::ProgressBar::new(overall.clamp(0.0, 1.0))
+                            .desired_width(width)
+                            .desired_height(5.0)
+                            .fill(RIM),
+                    );
                 });
             }
             Phase::Running(_) => {
-                note(ui, format!("Playing as {} on {}", self.username(), self.address()), OK);
+                note(
+                    ui,
+                    format!("Playing as {} on {}", self.username(), self.address()),
+                    OK,
+                );
             }
             Phase::Idle => {
                 if let Some((message, error)) = &self.status {
                     note(ui, message.clone(), if *error { ERROR } else { OK });
                 } else if self.ready {
-                    note(ui, format!("Minecraft {GAME_VERSION} content ready"), TEXT_DIM);
+                    note(
+                        ui,
+                        format!("Minecraft {GAME_VERSION} content ready"),
+                        TEXT_DIM,
+                    );
                 } else {
                     note(
                         ui,
-                        "First run: downloads about 670 MB of game content from Mojang, Adoptium and the Solaris server.",
+                        "First run: downloads about 670 MB of game content from Mojang, Adoptium and the Krasnokamen server.",
                         TEXT_DIM,
                     );
                 }
@@ -481,18 +608,31 @@ impl App {
     fn sidebar(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("nav")
             .exact_width(210.0)
-            .frame(egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0, RIM)).inner_margin(Margin::same(16)))
+            .frame(
+                egui::Frame::new()
+                    .fill(PANEL)
+                    .stroke(Stroke::new(1.0, RIM))
+                    .inner_margin(Margin::same(16)),
+            )
             .show(ctx, |ui| {
                 ui.add_space(6.0);
-                wordmark(ui, "SOLARIS", 4.0);
+                wordmark(ui, "KRASNOKAMEN", 4.0);
                 ui.add_space(6.0);
-                ui.label(RichText::new(format!("Minecraft {GAME_VERSION}")).color(TEXT_DIM).size(12.5));
+                ui.label(
+                    RichText::new(format!("Minecraft {GAME_VERSION}"))
+                        .color(TEXT_DIM)
+                        .size(12.5),
+                );
                 ui.add_space(22.0);
                 nav_button(ui, &mut self.tab, Tab::Play, "Play");
                 nav_button(ui, &mut self.tab, Tab::Settings, "Settings");
                 nav_button(ui, &mut self.tab, Tab::Logs, "Logs");
                 ui.with_layout(UiLayout::bottom_up(Align::LEFT), |ui| {
-                    ui.label(RichText::new(format!("launcher {}", env!("CARGO_PKG_VERSION"))).color(TEXT_OFF).size(11.5));
+                    ui.label(
+                        RichText::new(format!("launcher {}", env!("CARGO_PKG_VERSION")))
+                            .color(TEXT_OFF)
+                            .size(11.5),
+                    );
                 });
             });
     }
@@ -505,7 +645,14 @@ impl App {
                 heading(ui, "PROFILE");
                 let mut clicked = None;
                 for (index, profile) in self.config.profiles.iter().enumerate() {
-                    if row(ui, index == self.config.selected_profile, &profile.username, "Offline account").clicked() {
+                    if row(
+                        ui,
+                        index == self.config.selected_profile,
+                        &profile.username,
+                        "Offline account",
+                    )
+                    .clicked()
+                    {
                         clicked = Some(index);
                     }
                 }
@@ -525,7 +672,11 @@ impl App {
                     self.save_config();
                 }
                 if !self.selected_username_ok() {
-                    ui.label(RichText::new("3-16 letters, digits or underscore").color(ERROR).size(12.5));
+                    ui.label(
+                        RichText::new("3-16 letters, digits or underscore")
+                            .color(ERROR)
+                            .size(12.5),
+                    );
                 }
                 ui.horizontal(|ui| {
                     if ui.button("+ New profile").clicked() {
@@ -535,7 +686,10 @@ impl App {
                         self.config.selected_profile = self.config.profiles.len() - 1;
                         self.save_config();
                     }
-                    if ui.add_enabled(self.config.profiles.len() > 1, egui::Button::new("Remove")).clicked() {
+                    if ui
+                        .add_enabled(self.config.profiles.len() > 1, egui::Button::new("Remove"))
+                        .clicked()
+                    {
                         self.config.profiles.remove(self.config.selected_profile);
                         self.config.normalize();
                         self.save_config();
@@ -544,10 +698,17 @@ impl App {
                 ui.add_space(6.0);
                 ui.add_enabled(
                     false,
-                    egui::Button::new(RichText::new("Sign in with Microsoft").color(TEXT_OFF)).min_size(Vec2::new(ui.available_width(), 34.0)),
+                    egui::Button::new(RichText::new("Sign in with Microsoft").color(TEXT_OFF))
+                        .min_size(Vec2::new(ui.available_width(), 34.0)),
                 )
-                .on_disabled_hover_text("Microsoft login is not implemented yet; this preview uses offline accounts.");
-                ui.label(RichText::new("Microsoft login: coming later").color(TEXT_OFF).size(12.0));
+                .on_disabled_hover_text(
+                    "Microsoft login is not implemented yet; this preview uses offline accounts.",
+                );
+                ui.label(
+                    RichText::new("Microsoft login: coming later")
+                        .color(TEXT_OFF)
+                        .size(12.0),
+                );
             });
 
             let ui = &mut cols[1];
@@ -556,7 +717,14 @@ impl App {
                 heading(ui, "SERVER");
                 let mut clicked = None;
                 for (index, server) in self.config.servers.iter().enumerate() {
-                    if row(ui, index == self.config.selected_server, &server.name, &server.address).clicked() {
+                    if row(
+                        ui,
+                        index == self.config.selected_server,
+                        &server.name,
+                        &server.address,
+                    )
+                    .clicked()
+                    {
                         clicked = Some(index);
                     }
                 }
@@ -569,17 +737,31 @@ impl App {
                 let mut changed = false;
                 ui.label(RichText::new("Name").color(TEXT_DIM).size(12.5));
                 changed |= ui
-                    .add(egui::TextEdit::singleline(&mut self.config.servers[selected].name).desired_width(f32::INFINITY))
+                    .add(
+                        egui::TextEdit::singleline(&mut self.config.servers[selected].name)
+                            .desired_width(f32::INFINITY),
+                    )
                     .changed();
-                ui.label(RichText::new("Address (host[:port])").color(TEXT_DIM).size(12.5));
+                ui.label(
+                    RichText::new("Address (host[:port])")
+                        .color(TEXT_DIM)
+                        .size(12.5),
+                );
                 changed |= ui
-                    .add(egui::TextEdit::singleline(&mut self.config.servers[selected].address).desired_width(f32::INFINITY))
+                    .add(
+                        egui::TextEdit::singleline(&mut self.config.servers[selected].address)
+                            .desired_width(f32::INFINITY),
+                    )
                     .changed();
                 if changed {
                     self.save_config();
                 }
                 if !config::valid_address(&self.config.servers[selected].address) {
-                    ui.label(RichText::new("Enter host or host:port").color(ERROR).size(12.5));
+                    ui.label(
+                        RichText::new("Enter host or host:port")
+                            .color(ERROR)
+                            .size(12.5),
+                    );
                 }
                 ui.horizontal(|ui| {
                     if ui.button("+ Add server").clicked() {
@@ -590,7 +772,10 @@ impl App {
                         self.config.selected_server = self.config.servers.len() - 1;
                         self.save_config();
                     }
-                    if ui.add_enabled(self.config.servers.len() > 1, egui::Button::new("Remove")).clicked() {
+                    if ui
+                        .add_enabled(self.config.servers.len() > 1, egui::Button::new("Remove"))
+                        .clicked()
+                    {
                         self.config.servers.remove(self.config.selected_server);
                         self.config.normalize();
                         self.save_config();
@@ -624,22 +809,43 @@ impl App {
             heading(ui, "CONTENT");
             ui.horizontal(|ui| {
                 ui.label("Data folder");
-                ui.label(RichText::new(self.layout.root.display().to_string()).monospace().color(ACCENT_HI));
+                ui.label(
+                    RichText::new(self.layout.root.display().to_string())
+                        .monospace()
+                        .color(ACCENT_HI),
+                );
                 if ui.button("Open").clicked() {
                     let _ = std::fs::create_dir_all(&self.layout.root);
-                    let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
-                    let _ = std::process::Command::new(opener).arg(&self.layout.root).spawn();
+                    let opener = if cfg!(windows) {
+                        "explorer"
+                    } else {
+                        "xdg-open"
+                    };
+                    let _ = std::process::Command::new(opener)
+                        .arg(&self.layout.root)
+                        .spawn();
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Content manifest");
-                if ui.add(egui::TextEdit::singleline(&mut self.manifest).desired_width(f32::INFINITY)).changed() {
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.manifest).desired_width(f32::INFINITY),
+                    )
+                    .changed()
+                {
                     self.config.manifest_url = self.manifest.trim().to_owned();
                     self.save_config();
                 }
             });
             ui.horizontal(|ui| {
-                if ui.add_enabled(!self.busy(), egui::Button::new("Verify / repair game files")).clicked() {
+                if ui
+                    .add_enabled(
+                        !self.busy(),
+                        egui::Button::new("Verify / repair game files"),
+                    )
+                    .clicked()
+                {
                     self.start_install(ctx, false, true);
                 }
                 ui.label(
@@ -661,7 +867,11 @@ impl App {
             if ui.button("Clear").clicked() {
                 self.rep.clear_logs();
             }
-            ui.label(RichText::new(self.layout.log_file().display().to_string()).color(TEXT_OFF).size(12.0));
+            ui.label(
+                RichText::new(self.layout.log_file().display().to_string())
+                    .color(TEXT_OFF)
+                    .size(12.0),
+            );
         });
         egui::Frame::new()
             .fill(TRACK)
@@ -669,23 +879,26 @@ impl App {
             .corner_radius(CornerRadius::same(2))
             .inner_margin(Margin::same(10))
             .show(ui, |ui| {
-                egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                    ui.style_mut().interaction.selectable_labels = true;
-                    for line in &lines {
-                        let color = if line.starts_with("ERROR") {
-                            ERROR
-                        } else if line.starts_with('[') && !line.starts_with("[client]") {
-                            HEADING
-                        } else {
-                            TEXT
-                        };
-                        ui.label(RichText::new(line).monospace().color(color));
-                    }
-                    if lines.is_empty() {
-                        ui.label(RichText::new("Nothing logged yet.").color(TEXT_OFF));
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                        ui.style_mut().interaction.selectable_labels = true;
+                        for line in &lines {
+                            let color = if line.starts_with("ERROR") {
+                                ERROR
+                            } else if line.starts_with('[') && !line.starts_with("[client]") {
+                                HEADING
+                            } else {
+                                TEXT
+                            };
+                            ui.label(RichText::new(line).monospace().color(color));
+                        }
+                        if lines.is_empty() {
+                            ui.label(RichText::new("Nothing logged yet.").color(TEXT_OFF));
+                        }
+                    });
             });
     }
 }
@@ -697,12 +910,10 @@ impl eframe::App for App {
         self.bottom_bar(ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG).inner_margin(Margin::same(20)))
-            .show(ctx, |ui| {
-                match self.tab {
-                    Tab::Play => self.play_tab(ui),
-                    Tab::Settings => self.settings_tab(ui, ctx),
-                    Tab::Logs => self.logs_tab(ui),
-                }
+            .show(ctx, |ui| match self.tab {
+                Tab::Play => self.play_tab(ui),
+                Tab::Settings => self.settings_tab(ui, ctx),
+                Tab::Logs => self.logs_tab(ui),
             });
         if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));

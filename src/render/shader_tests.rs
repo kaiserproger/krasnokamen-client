@@ -1174,20 +1174,25 @@ fn hiz_rejects_hidden_sections_and_preserves_every_pixel_across_turns() {
 }
 
 fn flat_quad(z: f32, half: f32, color: f32) -> Vec<crate::api::Vertex> {
-    [[-half, -half, z], [-half, half, z], [half, half, z], [half, -half, z]]
-        .into_iter()
-        .map(|position| crate::api::Vertex {
-            position,
-            color: [color; 3],
-            normal: [0., 0., -1.],
-            alpha: 1.,
-            uv: [-1.; 2],
-            overlay_uv: [-1.; 2],
-            overlay_tint: [1.; 3],
-            light: [-1.; 2],
-            ..crate::api::Vertex::zeroed()
-        })
-        .collect()
+    [
+        [-half, -half, z],
+        [-half, half, z],
+        [half, half, z],
+        [half, -half, z],
+    ]
+    .into_iter()
+    .map(|position| crate::api::Vertex {
+        position,
+        color: [color; 3],
+        normal: [0., 0., -1.],
+        alpha: 1.,
+        uv: [-1.; 2],
+        overlay_uv: [-1.; 2],
+        overlay_tint: [1.; 3],
+        light: [-1.; 2],
+        ..crate::api::Vertex::zeroed()
+    })
+    .collect()
 }
 
 /// ISSUE-1-21: the held item the player pushes into a wall. The hand quad lies behind
@@ -1247,20 +1252,30 @@ fn first_person_hand_draws_over_a_wall_it_is_inside() {
 
     renderer.set_fancy_shaders(false);
     let wall_only = pixels(&mut renderer, &scene)[center];
-    assert!(wall_only < 120, "the wall must be dark so the additive item shows, got {wall_only}");
+    assert!(
+        wall_only < 120,
+        "the wall must be dark so the additive item shows, got {wall_only}"
+    );
 
     // Control: the item behind the wall as ordinary dynamic geometry is occluded.
     scene.dynamic.vertices = flat_quad(6., 1., 0.5);
     scene.dynamic.indices[lightning] = vec![0, 1, 2, 0, 2, 3];
     scene.revision += 1;
-    assert_eq!(pixels(&mut renderer, &scene)[center], wall_only, "dynamic quad must be hidden");
+    assert_eq!(
+        pixels(&mut renderer, &scene)[center],
+        wall_only,
+        "dynamic quad must be hidden"
+    );
 
     // The same quad as hand geometry wins over the wall.
     scene.hand = std::mem::take(&mut scene.dynamic);
     scene.revision += 1;
     let hand = pixels(&mut renderer, &scene)[center];
     // `Lightning` blends additively: over a hidden quad the wall stays, over the wall it adds ~128.
-    assert!(hand >= wall_only + 100, "hand pixel {hand}, wall pixel {wall_only}");
+    assert!(
+        hand >= wall_only + 100,
+        "hand pixel {hand}, wall pixel {wall_only}"
+    );
 }
 
 /// ISSUE-1-03: the F3 `indices` figure is the index count submitted this frame. It depends
@@ -1306,6 +1321,10 @@ fn submitted_index_count_is_per_frame_not_cumulative() {
             .unwrap();
         let indices = renderer.stats.submitted_indices;
         assert!(indices >= 6, "frame must submit the terrain quad");
-        assert_eq!(*expected.get_or_insert(indices), indices, "counts must reset each frame");
+        assert_eq!(
+            *expected.get_or_insert(indices),
+            indices,
+            "counts must reset each frame"
+        );
     }
 }

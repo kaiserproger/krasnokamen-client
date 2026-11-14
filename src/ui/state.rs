@@ -1,18 +1,18 @@
 //! Retained paint/hit/accessibility owner. Network effects are typed domain commands only.
 use super::{
+    ClickMode, Modifiers, PointerButton, PointerPhase, UiIntent,
     edit::EditBuffer,
     items::{ItemContext, ItemModels},
     render::{Painter, TextRenderer},
-    ClickMode, Modifiers, PointerButton, PointerPhase, UiIntent,
 };
 use crate::{
     api::{MeshGeometry, RenderLayer, Vertex},
     inventory::{InventoryStore, MenuKind, UiContext},
-    protocol::{content::Content, models::TintKind, Result},
+    protocol::{Result, content::Content, models::TintKind},
 };
 use glam::{Mat4, Vec3};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
@@ -347,10 +347,19 @@ pub(crate) enum Paint {
     /// Options category tab (`true` = selected).
     Tab(bool),
     /// Options slider; `t` is the 0..1 stop position, `desc` the hover description.
-    Slider { t: f32, desc: &'static str },
-    Toggle { on: bool, desc: &'static str },
+    Slider {
+        t: f32,
+        desc: &'static str,
+    },
+    Toggle {
+        on: bool,
+        desc: &'static str,
+    },
     /// Row split at `delim` into a left label and a right-aligned value.
-    Split { delim: &'static str, desc: &'static str },
+    Split {
+        delim: &'static str,
+        desc: &'static str,
+    },
     /// Themed translucent panel.
     Frame,
     Hotbar,
@@ -721,16 +730,20 @@ impl UiState {
     pub fn next_setting_value(key: &str, current: Option<&Value>) -> Option<Value> {
         let sane = |v: &Value| Self::sanitize_setting_value(key, v);
         match key {
-            "fullscreen" | "vsync" | "fancy_shaders" => Some(json!(!current
-                .and_then(Value::as_bool)
-                .unwrap_or(key != "fullscreen"))),
+            "fullscreen" | "vsync" | "fancy_shaders" => Some(json!(
+                !current
+                    .and_then(Value::as_bool)
+                    .unwrap_or(key != "fullscreen")
+            )),
             "max_fps" => {
                 let current = current.and_then(Value::as_u64).unwrap_or(120);
-                Some(json!([30, 60, 90, 120, 144, 165, 240, 260, 0]
-                    .into_iter()
-                    .find(|&v| v > current)
-                    .filter(|_| current != 0)
-                    .unwrap_or(if current == 0 { 30 } else { 0 })))
+                Some(json!(
+                    [30, 60, 90, 120, 144, 165, 240, 260, 0]
+                        .into_iter()
+                        .find(|&v| v > current)
+                        .filter(|_| current != 0)
+                        .unwrap_or(if current == 0 { 30 } else { 0 })
+                ))
             }
             "render_distance" => {
                 let Some(cur) = current.and_then(sane).and_then(|v| v.as_u64()) else {
@@ -2011,7 +2024,10 @@ impl UiState {
                                         ClickMode::Pickup
                                     },
                                 });
-                            } else if let NodeAction::Dialog(super::dialog::DialogControl::Slide(_)) = action {
+                            } else if let NodeAction::Dialog(super::dialog::DialogControl::Slide(
+                                _,
+                            )) = action
+                            {
                                 self.focus = Some(id.clone());
                                 self.slider_drag = Some(id.clone());
                                 self.dialog_slider_pointer(&id);
@@ -2054,12 +2070,14 @@ impl UiState {
                         if let Some(id) = self.slider_drag.clone() {
                             if self.screen == Screen::ServerDialog {
                                 self.dialog_slider_pointer(&id);
-                            } else if let Some((key, bounds)) = self.nodes.iter().find(|n| n.id == id).and_then(
-                                |n| match n.action {
-                                    NodeAction::Slider(key) => Some((key, n.bounds)),
-                                    _ => None,
-                                },
-                            ) {
+                            } else if let Some((key, bounds)) =
+                                self.nodes.iter().find(|n| n.id == id).and_then(|n| {
+                                    match n.action {
+                                        NodeAction::Slider(key) => Some((key, n.bounds)),
+                                        _ => None,
+                                    }
+                                })
+                            {
                                 if let Some(pos) =
                                     super::options::pos_at(key, bounds, self.pointer[0])
                                 {
@@ -3006,11 +3024,13 @@ impl UiState {
                         .unwrap_or(0.5);
                     json!(if v >= 1. { 0. } else { (v + 0.05).min(1.) })
                 } else {
-                    json!(!self
-                        .settings
-                        .get(key)
-                        .and_then(Value::as_bool)
-                        .unwrap_or(matches!(key, "text_background" | "keep_jigsaws")))
+                    json!(
+                        !self
+                            .settings
+                            .get(key)
+                            .and_then(Value::as_bool)
+                            .unwrap_or(matches!(key, "text_background" | "keep_jigsaws"))
+                    )
                 };
                 self.commit_setting(key, value, e);
             }
@@ -3332,7 +3352,11 @@ impl UiState {
                 Paint::Field(id) => {
                     // Single-line fields centre their text vertically; tall
                     // (multi-line editor) fields keep the top inset.
-                    let ty = if h <= 28. { y + ((h - 9.) / 2.).floor() } else { y + 4. };
+                    let ty = if h <= 28. {
+                        y + ((h - 9.) / 2.).floor()
+                    } else {
+                        y + 4.
+                    };
                     p.pixel_panel(
                         node.bounds,
                         super::theme::TRACK,
@@ -3645,13 +3669,21 @@ impl UiState {
                     [x + offset, y + offset]
                 };
                 let color = if !node.enabled {
-                    if menu { super::theme::TEXT_OFF } else { 0xff888888 }
+                    if menu {
+                        super::theme::TEXT_OFF
+                    } else {
+                        0xff888888
+                    }
                 } else if !menu {
                     0xffffffff
                 } else if wordmark || heading || panel_title {
                     super::theme::HEADING
                 } else if matches!(node.paint, Paint::Button) {
-                    if fx.hover > 0.4 { 0xffffe2a8 } else { super::theme::TEXT }
+                    if fx.hover > 0.4 {
+                        0xffffe2a8
+                    } else {
+                        super::theme::TEXT
+                    }
                 } else if node.id == "title/error" {
                     0xffff8466
                 } else if node.id == "title/subtitle" {
