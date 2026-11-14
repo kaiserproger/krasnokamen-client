@@ -329,6 +329,8 @@ pub struct World {
     resident_bytes: usize,
     view_distance: u32,
     chunk_lifecycle_revision: u64,
+    /// Changes whenever any received block may have changed (`block_revision`).
+    block_revision: u64,
     random: random::RandomSources,
     pub(crate) environment: crate::environment::PointState,
     environment_context: environment::Context,
@@ -366,6 +368,11 @@ impl World {
     /// on idle turns. Replacing a column (including its section layout) counts.
     pub(crate) fn chunk_lifecycle_revision(&self) -> u64 {
         self.chunk_lifecycle_revision
+    }
+    /// Changes whenever a block read may answer differently: a column received, replaced or
+    /// dropped, or a block set.
+    pub(crate) fn block_revision(&self) -> u64 {
+        self.block_revision
     }
     pub fn resident_bytes(&self) -> usize {
         self.resident_bytes
@@ -417,17 +424,20 @@ impl World {
         self.chunks.insert(pos, Arc::new(chunk));
         self.resident_bytes = next_bytes;
         self.chunk_lifecycle_revision = self.chunk_lifecycle_revision.wrapping_add(1);
+        self.block_revision = self.block_revision.wrapping_add(1);
         Ok(())
     }
     pub fn remove(&mut self, pos: [i32; 2]) {
         if let Some(chunk) = self.chunks.remove(&pos) {
             self.resident_bytes -= chunk.resident_bytes();
             self.chunk_lifecycle_revision = self.chunk_lifecycle_revision.wrapping_add(1);
+            self.block_revision = self.block_revision.wrapping_add(1);
         }
     }
     pub fn clear(&mut self) {
         if !self.chunks.is_empty() {
             self.chunk_lifecycle_revision = self.chunk_lifecycle_revision.wrapping_add(1);
+            self.block_revision = self.block_revision.wrapping_add(1);
         }
         self.chunks.clear();
         self.resident_bytes = 0;
@@ -542,6 +552,7 @@ impl World {
                 Arc::make_mut(&mut chunk.surface_heightmap).set_offset([p[0], p[2]], height);
             }
             self.resident_bytes = self.resident_bytes - old_bytes + chunk.resident_bytes();
+            self.block_revision = self.block_revision.wrapping_add(1);
         }
         Ok(())
     }
@@ -793,5 +804,30 @@ mod tests {
         let filled = world.chunk_lifecycle_revision();
         world.clear();
         assert_ne!(world.chunk_lifecycle_revision(), filled);
+    }
+
+    /// Entities remember dry water probes by `block_revision`: every change a block read can
+    /// see moves it, a block set to the state it already has does not.
+    #[test]
+    fn block_revision_moves_with_every_block_change() {
+        let mut world = World::new(0, 16);
+        let mut last = world.block_revision();
+        let mut moved = |world: &World, expected: bool, what: &str| {
+            assert_eq!(world.block_revision() != last, expected, "{what}");
+            last = world.block_revision();
+        };
+        world.insert([0, 0], chunk(1, 0)).unwrap();
+        moved(&world, true, "column received");
+        let state = world.block([1, 2, 3]).unwrap();
+        world.set([1, 2, 3], state, |_| Ok(false)).unwrap();
+        moved(&world, false, "same state");
+        world.set([1, 2, 3], state + 1, |_| Ok(false)).unwrap();
+        moved(&world, true, "block set");
+        world.remove([0, 0]);
+        moved(&world, true, "column dropped");
+        world.insert([0, 0], chunk(1, 0)).unwrap();
+        moved(&world, true, "column received again");
+        world.clear();
+        moved(&world, true, "cleared");
     }
 }
