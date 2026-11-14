@@ -970,6 +970,38 @@ class Fight(unittest.TestCase):
         sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), duration=12.0)
         self.assertGreater(abs(sim.me[0]), 0.3, "he did not leave the line behind the friend")
 
+    def sidestep_lines(self, floor=None, duration=15.0):
+        pulses = []
+        real = MarchingRank.tool
+        def tool(sim, name, arguments=None):
+            if name == "minecraft_press_inputs" and arguments and "hold" not in arguments and set(arguments["keys"]) & {"left", "right"}:
+                pulses.append(arguments["keys"])
+            return real(sim, name, arguments)
+        with mock.patch.object(MarchingRank, "tool", tool):
+            sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), floor=floor, duration=duration)
+        return sim, logs, pulses, [line for line in logs if line.startswith("sidestep ") and not line.startswith("sidestep ended")]
+
+    def test_every_detour_step_is_logged_once_with_its_reason_side_keys_and_outcome(self):
+        sim, logs, pulses, lines = self.sidestep_lines()
+        self.assertTrue(pulses)
+        self.assertIn(len(lines), (len(pulses), len(pulses) - 1), "one decision line per sidestep, the last one still pending at the end")
+        for line in lines:
+            self.assertRegex(line, r"^sidestep all enemies blocked; side (left|right)\b.*; wanted \['(left|right)'\] allowed \[.*\]; "
+                                   r"(moved|did not move) [\d.]+ blocks \[.*\] -> \[.*\]$")
+        self.assertEqual(len([line for line in logs if line.startswith("sidestep ended")]), 1, "one reset line per detour")
+        self.assertIn("jam cleared", [line for line in logs if line.startswith("sidestep ended")][0])
+
+    def test_the_log_says_what_the_guard_refused_and_when_the_side_flipped(self):
+        sim, logs, pulses, lines = self.sidestep_lines(floor=lambda x, z: None if x < -0.3 else 63)
+        refused = [line for line in lines if "did not move" in line]
+        self.assertEqual(len(refused), 1, lines)
+        self.assertIn("allowed []; guard: edge refused", refused[0])
+        self.assertTrue(any("(flipped: the last step was refused)" in line for line in lines), lines)
+
+    def test_a_jam_of_skipped_swings_names_the_kind(self):
+        sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=15.0, bare=True)
+        self.assertTrue(any(line.startswith("sidestep jam 2 skips: friend;") or line.startswith("sidestep all enemies blocked;") for line in logs), logs[-8:])
+
     def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
         for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
             sim, logs = self.jammed((0.0, 2.3, 64.0), (0.0, 1.2, 64.0), floor=void)

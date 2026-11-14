@@ -179,6 +179,7 @@ class Guard:
         self.c, self.keepout = client, keepout
         self.cache: dict[tuple, dict] = {}  # (x, z, feet_y) -> {y: row}, columns read within one `filter` call
         self.logged: dict[tuple, float] = {}
+        self.refusals: list[str] = []  # every refusal since the caller last cleared it (the log line throttles, this does not)
 
     def cells(self, here, vector, reach):
         """Distinct (x, z) cells along `vector` from the feet at `look_points(reach)`, not the feet's own."""
@@ -231,6 +232,7 @@ class Guard:
         return None
 
     def refuse(self, line: str, key: tuple):
+        self.refusals.append(line)
         now = time.monotonic()
         if now - self.logged.get(key, -1e9) >= LOG_AGAIN:
             self.logged[key] = now
@@ -298,6 +300,7 @@ class Pilot:
         self.held: set[str] = set()
         self.sent_look = None
         self.observed: dict = {}  # the whole last minecraft_observe taken by player()
+        self.jam_kind = "friend"  # what stood under the crosshair last: friend | unknown-side | block
         self.jam = 0  # swings in a row not made because a friend or block stood under the crosshair
 
     def keys(self, wanted: set[str]):
@@ -636,6 +639,8 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
         seen.append(kind)
     blocked[ident] = time.monotonic() + BLOCK_FOR
     pilot.jam += 1
+    pilot.jam_kind = ("friend" if any(x.startswith("friend") for x in seen) else
+                      "unknown-side" if any(x.startswith("unknown-side") for x in seen) else "block")
     log(f"attack skipped (crosshair {', '.join(seen)}; target {ident} left alone {BLOCK_FOR} s)")
     return False
 
@@ -685,6 +690,7 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
                 return False
             blocked[ident] = time.monotonic() + BLOCK_FOR
             pilot.jam += 1
+            pilot.jam_kind = "friend" if side == args.side else "unknown-side"
             log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
                 "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
             return False
@@ -731,6 +737,8 @@ def rank(args, client: Client):
     moving = False
     last_attack = 0.0
     walked_last = True
+    decision = None  # the sidestep decision of the last step, logged once its outcome is known
+    episode = 0  # sidestep steps in the current detour
     side_dir, side_from, sidestepping = 1.0, None, False  # sidestep: direction, where this way began, last step was one
     blocked: dict[int, float] = {}  # enemy id -> time before which it is not struck (a friend stood in the way)
     last_status, steps = time.monotonic(), 0
@@ -769,6 +777,13 @@ def rank(args, client: Client):
             pitch = float(me.get("pitch", pitch))
             interval = weapon_profile(client, args)
         last, last_step = here, stepped
+        if decision is not None:
+            moved = math.dist(decision["before"], here)
+            log(f"sidestep {decision['reason']}; side {decision['side']}{decision['flip']}; wanted {decision['wanted']} "
+                f"allowed {decision['allowed']}{decision['refused']}; "
+                f"{'moved' if moved >= 0.2 else 'did not move'} {moved:.2f} blocks "
+                f"{[round(v, 1) for v in decision['before']]} -> {[round(v, 1) for v in here]}")
+            decision = None
         listed = client.tool("minecraft_list_entities", {"radius": args.radius, "limit": args.limit})["entities"]
         soldiers = sorted((e for e in listed if soldier(e)), key=lambda e: e["distance"])
         friends, enemies, unread = [], [], []
@@ -862,7 +877,7 @@ def rank(args, client: Client):
         pilot.look(yaw, pitch)
         wanted: set[str] = set()
         steer = None
-        step_aside = False
+        step_aside, flip = False, ""
         if contact:
             too_close = eye_distance(me, focus) < args.min_reach  # a spear misses inside its minimum reach
             if focus["distance"] > args.engage + ENGAGE_SLACK or too_close:
@@ -873,12 +888,13 @@ def rank(args, client: Client):
             elif enemy is None or pilot.jam >= JAM_SKIPS:
                 # A friend stands in the line (every enemy blocked, or swings skipped in a row): one step sideways,
                 # the other way when the guard refused it or this way went SIDESTEP_MAX; never stand still in a fight.
+                flip = ""
                 if sidestepping and not walked_last:
-                    side_dir, side_from = -side_dir, None
+                    side_dir, side_from, flip = -side_dir, None, " (flipped: the last step was refused)"
                 if side_from is None:
                     side_from = list(here)
                 elif math.dist(side_from, here) >= SIDESTEP_MAX:
-                    side_dir, side_from = -side_dir, list(here)
+                    side_dir, side_from, flip = -side_dir, list(here), f" (flipped: {SIDESTEP_MAX} blocks this way)"
                 line = [focus["x"] - here[0], focus["z"] - here[2]]
                 length = math.hypot(*line) or 1.0
                 steer = [here[0] - line[1] / length * SIDESTEP * side_dir, here[2] + line[0] / length * SIDESTEP * side_dir]
@@ -919,7 +935,19 @@ def rank(args, client: Client):
         if args.guard > 0 and enemy is not None and enemy["distance"] <= args.guard and not strike:
             wanted.add("use")
         was_using = "use" in pilot.held
+        asked = sorted(wanted & {"forward", "back", "left", "right"})
+        if guard is not None:
+            guard.refusals.clear()
         walked = move(client, pilot, guard, wanted, here, yaw, distance if steer is not None else 0.0, step_time)
+        if step_aside:
+            reason = ("all enemies blocked" if enemy is None else f"jam {pilot.jam} skips: {pilot.jam_kind}")
+            decision = {"reason": reason, "flip": flip, "wanted": asked, "before": list(here),
+                        "side": "right" if "right" in asked else "left" if "left" in asked else ("left" if side_dir > 0 else "right") + " (keys " + ",".join(asked) + ")",
+                        "allowed": sorted(walked), "refused": ("; guard: " + " | ".join(dict.fromkeys(guard.refusals))) if guard is not None and guard.refusals else ""}
+            episode += 1
+        elif sidestepping:
+            log(f"sidestep ended after {episode} step(s): {'fight over' if not contact else 'jam cleared (counter ' + str(pilot.jam) + ')'}")
+            episode = 0
         sidestepping, walked_last = step_aside, bool(walked)
         if not step_aside:
             side_from = None
