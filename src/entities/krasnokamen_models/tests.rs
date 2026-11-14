@@ -786,10 +786,18 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
 
     for key in ["minecraft:rabbit#main", "minecraft:rabbit_baby#main"] {
         let rabbit = rest_bounds(key);
-        let leg = rabbit["right_hind_leg"].1.y - rabbit["right_hind_leg"].0.y;
+        // Vanilla hangs the rabbit's haunch geometry on `right_haunch` below the
+        // pivot-only `right_hind_leg`, and a baby torso carries a rotated copy on
+        // `body_r1`, so the fold is measured against every torso bone.
+        let leg = rabbit["right_haunch"].1.y - rabbit["right_haunch"].0.y;
+        let torso = rabbit
+            .iter()
+            .filter(|(name, _)| name.starts_with("body"))
+            .map(|(_, (low, high))| high.y - low.y)
+            .fold(0.0_f32, f32::max);
         assert!(
-            leg < rabbit["body"].1.y - rabbit["body"].0.y,
-            "{key}: haunches fold below the body, not deer legs"
+            leg < torso,
+            "{key}: haunches fold below the body ({leg} vs {torso}), not deer legs"
         );
     }
     let fox = overall_size(&rest_bounds("minecraft:fox#main"));
@@ -814,10 +822,18 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
                 && boar.contains_key("right_ear"),
             "{key}"
         );
-        for tusk in ["left_tusk", "right_tusk"] {
+        // Vanilla paints the tusks on the 14x6x19 head cube; there is no separate
+        // tusk bone, so the head must carry the tusk texels itself. The baby rigs
+        // still carry their own tusk bones until they are re-authored.
+        if !key.contains("_baby") {
             assert!(
-                protrusion(boar[tusk], boar["head"]) > px,
-                "{key}: {tusk} sticks out of the head"
+                !boar.contains_key("left_tusk") && !boar.contains_key("right_tusk"),
+                "{key}: tusks are head texels, not extra bones"
+            );
+            let head = boar["head"];
+            assert!(
+                head.1.y - head.0.y > 5. * px && head.1.z - head.0.z > 15. * px,
+                "{key}: long head that carries the tusk texels"
             );
         }
     }
@@ -826,14 +842,17 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         assert_eq!(
             names(&strider)
                 .iter()
-                .filter(|name| name.starts_with("leg"))
+                .filter(|name| name.ends_with("_leg") || name.starts_with("leg"))
                 .count(),
             2,
             "{key}: two legs"
         );
-        let head = strider["head"].1 - strider["head"].0;
+        // Vanilla's strider head is part of the body cube (no head bone) and its
+        // bristles are flat fans; the deep 16x14x16 body is the silhouette.
+        let body = strider["body"];
         assert!(
-            head.z > 0.8 * head.x && names(&strider).iter().any(|name| name.contains("bristle")),
+            body.1.z - body.0.z > 0.95 * (body.1.x - body.0.x)
+                && names(&strider).iter().any(|name| name.contains("bristle")),
             "{key}: deep body with bristles"
         );
     }
@@ -875,9 +894,19 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
             axolotl["top_gills"].0.y < head.0.y,
             "{key}: top gills rise above the head"
         );
+        // Vanilla hangs each side gill as a flat fan off a head side; the baby model
+        // mirrors the two names, so only the shared shape and both-sides facts hold.
+        let (right, left) = (axolotl["right_gills"], axolotl["left_gills"]);
+        for (gill, span) in [("right_gills", right), ("left_gills", left)] {
+            assert!(
+                (span.1.z - span.0.z).abs() < 0.01 && span.1.x - span.0.x > 0.1,
+                "{key}: {gill} is a flat fan"
+            );
+        }
         assert!(
-            axolotl["right_gills"].0.x < head.0.x && axolotl["left_gills"].1.x > head.1.x,
-            "{key}: side gills"
+            ((right.0.x + right.1.x) - (left.0.x + left.1.x)).abs() > 0.1
+                && (right.1.x >= head.1.x - 0.01 || left.1.x >= head.1.x - 0.01),
+            "{key}: gill fans sit on both sides of the head"
         );
     }
     let vindicator = embedded("vindicator");

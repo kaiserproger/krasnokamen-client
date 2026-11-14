@@ -641,3 +641,248 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
         low.z
     );
 }
+
+/// Pixel-space rest bounds of one authored bone: (low, high) in 1/16-block units.
+fn rest_px(rig: &Rig, transforms: &[Mat4], name: &str) -> ([f32; 3], [f32; 3]) {
+    let (low, high) = bounds(rig, transforms, name);
+    (
+        [low.x * 16., low.y * 16., low.z * 16.],
+        [high.x * 16., high.y * 16., high.z * 16.],
+    )
+}
+
+fn assert_px(actual: ([f32; 3], [f32; 3]), expected: ([f32; 3], [f32; 3]), what: &str) {
+    for axis in 0..3 {
+        assert!(
+            (actual.0[axis] - expected.0[axis]).abs() < 0.05
+                && (actual.1[axis] - expected.1[axis]).abs() < 0.05,
+            "{what}: {:?}..{:?} != {:?}..{:?}",
+            actual.0,
+            actual.1,
+            expected.0,
+            expected.1
+        );
+    }
+}
+
+// MODEL-OPUS-2: vanilla's pig is a 10x16x8 horizontal torso whose head sits on the
+// body line with a 4x3x1 snout; the invented ears and three-cube tail are gone.
+#[test]
+fn pig_is_the_vanilla_horizontal_torso_with_a_grounded_head_and_short_legs() {
+    let pig = rig("pig");
+    let transforms = rest(pig);
+    let parts: Vec<&str> = pig
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        parts,
+        [
+            "head",
+            "body",
+            "right_hind_leg",
+            "left_hind_leg",
+            "right_front_leg",
+            "left_front_leg"
+        ],
+        "vanilla pig has head, body and four legs only"
+    );
+    assert_px(
+        rest_px(pig, &transforms, "body"),
+        ([-5., 10., -8.], [5., 18., 8.]),
+        "pig body",
+    );
+    assert_px(
+        rest_px(pig, &transforms, "head"),
+        ([-4., 8., -15.], [4., 16., -6.]),
+        "pig head and snout",
+    );
+    for (leg, z) in [("right_front_leg", -7.), ("right_hind_leg", 5.)] {
+        assert_px(
+            rest_px(pig, &transforms, leg),
+            ([-5., 18., z], [-1., 24., z + 4.]),
+            leg,
+        );
+    }
+}
+
+// MODEL-OPUS-5: the face lives on the inner cube and the translucent shell is a
+// separate rig, so a plain green box never covers the eyes and mouth.
+#[test]
+fn slime_face_parts_sit_on_the_inner_cube_under_a_separate_shell() {
+    let inner = rig("slime");
+    let transforms = rest(inner);
+    let names: Vec<&str> = inner
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(names, ["right_eye", "mouth", "left_eye", "cube"]);
+    assert_px(
+        rest_px(inner, &transforms, "right_eye"),
+        ([-3.25, 18., -3.5], [-1.25, 20., -1.5]),
+        "slime right eye",
+    );
+    assert_px(
+        rest_px(inner, &transforms, "left_eye"),
+        ([1.25, 18., -3.5], [3.25, 20., -1.5]),
+        "slime left eye",
+    );
+    assert_px(
+        rest_px(inner, &transforms, "mouth"),
+        ([0., 21., -3.5], [1., 22., -2.5]),
+        "slime mouth",
+    );
+    let shell = rig("slime_outer");
+    let shell_transforms = rest(shell);
+    assert_px(
+        rest_px(shell, &shell_transforms, "cube"),
+        ([-4., 16., -4.], [4., 24., 4.]),
+        "slime shell",
+    );
+}
+
+// MODEL-OPUS-N2: the magma cube's eyes are the front texels of the eight one-pixel
+// layers plus the inside cube; there is no split eye bone and nothing sits low.
+#[test]
+fn magma_cube_eyes_stay_on_the_vanilla_one_pixel_layers() {
+    let cube = rig("magma_cube");
+    let transforms = rest(cube);
+    let mut layers = 0;
+    for bone in &cube.bones {
+        assert!(
+            !bone.name.contains("eye"),
+            "split eye bone {} is not vanilla",
+            bone.name
+        );
+        if bone.name.starts_with("cube") {
+            layers += 1;
+        }
+    }
+    assert_eq!(layers, 8, "vanilla magma cube has eight 8x1x8 layers");
+    assert_px(
+        rest_px(cube, &transforms, "cube0"),
+        ([-4., 16., -4.], [4., 17., 4.]),
+        "lowest layer",
+    );
+    assert_px(
+        rest_px(cube, &transforms, "cube7"),
+        ([-4., 23., -4.], [4., 24., 4.]),
+        "highest layer",
+    );
+    assert_px(
+        rest_px(cube, &transforms, "inside_cube"),
+        ([-2., 18., -2.], [2., 22., 2.]),
+        "inside cube",
+    );
+}
+
+// MODEL-OPUS-9: axolotl gill fans are flat planes on the head's top and both sides,
+// and the tail is a vertical fin rather than a box.
+#[test]
+fn axolotl_gill_fans_and_tail_are_flat_vanilla_planes() {
+    let axolotl = rig("axolotl");
+    let transforms = rest(axolotl);
+    for (name, expected) in [
+        ("top_gills", ([-4., 13.5, -5.], [4., 16.5, -5.])),
+        ("right_gills", ([4., 14.5, -5.], [7., 21.5, -5.])),
+        ("left_gills", ([-7., 14.5, -5.], [-4., 21.5, -5.])),
+        ("tail", ([0., 16.5, 6.], [0., 21.5, 18.])),
+    ] {
+        assert_px(rest_px(axolotl, &transforms, name), expected, name);
+    }
+}
+
+// MODEL-OPUS-10: hoglin horns/ears/mane, strider bristles and the bee's legs and
+// stinger are the signature parts those rigs used to lose.
+#[test]
+fn hoglin_strider_and_bee_keep_their_signature_parts() {
+    let hoglin = rig("hoglin");
+    let transforms = rest(hoglin);
+    assert_px(
+        rest_px(hoglin, &transforms, "right_horn"),
+        ([-8., 4.64, -27.25], [-6., 13.24, -17.54]),
+        "hoglin horn",
+    );
+    assert_px(
+        rest_px(hoglin, &transforms, "left_ear"),
+        ([6., 0.99, -17.33], [11.24, 7.02, -11.22]),
+        "hoglin ear",
+    );
+    assert_px(
+        rest_px(hoglin, &transforms, "mane"),
+        ([0., -7., -16.], [0., 3., 3.]),
+        "hoglin mane",
+    );
+    let strider = rig("strider");
+    let transforms = rest(strider);
+    assert_px(
+        rest_px(strider, &transforms, "body"),
+        ([-8., -5., -8.], [8., 9., 8.]),
+        "strider body depth",
+    );
+    assert_px(
+        rest_px(strider, &transforms, "right_top_bristle"),
+        ([-15.71, -4., -8.], [-8., 5.19, 8.]),
+        "strider bristle",
+    );
+    let bee = rig("bee");
+    let transforms = rest(bee);
+    assert_px(
+        rest_px(bee, &transforms, "front_legs"),
+        ([-3.5, 22., -2.], [3.5, 24., -2.]),
+        "bee legs",
+    );
+    assert_px(
+        rest_px(bee, &transforms, "stinger"),
+        ([0., 18., 5.], [0., 19., 7.]),
+        "bee stinger",
+    );
+}
+
+// MODEL-OPUS-11: the rabbit's crouched 8x6x10 torso, the fox's 6x11x6 body, the
+// panda's 19x26x13 torso and the vex's plane wings against the old deer/boxy rigs.
+#[test]
+fn rabbit_fox_panda_and_vex_shapes_match_the_vanilla_proportions() {
+    let rabbit = rig("rabbit");
+    let transforms = rest(rabbit);
+    assert_px(
+        rest_px(rabbit, &transforms, "body"),
+        ([-4., 14.01, -4.31], [4., 23.38, 7.22]),
+        "rabbit body",
+    );
+    assert_px(
+        rest_px(rabbit, &transforms, "right_ear"),
+        ([-2.5, 7., -2.48], [-0.5, 12., -1.48]),
+        "rabbit ear",
+    );
+    let fox = rig("fox");
+    let transforms = rest(fox);
+    assert_px(
+        rest_px(fox, &transforms, "body"),
+        ([-3., 13.5, -2.], [3., 19.5, 9.]),
+        "fox body",
+    );
+    let panda = rig("panda");
+    let transforms = rest(panda);
+    assert_px(
+        rest_px(panda, &transforms, "body"),
+        ([-9.5, 3.5, -13.], [9.5, 16.5, 13.]),
+        "panda body",
+    );
+    assert_px(
+        rest_px(panda, &transforms, "head"),
+        ([-8.5, 3.5, -23.], [8.5, 16.5, -12.]),
+        "panda head",
+    );
+    let vex = rig("vex");
+    let transforms = rest(vex);
+    assert_px(
+        rest_px(vex, &transforms, "right_wing"),
+        ([-0.5, 18.5, 1.], [-0.5, 23.5, 9.]),
+        "vex wing plane",
+    );
+}
