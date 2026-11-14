@@ -119,3 +119,45 @@ fn rc1_boss_remove_packet_removes_only_addressed_bar() {
     session.disconnect();
     assert!(session.ui.as_ref().unwrap().bosses().is_empty());
 }
+
+/// Regression (NATIVE-SET-PLAYER-TEAM-26-3-LAYOUT): the 26.3
+/// `ClientboundSetPlayerTeamPacket.Parameters.STREAM_CODEC` order is display,
+/// prefix, suffix, visibility, collision, Optional<color>, options. Decoding the
+/// pre-26.3 order failed on this exact payload with "4 trailing packet bytes",
+/// which disconnected the native client on `/team add`.
+#[test]
+fn rc1_team_packet_decodes_the_26_3_parameter_order() {
+    let mut session = session();
+    let text = |value: &str| Nbt::Compound(vec![("text".into(), Nbt::String(value.into()))]);
+    let mut packet = Writer::default();
+    packet.string("alpha");
+    packet.byte(0); // method: add
+    text("Alpha").write_root(&mut packet).unwrap();
+    text("<").write_root(&mut packet).unwrap();
+    text(">").write_root(&mut packet).unwrap();
+    packet.var(0); // visibility: always
+    packet.var(0); // collision: always
+    packet.byte(0); // Optional<TeamColor>: absent
+    packet.byte(0); // options
+    packet.var(1);
+    packet.string("Steve");
+    session
+        .apply(Phase::Play, cb::SET_PLAYER_TEAM, &packet.0)
+        .expect("26.3 team parameters must decode without trailing bytes");
+    let board = session.ui.as_ref().unwrap().scoreboard();
+    let team = board.teams.get("alpha").expect("team must be stored");
+    assert_eq!(team.parameters.display["text"], json!("Alpha"));
+    assert_eq!(team.parameters.prefix["text"], json!("<"));
+    assert_eq!(team.parameters.suffix["text"], json!(">"));
+    assert_eq!(
+        team.parameters.formatting, 21,
+        "an absent Optional<TeamColor> is ChatFormatting.RESET (21), not a color"
+    );
+    assert_eq!(team.members, BTreeSet::from(["Steve".to_string()]));
+    assert_eq!(
+        board
+            .team("Steve")
+            .map(|team| team.parameters.display["text"].clone()),
+        Some(json!("Alpha"))
+    );
+}
