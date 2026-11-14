@@ -43,6 +43,9 @@ class MarchingRank:
         self.always_using = False
         self.waits, self.entity_reads, self.press_times = [], [], []  # wait_ticks counts; ids whose side was read; client time of each attack press
         self.spawn = []  # (time, id, [x, z]): a soldier that appears
+        self.teleport = None  # (time, [x, z]): the server moves him there once
+        self.die_at = None  # client time of his death; he stays dead until minecraft_respawn
+        self.dead = False
         self.list_times = []  # client time of each entity list: one per pilot step
         self.vanish = None  # (time, ids): from that time those soldiers are far away
         self.selected_free = True  # reads of the selected item (the weapon interval) also take no march time
@@ -81,6 +84,10 @@ class MarchingRank:
             for appearing in [w for w in self.spawn if self.now >= w[0]]:
                 self.spawn.remove(appearing)
                 self.soldiers[appearing[1]] = list(appearing[2])
+            if self.teleport and self.now >= self.teleport[0]:
+                self.me, self.teleport = list(self.teleport[1]), None
+            if self.die_at is not None and self.now >= self.die_at:
+                self.dead, self.die_at = True, None
             if self.vanish and self.now >= self.vanish[0]:
                 for ident in self.vanish[1]:
                     self.soldiers[ident] = [500.0, 500.0]
@@ -150,7 +157,7 @@ class MarchingRank:
             return {}
         if name == "minecraft_observe":
             return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
-                                                  "pitch": 0.0, "health": 20.0, "horizontal_collision": False},
+                                                  "pitch": 0.0, "health": 0.0 if self.dead else 20.0, "horizontal_collision": False},
                     "inputs": {"held": sorted(self.held)},
                     "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
                     "target": self.crosshair(), **({"ui_nodes": self.ui_nodes()} if self.hud else {})}
@@ -173,6 +180,9 @@ class MarchingRank:
             self.entity_reads.append(arguments.get("entity_id"))
             side = "blue" if arguments.get("entity_id", 0) >= 1000 else "red"
             return {"components": {"minecraft:item_model": f"solaris_battle:{side}_shield"}}
+        if name == "minecraft_respawn":
+            self.dead, self.me = False, [30.0, 30.0]
+            return {"status": "ok"}
         if name == "minecraft_set_hotbar_slot":
             self.selected = arguments["slot"]
             return {"status": "ok"}
@@ -1001,6 +1011,39 @@ class Fight(unittest.TestCase):
     def test_a_jam_of_skipped_swings_names_the_kind(self):
         sim, logs = duel({1000: (0.0, 2.3, 64.0)}, friends={500: (0.0, 1.2, 64.0)}, duration=15.0, bare=True)
         self.assertTrue(any(line.startswith("sidestep jam 2 skips: friend;") or line.startswith("sidestep all enemies blocked;") for line in logs), logs[-8:])
+
+    def test_a_sidestep_cut_short_by_a_teleport_or_a_death_is_logged_as_unknown_not_as_a_move(self):
+        for how in ("teleport", "death"):
+            sim = MarchingRank(0.05, march=0.0, duration=12.0)
+            sim.soldiers = {500: [0.0, 1.2], 1000: [0.0, 2.3]}
+            if how == "teleport":
+                sim.teleport = (2.0, [100.0, 100.0])
+            else:
+                sim.die_at = 2.0
+            logs = logged(sim, lambda: self.run_rank(sim))
+            lines = [line for line in logs if line.startswith("sidestep ")]
+            self.assertFalse([line for line in lines if "moved" in line and "->" in line and "[100" in line or "[30" in line and "->" in line],
+                             f"{how}: the jump to the new place is not a sidestep result: {lines}")
+            self.assertTrue(any("outcome unknown" in line or line.startswith("sidestep ended after") and how in line for line in lines),
+                            f"{how}: {lines}")
+
+    def test_the_enemy_beyond_the_page_of_a_crowd_is_still_struck(self):
+        ring = {600 + i: (math.cos(i) * 1.5, -abs(math.sin(i)) * 1.5 - 0.3, 64.0) for i in range(40)}  # 40 friends nearer than he, behind PovRed
+        sim, logs = duel({1000: (0.0, 2.8, 64.0)}, friends=ring, duration=15.0, bare=True)
+        self.assertEqual([line for line in logs if "left the page" in line], [])
+        self.assertTrue(sim.hits, logs[-5:])
+
+    def test_an_enemy_he_cannot_reach_for_four_seconds_is_walked_up_to(self):
+        sim, logs = duel({1000: (0.0, 10.0, 64.0)}, duration=40.0)
+        self.assertTrue(any(line.startswith("no swing for 4 s, nearest enemy") for line in logs), logs[-5:])
+        self.assertTrue(sim.hits, "he never reached the enemy")
+        self.assertLessEqual(math.dist(sim.me, [0.0, 10.0]), 3.2)
+
+    def test_in_a_fight_he_does_not_step_down_more_than_one_block(self):
+        floor = lambda x, z: 61 if z > 0.5 else 63  # a 2-block pit between him and the enemy 4.3 blocks ahead
+        sim, logs = duel({1000: (0.0, 4.3, 64.0)}, duration=15.0, bare=True, floor=floor)
+        self.assertLess(sim.me[1], 0.9, "he walked down into the pit")
+        self.assertTrue(any(line.startswith("edge refused forward") and "drop deeper than 1" in line for line in logs), logs[-4:])
 
     def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
         for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
