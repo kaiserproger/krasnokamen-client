@@ -1,10 +1,10 @@
 //! Authored approximation of the entity discs visible in our Java oracle shots.
 //! The runtime resource pack supplies `misc/shadow`; range, fade and radius
 //! formulae below are our tuning choices, not extracted game constants.
-use super::{presentation as p, Entity, Models, Store};
+use super::{Entity, Models, Store, presentation as p};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
-    protocol::{content::Content, world::World, Result},
+    protocol::{Result, content::Content, world::World},
 };
 
 /// Shadows fade with camera distance and are gone at this range, in blocks.
@@ -64,7 +64,10 @@ pub(super) fn opacity(height: f64, distance_squared: f64, level: u8) -> f32 {
 impl Store {
     /// Appends blob shadows for living entities near the camera onto the full
     /// block tops under them. Returns the number of entities that cast one.
-    #[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Shares the scene extraction inputs"
+    )]
     pub(crate) fn append_shadow_geometry(
         &self,
         content: &Content,
@@ -213,7 +216,12 @@ fn quad(
                 (pz - origin[2]) as f32,
             ]
         }),
-        corners.map(|(px, pz)| [((px - disc[0]) / size) as f32, ((pz - disc[1]) / size) as f32]),
+        corners.map(|(px, pz)| {
+            [
+                ((px - disc[0]) / size) as f32,
+                ((pz - disc[1]) / size) as f32,
+            ]
+        }),
         [1.; 3],
         texture.layer,
         EntityMaterial::EntityShadow,
@@ -226,7 +234,11 @@ fn quad(
     let first = out.vertices.len() - 4;
     for vertex in &mut out.vertices[first..] {
         vertex.overlay_uv = [texture.uv[0], texture.uv[1]];
-        vertex.overlay_tint = [texture.uv[2] - texture.uv[0], texture.uv[3] - texture.uv[1], 0.];
+        vertex.overlay_tint = [
+            texture.uv[2] - texture.uv[0],
+            texture.uv[3] - texture.uv[1],
+            0.,
+        ];
     }
     Ok(())
 }
@@ -244,7 +256,10 @@ mod tests {
         assert!((golem - 0.37).abs() < 0.02, "{golem}");
         assert!(opacity(1., 0., 15) < full && opacity(2., 0., 15) == 0.);
         assert_eq!(opacity(0., SHADOW_RANGE * SHADOW_RANGE, 15), 0.);
-        assert!(opacity(0., 0., 4) < 0.1 * full, "night ground hardly shows a shadow");
+        assert!(
+            opacity(0., 0., 4) < 0.1 * full,
+            "night ground hardly shows a shadow"
+        );
         assert_eq!(opacity(0., 0., 0), 0.);
     }
 

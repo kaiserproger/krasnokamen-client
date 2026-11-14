@@ -54,7 +54,8 @@ pub(crate) struct Cache {
     models: BTreeMap<String, BakedModel>,
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
-    clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    clock_needles:
+        BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
     dynamic_models: BTreeMap<String, Result<bool>>,
     tnt_state: Option<u32>,
 }
@@ -71,7 +72,9 @@ impl Cache {
         position: [f64; 3],
         environment: Option<super::ClockEnvironment<'_>>,
     ) -> Result<Option<ItemContext>> {
-        let Some((base, time_at)) = environment else { return Ok(None) };
+        let Some((base, time_at)) = environment else {
+            return Ok(None);
+        };
         if !stacks.iter().flatten().any(|stack| !stack.empty()) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
@@ -79,9 +82,16 @@ impl Cache {
         fn dynamic(value: &Value) -> bool {
             match value {
                 Value::Object(fields) => {
-                    fields.get("property").and_then(Value::as_str).is_some_and(|name| {
-                        matches!(name.strip_prefix("minecraft:").unwrap_or(name), "time" | "compass")
-                    }) || fields.values().any(dynamic)
+                    fields
+                        .get("property")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| {
+                            matches!(
+                                name.strip_prefix("minecraft:").unwrap_or(name),
+                                "time" | "compass"
+                            )
+                        })
+                        || fields.values().any(dynamic)
                 }
                 Value::Array(values) => values.iter().any(dynamic),
                 _ => false,
@@ -89,14 +99,19 @@ impl Cache {
         }
         let mut needs_world = false;
         for stack in stacks.into_iter().flatten().filter(|s| !s.empty()) {
-            let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
+            let Some(id) = crate::ui::items::item_model_id(content, stack) else {
+                continue;
+            };
             if !self.dynamic_models.contains_key(id) {
                 if self.dynamic_models.len() >= 4096 {
                     return Err("dynamic item model cache bound".into());
                 }
                 let (ns, path) = crate::ui::items::item_model_location(id);
-                let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+                let result = content
+                    .resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+                    .and_then(|bytes| {
+                        serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string())
+                    })
                     .map(|graph| dynamic(&graph));
                 self.dynamic_models.insert(id.into(), result);
             }
@@ -162,9 +177,12 @@ fn textured_quad(
         out,
     )
 }
-pub(crate) use items::{append_observed_item, ObservedItemFrame};
+pub(crate) use items::{ObservedItemFrame, append_observed_item};
 
-#[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs without a second render-state owner")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Shares the scene extraction inputs without a second render-state owner"
+)]
 pub(crate) fn append(
     store: &mut Store,
     slot: usize,
@@ -178,10 +196,16 @@ pub(crate) fn append(
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let entity = &store.slots[slot];
-    if !matches!(entity.type_name.as_str(),
-        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
-        | "minecraft:tnt" | "minecraft:falling_block" | "minecraft:lightning_bolt")
-        && entity.leash_value().is_none() && entity.leash_holder_id.is_none()
+    if !matches!(
+        entity.type_name.as_str(),
+        "minecraft:painting"
+            | "minecraft:item_frame"
+            | "minecraft:glow_item_frame"
+            | "minecraft:tnt"
+            | "minecraft:falling_block"
+            | "minecraft:lightning_bolt"
+    ) && entity.leash_value().is_none()
+        && entity.leash_holder_id.is_none()
     {
         return Ok(Handled::Unhandled);
     }
@@ -192,28 +216,88 @@ pub(crate) fn append(
         if entity.type_name == "minecraft:lightning_bolt" {
             return world_fx::append_bolt(entity, origin, tick, partial, out);
         }
-        if !matches!(entity.type_name.as_str(),
-            "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
-            | "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_leash(entity, store, models, origin, tick, partial, light_source, out);
+        if !matches!(
+            entity.type_name.as_str(),
+            "minecraft:painting"
+                | "minecraft:item_frame"
+                | "minecraft:glow_item_frame"
+                | "minecraft:tnt"
+                | "minecraft:falling_block"
+        ) {
+            return world_fx::append_leash(
+                entity,
+                store,
+                models,
+                origin,
+                tick,
+                partial,
+                light_source,
+                out,
+            );
         }
         if store.slots[slot].type_name == "minecraft:painting" {
-            return painting::append(&store.slots[slot], store, models,
-                content, origin, tick, partial, light_source, out);
+            return painting::append(
+                &store.slots[slot],
+                store,
+                models,
+                content,
+                origin,
+                tick,
+                partial,
+                light_source,
+                out,
+            );
         }
         let entity = &store.slots[slot];
         let (dimensions, scale) = models.dimensions(entity)?;
-        let Some(light) = p::entity_light(entity, models, tick, partial,
-            dimensions, scale, light_source)? else {
+        let Some(light) = p::entity_light(
+            entity,
+            models,
+            tick,
+            partial,
+            dimensions,
+            scale,
+            light_source,
+        )?
+        else {
             return Ok(Handled::PendingLighting);
         };
-        if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_block(store, slot, content,
-                p::EntityDrawFrame { origin, tick, partial, light, parent: None }, out);
+        if matches!(
+            entity.type_name.as_str(),
+            "minecraft:tnt" | "minecraft:falling_block"
+        ) {
+            return world_fx::append_block(
+                store,
+                slot,
+                content,
+                p::EntityDrawFrame {
+                    origin,
+                    tick,
+                    partial,
+                    light,
+                    parent: None,
+                },
+                out,
+            );
         }
-        item_frame::append(entity, models, item_frame::ItemFrameResources {
-            cache: &mut store.special_render_cache, items: &mut store.items,
-        }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
+        item_frame::append(
+            entity,
+            models,
+            item_frame::ItemFrameResources {
+                cache: &mut store.special_render_cache,
+                items: &mut store.items,
+            },
+            content,
+            p::EntityDrawFrame {
+                origin,
+                tick,
+                partial,
+                light,
+                parent: None,
+            },
+            clock_context,
+            out,
+        )
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);
