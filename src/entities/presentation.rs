@@ -2166,6 +2166,54 @@ fn equipped_arm_rotations(
                     let scroll = ((tick % 2000) as f32 + partial) * 0.01;
                     emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
                 }
+                if entity.type_name == "minecraft:slime" {
+                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
+                        .ok_or("missing authored slime outer rig")?;
+                    evaluate_rig(
+                        shell,
+                        entity,
+                        models,
+                        tick,
+                        partial,
+                        matrix,
+                        store.transforms,
+                    );
+                    emit_rig(
+                        shell,
+                        store.transforms,
+                        crate::entities::presentation::RigStyle {
+                            tex,
+                            color: [1.; 3],
+                            layer: EntityMaterial::EntityTranslucent,
+                            alpha: 1.,
+                            light,
+                        },
+                        out,
+                    )?;
+                }
+                if entity.type_name == "minecraft:breeze" {
+                    let wind = super::krasnokamen_models::authored("minecraft:breeze_wind#main")
+                        .ok_or("missing authored breeze wind rig")?;
+                    let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
+                    evaluate_rig(
+                        wind,
+                        entity,
+                        models,
+                        tick,
+                        partial,
+                        matrix,
+                        store.transforms,
+                    );
+                    let scroll = ((tick % 2000) as f32 + partial) * 0.01;
+                    emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
+                }
+            }
+        }
+        Err(reason) => {
+            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
+                stats
+                    .unrendered
+                    .insert(entity.type_name.clone(), reason.clone());
             }
         }
         Err(reason) => {
