@@ -839,7 +839,6 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "egui_glow",
- "glow",
  "glutin",
  "glutin-winit",
  "image",
@@ -1884,6 +1883,7 @@ dependencies = [
  "krasnokamen-paths",
  "libc",
  "libm",
+ "mc-melee-range",
  "md5",
  "naga",
  "openh264",
@@ -2051,6 +2051,11 @@ checksum = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "mc-melee-range"
+version = "1.0.0-rc.5"
+source = "git+file:///run/media/kaiserroman/games/solaris-work/solaris?rev=45296bf5ed48d7ad1510474e487a5665010d9a3e#45296bf5ed48d7ad1510474e487a5665010d9a3e"
 
 [[package]]
 name = "md5"

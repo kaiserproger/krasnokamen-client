@@ -847,33 +847,9 @@ fn resolve_contract(
             row["coverage_pass"] = passed.into();
             // Presence and UV coverage cannot prove a native or oracle frame.
             row["accepted"] = false.into();
-            return row;
-        };
-        let id = model_id(key);
-        let rig = catalog.rigs.get(&id);
-        let classification = if rig.is_some() {
-            "simplified"
-        } else if sources.iter().any(|(file, _)| *file == format!("{id}.json")) {
-            "rejected"
-        } else {
-            "missing"
-        };
-        let selection_matches = row["selected_rig"].as_str().is_none_or(|selected| selected == key);
-        let selected = row["class"] == "selection";
-        let texture_matches = row["required_texture"].as_str().is_none_or(|expected|
-            row["selected_texture"].as_str().is_some_and(|actual|
-                normalize_texture(actual) == normalize_texture(expected)));
-        let passed = rig.is_some_and(|rig| !rig.is_placeholder())
-            && selection_matches && texture_matches && (!selected || row["selection_error"].is_null());
-        row["model_id"] = id.clone().into();
-        row["model_file"] = format!("assets/krasnokamen/models/entity/{id}.json").into();
-        row["classification"] = classification.into();
-        row["coverage_pass"] = passed.into();
-        // Presence and UV coverage cannot prove a native or oracle frame.
-        row["accepted"] = false.into();
-        row["native_frame"] = serde_json::Value::Null;
-        row["java_frame"] = serde_json::Value::Null;
-        row
+            row["native_frame"] = serde_json::Value::Null;
+            row["java_frame"] = serde_json::Value::Null;
+            row
     }).collect()
 }
 
@@ -1260,7 +1236,7 @@ fn baby_armor_shell_faces_sample_texels_1_to_1() {
         "zombified_piglin",
     ] {
         for part in ["head", "chest", "legs", "feet"] {
-            let id = model_id(&format!("minecraft:{kind}#layer3/babyModelSet/{part}"));
+            let id = model_id(&format!("minecraft:{kind}#layer3/babyModelSet/{part}")).into_owned();
             let model = embedded(&id);
             for bone in &model.bones {
                 for cube in &bone.cubes {

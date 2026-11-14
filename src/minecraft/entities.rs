@@ -5,7 +5,7 @@ use crate::{
     entities::{Entity, Handle, Metadata},
     player::{Bounds, InteractionIntent},
     protocol::{content::Content, Result},
-    session::Session,
+    session::{EntityInteraction, Session},
 };
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -252,15 +252,6 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
             "cached_rig_error": rig_error
         }),
     );
-    if entity.type_name == "minecraft:falling_block" {
-        value["predicted_position"] = json!(entity.transform.position);
-        value["presented_position"] = json!(
-            entity
-                .presented_transform(session.entities.frame_tick, session.entities.frame_partial)
-                .position
-        );
-        value["presentation_tick"] = json!(session.world_tick);
-    }
     Ok(value)
 }
 fn extend(object: &mut serde_json::Map<String, Value>, value: Value) {
@@ -432,82 +423,37 @@ pub(super) fn visible_item(session: &Session, item: &str, origin: [i32; 3]) -> R
         .nearest_visible_item(item, origin, content(session)?, session.world_tick)?
         .is_some())
 }
-/// Ordinary, unpaged calls retain nearest-first order.
+/// A cursor opts into network-id order; ordinary calls retain nearest-first order.
 fn entity_page<'a>(
     entities: impl Iterator<Item = (f64, i32, &'a str)>,
     radius: f64,
     limit: usize,
     kind: Option<&str>,
-) -> (Vec<(f64, i32)>, usize) {
+    paged: bool,
+    after: Option<i32>,
+) -> (Vec<(f64, i32)>, usize, usize) {
     let mut page = Vec::with_capacity(limit + 1);
     let mut total = 0;
+    let mut remaining = 0;
     for (distance, id, entity_kind) in entities {
         if distance > radius * radius || kind.is_some_and(|kind| kind != entity_kind) {
             continue;
         }
         total += 1;
-        let index = page.partition_point(|other: &(f64, i32)| *other < (distance, id));
+        if after.is_some_and(|after| id <= after) {
+            continue;
+        }
+        remaining += 1;
+        let key = if paged { f64::from(id) } else { distance };
+        let index = page.partition_point(|other: &(f64, i32)| *other < (key, id));
         if index < limit {
-            page.insert(index, (distance, id));
+            page.insert(index, (key, id));
             if page.len() > limit {
                 page.pop();
             }
         }
     }
-    (page, total)
-}
-
-impl super::EntityCensus {
-    fn begin(
-        &mut self,
-        epochs: (u64, u64),
-        radius: f64,
-        kind: Option<&str>,
-        game_time: i64,
-        mut rows: Vec<(i32, Value)>,
-    ) {
-        rows.sort_unstable_by_key(|(id, _)| *id);
-        self.snapshot = Some(super::EntityCensusSnapshot {
-            epochs,
-            radius,
-            kind: kind.map(str::to_owned),
-            game_time,
-            total: rows.len(),
-            rows: rows.into_iter(),
-        });
-    }
-
-    fn page(
-        &mut self,
-        epochs: (u64, u64),
-        radius: f64,
-        kind: Option<&str>,
-        cursor: &str,
-        limit: usize,
-    ) -> Result<Value> {
-        if !cursor.is_empty()
-            && cursor.parse::<u64>().map_err(|_| "invalid_cursor")? != self.serial
-        {
-            return Err("entity census cursor expired".into());
-        }
-        let snapshot = self.snapshot.as_mut().ok_or("entity census cursor expired")?;
-        if snapshot.epochs != epochs || snapshot.radius != radius || snapshot.kind.as_deref() != kind {
-            return Err("entity census query or context changed".into());
-        }
-        let serial = self.serial.checked_add(1).ok_or("entity census cursor exhausted")?;
-        let entities = snapshot.rows.by_ref().take(limit).map(|(_, value)| value).collect::<Vec<_>>();
-        let more = snapshot.rows.len() != 0;
-        let mut value = json!({
-            "in_play":true,"radius":radius,"visible_count":snapshot.total,"game_time":snapshot.game_time,
-            "entities":[],"truncated":more,"next_cursor":more.then(|| serial.to_string()),
-        });
-        value["entities"] = Value::Array(entities);
-        self.serial = serial;
-        if !more {
-            self.snapshot = None;
-        }
-        Ok(value)
-    }
+    (page, total, remaining)
 }
 
 pub(super) fn start(
@@ -534,32 +480,18 @@ pub(super) fn start(
             let limit = integer(args, "limit", Some(128), 1, 512)? as usize;
             let kind = args.get("entity_type").map(|_| text(args, "entity_type", 128)).transpose()?;
             let cursor = args.get("cursor").map(|value| value.as_str().ok_or("invalid_cursor")).transpose()?;
-            if let Some(cursor) = cursor {
-                let epochs = session.context_epochs();
-                if cursor.is_empty() {
-                    let radius_squared = radius * radius;
-                    let rows = session.entities.received_entities()
-                        .filter(|entity| {
-                            distance_squared(entity.position, session.player.position) <= radius_squared
-                                && kind.is_none_or(|kind| kind == entity.type_name)
-                        })
-                        .map(|entity| list_entity_value(session, entity)
-                            .map(|value| (entity.handle.network_id, value)))
-                        .collect::<Result<Vec<_>>>()?;
-                    session.entity_census.begin(epochs, radius, kind, session.game_time(), rows);
-                }
-                return Ok(Some(Outcome::Complete(
-                    session.entity_census.page(epochs, radius, kind, cursor, limit)?,
-                )));
-            }
-            let (page, total) = entity_page(
+            let after = cursor.filter(|value| !value.is_empty())
+                .map(str::parse::<i32>).transpose().map_err(|_| "invalid_cursor")?;
+            let (page, total, remaining) = entity_page(
                 session.entities.received_entities().map(|entity| (
                     distance_squared(entity.position, session.player.position),
                     entity.handle.network_id,
                     entity.type_name.as_str(),
                 )),
-                radius, limit, kind,
+                radius, limit, kind, cursor.is_some(), after,
             );
+            let next_cursor = (cursor.is_some() && remaining > page.len())
+                .then(|| page.last().unwrap().1.to_string());
             let entities = page
                 .iter()
                 .map(|(_, id)| list_entity_value(session, session.entities.get(*id).unwrap()))
@@ -567,7 +499,7 @@ pub(super) fn start(
             return Ok(Some(Outcome::Complete(
                 json!({"in_play":true,"radius":radius,"visible_count":total,
                 "game_time":session.game_time(),"entities":entities,
-                "truncated":total > limit,"next_cursor":null}),
+                "truncated":remaining > limit,"next_cursor":next_cursor}),
             )));
         }
         "minecraft_wait_for_visible_entity" => Wait::Visible {
@@ -625,7 +557,7 @@ pub(super) fn start(
             let observed = match session.interact_entity(handle, InteractionIntent::Use { hand })? {
                 EntityInteraction::Dispatched(observed) => observed,
                 EntityInteraction::CrosshairMismatch(_) => {
-                    return Err("ordinary raycast does not target requested entity".into());
+                    return Err("ordinary raycast does not target requested entity".into())
                 }
             };
             // The executor owns the local interaction result. Dispatch is not server success.
@@ -938,135 +870,6 @@ impl Task {
 mod observation_tests {
     use super::*;
 
-    fn census_session() -> Session {
-        let mut session = Session::new_mode("entity-census".into(), false);
-        let mut content = Content::test_cube();
-        let facts: Value = serde_json::from_str(include_str!(
-            "../../assets/krasnokamen/entities/entity-facts.json"
-        )).unwrap();
-        content.entity_names = facts["entities"].as_object().unwrap().iter()
-            .map(|(name, schema)| (u32::try_from(schema["protocol_id"].as_u64().unwrap()).unwrap(), name.clone()))
-            .collect();
-        session.entities.activate_models(std::sync::Arc::new(
-            crate::entities::Models::load_state(&content).unwrap(),
-        ));
-        session.content = Some(content);
-        session.phase = "play".into();
-        session.player.pose_known = true;
-        session.player.position = [0.; 3];
-        session
-    }
-
-    fn census_spawn(session: &mut Session, id: i32, x: f64) {
-        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
-        let content = session.content.as_ref().unwrap();
-        let kind = content.entity_names.iter()
-            .find(|(_, name)| *name == "minecraft:villager").unwrap().0;
-        let mut packet = Writer::default();
-        packet.var(id);
-        packet.0.extend([u8::try_from(id).unwrap(); 16]);
-        packet.var(i32::try_from(*kind).unwrap());
-        packet.f64(x);
-        packet.f64(0.);
-        packet.f64(0.);
-        packet.0.extend([0u8; 5]);
-        session.entities.apply(cb::ADD_ENTITY, &mut Reader::new(&packet.0), content, 1).unwrap();
-    }
-
-    fn census_page(session: &mut Session, arguments: Value) -> Value {
-        match start(session, "minecraft_list_entities", &arguments).unwrap().unwrap() {
-            Outcome::Complete(value) => value,
-            Outcome::Pending(_) => panic!("entity census unexpectedly waits"),
-        }
-    }
-
-    #[test]
-    fn entity_census_snapshot_keeps_received_rows_across_packet_and_pose_changes() {
-        let mut session = census_session();
-        for id in [9, 5, 7] {
-            census_spawn(&mut session, id, 1.);
-        }
-        let first = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
-        assert_eq!(first["visible_count"], 3);
-        assert_eq!(first["entities"][0]["entity_id"], 5);
-
-        session.player.position[0] = 1024.;
-        census_spawn(&mut session, 11, 1025.);
-        let second = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":first["next_cursor"],
-        }));
-        assert_eq!(second["visible_count"], 3);
-        assert_eq!(second["entities"][0]["entity_id"], 7);
-        let last = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":second["next_cursor"],
-        }));
-        assert_eq!(last["visible_count"], 3);
-        assert_eq!(last["entities"][0]["entity_id"], 9);
-        assert_eq!(last["next_cursor"], Value::Null);
-        assert_eq!(last["truncated"], false);
-
-        let current = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
-        assert_eq!(current["visible_count"], 1);
-        assert_eq!(current["entities"][0]["entity_id"], 11);
-    }
-
-    #[test]
-    fn entity_census_snapshot_filters_radius_and_type_before_limits() {
-        let mut session = census_session();
-        for (id, x) in [(5, 127.), (7, 2.), (9, 129.)] {
-            census_spawn(&mut session, id, x);
-        }
-        let absent = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:sheep",
-        }));
-        assert_eq!(absent["visible_count"], 0);
-        assert_eq!(absent["entities"], json!([]));
-        assert_eq!(absent["next_cursor"], Value::Null);
-
-        let first = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:villager",
-        }));
-        assert_eq!(first["visible_count"], 2);
-        assert_eq!(first["entities"][0]["entity_id"], 5);
-        let last = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":first["next_cursor"],"entity_type":"minecraft:villager",
-        }));
-        assert_eq!(last["entities"][0]["entity_id"], 7);
-        assert_eq!(last["next_cursor"], Value::Null);
-        assert_eq!(last["truncated"], false);
-    }
-
-    #[test]
-    fn entity_census_snapshot_fences_query_context_replay_and_replacement() {
-        let mut session = census_session();
-        for id in [5, 7, 9] {
-            census_spawn(&mut session, id, 1.);
-        }
-        let first = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
-        let cursor = first["next_cursor"].as_str().unwrap();
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":64,"limit":1,"cursor":cursor,
-        })).is_err());
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":cursor,"entity_type":"minecraft:villager",
-        })).is_err());
-        assert!(session.entity_census.page((0, 1), 128., None, cursor, 1).is_err());
-
-        let replacement = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":cursor,
-        })).is_err());
-        let current = replacement["next_cursor"].as_str().unwrap();
-        let second = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":current}));
-        assert_eq!(second["entities"][0]["entity_id"], 7);
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":current,
-        })).is_err());
-        session.disconnect();
-        assert!(session.entity_census.page((0, 0), 128., None,
-            second["next_cursor"].as_str().unwrap(), 1).is_err());
-    }
-
     #[test]
     fn entity_census_filters_before_paging_and_preserves_distant_residents() {
         let entities = [
@@ -1077,18 +880,25 @@ mod observation_tests {
             (16000., 5, "minecraft:villager"),
             (17000., 11, "minecraft:villager"),
         ];
-        let (page, total) = entity_page(
-            entities.into_iter(), 128., 3, Some("minecraft:villager"),
+        let (first, total, remaining) = entity_page(
+            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, None,
         );
-        assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9, 5]);
-        assert_eq!(total, 3);
+        assert_eq!(first.iter().map(|row| row.1).collect::<Vec<_>>(), [5, 7]);
+        assert_eq!((total, remaining), (3, 3));
+        let (last, total, remaining) = entity_page(
+            entities.into_iter(), 128., 2, Some("minecraft:villager"), true, Some(7),
+        );
+        assert_eq!(last.iter().map(|row| row.1).collect::<Vec<_>>(), [9]);
+        assert_eq!((total, remaining), (3, 1));
     }
 
     #[test]
-    fn entity_census_unpaged_calls_preserve_nearest_order() {
+    fn entity_census_cursor_order_survives_motion_and_packet_order() {
         let entities = [(1., 9, "minecraft:villager"), (100., 5, "minecraft:villager"),
                         (81., 7, "minecraft:villager")];
-        let (nearest, _) = entity_page(entities.into_iter(), 128., 2, None);
+        let (page, _, _) = entity_page(entities.into_iter(), 128., 2, None, true, Some(5));
+        assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9]);
+        let (nearest, _, _) = entity_page(entities.into_iter(), 128., 2, None, false, None);
         assert_eq!(nearest.iter().map(|row| row.1).collect::<Vec<_>>(), [9, 7]);
     }
 
@@ -1115,15 +925,12 @@ mod observation_tests {
 #[cfg(test)]
 mod attack_diag_tests {
     use super::*;
+    use std::{collections::BTreeMap, sync::Arc};
     use crate::{
         player::Hit,
         protocol::{Reader, Writer},
-        session::{
-            entity_aim_tests::{VILLAGER, session},
-            mining_start_tests::connect,
-        },
+        session::{entity_aim_tests::{session, VILLAGER}, mining_start_tests::connect},
     };
-    use std::{collections::BTreeMap, sync::Arc};
 
     const PREFIX: &str = "ordinary entity attack was not dispatched";
 
@@ -1165,12 +972,7 @@ mod attack_diag_tests {
         session.player.look(0., -90.).unwrap();
         let message = refusal(&mut session, handle);
         assert!(message.starts_with(PREFIX), "{message}");
-        assert!(
-            message.contains(
-                "crosshair target at the swing is not the requested entity 42 (test:villager)"
-            ),
-            "{message}"
-        );
+        assert!(message.contains("crosshair target at the swing is not the requested entity 42 (test:villager)"), "{message}");
         assert!(message.contains("under crosshair: none"), "{message}");
         assert!(!message.contains("attack not started"), "{message}");
     }
@@ -1179,10 +981,7 @@ mod attack_diag_tests {
     fn wrong_target_reports_block_under_crosshair() {
         let (mut session, handle) = session([4.5, 4., 7.5]);
         let _peer = connect(&mut session);
-        session
-            .world
-            .set([4, 5, 3], 1, |state| Ok(state == 0))
-            .unwrap();
+        session.world.set([4, 5, 3], 1, |state| Ok(state == 0)).unwrap();
         session.player.look(180., 0.).unwrap();
         let message = refusal(&mut session, handle);
         assert!(message.starts_with(PREFIX), "{message}");
@@ -1198,19 +997,11 @@ mod attack_diag_tests {
         session.player.look(0., 0.).unwrap();
         let target = session
             .player
-            .raycast(
-                &session.world,
-                session.content.as_ref().unwrap(),
-                &session.entities,
-                session.client_tick,
-            )
+            .raycast(&session.world, session.content.as_ref().unwrap(), &session.entities, session.client_tick)
             .unwrap();
         assert!(matches!(target, Some(Hit::Entity { handle, .. }) if handle.network_id == 43));
         let message = refusal(&mut session, handle);
-        assert!(
-            message.contains("under crosshair: entity 43 (test:villager)"),
-            "{message}"
-        );
+        assert!(message.contains("under crosshair: entity 43 (test:villager)"), "{message}");
     }
 
     #[test]
@@ -1220,10 +1011,7 @@ mod attack_diag_tests {
         assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
         session.player.game_mode = 3;
         session
-            .input(InputIntent::Key {
-                key: "forward".into(),
-                pressed: true,
-            })
+            .input(InputIntent::Key { key: "forward".into(), pressed: true })
             .unwrap();
         let message = refusal(&mut session, handle);
         assert!(message.starts_with(PREFIX), "{message}");
@@ -1231,42 +1019,26 @@ mod attack_diag_tests {
         assert!(message.contains("early_exit=spectator_mode"), "{message}");
         assert!(message.contains("using=none"), "{message}");
         assert!(message.contains("held_keys=[forward]"), "{message}");
-        assert!(
-            message.contains("main_hand=empty (piercing_weapon=false)"),
-            "{message}"
-        );
-        assert!(
-            message.contains("queued_commands=[spectator_action#"),
-            "{message}"
-        );
+        assert!(message.contains("main_hand=empty (piercing_weapon=false)"), "{message}");
+        assert!(message.contains("queued_commands=[spectator_action#"), "{message}");
         assert!(message.contains("game_mode=3 (spectator)"), "{message}");
         assert!(!message.contains("crosshair target"), "{message}");
     }
 
     #[test]
-    fn piercing_weapon_reports_the_queued_stab_that_started_does_not_count() {
+    fn piercing_weapon_stab_counts_as_started() {
         let (mut session, handle) = session([4.5, 4., 7.5]);
         let _peer = connect(&mut session);
         assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
         let mut spear = crate::inventory::Stack::default();
         spear.id = 1;
         spear.count = 1;
-        spear.components = Arc::new(BTreeMap::from([(
-            "minecraft:piercing_weapon".into(),
-            json!({}),
-        )]));
+        spear.components = Arc::new(BTreeMap::from([("minecraft:piercing_weapon".into(), json!({}))]));
         let slot = 36 + session.inventory.selected_slot as usize;
         session.inventory.player.slots[slot] = Some(spear);
-        let message = refusal(&mut session, handle);
-        assert!(message.starts_with(PREFIX), "{message}");
-        assert!(message.contains("early_exit=none"), "{message}");
-        assert!(message.contains("(piercing_weapon=true)"), "{message}");
-        // Internal stab action 7 goes out as ordinal 8, which `started` does not recognise.
-        assert!(
-            message.contains("queued_commands=[player_action#"),
-            "{message}"
-        );
-        assert!(message.contains(" action=8, swing#"), "{message}");
+        // Internal stab action 7 goes out as wire ordinal 8 (STAB); `started` counts it,
+        // so the once-tool reports the swing as dispatched (AttackDispatchCheck fix).
+        assert!(dispatch_attack(&mut session, handle).unwrap().is_ok());
     }
 
     #[test]
@@ -1276,19 +1048,13 @@ mod attack_diag_tests {
         assert_eq!(aim_entity(&mut session, handle).unwrap(), None);
         session.player.set_using_for_test(1, 7);
         session
-            .input(InputIntent::Key {
-                key: "use".into(),
-                pressed: true,
-            })
+            .input(InputIntent::Key { key: "use".into(), pressed: true })
             .unwrap();
         let message = refusal(&mut session, handle);
         assert!(message.starts_with(PREFIX), "{message}");
         assert!(message.contains("attack not started"), "{message}");
         assert!(message.contains("early_exit=using_item"), "{message}");
-        assert!(
-            message.contains("using=item_id 7 hand=off_hand remaining_ticks=4"),
-            "{message}"
-        );
+        assert!(message.contains("using=item_id 7 hand=off_hand remaining_ticks=4"), "{message}");
         assert!(message.contains("held_keys=[use]"), "{message}");
         assert!(message.contains("queued_commands=[]"), "{message}");
         assert!(message.contains("game_mode=0 (survival)"), "{message}");

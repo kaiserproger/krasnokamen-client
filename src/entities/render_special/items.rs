@@ -1,6 +1,9 @@
 use super::*;
 
-pub(in crate::entities) fn observed_stack(content: &Content, value: &Value) -> Result<Option<Stack>> {
+pub(in crate::entities) fn observed_stack(
+    content: &Content,
+    value: &Value,
+) -> Result<Option<Stack>> {
     let Some(id) = value.get("id").and_then(Value::as_str) else {
         return if value.is_null() || value.as_object().is_some_and(|o| o.is_empty()) {
             Ok(None)
@@ -69,8 +72,15 @@ pub(crate) fn append_observed_item(
     cache: &mut Cache,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    let ObservedItemFrame { context, seed, root, light } = frame;
-    let Some(stack) = cache.observed_stack(content, observed)? else {
+    let ObservedItemFrame {
+        context,
+        seed,
+        root,
+        light,
+        block_world,
+    } = frame;
+    let key = cache.ensure_observed_stack(content, observed)?;
+    let Some(stack) = cache.observed_items[&key].stack.as_ref() else {
         return Ok(());
     };
     let display = match context {

@@ -4,7 +4,7 @@
 //! the part their own range covers, instead of each walking the spatial index and resolving
 //! every transform (a mounted body's attachment chain included) again.
 
-use super::{Store, Transform, resources::Models, view_range};
+use super::{physical::Place, resources::Models, view_range, Store, Transform};
 use crate::player::Bounds;
 
 /// One candidate seen from the frame's camera.
@@ -55,7 +55,7 @@ impl Entry {
         });
         Self {
             slot,
-            cell,
+            place,
             transform,
             distance_squared,
             within,
@@ -230,7 +230,7 @@ mod tests {
         let mut frame = FrameEntities::default();
         frame.gather(&store, &models, camera, 128., tick, partial);
         assert!(
-            frame.entries.iter().any(|entry| entry.cell.is_none()),
+            frame.entries.iter().any(|entry| matches!(entry.place, Place::Seat(Some(_)))),
             "riders are gathered"
         );
         for range in [16., 40., 64., 128.] {

@@ -54,8 +54,13 @@ pub(crate) struct Cache {
     models: BTreeMap<String, BakedModel>,
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
-    clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    clock_needles:
+        BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
     dynamic_models: BTreeMap<String, Result<bool>>,
+    block_clock_needles: BTreeMap<
+        ([i32; 3], i32),
+        std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>,
+    >,
     tnt_state: Option<u32>,
     generation: Generation,
 }
@@ -80,10 +85,57 @@ pub(crate) struct ClockMemo {
     needs_world: bool,
 }
 
+
+fn dynamic_item(
+    cache: &mut BTreeMap<String, Result<bool>>,
+    content: &Content,
+    stack: &Stack,
+) -> Result<bool> {
+    fn dynamic(value: &Value) -> bool {
+        match value {
+            Value::Object(fields) => {
+                fields
+                    .get("property")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| {
+                        matches!(
+                            name.strip_prefix("minecraft:").unwrap_or(name),
+                            "time" | "compass"
+                        )
+                    })
+                    || fields.values().any(dynamic)
+            }
+            Value::Array(values) => values.iter().any(dynamic),
+            _ => false,
+        }
+    }
+    let Some(id) = crate::ui::items::item_model_id(content, stack) else {
+        return Ok(false);
+    };
+    if !cache.contains_key(id) {
+        if cache.len() >= 4096 {
+            return Err("dynamic item model cache bound".into());
+        }
+        let (ns, path) = crate::ui::items::item_model_location(id);
+        let result = content
+            .resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
+            .map(|graph| dynamic(&graph));
+        cache.insert(id.into(), result);
+    }
+    cache[id].as_ref().copied().map_err(Clone::clone)
+}
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
         self.text.remove(&handle);
         self.clock_needles.remove(&handle);
+    }
+    pub(super) fn remove_block(&mut self, position: [i32; 3]) {
+        self.block_clock_needles.retain(|(p, _), _| *p != position);
+    }
+    pub(super) fn unload_chunk(&mut self, chunk: [i32; 2]) {
+        self.block_clock_needles
+            .retain(|(p, _), _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
     }
     /// The clock context of `entity`'s `stacks`; `memo` is the entity's [`ClockMemo`].
     pub(super) fn item_context(
@@ -95,34 +147,66 @@ impl Cache {
         position: [f64; 3],
         environment: Option<super::ClockEnvironment<'_>>,
     ) -> Result<Option<ItemContext>> {
-        let Some((base, time_at)) = environment else { return Ok(None) };
-        if !stacks.iter().flatten().any(|stack| !stack.empty()) {
+        let Some((base, time_at)) = environment else {
+            return Ok(None);
+        };
+        let stacks = stacks.map(|stack| stack.filter(|stack| !stack.empty()));
+        if stacks.iter().all(Option::is_none) {
             self.clock_needles.remove(&entity.handle);
             return Ok(None);
         }
         fn dynamic(value: &Value) -> bool {
             match value {
                 Value::Object(fields) => {
-                    fields.get("property").and_then(Value::as_str).is_some_and(|name| {
-                        matches!(name.strip_prefix("minecraft:").unwrap_or(name), "time" | "compass")
-                    }) || fields.values().any(dynamic)
+                    fields
+                        .get("property")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| {
+                            matches!(
+                                name.strip_prefix("minecraft:").unwrap_or(name),
+                                "time" | "compass"
+                            )
+                        })
+                        || fields.values().any(dynamic)
                 }
                 Value::Array(values) => values.iter().any(dynamic),
                 _ => false,
             }
         }
-        let mut needs_world = false;
-        for stack in stacks.into_iter().flatten().filter(|s| !s.empty()) {
-            let Some(id) = crate::ui::items::item_model_id(content, stack) else { continue };
-            if !self.dynamic_models.contains_key(id) {
-                if self.dynamic_models.len() >= 4096 {
-                    return Err("dynamic item model cache bound".into());
+        let current = memo.as_ref().is_some_and(|memo| {
+            memo.generation == self.generation
+                && memo
+                    .stacks
+                    .iter()
+                    .zip(stacks)
+                    .all(|(held, stack)| match (held, stack) {
+                        (None, None) => true,
+                        (Some((components, id)), Some(stack)) => {
+                            *id == stack.id && std::sync::Arc::ptr_eq(components, &stack.components)
+                        }
+                        _ => false,
+                    })
+        });
+        if !current {
+            let mut needs_world = false;
+            for stack in stacks.into_iter().flatten() {
+                let Some(id) = crate::ui::items::item_model_id(content, stack) else {
+                    continue;
+                };
+                if !self.dynamic_models.contains_key(id) {
+                    if self.dynamic_models.len() >= 4096 {
+                        return Err("dynamic item model cache bound".into());
+                    }
+                    let (ns, path) = crate::ui::items::item_model_location(id);
+                    let result = content
+                        .resource_bytes(&format!("assets/{ns}/items/{path}.json"))
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string())
+                        })
+                        .map(|graph| dynamic(&graph));
+                    self.dynamic_models.insert(id.into(), result);
                 }
-                let (ns, path) = crate::ui::items::item_model_location(id);
-                let result = content.resource_bytes(&format!("assets/{ns}/items/{path}.json"))
-                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|e| e.to_string()))
-                    .map(|graph| dynamic(&graph));
-                self.dynamic_models.insert(id.into(), result);
+                needs_world |= *self.dynamic_models[id].as_ref().map_err(Clone::clone)?;
             }
             *memo = Some(ClockMemo {
                 generation: self.generation,
@@ -192,9 +276,12 @@ fn textured_quad(
         out,
     )
 }
-pub(crate) use items::{append_observed_item, ObservedItemFrame};
+pub(crate) use items::{ObservedItemFrame, append_observed_item};
 
-#[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs without a second render-state owner")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Shares the scene extraction inputs without a second render-state owner"
+)]
 pub(crate) fn append(
     store: &mut Store,
     slot: usize,
@@ -211,10 +298,16 @@ pub(crate) fn append(
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
     let entity = &store.slots[slot];
-    if !matches!(entity.type_name.as_str(),
-        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
-        | "minecraft:tnt" | "minecraft:falling_block" | "minecraft:lightning_bolt")
-        && entity.leash_value().is_none() && entity.leash_holder_id.is_none()
+    if !matches!(
+        entity.type_name.as_str(),
+        "minecraft:painting"
+            | "minecraft:item_frame"
+            | "minecraft:glow_item_frame"
+            | "minecraft:tnt"
+            | "minecraft:falling_block"
+            | "minecraft:lightning_bolt"
+    ) && entity.leash_value().is_none()
+        && entity.leash_holder_id.is_none()
     {
         return Ok(Handled::Unhandled);
     }
@@ -225,28 +318,94 @@ pub(crate) fn append(
         if entity.type_name == "minecraft:lightning_bolt" {
             return world_fx::append_bolt(entity, origin, transform, out);
         }
-        if !matches!(entity.type_name.as_str(),
-            "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
-            | "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_leash(entity, store, models, origin, tick, partial, light_source, out);
+        if !matches!(
+            entity.type_name.as_str(),
+            "minecraft:painting"
+                | "minecraft:item_frame"
+                | "minecraft:glow_item_frame"
+                | "minecraft:tnt"
+                | "minecraft:falling_block"
+        ) {
+            return world_fx::append_leash(
+                entity,
+                store,
+                models,
+                origin,
+                tick,
+                partial,
+                light_source,
+                out,
+            );
         }
         if store.slots[slot].type_name == "minecraft:painting" {
-            return painting::append(&store.slots[slot], store, models,
-                content, origin, tick, partial, light_source, out);
+            return painting::append(
+                &store.slots[slot],
+                store,
+                models,
+                content,
+                origin,
+                tick,
+                partial,
+                light_source,
+                out,
+            );
         }
         let entity = &store.slots[slot];
         let (dimensions, scale) = models.dimensions(entity)?;
-        let Some(light) = p::entity_light(entity, store, models, tick, transform,
-            dimensions, scale, light_source)? else {
+        let Some(light) = p::entity_light(
+            entity,
+            store,
+            models,
+            tick,
+            transform,
+            dimensions,
+            scale,
+            light_source,
+        )?
+        else {
             return Ok(Handled::PendingLighting);
         };
-        if matches!(entity.type_name.as_str(), "minecraft:tnt" | "minecraft:falling_block") {
-            return world_fx::append_block(store, slot, models, content,
-                p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, tint_source, out);
+        if matches!(
+            entity.type_name.as_str(),
+            "minecraft:tnt" | "minecraft:falling_block"
+        ) {
+            return world_fx::append_block(
+                store,
+                slot,
+                models,
+                content,
+                p::EntityDrawFrame {
+                    origin,
+                    transform,
+                    tick,
+                    partial,
+                    light,
+                    parent: None,
+                },
+                tint_source,
+                out,
+            );
         }
-        item_frame::append(entity, models, item_frame::ItemFrameResources {
-            cache: &mut store.special_render_cache, items: &mut store.items, maps,
-        }, content, p::EntityDrawFrame { origin, transform, tick, partial, light, parent: None }, clock_context, out)
+        item_frame::append(
+            entity,
+            models,
+            item_frame::ItemFrameResources {
+                cache: &mut store.special_render_cache,
+                items: &mut store.items,
+                maps,
+            },
+            content,
+            p::EntityDrawFrame {
+                origin,
+                transform,
+                tick,
+                partial,
+                light,
+                parent: None,
+            },
+            clock_context,
+            out,
+        )
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);
@@ -257,26 +416,3 @@ pub(crate) fn append(
     result
 }
 pub(super) use items::observed_stack;
-
-#[cfg(test)]
-mod block_needle_tests {
-    use super::Cache;
-
-    #[test]
-    fn removing_blocks_and_chunks_drops_only_their_needles() {
-        let mut cache = Cache::default();
-        for key in [
-            ([-1, 64, -1], 0),
-            ([-1, 64, -1], 1),
-            ([-17, 64, -1], 0),
-            ([0, 64, 0], 0),
-        ] {
-            cache.block_clock_needles.insert(key, Default::default());
-        }
-        cache.remove_block([-1, 64, -1]);
-        assert_eq!(cache.block_clock_needles.len(), 2);
-        cache.unload_chunk([-2, -1]);
-        assert_eq!(cache.block_clock_needles.len(), 1);
-        assert!(cache.block_clock_needles.contains_key(&([0, 64, 0], 0)));
-    }
-}

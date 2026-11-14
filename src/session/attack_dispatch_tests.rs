@@ -34,7 +34,7 @@ fn models() -> Models {
     .unwrap();
     Models {
         rigs: BTreeMap::new(),
-        schemas: BTreeMap::from([("test:soldier".into(), schema)]),
+        schemas: [("test:soldier".into(), schema)].into_iter().collect(),
         families: BTreeMap::new(),
         builtin_variants: BTreeMap::new(),
         simple_particles: Vec::new(),
@@ -44,13 +44,13 @@ fn models() -> Models {
         attribute_ids: BTreeMap::new(),
         digest: String::new(),
         armor_models: BTreeMap::new(),
-        motion: BTreeMap::new(),
+        motion: Default::default(),
     }
 }
 
 /// Player eye at (4.5, 5.62, 4.5); a soldier standing 2.5 blocks ahead on open
 /// ground, well inside entity-interaction reach, with nothing between.
-fn session() -> (Session, Handle) {
+fn session() -> (Session, Handle, std::net::TcpListener) {
     let mut session = Session::new_mode("attack-dispatch-test".into(), false);
     session.world = World::new(0, 16);
     let palette = |size| Palette {
@@ -112,22 +112,27 @@ fn session() -> (Session, Handle) {
     session.inventory.player.slots[36] = Some(spear);
     session.inventory.selected_slot = 0;
     session.player.game_mode = 0;
-    let _peer = super::mining_start_tests::connect(&mut session);
+    let peer = super::mining_start_tests::connect(&mut session);
     let handle = session.entities.get(TARGET_ID).unwrap().handle;
-    (session, handle)
+    (session, handle, peer)
 }
 
 #[test]
 fn spear_attack_counts_its_stab_as_started() {
-    let (mut session, handle) = session();
+    let (mut session, handle, _peer) = session();
     assert!(
         session.aim_at_entity(handle, true).unwrap().is_none(),
         "open-ground soldier 2.5 blocks ahead must be aimable"
     );
-    let result = session
+    let result = match session
         .interact_entity(handle, crate::player::InteractionIntent::Attack)
         .unwrap()
-        .expect("aimed spear attack must dispatch, not crosshair-mismatch");
+    {
+        EntityInteraction::Dispatched(value) => value,
+        EntityInteraction::CrosshairMismatch(why) => {
+            panic!("aimed spear attack must dispatch, not crosshair-mismatch: {why}")
+        }
+    };
     assert_eq!(
         result["started"].as_bool(),
         Some(true),

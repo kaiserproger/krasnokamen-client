@@ -287,7 +287,7 @@ fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
         entity.previous = entity.transform;
         for _ in 0..6 {
             let bounds = physical::bounds(&models, entity, 0, 0.).unwrap();
-            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, bounds).unwrap();
+            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, Some(bounds)).unwrap();
         }
     };
     settle_at(&mut entity, 16.);
@@ -1693,7 +1693,7 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
     let at = |_: [f64;3]| Ok((sample.get(), 0.));
     let mut equipment = equipment::Cache::default();
     let mut render = |e: &Entity, base: &ItemContext| {
-        let state = cache.item_context(e, [e.equipment_value(0), None, None], &content,
+        let state = cache.item_context(e, [e.equipment_value(0), None, None], &mut None, &content,
             e.position, Some((base, &at))).unwrap().unwrap();
         let transforms = action_pose(&models, e, &content, &rig);
         let mut out = DynamicGeometry::default();

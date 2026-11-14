@@ -46,6 +46,7 @@ reqwest = { version = "=0.13.4", default-features = false, features = ["blocking
 rsa = { version = "=0.9.10", default-features = false, features = ["std", "u64_digit", "sha1"] }
 freetype-rs = { version = "=0.38.0", features = ["bundled"] }
 krasnokamen-paths = { path = "paths" }
+mc-melee-range = { git = "file:///run/media/kaiserroman/games/solaris-work/solaris", rev = "45296bf5ed48d7ad1510474e487a5665010d9a3e" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.189"

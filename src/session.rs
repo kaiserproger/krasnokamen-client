@@ -8,132 +8,19 @@ mod torch_particles;
 mod block_motion;
 mod local_server;
 #[cfg(test)]
-mod entity_aim_tests;
+pub(crate) mod entity_aim_tests;
 mod follow;
 #[cfg(test)]
 mod hud_packet_tests;
-mod local_server;
 #[cfg(test)]
-mod attack_dispatch_tests;
+pub(crate) mod attack_dispatch_tests;
 #[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod hud_packet_tests;
-mod local_server;
-#[cfg(test)]
-mod mining_start_tests;
+pub(crate) mod mining_start_tests;
 mod observation;
 mod packets;
 #[cfg(test)]
 mod placement_prediction_tests;
 mod replay;
-mod torch_particles;
 mod ui_packets;
 #[cfg(test)]
 mod vehicle_packet_tests;
@@ -141,11 +28,11 @@ mod weather;
 #[cfg(test)]
 mod block_break_prediction_tests;
 #[cfg(test)]
-mod placement_prediction_tests;
-#[cfg(test)]
 mod block_entity_prediction_tests;
 #[cfg(test)]
 mod command_suggestion_limit_tests;
+
+pub use actions::EntityInteraction;
 
 use crate::{
     api::{Command, InputIntent, Observation, Scene, Vertex},
@@ -166,6 +53,7 @@ use crate::{
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    path::PathBuf,
     sync::{Arc, RwLock, mpsc},
     thread,
     time::{Duration, Instant},
@@ -206,6 +94,9 @@ pub(crate) struct ScreenAudioOwner {
 pub struct Session {
     instance_id: String,
     presentation: bool,
+    /// Downloaded server resource packs land here; `None` resolves lazily from
+    /// KRASNOKAMEN_CLIENT_PACK_CACHE or the platform data root.
+    pub(crate) pack_cache: Option<PathBuf>,
     /// `prepare_frame` rebuilds the animated geometry (entities, weather, clouds, effects)
     /// before every draw, so a state refresh of the scene leaves that part to it.
     frame_driven: bool,
@@ -242,6 +133,8 @@ pub struct Session {
     pub(crate) screen_audio_owner: ScreenAudioOwner,
     pub(crate) screen_audio: std::collections::BTreeMap<crate::computer::relay::Id, ScreenAudioStats>,
     pub(crate) voice_net: crate::voice::Net,
+    /// Entity profiles revision already reported in the observation.
+    profiles_synced: u64,
     environment: Environment,
     terrain: Option<Terrain>,
     /// Far terrain beyond the loaded chunks (Krasnokamen `[lod]` servers).
@@ -352,6 +245,7 @@ impl Session {
         let mut out = Self {
             instance_id,
             presentation,
+            pack_cache: None,
             frame_driven: false,
             network: None,
             replaying: false,
@@ -381,6 +275,7 @@ impl Session {
             screen_audio: Default::default(),
             screen_audio_owner: Default::default(),
             voice_net: Default::default(),
+            profiles_synced: 0,
             environment: Environment::new(),
             terrain: None,
             far: crate::far::Far::default(),

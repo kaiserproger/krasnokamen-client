@@ -875,43 +875,32 @@ fn replay_settle_beyond_cpu_budget_waits_for_uploads_and_matches_one_round() {
     let mut world = World::new(0, 64);
     for x in -2..=2 {
         for z in -2..=2 {
-            let cells: Vec<_> = (0..4)
-                .map(|y| [x * 16 + 8, y * 16 + 8, z * 16 + 8])
-                .collect();
+            let cells: Vec<_> = (0..4).map(|y| [x * 16 + 8, y * 16 + 8, z * 16 + 8]).collect();
             world.insert([x, z], lit_chunk(&cells, 4, 64)).unwrap();
         }
     }
     let settle = |budget: Option<usize>| {
         let mut terrain = super::Terrain::new(Arc::new(|| {})).unwrap();
         terrain.activate(&fixture_content(), [1; 3]).unwrap();
-        terrain
-            .set_render_rules([1.; 6], false, 0, Some(0))
-            .unwrap();
+        terrain.set_render_rules([1.; 6], false, 0, Some(0)).unwrap();
         if let Some(budget) = budget {
             terrain.cpu_mesh_budget = budget;
         }
         let mut draws = BTreeMap::new();
         // The renderer's role: copy each drawn payload, then acknowledge it.
         let mut gpu = BTreeMap::new();
-        let mut upload =
-            |draws: &BTreeMap<[i32; 3], crate::api::ChunkDraw>| -> Vec<([i32; 3], u64)> {
-                draws
-                    .iter()
-                    .filter_map(|(key, draw)| {
-                        let geometry = draw.geometry.as_ref()?;
-                        let vertices: &[u8] = bytemuck::cast_slice(&geometry.vertices);
-                        gpu.insert(*key, (vertices.to_vec(), geometry.indices.clone()));
-                        Some((*key, draw.revision))
-                    })
-                    .collect()
-            };
+        let mut upload = |draws: &BTreeMap<[i32; 3], crate::api::ChunkDraw>| -> Vec<([i32; 3], u64)> {
+            draws.iter().filter_map(|(key, draw)| {
+                let geometry = draw.geometry.as_ref()?;
+                let vertices: &[u8] = bytemuck::cast_slice(&geometry.vertices);
+                gpu.insert(*key, (vertices.to_vec(), geometry.indices.clone()));
+                Some((*key, draw.revision))
+            }).collect()
+        };
         let mut uploads = 0;
         loop {
             terrain.update(&world, [8., 8., 8.], 2, &mut draws).unwrap();
-            match terrain
-                .wait_replay_completion(true, std::time::Duration::from_secs(60))
-                .unwrap()
-            {
+            match terrain.wait_replay_completion(true, std::time::Duration::from_secs(60)).unwrap() {
                 super::ReplayWait::Completion => {}
                 super::ReplayWait::Upload => {
                     let acks = upload(&draws);
@@ -925,25 +914,13 @@ fn replay_settle_beyond_cpu_budget_waits_for_uploads_and_matches_one_round() {
         (gpu, uploads, terrain.counters.resident_peak)
     };
     let (expected, uploads, total) = settle(None);
-    assert_eq!(
-        uploads, 0,
-        "the default budget holds this fixture in one round"
-    );
+    assert_eq!(uploads, 0, "the default budget holds this fixture in one round");
     assert_eq!(expected.len(), 5 * 5 * 4, "every cube section is meshed");
     let budget = total / 3;
     let (actual, uploads, peak) = settle(Some(budget));
-    assert!(
-        uploads >= 2,
-        "a third of the geometry needs several upload rounds, got {uploads}"
-    );
-    assert!(
-        peak <= budget,
-        "resident CPU payload {peak} exceeded the budget {budget}"
-    );
-    assert!(
-        actual == expected,
-        "upload rounds must deliver the same sections and geometry"
-    );
+    assert!(uploads >= 2, "a third of the geometry needs several upload rounds, got {uploads}");
+    assert!(peak <= budget, "resident CPU payload {peak} exceeded the budget {budget}");
+    assert!(actual == expected, "upload rounds must deliver the same sections and geometry");
 }
 
 #[test]

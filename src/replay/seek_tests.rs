@@ -184,7 +184,7 @@ fn render_cut(replay: &mut Player, camera: &CameraPath, directory: &Path, label:
         "cpu_state_sha256":replay.frame_hash(),"rgba_sha256":format!("{:x}",Sha256::digest(&pixels)),
         "last_applied_tick":replay.last_tick,"replay_time":replay.time.as_secs_f64(),
         "presentation":replay.session.scene().entity_presentation,
-        "terrain_upload_frames":upload_frames,"terrain":replay.session.replay_terrain_metrics(),
+        "terrain_upload_frames":upload_frames,"terrain":replay.session.capture_terrain_metrics(),
         "note":"native 480x270 diagnostic cut-in, no SSAA; not the final cinematic export"
     })).unwrap()).unwrap();
     pixels

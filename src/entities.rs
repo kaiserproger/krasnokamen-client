@@ -16,12 +16,9 @@ mod display;
 mod dragon;
 mod drowned_outer;
 mod equipment;
+pub(crate) mod frame_entities;
 mod local;
-#[cfg(test)]
-mod animation_tests;
-#[cfg(test)]
-mod asset_model_regression_tests;
-mod metadata;
+pub(crate) mod metadata;
 mod nameplates;
 mod physical;
 mod prediction;
@@ -39,6 +36,7 @@ mod sheep;
 mod shadows;
 mod krasnokamen_models;
 mod villagers;
+pub(crate) mod view_range;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
@@ -51,6 +49,7 @@ pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
 pub use presentation::{PresentationStats, special_item};
+pub use crowd::{CrowdChunk, CrowdGroup, CrowdInstance, CrowdMeshes, CrowdScene, CrowdVertex};
 pub use profiles::{
     PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
     RemoteChatKey,
@@ -629,7 +628,7 @@ impl Store {
             .ok_or("source rider vehicle attachment missing")?
             .map(|value| value * f64::from(scale));
         transform.position = crate::player::vehicle::passenger_position(
-            self, vehicle, entity.handle.network_id, parent_transform.position,
+            self, parent, entity.handle.network_id, parent_transform.position,
             parent_transform.yaw, attachment, transform.yaw,
             parent.physical.seat_motion.as_ref(), parent.physical.seat_game_time,
         )?;

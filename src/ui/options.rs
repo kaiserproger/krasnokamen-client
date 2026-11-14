@@ -28,9 +28,7 @@ const fn row(key: &'static str, label: &'static str, kind: Kind, desc: &'static 
     }
 }
 
-pub(super) const TABS: [&str; 5] = ["Video", "Controls", "Audio", "Interface", "Language"];
-/// Tab listing the available languages, one row each.
-pub(super) const LANGUAGE_TAB: usize = 4;
+pub(super) const TABS: [&str; 4] = ["Video", "Controls", "Audio", "Interface"];
 /// Tab shown for the Accessibility entry of the pause menu.
 pub(super) const INTERFACE_TAB: usize = 3;
 
@@ -40,12 +38,6 @@ const VIDEO: [Row; 7] = [
         "Field of view",
         Kind::Slider,
         "Wider view shows more but stretches the edges.",
-    ),
-    row(
-        "gamma",
-        "Brightness",
-        Kind::Slider,
-        "Lifts the darkest light. Moody to Bright.",
     ),
     row(
         "render_distance",
@@ -84,7 +76,7 @@ const VIDEO: [Row; 7] = [
         "Low fast vanilla; Medium rich; High max.",
     ),
 ];
-const CONTROLS: [Row; 4] = [
+const CONTROLS: [Row; 3] = [
     row(
         "mouse_sensitivity",
         "Sensitivity",
@@ -103,14 +95,8 @@ const CONTROLS: [Row; 4] = [
         Kind::Choice,
         "Choose which hand holds the main-hand item.",
     ),
-    row(
-        "desktop_computer",
-        "Desktop computer",
-        Kind::Toggle,
-        "Show a desktop window on monitor blocks",
-    ),
 ];
-const AUDIO: [Row; 7] = [
+const AUDIO: [Row; 2] = [
     row(
         "volume",
         "Master volume",
@@ -122,36 +108,6 @@ const AUDIO: [Row; 7] = [
         "Subtitles",
         Kind::Toggle,
         "Show captions for sounds that play nearby.",
-    ),
-    row(
-        "voice_chat",
-        "Voice chat",
-        Kind::Toggle,
-        "Proximity voice. Hold V to talk.",
-    ),
-    row(
-        "voice_mute",
-        "Mute microphone",
-        Kind::Toggle,
-        "Others cannot hear you, even while holding V.",
-    ),
-    row(
-        "voice_deafen",
-        "Deafen",
-        Kind::Toggle,
-        "Stops receiving other players' voices.",
-    ),
-    row(
-        "voice_volume",
-        "Voice volume",
-        Kind::Slider,
-        "Loudness of other players' voices.",
-    ),
-    row(
-        "voice_mic_volume",
-        "Microphone volume",
-        Kind::Slider,
-        "Gain applied to your microphone before sending.",
     ),
 ];
 const INTERFACE: [Row; 8] = [
@@ -210,7 +166,6 @@ pub(super) fn rows(tab: usize) -> &'static [Row] {
         0 => &VIDEO,
         1 => &CONTROLS,
         2 => &AUDIO,
-        LANGUAGE_TAB => &[],
         _ => &INTERFACE,
     }
 }
@@ -231,10 +186,7 @@ fn spec(key: &str) -> Option<Spec> {
         // 30..=260 in tens, then one extra stop for Unlimited (value 0).
         "max_fps" => (30., 10., 25),
         "ui_scale" => (0., 1., 5),
-        "gamma" => (0., 0.1, 11),
-        "volume" | "damage_tilt_strength" | "text_background_opacity" | "voice_volume" | "voice_mic_volume" => {
-            (0., 0.05, 21)
-        }
+        "volume" | "damage_tilt_strength" | "text_background_opacity" => (0., 0.05, 21),
         _ => return None,
     };
     Some(Spec {
@@ -310,12 +262,8 @@ pub(super) fn value_text(key: &str, value: Option<&Value>) -> String {
         },
         "mouse_sensitivity" => pct(num.unwrap_or(1.)),
         "damage_tilt_strength" => pct(num.unwrap_or(1.)),
-        "gamma" => match num.unwrap_or(0.5) {
-            v if v <= 0. => "Moody".into(),
-            v if v >= 1. => "Bright".into(),
-            v => pct(v),
-        },
-        "volume" | "voice_volume" | "voice_mic_volume" => pct(num.unwrap_or(1.)),
+        "volume" => pct(num.unwrap_or(1.)),
+        "entity_distance_scaling" => pct(num.unwrap_or(1.)),
         "text_background_opacity" => pct(num.unwrap_or(0.5)),
         "main_arm_right" => if value.and_then(Value::as_bool).unwrap_or(true) { "Right" } else { "Left" }.into(),
         "narrator" => ["Off", "All", "Chat", "System"]
@@ -393,12 +341,7 @@ impl UiState {
         let footer_h = 24.;
         self.options_footer = [lx, y0 + ph - footer_h - 2., lw, footer_h];
         let rows = rows(self.options_tab);
-        let total = rows.len()
-            + match self.options_tab {
-                1 => crate::controls::ACTIONS.len() + 1,
-                LANGUAGE_TAB => self.languages.len(),
-                _ => 0,
-            };
+        let total = rows.len() + if self.options_tab == 1 { crate::controls::ACTIONS.len() + 1 } else { 0 };
         let visible = (((ph - 26. - footer_h - 8.) + 2.) / Self::ROW_PITCH)
             .floor()
             .max(1.) as usize;
@@ -458,35 +401,6 @@ impl UiState {
                 action,
                 paint,
             )?;
-        }
-        if self.options_tab == LANGUAGE_TAB {
-            let current = self.language().to_owned();
-            let page: Vec<(usize, String)> = self
-                .languages
-                .iter()
-                .cloned()
-                .enumerate()
-                .skip(scroll)
-                .take(visible)
-                .collect();
-            for (index, id) in page {
-                let selected = id == current;
-                let entries = &self.text.language.entries;
-                let label = match (selected, entries.get("language.name"), entries.get("language.region")) {
-                    (true, Some(name), Some(region)) => format!("{id}: {name} ({region})"),
-                    _ => id.clone(),
-                };
-                self.add(
-                    format!("language/{id}"),
-                    "button",
-                    label,
-                    [lx, list_top + (index - scroll) as f32 * Self::ROW_PITCH, lw, Self::ROW_HEIGHT],
-                    true,
-                    None,
-                    NodeAction::SelectLanguage(index),
-                    Paint::Tab(selected),
-                )?;
-            }
         }
         if self.options_tab == 1 {
             let bindings = self.settings.get("key_bindings")
@@ -661,33 +575,6 @@ mod tests {
         assert!(matches!(&effects.commands[0], UiCommand::Settings { key, .. } if key == "key_bindings"));
     }
 
-    #[test]
-    fn language_tab_lists_the_lang_files_and_a_click_commits_the_language_setting() {
-        let (mut content, mut inventory, _) = state();
-        for id in ["en_us", "ru_ru"] {
-            content.insert_test_resource(&format!("assets/minecraft/lang/{id}.json"), b"{}");
-        }
-        let mut ui = UiState::new_state(&content).unwrap();
-        ui.resize(427, 240, 1.0);
-        open_options(&mut ui, &mut inventory, &content);
-        assert_eq!(ui.language(), "en_us");
-        ui.activate_for_test(NodeAction::OptionsTab(LANGUAGE_TAB), &mut inventory, &content).unwrap();
-        ui.rebuild_for_test(&inventory, &content).unwrap();
-        let ids: Vec<_> = ui.nodes.iter().map(|n| n.id.as_str()).filter(|id| id.starts_with("language/")).collect();
-        assert_eq!(ids, ["language/en_us", "language/ru_ru"]);
-        let russian = ui.nodes.iter().position(|n| n.id == "language/ru_ru").unwrap();
-        let action = ui.nodes[russian].action.clone();
-        let effects = ui.activate_for_test(action, &mut inventory, &content).unwrap();
-        assert_eq!(setting_commands(&effects, "language"), vec![json!("ru_ru")]);
-        assert_eq!(ui.language(), "ru_ru");
-        assert_eq!(UiState::sanitize_setting_value("language", &json!("ru_ru")), Some(json!("ru_ru")));
-        for bad in [json!("RU"), json!(3), json!("../etc"), json!("")] {
-            assert_eq!(UiState::sanitize_setting_value("language", &bad), None, "{bad}");
-        }
-        assert_eq!(UiState::default_setting_value("language"), Some(json!("en_us")));
-        assert!(UiState::MANAGED_SETTING_KEYS.contains(&"language"));
-    }
-
     fn state() -> (Content, InventoryStore, UiState) {
         let mut content = Content::test_cube();
         content.creative_tabs_report = std::sync::Arc::from(br#"{"tabs":[]}"#.as_slice());
@@ -741,7 +628,7 @@ mod tests {
         let (content, mut inventory, mut ui) = state();
         open_options(&mut ui, &mut inventory, &content);
         let ids: Vec<_> = ui.nodes.iter().map(|n| n.id.as_str()).collect();
-        for tab in 0..TABS.len() {
+        for tab in 0..4 {
             assert!(ids.contains(&format!("options/tab/{tab}").as_str()), "{ids:?}");
         }
         for key in ["fov", "render_distance", "max_fps", "vsync", "fullscreen", "graphics_preset"] {
@@ -948,9 +835,6 @@ mod tests {
         assert_eq!(value_text("fullscreen", None), "Off");
         assert_eq!(value_text("narrator", Some(&json!(2))), "Chat");
         assert_eq!(value_text("volume", Some(&json!(0.5))), "50%");
-        assert_eq!(value_text("gamma", None), "50%");
-        assert_eq!(value_text("gamma", Some(&json!(0.))), "Moody");
-        assert_eq!(value_text("gamma", Some(&json!(1.))), "Bright");
     }
 
     #[test]

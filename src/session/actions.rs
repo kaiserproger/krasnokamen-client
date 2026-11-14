@@ -402,7 +402,7 @@ impl Session {
                     &self.keys,
                     content,
                     &self.inventory,
-                    &queued
+                    &describe_queued_commands(&self.commands[start..])
                 ));
             }
             value
@@ -1253,6 +1253,10 @@ impl Session {
             .as_ref()
             .ok_or("content unavailable")?
             .stage_current_reload()?;
+        self.install_reloaded(content)
+    }
+    /// Installs an already-staged `Content` (resource reload or a server pack push).
+    pub(super) fn install_reloaded(&mut self, content: crate::protocol::content::Content) -> Result<()> {
         let models = Arc::new(crate::entities::Models::load(&content)?);
         self.ui
             .as_mut()

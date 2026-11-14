@@ -553,7 +553,7 @@ impl Player {
                 w.var(handle.network_id.checked_add(1).ok_or("spectator entity id overflow")?);
                 out.push(PacketCommand::new(sb::SPECTATOR_ACTION, w));
             }
-            None => {}
+            return Ok(());
         }
         if held(inventory, 0)
             .is_some_and(|s| s.components.contains_key("minecraft:piercing_weapon"))

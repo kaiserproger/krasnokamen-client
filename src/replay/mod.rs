@@ -2,20 +2,43 @@
 pub(crate) mod clock;
 pub mod format;
 pub(crate) mod record;
-mod roster;
 pub(crate) mod scan;
+mod roster;
 #[cfg(test)]
-use crate::protocol::packet_ids::{configuration, login, play};
+mod seek_tests;
 use crate::{protocol::network::Phase, session::Session};
+#[cfg(test)]
+use crate::protocol::packet_ids::{login, configuration, play};
 use clock::VirtualClock;
 use format::{Packet, RecordingReader};
 use sha2::{Digest, Sha256};
-use std::{
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{fs::File, io::BufReader, path::{Path, PathBuf}, time::Duration};
+
+/// Wall time preserves the recording's receive cadence; tick time plays server
+/// marker groups at 20 Hz, including gaps, independent of the server's TPS.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timebase {
+    #[default]
+    Wall,
+    Tick,
+}
+impl std::str::FromStr for Timebase {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, String> {
+        match value {
+            "wall" => Ok(Self::Wall),
+            "tick" => Ok(Self::Tick),
+            _ => Err("replay timebase must be wall or tick".into()),
+        }
+    }
+}
+
+// Four seconds of normal entity presentation before a shot starts. The fast
+// prefix never becomes a captured frame; seeks are cut boundaries, not playback.
+pub(crate) const SEEK_WARMUP_TICKS: u32 = 80;
+#[derive(Clone, Copy)]
+pub(crate) enum SeekPhase { Skip, Warmup(u32) }
 
 pub struct Player {
     pub(crate) session: Session,
@@ -35,7 +58,7 @@ pub struct Player {
     pub last_wall_ns: Option<u64>,
     transcript: Sha256,
     crowd_instancing: bool,
-    crowd_mesh_fingerprint: std::cell::RefCell<Option<(u64, [u8; 32])>>,
+    crowd_mesh_fingerprint: std::cell::RefCell<Option<(u64,[u8;32])>>,
     // Drop the session's worker owners before restoring the enclosing clock.
     clock: VirtualClock,
 }
@@ -44,30 +67,16 @@ impl Player {
         let clock = VirtualClock::new();
         let mut input = RecordingReader::open(path)?;
         let next = input.next_packet()?;
-        if next.is_none() {
-            return Err("replay recording contains no packets".into());
-        }
+        if next.is_none() { return Err("replay recording contains no packets".into()); }
         let session = Session::from_recording(presentation)?;
-        Ok(Self {
-            session,
-            input,
-            next,
-            path: path.into(),
-            presentation,
-            phase: Phase::Login,
-            time: Duration::ZERO,
-            next_tick: Duration::ZERO,
-            last_packet: Duration::ZERO,
-            last_tick: None,
-            last_wall_ns: None,
-            transcript: Sha256::new(),
-            crowd_instancing: false,
-            crowd_mesh_fingerprint: Default::default(),
-            clock,
-        })
+        Ok(Self { session, input, next, path: path.into(), presentation, phase: Phase::Login,
+            time: Duration::ZERO, next_tick: Duration::ZERO, last_packet: Duration::ZERO,
+            last_tick: None, timebase, tick_origin: None, render_distance: None, seek_warmup_ticks: 0,
+            last_wall_ns: None, transcript: Sha256::new(),
+            crowd_instancing:false, crowd_mesh_fingerprint:Default::default(), clock })
     }
-    pub(crate) fn set_crowd_instancing(&mut self, enabled: bool) {
-        self.crowd_instancing = enabled;
+    pub(crate) fn set_crowd_instancing(&mut self,enabled:bool) {
+        self.crowd_instancing=enabled;
         self.session.set_crowd_instancing(enabled);
     }
     pub(crate) fn set_render_distance(&mut self, distance: Option<u32>) -> Result<(), String> {
@@ -90,7 +99,8 @@ impl Player {
             self.session = Session::from_recording(self.presentation)?;
             self.session.enable_scene_profile(profiling);
             self.session.set_crowd_instancing(self.crowd_instancing);
-            *self.crowd_mesh_fingerprint.borrow_mut() = None;
+            self.session.replay_render_distance(self.render_distance)?;
+            *self.crowd_mesh_fingerprint.borrow_mut()=None;
             self.input = RecordingReader::open(&self.path)?;
             self.next = self.input.next_packet()?;
             self.phase = Phase::Login;
@@ -121,27 +131,15 @@ impl Player {
         self.advance_to(clock::frame_time(frame, 60))
     }
     pub fn advance_to(&mut self, target: Duration) -> Result<(), String> {
-        if target < self.time {
-            return Err("replay clock reversal requires seek".into());
-        }
-        if target.as_millis() > u128::from(u32::MAX) {
-            return Err("replay time exceeds solrec u32 millisecond range".into());
-        }
+        if target < self.time { return Err("replay clock reversal requires seek".into()); }
+        if target.as_millis() > u128::from(u32::MAX) { return Err("replay time exceeds solrec u32 millisecond range".into()); }
         loop {
             if self.next.is_none() && target > self.last_packet {
-                return Err(format!(
-                    "replay range exceeds last packet at {:.3}s",
-                    self.last_packet.as_secs_f64()
-                ));
+                return Err(format!("replay range exceeds last packet at {:.3}s", self.last_packet.as_secs_f64()));
             }
-            let packet_time = self
-                .next
-                .as_ref()
-                .map(|packet| Duration::from_millis(u64::from(packet.ms)));
+            let packet_time = self.packet_time()?;
             let tick_due = self.next_tick <= target;
-            if let Some(time) =
-                packet_time.filter(|time| *time <= target && (!tick_due || *time <= self.next_tick))
-            {
+            if let Some(time) = packet_time.filter(|time| *time <= target && (!tick_due || *time <= self.next_tick)) {
                 self.clock.set(time);
                 self.time = time;
                 let packet = self.next.take().unwrap();
@@ -153,10 +151,8 @@ impl Player {
                 self.time = self.next_tick;
                 self.session.tick_after_events(true);
                 self.session.replay_error()?;
-                self.next_tick += self.session.tick_interval();
-            } else {
-                break;
-            }
+                self.next_tick += self.tick_interval();
+            } else { break; }
         }
         self.clock.set(target);
         self.time = target;
@@ -169,9 +165,7 @@ impl Player {
         }
     }
     fn packet_time(&mut self) -> Result<Option<Duration>, String> {
-        let Some(packet) = self.next.as_ref() else {
-            return Ok(None);
-        };
+        let Some(packet) = self.next.as_ref() else { return Ok(None); };
         if self.timebase == Timebase::Wall {
             return Ok(Some(Duration::from_millis(u64::from(packet.ms))));
         }
@@ -186,8 +180,7 @@ impl Player {
         // Configuration before the first actual marker is time zero. The
         // header's start_tick may be an unfinalized recorder estimate.
         let elapsed = match (marker.or(self.last_tick), self.tick_origin) {
-            (Some(tick), Some(origin)) => tick
-                .checked_sub(origin)
+            (Some(tick), Some(origin)) => tick.checked_sub(origin)
                 .and_then(|ticks| ticks.checked_mul(50))
                 .ok_or("replay tick timeline overflow")?,
             _ => 0,
@@ -201,7 +194,7 @@ impl Player {
         let (id, body) = packet.split()?;
         // Tick numbers are server-owned labels, never inferred by incrementing
         // a local counter: skipped edge-pump ticks remain visible as gaps.
-        if let Some((tick, wall)) = format::tick_marker(self.phase, id, body)? {
+        if let Some((tick,wall)) = format::tick_marker(self.phase,id,body)? {
             if self.last_tick.is_some_and(|previous| tick <= previous) {
                 return Err("replay krasnokamen:tick markers are not strictly increasing".into());
             }
@@ -211,44 +204,45 @@ impl Player {
         self.session.receive_packet(self.phase, id, body)?;
         self.session.replay_render_distance(self.render_distance)?;
         self.transcript.update(packet.ms.to_be_bytes());
-        self.transcript
-            .update((packet.bytes.len() as u32).to_be_bytes());
+        self.transcript.update((packet.bytes.len() as u32).to_be_bytes());
         self.transcript.update(&packet.bytes);
-        self.phase = format::phase_after(self.phase, id);
+        self.phase = format::phase_after(self.phase,id);
         Ok(())
     }
     pub(crate) fn partial(&self) -> f32 {
-        let interval = self.session.tick_interval();
-        (1. - self.next_tick.saturating_sub(self.time).as_secs_f32() / interval.as_secs_f32())
-            .clamp(0., 1.)
+        let interval = self.tick_interval();
+        (1. - self.next_tick.saturating_sub(self.time).as_secs_f32()/interval.as_secs_f32()).clamp(0.,1.)
     }
     pub fn frame_hash(&self) -> String {
         let mut hash = self.transcript.clone();
         hash.update(self.time.as_nanos().to_be_bytes());
         hash.update(self.session.replay_state_hash());
         // A process-global mesh revision is an invalidation key, not replay state.
-        let meshes = &self.session.scene().crowd.meshes;
-        let mut cached = self.crowd_mesh_fingerprint.borrow_mut();
-        if cached
-            .as_ref()
-            .is_none_or(|(revision, _)| *revision != meshes.revision)
-        {
-            *cached = Some((meshes.revision, crowd_mesh_hash(meshes)));
+        let meshes=&self.session.scene().crowd.meshes;
+        let mut cached=self.crowd_mesh_fingerprint.borrow_mut();
+        if cached.as_ref().is_none_or(|(revision,_)|*revision!=meshes.revision) {
+            *cached=Some((meshes.revision,crowd_mesh_hash(meshes)));
         }
         hash.update(cached.as_ref().unwrap().1);
         format!("{:x}", hash.finalize())
     }
 }
 
-fn crowd_mesh_hash(meshes: &crate::entities::CrowdMeshes) -> [u8; 32] {
-    let mut hash = Sha256::new();
-    for bytes in [
-        bytemuck::cast_slice(meshes.vertices.as_slice()),
-        bytemuck::cast_slice(meshes.indices.as_slice()),
-        bytemuck::cast_slice(meshes.bones.as_slice()),
-    ] {
-        hash.update((bytes.len() as u64).to_be_bytes());
-        hash.update(bytes);
+fn crowd_mesh_hash(meshes:&crate::entities::CrowdMeshes) -> [u8;32] {
+    let mut hash=Sha256::new();
+    type Bytes = for<'a> fn(&'a crate::entities::CrowdChunk) -> &'a [u8];
+    let parts: [Bytes; 3] = [
+        |chunk| bytemuck::cast_slice(chunk.vertices.as_slice()),
+        |chunk| bytemuck::cast_slice(chunk.indices.as_slice()),
+        |chunk| bytemuck::cast_slice(chunk.bones.as_slice()),
+    ];
+    // The bytes of every chunk in order: the same stream as one contiguous buffer.
+    for bytes in parts {
+        let len: usize = meshes.chunks.iter().map(|chunk| bytes(chunk).len()).sum();
+        hash.update((len as u64).to_be_bytes());
+        for chunk in &meshes.chunks {
+            hash.update(bytes(chunk));
+        }
     }
     hash.update((meshes.groups.len() as u64).to_be_bytes());
     for group in &meshes.groups {

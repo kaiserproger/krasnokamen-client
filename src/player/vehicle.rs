@@ -2,7 +2,7 @@
 //! entity interpolation; they are never run through a guessed boat/horse simulator.
 use crate::protocol::packet_ids::play::serverbound as sb;
 use super::*;
-use crate::entities::Metadata;
+use crate::entities::{Metadata, Seat};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -1079,7 +1079,7 @@ impl Player {
             .and_then(|points| points.first()).ok_or("source_player_vehicle_attachment_missing")?
             .map(|value| value * self.attribute("minecraft:scale"));
         passenger_position(
-            entities, handle, self.entity_id, position, yaw, attachment, self.yaw,
+            entities, entity, self.entity_id, position, yaw, attachment, self.yaw,
             self.vehicle_seat_motion.as_ref(), game_time,
         )
     }
@@ -1221,10 +1221,11 @@ fn mount_controlled(
             || (kind != Kind::HappyGhast && saddle))
         && holds_steer)
 }
-/// Shared source attachment owner for predicted players and received remote riders.
+/// Shared source attachment owner for predicted players and received remote riders: where
+/// `passenger` of the resolved `entity` sits.
 #[expect(clippy::too_many_arguments, reason = "Vehicle and rider attachment transforms share one source rule")]
 pub(crate) fn passenger_position(
-    entities: &EntityStore, handle: Handle, passenger: i32, position: [f64; 3], yaw: f32,
+    entities: &EntityStore, entity: &crate::entities::Entity, passenger: i32, position: [f64; 3], yaw: f32,
     rider_attachment: [f64; 3], rider_yaw: f32, motion: Option<&SeatMotion>, game_time: i64,
 ) -> Result<[f64; 3]> {
     if position.iter().any(|value| !value.is_finite()) || !yaw.is_finite() {
@@ -1232,7 +1233,7 @@ pub(crate) fn passenger_position(
     }
     let handle = entity.handle;
     let models = entities.models_ref().ok_or("entity_models_not_activated")?;
-    let schema = models.schemas.get(&entity.type_name).ok_or("missing_mount_schema")?;
+    let schema = models.schema_of(entity).ok_or("missing_mount_schema")?;
     let index = entity.passenger_ids.iter().position(|id| *id == passenger)
         .ok_or("mount_passenger_not_received")?;
     let (dimensions, scale) = models.dimensions(entity)?;
@@ -1241,14 +1242,8 @@ pub(crate) fn passenger_position(
         .ok_or("source_mount_passenger_attachment_missing")?
         .map(|value| value * f64::from(scale));
     let height = dimensions.height * scale;
-    match schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str) {
-        Some("net.minecraft.world.entity.vehicle.boat.AbstractBoat") => {
-            let chest = schema.hierarchy.iter().any(|name| {
-                name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat"
-            });
-            let raft = matches!(schema.class.as_str(),
-                "net.minecraft.world.entity.vehicle.boat.Raft"
-                    | "net.minecraft.world.entity.vehicle.boat.ChestRaft");
+    match models.ids(entity).seat {
+        Seat::Boat { chest, raft } => {
             point = [
                 0., f64::from(if raft { height * 0.8888889 } else { height / 3. }),
                 f64::from(if entity.passenger_ids.len() > 1 {

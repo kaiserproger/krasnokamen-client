@@ -6,7 +6,7 @@ mod gpu_tests;
 use crate::{
     content_paths,
     render::{GraphicsPreset, Renderer},
-    replay::{Player, clock::frame_time},
+    replay::{Player, Timebase, clock::frame_time},
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -116,11 +116,51 @@ fn accumulate(rgba: &[u8], width: usize, height: usize, sum: &mut [u32]) {
     }
 }
 
+fn presentation_metadata(scene: &crate::api::Scene, entity_extract_ms: f64) -> serde_json::Value {
+    serde_json::json!({
+        "crowd_instances": scene.crowd.instances.len(),
+        "crowd_fallback": scene.entity_presentation.crowd_fallback,
+        "entity_extraction": scene.entity_presentation,
+        "cpu_entity_extract_ms": entity_extract_ms,
+    })
+}
+
+/// Settle the camera's terrain before capture. When CPU mesh residency is full,
+/// an uncaptured `upload_frame` uploads the drawn payloads so their CPU copies
+/// release, then settling continues. Returns the number of upload frames.
+pub(crate) fn settle_terrain(
+    replay: &mut Player,
+    renderer: &mut Renderer,
+    mut upload_frame: impl FnMut(&mut Renderer, &crate::api::Scene, &crate::api::Observation) -> Result<(), String>,
+) -> Result<u32, String> {
+    let mut uploads = 0;
+    while !replay.session.settle_replay_geometry()? {
+        upload_frame(
+            renderer,
+            replay.session.scene(),
+            &replay.session.execution_observation(),
+        )?;
+        replay
+            .session
+            .release_uploaded_terrain(renderer.drain_uploaded_meshes());
+        replay.session.far_generated(
+            renderer.far_gpu_generation(),
+            renderer.drain_far_generated(),
+        );
+        uploads += 1;
+    }
+    Ok(uploads)
+}
+
 pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let (mut recording, mut camera, mut output, mut data) = (None, None, None, None);
     let (mut start, mut end) = (None, None);
     let (mut width, mut height, mut samples) = (1920u32, 1080u32, 1u32);
     let mut ffmpeg = "ffmpeg".to_string();
+    let mut timebase = Timebase::Wall;
+    let mut render_distance = None;
+    // Cinematic shots default to vanilla's largest «Entity Distance», so wide plans keep their crowds.
+    let mut entity_distance = crate::entities::view_range::MAX_SCALING;
     while let Some(arg) = args.next() {
         if arg == "--help" {
             crate::launch::print_help();
@@ -137,6 +177,13 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
             "--start" => start = Some(value.parse::<f64>().map_err(|e| e.to_string())?),
             "--end" => end = Some(value.parse::<f64>().map_err(|e| e.to_string())?),
             "--motion-samples" => samples = value.parse::<u32>().map_err(|e| e.to_string())?,
+            "--timebase" => timebase = value.parse()?,
+            "--render-distance" => {
+                render_distance = Some(value.parse::<u32>().map_err(|e| e.to_string())?)
+            }
+            "--entity-distance" => {
+                entity_distance = value.parse::<f64>().map_err(|e| e.to_string())?
+            }
             "--size" => {
                 let (w, h) = value.split_once('x').ok_or("size must be WIDTHxHEIGHT")?;
                 width = w.parse::<u32>().map_err(|e| e.to_string())?;
@@ -201,7 +248,9 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let mut replay = Player::open(&recording, true)?;
+    let mut replay = Player::open(&recording, true, timebase)?;
+    replay.set_render_distance(render_distance)?;
+    replay.set_entity_distance(entity_distance)?;
     let mut renderer = pollster::block_on(Renderer::new_offscreen(
         width * 2,
         height * 2,
@@ -232,15 +281,34 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
         let base = begin + frame_time(index, 60);
         sum.fill(0);
         let mut sample_ticks = [None; 16];
+        let mut entity_extract_ms = 0.;
+        // Main-thread wall time per phase: packets/ticks, scene preparation, draw+readback;
+        // and the main thread's own CPU time per phase (unaffected by preemption).
+        let mut main_ms = [0.; 3];
+        let mut thread_ms = thread_cpu_s().map(|_| [0.; 3]);
+        let mut upload_frames = 0;
         for sample in 0..samples {
             // 180 degree shutter: sample only the first half of this frame.
             let time = base + frame_time(u64::from(sample), 120 * samples);
-            replay.advance_to(time)?;
+            let (phase, cpu) = (std::time::Instant::now(), thread_cpu_s());
+            if index == 0 && sample == 0 {
+                replay.seek(time)?;
+            } else {
+                replay.advance_to(time)?;
+            }
             if replay.last_tick.is_none() { return Err("replay has no krasnokamen:tick marker at shot start; configure recorder account".into()); }
-            let partial=replay.partial();
-            replay.session.replay_camera(&path,time.as_secs_f64(),partial)?;
+            let partial = replay.partial();
+            replay.session.replay_camera(&path, time.as_secs_f64(), partial)?;
+            main_ms[0] += phase.elapsed().as_secs_f64() * 1e3;
+            phase_cpu(&mut thread_ms, 0, cpu);
+            let (phase, cpu) = (std::time::Instant::now(), thread_cpu_s());
             replay.session.prepare_frame(partial)?;
-            replay.session.settle_replay_geometry()?;
+            main_ms[1] += phase.elapsed().as_secs_f64() * 1e3;
+            phase_cpu(&mut thread_ms, 1, cpu);
+            let (phase, cpu) = (std::time::Instant::now(), thread_cpu_s());
+            upload_frames += settle_terrain(&mut replay, &mut renderer, |renderer, scene, observation| {
+                renderer.replay_rgba(scene, observation, &readback, &mut pixels)
+            })?;
             if replay.session.phase() != "play" {
                 return Err(format!(
                     "render starts before Play at {:.3}s",
@@ -256,6 +324,11 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
                 renderer.far_gpu_generation(),
                 renderer.drain_far_generated(),
             );
+            main_ms[2] += phase.elapsed().as_secs_f64() * 1e3;
+            phase_cpu(&mut thread_ms, 2, cpu);
+            if let Some([_, entities, _]) = replay.session.take_scene_profile() {
+                entity_extract_ms += entities;
+            }
             accumulate(&pixels, width as usize, height as usize, &mut sum);
             sample_ticks[sample as usize] = replay.last_tick;
         }
@@ -273,7 +346,7 @@ pub(crate) fn cli(mut args: impl Iterator<Item = String>) -> Result<(), String> 
             "cpu_main_ms":{"advance":main_ms[0],"prepare_frame":main_ms[1],"draw_readback":main_ms[2]},
             "cpu_thread_ms":thread_ms.map(|ms|serde_json::json!({"advance":ms[0],"prepare_frame":ms[1],"draw_readback":ms[2]})),
             "terrain":{"upload_frames":upload_frames,
-                "cpu_mesh_resident_peak_bytes":replay.session.replay_terrain_metrics()["cpu_mesh_resident_peak_bytes"]},
+                "cpu_mesh_resident_peak_bytes":replay.session.capture_terrain_metrics()["cpu_mesh_resident_peak_bytes"]},
             "rgba_sha256":format!("{:x}",Sha256::digest(&frame)),"supersampling":2,"motion_samples":samples,"taa":false}))
             .map_err(|e|format!("write replay frame metadata: {e}"))?;
         index += 1;

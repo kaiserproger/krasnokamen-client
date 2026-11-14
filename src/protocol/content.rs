@@ -602,6 +602,24 @@ impl ResourceSource {
     pub fn resource_root(&self) -> &Path {
         &self.roots[0]
     }
+    /// Adds a server-pushed pack as the highest-priority root, validated like a local pack.
+    pub fn push_pack_root(&mut self, root: PathBuf) -> Result<()> {
+        if self.roots.len() >= 32 {
+            return Err("resource pack stack bound".into());
+        }
+        let root = fs::canonicalize(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+        if self.roots.contains(&root) {
+            return Ok(());
+        }
+        validate_pack(&root)?;
+        self.roots.push(root);
+        self.palette_sprites = palettes::index(self)?;
+        Ok(())
+    }
+    /// The pack roots beyond the verified original resources, in stacking order.
+    pub fn pack_roots(&self) -> &[PathBuf] {
+        &self.roots[1..]
+    }
     /// IDs of every `assets/minecraft/lang/<id>.json` in the pack roots, the verified
     /// asset index and loader resources, sorted. Only IDs `Language::load` accepts.
     pub fn language_ids(&self) -> Vec<String> {
@@ -1054,6 +1072,25 @@ impl Content {
     }
     pub fn stage_current_reload(&self) -> Result<Self> {
         self.stage_reload(self.source.clone(), &self.data_root)
+    }
+    /// Stages a full reload with `pack_root` appended as the highest-priority pack.
+    pub fn stage_with_pack(&self, pack_root: &Path) -> Result<Self> {
+        let mut source = self.source.clone();
+        source.push_pack_root(pack_root.to_path_buf())?;
+        self.stage_reload(source, &self.data_root)
+    }
+    /// Applies a server-pushed pack to the live resource stack without a full reload
+    /// (state-only sessions; presentation sessions use `stage_with_pack` + install).
+    pub fn apply_pack_root(&mut self, pack_root: &Path) -> Result<()> {
+        self.source.push_pack_root(pack_root.to_path_buf())
+    }
+    /// The active pack roots beyond the verified original resources.
+    pub fn pack_roots(&self) -> Vec<PathBuf> {
+        self.source.pack_roots().to_vec()
+    }
+    /// The pinned local data directory.
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
     }
     /// Stages a coherent CPU generation. Caller reserves GPU bytes and atomically publishes it.
     pub fn stage_reload(&self, mut source: ResourceSource, data: &Path) -> Result<Self> {
@@ -2180,11 +2217,6 @@ impl Content {
         self.shapes.push(boxes);
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_test_collision(&mut self, state: u32, boxes: Vec<[f64; 6]>) {
-        self.states[state as usize].collision = Collision::Shape(self.shapes.len());
-        self.shapes.push(boxes);
-    }
 
     #[cfg(test)]
     pub(crate) fn insert_test_state_properties(

@@ -8,7 +8,44 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 
-/// Krasnokamen-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
+/// Map from the short, trusted names entity facts are looked up by (kinds, metadata
+/// accessors), many times per entity each tick and frame.
+pub type NameMap<V> = HashMap<String, V, BuildHasherDefault<NameHasher>>;
+
+/// Multiply-rotate hash over 8-byte words (the FxHash step): a fraction of SipHash's cost
+/// for the bundled fact names, which are not attacker-chosen.
+#[derive(Clone, Copy, Default)]
+pub struct NameHasher(u64);
+impl NameHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+impl Hasher for NameHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for word in &mut words {
+            self.add(u64::from_le_bytes(word.try_into().unwrap()));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut word = [0; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+    fn write_u8(&mut self, value: u8) {
+        self.add(u64::from(value));
+    }
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+/// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
 const ENTITY_FACTS: &str = include_str!("../../assets/krasnokamen/entities/entity-facts.json");
 const FACTS_SCHEMA: u32 = 1;
@@ -137,10 +174,7 @@ pub struct Ids {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Seat {
     /// `AbstractBoat`; chest boats and rafts seat differently.
-    Boat {
-        chest: bool,
-        raft: bool,
-    },
+    Boat { chest: bool, raft: bool },
     /// `AbstractHorse` (`SeatMotion`).
     Horse,
     Camel,
@@ -185,12 +219,7 @@ impl Ids {
         view_rule: super::view_range::Rule::Entity,
     };
     fn of(schema: &EntitySchema) -> Self {
-        let id = |name: &str| {
-            schema
-                .accessors
-                .get(name)
-                .and_then(|v| u8::try_from(v[0]).ok())
-        };
+        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
         Self {
             baby: id("DATA_BABY_ID"),
             pose: id("DATA_POSE"),
@@ -210,27 +239,28 @@ impl Ids {
             health: id("DATA_HEALTH_ID"),
             charging: [id("IS_CHARGING_CROSSBOW"), id("DATA_IS_CHARGING_CROSSBOW")],
             last_pose_change: id("LAST_POSE_CHANGE_TICK"),
-            boat: schema
-                .hierarchy
-                .iter()
-                .any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
-            seat_motion: matches!(
-                schema
-                    .method_owners
-                    .get("getPassengerAttachmentPoint")
-                    .map(String::as_str),
+            boat: schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
+            seat: match schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str) {
+                Some("net.minecraft.world.entity.vehicle.boat.AbstractBoat") => Seat::Boat {
+                    chest: schema.hierarchy.iter().any(|name| {
+                        name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat"
+                    }),
+                    raft: matches!(schema.class.as_str(),
+                        "net.minecraft.world.entity.vehicle.boat.Raft"
+                            | "net.minecraft.world.entity.vehicle.boat.ChestRaft"),
+                },
+                Some("net.minecraft.world.entity.animal.equine.AbstractHorse") => Seat::Horse,
+                Some("net.minecraft.world.entity.animal.camel.Camel") => Seat::Camel,
+                Some("net.minecraft.world.entity.monster.Strider") => Seat::Strider,
+                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => Seat::CubeMob,
                 Some(
-                    "net.minecraft.world.entity.animal.equine.AbstractHorse"
-                        | "net.minecraft.world.entity.monster.Strider"
-                )
-            ),
-            view_rule: super::view_range::Rule::of(
-                &schema.hierarchy,
-                schema
-                    .hierarchy
-                    .iter()
-                    .any(|class| class == "net.minecraft.world.entity.player.Player"),
-            ),
+                    "net.minecraft.world.entity.Entity"
+                    | "net.minecraft.world.entity.animal.equine.Llama"
+                    | "net.minecraft.world.entity.vehicle.minecart.AbstractMinecart",
+                ) => Seat::Attachment,
+                _ => Seat::Unknown,
+            },
+            view_rule: super::view_range::Rule::of(&schema.hierarchy, schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.player.Player")),
         }
     }
 }
@@ -325,13 +355,8 @@ enum SizeOwner {
 }
 
 impl Sizing {
-    fn of(schema: &EntitySchema, kind: &str) -> Self {
-        let id = |name: &str| {
-            schema
-                .accessors
-                .get(name)
-                .and_then(|v| u8::try_from(v[0]).ok())
-        };
+    fn of(schema: &EntitySchema, kind: &str, poses: &BTreeMap<u8, String>) -> Self {
+        let id = |name: &str| schema.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok());
         let inherits = |class: &str| schema.hierarchy.iter().any(|entry| entry == class);
         let owner = |method: &str| schema.method_owners.get(method).map(String::as_str);
         let constant = |name: &str| match schema.dimension_constants.get(name) {
@@ -348,14 +373,9 @@ impl Sizing {
             size: id("ID_SIZE"),
             living: inherits("net.minecraft.world.entity.LivingEntity"),
             camel: inherits("net.minecraft.world.entity.animal.camel.Camel"),
-            scale: schema
-                .default_attributes
-                .get("minecraft:scale")
-                .map(|scale| (scale.id, scale.value)),
+            scale: schema.default_attributes.get("minecraft:scale").map(|scale| (scale.id, scale.value)),
             sanitize: match owner("sanitizeScale") {
-                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => {
-                    Sanitize::AtMost(1.)
-                }
+                Some("net.minecraft.world.entity.animal.happyghast.HappyGhast") => Sanitize::AtMost(1.),
                 Some("net.minecraft.world.entity.monster.Shulker") => Sanitize::AtMost(3.),
                 Some("net.minecraft.world.entity.boss.enderdragon.EnderDragon") => Sanitize::One,
                 _ => Sanitize::Keep,
@@ -372,29 +392,40 @@ impl Sizing {
                 _ => 0.5,
             },
             owner: match owner("getDefaultDimensions") {
-                Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse") => {
-                    SizeOwner::ChestedHorse
-                }
-                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => {
-                    SizeOwner::CubeMob
-                }
+                Some("net.minecraft.world.entity.animal.equine.AbstractChestedHorse") => SizeOwner::ChestedHorse,
+                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => SizeOwner::CubeMob,
                 Some("net.minecraft.world.entity.animal.fish.Pufferfish") => SizeOwner::Pufferfish,
                 Some("net.minecraft.world.entity.animal.fish.Salmon") => SizeOwner::Salmon,
                 Some("net.minecraft.world.entity.monster.Phantom") => SizeOwner::Phantom,
                 _ => SizeOwner::Other,
             },
             armor_stand: kind == "minecraft:armor_stand",
-            avatar: matches!(
-                schema.dimension_constants.get("POSES"),
-                Some(DimensionConstant::Poses(_))
-            ),
+            avatar: matches!(schema.dimension_constants.get("POSES"), Some(DimensionConstant::Poses(_))),
+            poses: {
+                let table = match schema.dimension_constants.get("POSES") {
+                    Some(DimensionConstant::Poses(table)) => Some(table),
+                    _ => None,
+                };
+                let mut rules: Vec<Option<PoseRule>> = Vec::new();
+                for (&id, name) in poses {
+                    let index = usize::from(id);
+                    if rules.len() <= index {
+                        rules.resize_with(index + 1, || None);
+                    }
+                    rules[index] = Some(PoseRule {
+                        sleeping: name == "SLEEPING",
+                        sitting: name == "SITTING",
+                        long_jumping: name == "LONG_JUMPING",
+                        avatar: table.and_then(|table| table.get(name)).cloned()
+                            .or_else(|| constant("STANDING_DIMENSIONS")),
+                    });
+                }
+                rules
+            },
             goat: schema.class == "net.minecraft.world.entity.animal.goat.Goat",
             digging_states: if schema.class == "net.minecraft.world.entity.animal.sniffer.Sniffer" {
                 schema.enum_ids.get("State").map_or_else(Vec::new, |ids| {
-                    ids.iter()
-                        .filter(|(_, name)| *name == "DIGGING")
-                        .map(|(id, _)| *id)
-                        .collect()
+                    ids.iter().filter(|(_, name)| *name == "DIGGING").map(|(id, _)| *id).collect()
                 })
             } else {
                 Vec::new()
@@ -411,12 +442,7 @@ impl Sizing {
                 "minecraft:polar_bear" => Shape::PolarBear,
                 "minecraft:warden" => Shape::Warden,
                 "minecraft:shulker" => Shape::Shulker,
-                _ if inherits(
-                    "net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge",
-                ) =>
-                {
-                    Shape::WindCharge
-                }
+                _ if inherits("net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge") => Shape::WindCharge,
                 _ => Shape::Box,
             },
         }
@@ -471,9 +497,7 @@ impl Schemas {
     pub fn insert(&mut self, kind: String, mut schema: EntitySchema) -> Option<EntitySchema> {
         schema.forget_resolved();
         if let Some(&slot) = self.slots.get(&kind) {
-            return self.schemas[slot as usize]
-                .replace((kind, schema))
-                .map(|(_, old)| old);
+            return self.schemas[slot as usize].replace((kind, schema)).map(|(_, old)| old);
         }
         let slot = u32::try_from(self.schemas.len()).expect("entity kinds fit u32");
         self.slots.insert(kind.clone(), slot);
@@ -486,16 +510,10 @@ impl Schemas {
         self.schemas[slot as usize].take().map(|(_, schema)| schema)
     }
     pub fn iter(&self) -> impl Iterator<Item = (&String, &EntitySchema)> {
-        self.schemas
-            .iter()
-            .flatten()
-            .map(|(kind, schema)| (kind, schema))
+        self.schemas.iter().flatten().map(|(kind, schema)| (kind, schema))
     }
     fn at(&self, slot: u32) -> Option<&EntitySchema> {
-        self.schemas
-            .get(slot as usize)?
-            .as_ref()
-            .map(|(_, schema)| schema)
+        self.schemas.get(slot as usize)?.as_ref().map(|(_, schema)| schema)
     }
 }
 
@@ -512,8 +530,7 @@ impl FromIterator<(String, EntitySchema)> for Schemas {
 impl<K: AsRef<str> + ?Sized> std::ops::Index<&K> for Schemas {
     type Output = EntitySchema;
     fn index(&self, kind: &K) -> &EntitySchema {
-        self.get(kind.as_ref())
-            .expect("entity schema of a known kind")
+        self.get(kind.as_ref()).expect("entity schema of a known kind")
     }
 }
 
@@ -661,7 +678,7 @@ impl Models {
             return Err("source skin catalog mismatch".into());
         }
         Self::check_registry(&doc, content)?;
-        // Geometry is Krasnokamen-authored (`krasnokamen_models`); the facts carry no meshes. A family
+        // Geometry is Solaris-authored (`krasnokamen_models`); the facts carry no meshes. A family
         // whose rig has no authored model gets a visible entity-sized placeholder box.
         let mut rigs = BTreeMap::new();
         for (kind, family) in &doc.families {
@@ -697,7 +714,7 @@ impl Models {
         let set = if baby { &armor.baby } else { &armor.adult };
         set.get(part).map(String::as_str)
     }
-    /// Geometry for a renderer rig key: explicit entry, else Krasnokamen-authored model, else a
+    /// Geometry for a renderer rig key: explicit entry, else Solaris-authored model, else a
     /// placeholder box. Never fails; a missing model must not stop the frame.
     pub(crate) fn rig(&self, key: &str) -> &Rig {
         static FALLBACK: std::sync::LazyLock<Rig> =
@@ -731,25 +748,16 @@ impl Models {
             return Some(schema);
         }
         let slot = *self.schemas.slots.get(e.type_name.as_str())?;
-        e.kind_slot.set(KindSlot {
-            table: self.schemas.table,
-            name,
-            slot,
-        });
+        e.kind_slot.set(KindSlot { table: self.schemas.table, name, slot });
         self.schemas.at(slot)
     }
     /// Metadata index of `e`'s accessor `name`.
     pub(crate) fn entity_accessor(&self, e: &super::Entity, name: &str) -> Option<u8> {
-        self.schema_of(e)?
-            .accessors
-            .get(name)
-            .and_then(|v| u8::try_from(v[0]).ok())
+        self.schema_of(e)?.accessors.get(name).and_then(|v| u8::try_from(v[0]).ok())
     }
     /// `e`'s resolved per-frame accessor indices (all `None` for an unknown kind).
     pub(crate) fn ids(&self, e: &super::Entity) -> &Ids {
-        self.schema_of(e).map_or(&Ids::NONE, |schema| {
-            schema.ids.get_or_init(|| Ids::of(schema))
-        })
+        self.schema_of(e).map_or(&Ids::NONE, |schema| schema.ids.get_or_init(|| Ids::of(schema)))
     }
     pub fn default_skin(&self, uuid: Option<&str>) -> Result<&DefaultSkin> {
         let index = if let Some(uuid) = uuid {
@@ -767,8 +775,7 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32)> {
-        self.sized(entity)
-            .map(|(dimensions, scale, _)| (dimensions, scale))
+        self.sized(entity).map(|(dimensions, scale, _)| (dimensions, scale))
     }
     /// `dimensions` and the kind's box rule (`physical::bounds_at`). Inside a `SizedScope`
     /// (one frame's or tick's presentation, where metadata and attributes do not change) an
@@ -777,16 +784,28 @@ impl Models {
         &'a self,
         entity: &super::Entity,
     ) -> Result<(&'a Dimensions, f32, Shape)> {
-        let schema = self
-            .schema_of(entity)
-            .ok_or("entity dimensions source not activated")?;
-        let sizing = schema
-            .sizing
-            .get_or_init(|| Sizing::of(schema, &entity.type_name));
-        let shape = sizing.shape;
+        let schema = self.schema_of(entity).ok_or("entity dimensions source not activated")?;
+        let sizing = schema.sizing.get_or_init(|| Sizing::of(schema, &entity.type_name, &self.poses));
+        let scope = SIZED_SCOPE.with(std::cell::Cell::get);
+        let memo = entity.sized_memo.get();
+        let (choice, scale) = if scope != 0 && memo.scope == scope {
+            (memo.choice, memo.scale)
+        } else {
+            let (choice, scale) = Self::size_choice(entity, schema, sizing)?;
+            if scope != 0 {
+                entity.sized_memo.set(SizedMemo { scope, choice, scale });
+            }
+            (choice, scale)
+        };
+        Ok((choice.of(schema, sizing), scale, sizing.shape))
+    }
+    fn size_choice(
+        entity: &super::Entity,
+        schema: &EntitySchema,
+        sizing: &Sizing,
+    ) -> Result<(SizedChoice, f32)> {
         let number = |id: Option<u8>| {
-            id.and_then(|id| entity.metadata_value(id))
-                .and_then(super::Metadata::int)
+            id.and_then(|id| entity.metadata_value(id)).and_then(super::Metadata::int)
         };
         let boolean = |id: Option<u8>| {
             id.and_then(|id| entity.metadata_value(id))
@@ -814,35 +833,25 @@ impl Models {
             Sanitize::AtMost(most) => attribute_scale.min(most),
             Sanitize::One => 1.,
         };
-        if living && pose == "SLEEPING" {
-            return Ok((
-                sizing
-                    .sleeping
-                    .as_ref()
-                    .ok_or("source sleeping dimensions missing")?,
-                1.,
-                shape,
-            ));
+        let present = |dimensions: &Option<Dimensions>, missing: &str| {
+            dimensions.as_ref().map(|_| ()).ok_or_else(|| missing.to_string())
+        };
+        if living && pose.sleeping {
+            present(&sizing.sleeping, "source sleeping dimensions missing")?;
+            return Ok((SizedChoice::Sleeping, 1.));
         }
         if sizing.armor_stand {
             let flags = number(sizing.client_flags).unwrap_or(0);
-            return Ok((
-                if flags & 16 != 0 {
-                    sizing
-                        .marker
-                        .as_ref()
-                        .ok_or("source marker dimensions missing")?
-                } else if flags & 1 != 0 {
-                    sizing
-                        .baby_dimensions
-                        .as_ref()
-                        .ok_or("source small armor stand dimensions missing")?
-                } else {
-                    &schema.dimensions
-                },
-                attribute_scale,
-                shape,
-            ));
+            let choice = if flags & 16 != 0 {
+                present(&sizing.marker, "source marker dimensions missing")?;
+                SizedChoice::Marker
+            } else if flags & 1 != 0 {
+                present(&sizing.baby_dimensions, "source small armor stand dimensions missing")?;
+                SizedChoice::Baby
+            } else {
+                SizedChoice::Schema
+            };
+            return Ok((choice, attribute_scale));
         }
         if sizing.avatar {
             present(&pose.avatar, "source avatar dimensions missing")?;
@@ -850,57 +859,27 @@ impl Models {
         }
         let baby = boolean(sizing.baby);
         let age_scale = if baby { sizing.baby_scale } else { 1. };
-        if sizing.camel && pose == "SITTING" {
-            return Ok((
-                sizing
-                    .sitting
-                    .as_ref()
-                    .ok_or("source camel sitting dimensions missing")?,
-                age_scale * attribute_scale,
-                shape,
-            ));
+        if sizing.camel && pose.sitting {
+            present(&sizing.sitting, "source camel sitting dimensions missing")?;
+            return Ok((SizedChoice::Sitting, age_scale * attribute_scale));
         }
-        let special = if sizing.goat && pose == "LONG_JUMPING" {
-            Some(
-                sizing
-                    .long_jumping
-                    .as_ref()
-                    .ok_or("source goat jump dimensions missing")?,
-            )
+        let special = if sizing.goat && pose.long_jumping {
+            present(&sizing.long_jumping, "source goat jump dimensions missing")?;
+            Some(SizedChoice::LongJumping)
         } else if !sizing.digging_states.is_empty()
-            && sizing
-                .digging_states
-                .contains(&number(sizing.state).unwrap_or(0))
+            && sizing.digging_states.contains(&number(sizing.state).unwrap_or(0))
         {
-            Some(
-                sizing
-                    .digging
-                    .as_ref()
-                    .ok_or("source sniffer digging dimensions missing")?,
-            )
+            present(&sizing.digging, "source sniffer digging dimensions missing")?;
+            Some(SizedChoice::Digging)
         } else {
             None
         };
-        if let Some(d) = special {
-            return Ok((
-                d,
-                if d.fixed {
-                    1.
-                } else {
-                    age_scale * attribute_scale
-                },
-                shape,
-            ));
+        if let Some(choice) = special {
+            let fixed = choice.of(schema, sizing).fixed;
+            return Ok((choice, if fixed { 1. } else { age_scale * attribute_scale }));
         }
         if sizing.baby_dimensions.is_some() {
-            return Ok((
-                if baby {
-                    baby_dimensions
-                } else {
-                    &schema.dimensions
-                },
-                attribute_scale,
-            ));
+            return Ok((if baby { SizedChoice::Baby } else { SizedChoice::Schema }, attribute_scale));
         }
         let owner = &sizing.owner;
         if *owner == SizeOwner::ChestedHorse && !baby {
@@ -908,11 +887,7 @@ impl Models {
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
-        let age_scale = if owner == Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") {
-            1.
-        } else {
-            age_scale
-        };
+        let age_scale = if *owner == SizeOwner::CubeMob { 1. } else { age_scale };
         let family_scale = match owner {
             SizeOwner::Pufferfish => match number(sizing.puff).unwrap_or(0) {
                 0 => 0.5,
@@ -984,19 +959,14 @@ enum SizedChoice {
 }
 impl SizedChoice {
     fn of<'a>(self, schema: &'a EntitySchema, sizing: &'a Sizing) -> &'a Dimensions {
-        let present = |dimensions: &'a Option<Dimensions>| {
-            dimensions.as_ref().expect("chosen dimensions are present")
-        };
+        let present = |dimensions: &'a Option<Dimensions>| dimensions.as_ref().expect("chosen dimensions are present");
         match self {
             Self::Schema => &schema.dimensions,
             Self::Sleeping => present(&sizing.sleeping),
             Self::Marker => present(&sizing.marker),
             Self::Baby => present(&sizing.baby_dimensions),
             Self::Avatar(pose) => present(
-                &sizing.poses[usize::from(pose)]
-                    .as_ref()
-                    .expect("chosen pose is known")
-                    .avatar,
+                &sizing.poses[usize::from(pose)].as_ref().expect("chosen pose is known").avatar,
             ),
             Self::Sitting => present(&sizing.sitting),
             Self::LongJumping => present(&sizing.long_jumping),
@@ -1051,11 +1021,8 @@ pub fn transform(pivot: Vec3, rotation: Vec3, scale: Vec3) -> Mat4 {
 pub(super) fn every_kind() -> (Content, Models) {
     let doc = Models::parse().unwrap();
     let mut content = Content::test_cube();
-    content.entity_names = doc
-        .entities
-        .iter()
-        .map(|(name, schema)| (schema.protocol_id, name.clone()))
-        .collect();
+    content.entity_names = doc.entities.iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
     let models = Models::load(&content).unwrap();
     (content, models)
 }
@@ -1069,32 +1036,23 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     use serde_json::json;
     let doc = Models::parse().unwrap();
     let mut content = Content::test_cube();
-    content.entity_names = doc
-        .entities
-        .iter()
-        .map(|(name, schema)| (schema.protocol_id, name.clone()))
-        .collect();
+    content.entity_names = doc.entities.iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
     let models = Models::load(&content).unwrap();
     let mut textures = std::collections::BTreeSet::new();
     fn collect(value: &Value, textures: &mut std::collections::BTreeSet<String>) {
         match value {
             Value::String(s) if s.contains("entity/") => {
                 let (namespace, path) = s.split_once(':').unwrap_or(("minecraft", s));
-                textures.insert(format!(
-                    "{namespace}:{}",
-                    path.trim_start_matches("textures/")
-                        .trim_end_matches(".png")
-                ));
+                textures.insert(format!("{namespace}:{}",
+                    path.trim_start_matches("textures/").trim_end_matches(".png")));
             }
             Value::Object(fields) => fields.values().for_each(|v| collect(v, textures)),
             Value::Array(values) => values.iter().for_each(|v| collect(v, textures)),
             _ => {}
         }
     }
-    collect(
-        &serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(),
-        &mut textures,
-    );
+    collect(&serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(), &mut textures);
     // VillagerProfessionLayer computes these constructor-default paths rather than storing
     // them in the facts. Keep fixture resource absence separate from selection coverage.
     for family in ["villager", "zombie_villager"] {
@@ -1104,26 +1062,15 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     }
     let textures: Vec<_> = textures.into_iter().collect();
     for (index, name) in textures.iter().enumerate() {
-        content.insert_test_texture(
-            name.trim_end_matches(".png"),
-            TextureRegion {
-                layer: index as u32 + 1,
-                uv: [0., 0., 1., 1.],
-                width: 64,
-                height: 64,
-            },
-        );
+        content.insert_test_texture(name.trim_end_matches(".png"), TextureRegion {
+            layer: index as u32 + 1, uv: [0., 0., 1., 1.], width: 64, height: 64,
+        });
     }
     let mut rows = Vec::new();
     let mut store = Store::default();
     for (registry, entries) in &models.builtin_variants {
-        store.registries.insert(
-            registry.clone(),
-            entries
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
-        );
+        store.registries.insert(registry.clone(), entries.iter()
+            .map(|(name, value)| (name.clone(), value.clone())).collect());
     }
     let mut kinds: Vec<_> = models.schemas.iter().collect();
     kinds.sort_unstable_by_key(|(kind, _)| *kind);
@@ -1135,14 +1082,7 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             spawn.0.extend_from_slice(&[0; 16]);
             spawn.var(schema.protocol_id as i32);
             spawn.0.extend_from_slice(&[0; 29]);
-            fixture
-                .apply(
-                    clientbound::ADD_ENTITY,
-                    &mut Reader::new(&spawn.0),
-                    &content,
-                    1,
-                )
-                .unwrap();
+            fixture.apply(clientbound::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
             fixture.slots.pop().unwrap()
         };
         let Some(family) = models.families.get(kind) else {
@@ -1162,67 +1102,38 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
         for baby in [false, true] {
             // Inherited age metadata is not sufficient: the local 26.3
             // ZombieNautilus.canBeABaby contract explicitly returns false.
-            if baby
-                && (!schema.accessors.contains_key("DATA_BABY_ID")
-                    || kind == "minecraft:zombie_nautilus")
-            {
-                continue;
-            }
-            let base = if baby {
-                family.baby_rig.as_ref().unwrap_or(&family.rig)
-            } else {
-                &family.rig
-            };
+            if baby && (!schema.accessors.contains_key("DATA_BABY_ID")
+                || kind == "minecraft:zombie_nautilus") { continue; }
+            let base = if baby { family.baby_rig.as_ref().unwrap_or(&family.rig) } else { &family.rig };
             let age = if baby { "baby" } else { "adult" };
             let default_entity = entity();
             let default_key = if kind == "minecraft:player"
-                && models
-                    .default_skin(Some(&default_entity.uuid))
-                    .unwrap()
-                    .model
-                    == super::PlayerModel::Slim
+                && models.default_skin(Some(&default_entity.uuid)).unwrap().model == super::PlayerModel::Slim
             {
                 "minecraft:player_slim#main".to_owned()
             } else if kind == "minecraft:pufferfish" {
                 "minecraft:pufferfish_small#main".to_owned()
-            } else {
-                base.clone()
-            };
+            } else { base.clone() };
             let mut cases = vec![("default".to_owned(), default_entity, default_key, None)];
             if kind == "minecraft:wither_skull" {
                 let mut dangerous = entity();
-                dangerous.metadata.insert(
-                    models.accessor(kind, "DATA_DANGEROUS").unwrap(),
-                    Metadata::Bool(true),
-                );
-                cases.push((
-                    "DATA_DANGEROUS/true".into(),
-                    dangerous,
-                    base.clone(),
-                    family.materials["WITHER_INVULNERABLE_LOCATION"]
-                        .as_str()
-                        .map(str::to_owned),
-                ));
-                cases[0].3 = family.materials["WITHER_LOCATION"]
-                    .as_str()
-                    .map(str::to_owned);
+                dangerous.metadata.insert(models.accessor(kind, "DATA_DANGEROUS").unwrap(), Metadata::Bool(true));
+                cases.push(("DATA_DANGEROUS/true".into(), dangerous, base.clone(),
+                    family.materials["WITHER_INVULNERABLE_LOCATION"].as_str().map(str::to_owned)));
+                cases[0].3 = family.materials["WITHER_LOCATION"].as_str().map(str::to_owned);
             }
             if let Some(registry) = presentation::variant_registry(kind)
                 && let Some(entries) = store.registries.get(registry)
             {
                 for (index, (name, data)) in entries.iter().enumerate() {
                     let mut e = entity();
-                    let accessor = models
-                        .accessor(kind, "DATA_VARIANT_ID")
-                        .or_else(|| models.accessor(kind, "DATA_VARIANT"))
-                        .unwrap();
+                    let accessor = models.accessor(kind, "DATA_VARIANT_ID")
+                        .or_else(|| models.accessor(kind, "DATA_VARIANT")).unwrap();
                     e.metadata.insert(accessor, Metadata::Int(index as i32));
                     let expected = match data["model"].as_str() {
-                        Some(model) if !matches!(model, "normal" | "temperate") => format!(
-                            "minecraft:{model}_{}{}#main",
-                            kind.trim_start_matches("minecraft:"),
-                            if baby { "_baby" } else { "" }
-                        ),
+                        Some(model) if !matches!(model, "normal" | "temperate") =>
+                            format!("minecraft:{model}_{}{}#main",
+                                kind.trim_start_matches("minecraft:"), if baby { "_baby" } else { "" }),
                         _ => base.clone(),
                     };
                     let expected_texture = if data["assets"].is_object() {
@@ -1235,37 +1146,23 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                         data["baby_asset_id"].as_str().or(data["asset_id"].as_str())
                     } else {
                         data["asset_id"].as_str()
-                    }
-                    .map(str::to_owned);
+                    }.map(str::to_owned);
                     cases.push((format!("received/{name}"), e, expected, expected_texture));
                 }
             }
             // Only these numeric selectors change the rig in `material`.
             let shape = match kind.as_str() {
-                "minecraft:pufferfish" => Some((
-                    "PUFF_STATE",
-                    vec![
-                        (0, "minecraft:pufferfish_small#main"),
-                        (1, "minecraft:pufferfish_medium#main"),
-                        (2, "minecraft:pufferfish#main"),
-                    ],
-                )),
-                "minecraft:tropical_fish" => Some((
-                    "DATA_ID_TYPE_VARIANT",
-                    vec![
-                        (0, base.as_str()),
-                        (1, "minecraft:tropical_fish_large#main"),
-                    ],
-                )),
+                "minecraft:pufferfish" => Some(("PUFF_STATE", vec![
+                    (0, "minecraft:pufferfish_small#main"),
+                    (1, "minecraft:pufferfish_medium#main"), (2, "minecraft:pufferfish#main")])),
+                "minecraft:tropical_fish" => Some(("DATA_ID_TYPE_VARIANT", vec![
+                    (0, base.as_str()), (1, "minecraft:tropical_fish_large#main")])),
                 _ => None,
             };
             if let Some((accessor, values)) = shape {
                 for (value, expected) in values {
                     let mut e = entity();
-                    e.metadata.insert(
-                        models.accessor(kind, accessor).unwrap(),
-                        Metadata::Int(value),
-                    );
+                    e.metadata.insert(models.accessor(kind, accessor).unwrap(), Metadata::Int(value));
                     cases.push((format!("{accessor}/{value}"), e, expected.to_owned(), None));
                 }
             }
@@ -1275,13 +1172,8 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                 }
                 let selected = presentation::material(&store, &models, &e, &content, 0);
                 let (key, selected_texture, error) = match selected {
-                    Ok(binding) => (
-                        Some(binding.rig),
-                        textures
-                            .get(binding.texture.layer.saturating_sub(1) as usize)
-                            .cloned(),
-                        None,
-                    ),
+                    Ok(binding) => (Some(binding.rig),
+                        textures.get(binding.texture.layer.saturating_sub(1) as usize).cloned(), None),
                     Err(error) => (None, None, Some(error)),
                 };
                 rows.push(json!({"id":format!("selection/{kind}/{age}/{case}"),
@@ -1294,61 +1186,49 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             }
             // Poses share a rig, but each remains a distinct visual/animation obligation.
             for (id, pose) in &models.poses {
-                rows.push(
-                    json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
+                rows.push(json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
                     "entity":kind,"age":age,"pose":pose,"metadata_value":id,
                     "required_rig":base,"selected_rig":null,
                     "selection_error":null,"scope":"rig demand only; animation/pixels unverified",
                     "vanilla_reachability":if baby && family.baby_rig.is_none() {
                         "unverified_inherited_baby_accessor"
-                    } else { "declared_family" }}),
-                );
+                    } else { "declared_family" }}));
             }
         }
         for (enum_name, values) in &schema.enum_ids {
             for (id, value) in values {
-                rows.push(
-                    json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
+                rows.push(json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
                     "entity":kind,"enum":enum_name,"metadata_value":id,"value":value,
                     "required_rig":family.rig,"selected_rig":null,
-                    "scope":"facts inventory; received enum presentation unverified"}),
-                );
+                    "scope":"facts inventory; received enum presentation unverified"}));
             }
         }
         for texture in &family.textures {
-            rows.push(
-                json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
+            rows.push(json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
                 "entity":kind,"texture":texture,"required_rig":family.rig,"selected_rig":null,
-                "scope":"declared material inventory, not evidence that a state selects it"}),
-            );
+                "scope":"declared material inventory, not evidence that a state selects it"}));
         }
     }
     for (kind, armor) in &models.armor_models {
         for (age, slots) in [("adult", &armor.adult), ("baby", &armor.baby)] {
             for (slot, key) in slots {
-                rows.push(
-                    json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
+                rows.push(json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
                     "entity":kind,"age":age,"slot":slot,"required_rig":key,"selected_rig":null,
-                    "scope":"facts armor key; reachability and equipped pixels unverified"}),
-                );
+                    "scope":"facts armor key; reachability and equipped pixels unverified"}));
             }
         }
     }
     for (index, skin) in models.default_skins.iter().enumerate() {
-        rows.push(
-            json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
+        rows.push(json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
             "required_rig":if skin.model == super::PlayerModel::Slim {
                 "minecraft:player_slim#main"
             } else { "minecraft:player#main" }, "selected_rig":null,
-            "scope":"default skin layout demand; profile publication and pixels unverified"}),
-        );
+            "scope":"default skin layout demand; profile publication and pixels unverified"}));
     }
     for (name, data) in &models.builtin_variants["minecraft:painting_variant"] {
-        rows.push(
-            json!({"id":format!("painting/{name}"),"class":"painting-variant",
+        rows.push(json!({"id":format!("painting/{name}"),"class":"painting-variant",
             "required_rig":null,"selected_rig":null,"variant":data,
-            "scope":"resource-driven painting segments, not an authored entity rig"}),
-        );
+            "scope":"resource-driven painting segments, not an authored entity rig"}));
     }
     rows
 }
@@ -1363,10 +1243,6 @@ mod tests {
         "minecraft:entity/minecart/minecart", "minecraft:entity/cushion/white_cushion",
         "minecraft:entity/cushion/lime_cushion", "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
-        "minecraft:entity/sulfur_cube/sulfur_cube_outer",
-        "minecraft:entity/sulfur_cube/sulfur_cube_inner",
-        "minecraft:entity/sulfur_cube/sulfur_cube_outer_small",
-        "minecraft:entity/sulfur_cube/sulfur_cube_inner_small",
     ];
     fn fixture_layer(texture: &str) -> u32 {
         7 + FIXTURE_TEXTURES.iter().position(|name| *name == texture).unwrap() as u32
@@ -1442,11 +1318,8 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc
-            .entities
-            .iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone()))
-            .collect();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1461,57 +1334,29 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store
-                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
-                .unwrap();
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
         };
         spawn(&mut store, 1, "minecraft:zombie", 0.);
         spawn(&mut store, 2, "minecraft:zombie", 1000.);
         assert_eq!(store.query_padding(), 4.);
-        let near = crate::player::Bounds {
-            min: [-1., 60., -1.],
-            max: [1., 70., 1.],
-        };
-        let ids: Vec<_> = store
-            .candidates(near)
-            .map(|e| e.handle.network_id)
-            .collect();
+        let near = crate::player::Bounds { min: [-1., 60., -1.], max: [1., 70., 1.] };
+        let ids: Vec<_> = store.candidates(near).map(|e| e.handle.network_id).collect();
         assert_eq!(ids, [1]);
         // A horse in the next spatial cell, scaled 16 times: its body reaches `beside`.
         spawn(&mut store, 3, "minecraft:horse", 16.5);
-        let beside = crate::player::Bounds {
-            min: [8., 60., -1.],
-            max: [10., 70., 1.],
-        };
-        let found = |store: &super::super::Store| {
-            store.candidates(beside).any(|e| e.handle.network_id == 3)
-        };
+        let beside = crate::player::Bounds { min: [8., 60., -1.], max: [10., 70., 1.] };
+        let found = |store: &super::super::Store| store.candidates(beside).any(|e| e.handle.network_id == 3);
         assert!(!found(&store));
-        let scale = *models
-            .attribute_ids
-            .iter()
-            .find(|(_, name)| name.as_str() == "minecraft:scale")
-            .unwrap()
-            .0;
+        let scale = *models.attribute_ids.iter().find(|(_, name)| name.as_str() == "minecraft:scale").unwrap().0;
         let mut attributes = Writer::default();
         attributes.var(3);
         attributes.var(1);
         attributes.var(scale as i32);
         attributes.0.extend_from_slice(&16f64.to_be_bytes());
         attributes.var(0);
-        store
-            .apply(
-                cb::UPDATE_ATTRIBUTES,
-                &mut Reader::new(&attributes.0),
-                &content,
-                1,
-            )
-            .unwrap();
+        store.apply(cb::UPDATE_ATTRIBUTES, &mut Reader::new(&attributes.0), &content, 1).unwrap();
         let horse = store.get(3).unwrap().handle;
-        assert!(
-            store.bounds(horse, 1, 0.).unwrap().intersects(beside),
-            "the grown horse reaches it"
-        );
+        assert!(store.bounds(horse, 1, 0.).unwrap().intersects(beside), "the grown horse reaches it");
         assert!(found(&store), "padding {}", store.query_padding());
         store.activate_models(std::sync::Arc::clone(&models));
         assert!(found(&store), "activation keeps the grown horse's padding");
@@ -1532,11 +1377,8 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc
-            .entities
-            .iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone()))
-            .collect();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -1553,23 +1395,14 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store
-                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
-                .unwrap();
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
             let e = store.get(id).unwrap();
             let position = e.transform.position;
-            let at =
-                |distance: f64, scale| within(&models, e, position, distance * distance, scale);
+            let at = |distance: f64, scale| within(&models, e, position, distance * distance, scale);
             for (scaling, factor) in [(DEFAULT_SCALING, 1.), (2., 2.)] {
                 let scale = view_scale(8, scaling);
-                assert!(
-                    at(reach * factor - 0.01, scale),
-                    "{kind} at {scaling} inside"
-                );
-                assert!(
-                    !at(reach * factor + 0.01, scale),
-                    "{kind} at {scaling} outside"
-                );
+                assert!(at(reach * factor - 0.01, scale), "{kind} at {scaling} inside");
+                assert!(!at(reach * factor + 0.01, scale), "{kind} at {scaling} outside");
             }
         }
     }
@@ -1788,11 +1621,8 @@ mod tests {
         use super::super::metadata::Metadata;
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc
-            .entities
-            .iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone()))
-            .collect();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
         let mut models = Models::load_state(&content).unwrap();
         let entity = |kind: &str| {
             let (_, mut e) = super::super::animation_tests::fixture();
@@ -1806,56 +1636,28 @@ mod tests {
         };
         let mut husk = entity("minecraft:husk");
         husk.metadata.insert(16, Metadata::Bool(true));
-        assert_eq!(
-            size(&models, &husk),
-            (0.49, 0.98, 1.),
-            "a baby husk takes BABY_DIMENSIONS"
-        );
+        assert_eq!(size(&models, &husk), (0.49, 0.98, 1.), "a baby husk takes BABY_DIMENSIONS");
         husk.metadata.insert(16, Metadata::Bool(false));
         assert_eq!(size(&models, &husk), (0.6, 1.95, 1.));
         husk.metadata.insert(6, Metadata::Pose(2));
-        assert_eq!(
-            size(&models, &husk),
-            (0.2, 0.2, 1.),
-            "a sleeping husk takes SLEEPING_DIMENSIONS"
-        );
+        assert_eq!(size(&models, &husk), (0.2, 0.2, 1.), "a sleeping husk takes SLEEPING_DIMENSIONS");
         // A changed schema forgets what was resolved from it: the next call reads the new
         // constant, not the one resolved on the first call.
-        let DimensionConstant::Dimensions(sleeping) = models
-            .schemas
-            .get_mut("minecraft:husk")
-            .unwrap()
-            .dimension_constants
-            .get_mut("SLEEPING_DIMENSIONS")
-            .unwrap()
-        else {
-            panic!("dimensions")
-        };
+        let DimensionConstant::Dimensions(sleeping) = models.schemas.get_mut("minecraft:husk").unwrap()
+            .dimension_constants.get_mut("SLEEPING_DIMENSIONS").unwrap() else { panic!("dimensions") };
         sleeping.width = 0.3;
         assert_eq!(size(&models, &husk), (0.3, 0.2, 1.));
         husk.metadata.insert(6, Metadata::Pose(0));
         let mut stand = entity("minecraft:armor_stand");
         stand.metadata.insert(15, Metadata::Byte(1));
-        assert_eq!(
-            size(&models, &stand),
-            (0.25, 0.9875, 1.),
-            "a small armor stand"
-        );
+        assert_eq!(size(&models, &stand), (0.25, 0.9875, 1.), "a small armor stand");
         stand.metadata.insert(15, Metadata::Byte(16));
         assert_eq!(size(&models, &stand), (0., 0., 1.), "a marker armor stand");
         let mut player = entity("minecraft:player");
         player.metadata.insert(6, Metadata::Pose(5));
-        assert_eq!(
-            size(&models, &player),
-            (0.6, 1.5, 1.),
-            "a crouching avatar takes its POSES entry"
-        );
+        assert_eq!(size(&models, &player), (0.6, 1.5, 1.), "a crouching avatar takes its POSES entry");
         player.metadata.insert(6, Metadata::Pose(8));
-        assert_eq!(
-            size(&models, &player),
-            (0.6, 1.8, 1.),
-            "an avatar pose without an entry stands"
-        );
+        assert_eq!(size(&models, &player), (0.6, 1.8, 1.), "an avatar pose without an entry stands");
         // Box rules: a wind charge's box is 0.15 below its position, a husk's stands on it.
         let charge = entity("minecraft:wind_charge");
         let b = super::super::physical::bounds_at(&models, &charge, [0., 10., 0.]).unwrap();
@@ -1873,34 +1675,10 @@ mod tests {
             e.type_name = kind.into();
             models.ids(&e).seat
         };
-        assert_eq!(
-            seat("minecraft:oak_boat"),
-            Seat::Boat {
-                chest: false,
-                raft: false
-            }
-        );
-        assert_eq!(
-            seat("minecraft:oak_chest_boat"),
-            Seat::Boat {
-                chest: true,
-                raft: false
-            }
-        );
-        assert_eq!(
-            seat("minecraft:bamboo_raft"),
-            Seat::Boat {
-                chest: false,
-                raft: true
-            }
-        );
-        assert_eq!(
-            seat("minecraft:bamboo_chest_raft"),
-            Seat::Boat {
-                chest: true,
-                raft: true
-            }
-        );
+        assert_eq!(seat("minecraft:oak_boat"), Seat::Boat { chest: false, raft: false });
+        assert_eq!(seat("minecraft:oak_chest_boat"), Seat::Boat { chest: true, raft: false });
+        assert_eq!(seat("minecraft:bamboo_raft"), Seat::Boat { chest: false, raft: true });
+        assert_eq!(seat("minecraft:bamboo_chest_raft"), Seat::Boat { chest: true, raft: true });
         assert_eq!(seat("minecraft:horse"), Seat::Horse);
         assert_eq!(seat("minecraft:skeleton_horse"), Seat::Horse);
         assert_eq!(seat("minecraft:camel"), Seat::Camel);
@@ -1981,41 +1759,6 @@ mod tests {
     }
 
     #[test]
-    fn baby_armor_only_embeds_reachable_family_shells() {
-        let doc = Models::parse().unwrap();
-        let mut baby_wearers = Vec::new();
-        for (kind, armor) in &doc.armor_models {
-            if !doc.entities[kind].accessors.contains_key("DATA_BABY_ID") {
-                continue;
-            }
-            baby_wearers.push(kind.as_str());
-            for part in ["head", "chest", "legs", "feet"] {
-                let key = &armor.baby[part];
-                let id = krasnokamen_models::model_id(key);
-                assert_ne!(id, format!("armor_baby_{part}"), "{kind} {part}");
-                assert!(
-                    krasnokamen_models::authored(key).is_some(),
-                    "{kind} {part}: {key}"
-                );
-            }
-        }
-        assert_eq!(
-            baby_wearers,
-            [
-                "minecraft:drowned",
-                "minecraft:husk",
-                "minecraft:piglin",
-                "minecraft:zombie",
-                "minecraft:zombie_villager",
-                "minecraft:zombified_piglin",
-            ]
-        );
-        for part in ["head", "chest", "legs", "feet"] {
-            assert!(krasnokamen_models::authored(&format!("armor_baby_{part}")).is_none());
-        }
-    }
-
-    #[test]
     fn dimension_constants_preserve_decimal_dimensions_and_attachments() {
         let dimensions = r#"{"width":0.2,"height":0.2,"eye_height":0.2,"fixed":true,"attachments":{"NAME_TAG":[[0.0,0.20000000298023224,0.0]]}}"#;
         let value: DimensionConstant = serde_json::from_str(dimensions).unwrap();
@@ -2044,11 +1787,8 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc
-            .entities
-            .iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone()))
-            .collect();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -2062,44 +1802,30 @@ mod tests {
             }
             spawn.0.extend_from_slice(&[0; 4]);
             spawn.var(0);
-            store
-                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
-                .unwrap();
+            store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
         }
         let size = |d: &Dimensions| (d.width, d.height, d.eye_height);
-        let constant =
-            |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
-                Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
-                _ => None,
-            };
-        let Some(DimensionConstant::Poses(table)) = doc.entities["minecraft:mannequin"]
-            .dimension_constants
-            .get("POSES")
+        let constant = |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
+            Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
+            _ => None,
+        };
+        let Some(DimensionConstant::Poses(table)) =
+            doc.entities["minecraft:mannequin"].dimension_constants.get("POSES")
         else {
             panic!("mannequin POSES table");
         };
         let sized_in = |store: &mut super::super::Store, id: i32, pose: u8| {
-            let index = models
-                .entity_accessor(store.get(id).unwrap(), "DATA_POSE")
-                .unwrap();
+            let index = models.entity_accessor(store.get(id).unwrap(), "DATA_POSE").unwrap();
             let entity = store.get_mut(id).unwrap();
-            entity
-                .metadata
-                .insert(index, super::super::Metadata::Pose(pose));
-            models
-                .dimensions(store.get(id).unwrap())
-                .map(|(d, _)| size(d))
-                .ok()
+            entity.metadata.insert(index, super::super::Metadata::Pose(pose));
+            models.dimensions(store.get(id).unwrap()).map(|(d, _)| size(d)).ok()
         };
         let mut checked = 0;
         for (&pose, name) in &models.poses {
             let avatar = if name == "SLEEPING" {
                 constant("minecraft:mannequin", "SLEEPING_DIMENSIONS")
             } else {
-                table
-                    .get(name)
-                    .map(size)
-                    .or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
+                table.get(name).map(size).or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
             };
             assert_eq!(sized_in(&mut store, 1, pose), avatar, "mannequin {name}");
             let camel = match name.as_str() {
@@ -2126,11 +1852,8 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc
-            .entities
-            .iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone()))
-            .collect();
+        content.entity_names = doc.entities.iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(std::sync::Arc::clone(&models));
@@ -2143,30 +1866,13 @@ mod tests {
         }
         spawn.0.extend_from_slice(&[0; 4]);
         spawn.var(0);
-        store
-            .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
-            .unwrap();
-        let pose_of = |name: &str| {
-            *models
-                .poses
-                .iter()
-                .find(|(_, pose)| pose.as_str() == name)
-                .unwrap()
-                .0
-        };
-        let index = models
-            .entity_accessor(store.get(1).unwrap(), "DATA_POSE")
-            .unwrap();
+        store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        let pose_of = |name: &str| *models.poses.iter().find(|(_, pose)| pose.as_str() == name).unwrap().0;
+        let index = models.entity_accessor(store.get(1).unwrap(), "DATA_POSE").unwrap();
         let set_pose = |store: &mut super::super::Store, name: &str| {
-            store
-                .get_mut(1)
-                .unwrap()
-                .metadata
-                .insert(index, super::super::Metadata::Pose(pose_of(name)));
+            store.get_mut(1).unwrap().metadata.insert(index, super::super::Metadata::Pose(pose_of(name)));
         };
-        let height = |store: &super::super::Store| {
-            models.dimensions(store.get(1).unwrap()).unwrap().0.height
-        };
+        let height = |store: &super::super::Store| models.dimensions(store.get(1).unwrap()).unwrap().0.height;
         set_pose(&mut store, "STANDING");
         let standing = {
             let _frame = SizedScope::enter();
@@ -2179,10 +1885,7 @@ mod tests {
             let _frame = SizedScope::enter();
             height(&store)
         };
-        assert!(
-            crouching < standing,
-            "the next scope sees the received pose: {crouching} vs {standing}"
-        );
+        assert!(crouching < standing, "the next scope sees the received pose: {crouching} vs {standing}");
         set_pose(&mut store, "STANDING");
         assert_eq!(height(&store), standing, "outside a scope");
     }

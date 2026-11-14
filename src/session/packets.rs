@@ -3,6 +3,7 @@ use crate::protocol::packet_ids::play::clientbound as cb;
 use crate::protocol::packet_ids::{login, configuration};
 use super::*;
 use crate::protocol::{self, world::Chunk, Reader};
+use sha1::Digest as _;
 impl Session {
     fn initialize_player_attributes(&mut self) -> Result<()> {
         let schema = self
@@ -93,7 +94,7 @@ impl Session {
                     r.done()?;
                     *self.ignored_presentation.entry(id).or_default() += 1;
                 }
-                configuration::clientbound::RESOURCE_PACK_PUSH => self.decline_resource_pack(&mut r, configuration::serverbound::RESOURCE_PACK)?,
+                configuration::clientbound::RESOURCE_PACK_PUSH => self.resource_pack_push(&mut r, configuration::serverbound::RESOURCE_PACK)?,
                 configuration::clientbound::TRANSFER => return Err("server transfer unsupported".into()),
                 configuration::clientbound::SHOW_DIALOG | configuration::clientbound::CODE_OF_CONDUCT => return Err("configuration dialog/code-of-conduct requires unsupported human UI".into()),
                 _ => return Err(format!("unknown mandatory Configuration packet {id}")),
@@ -102,16 +103,145 @@ impl Session {
         }
         Ok(())
     }
-    fn decline_resource_pack(&self, r: &mut Reader<'_>, response_id: i32) -> Result<()> {
-        let mut response = Writer(r.take(16)?.to_vec());
-        r.string(32767)?;
-        r.string(40)?;
-        r.bool()?;
+    /// Vanilla server resource-pack push: accept, download over HTTP(S), verify the
+    /// SHA-1, extract into the per-id pack cache, apply to the resource stack, and
+    /// answer with the status sequence (Accepted -> Downloaded -> SuccessfullyLoaded,
+    /// or a failure action). A required pack that fails is fatal, like vanilla.
+    fn resource_pack_push(&mut self, r: &mut Reader<'_>, response_id: i32) -> Result<()> {
+        // ResourcePackAction ordinals as defined by mc-protocol.
+        const SUCCESSFULLY_LOADED: i32 = 0;
+        const FAILED_DOWNLOAD: i32 = 2;
+        const ACCEPTED: i32 = 3;
+        const DOWNLOADED: i32 = 4;
+        const INVALID_URL: i32 = 5;
+        const FAILED_RELOAD: i32 = 6;
+        const MAX_PACK_BYTES: u64 = 64 << 20;
+        let id: [u8; 16] = r.take(16)?.try_into().map_err(|_| "resource pack id")?;
+        let url = r.string(32767)?;
+        let hash = r.string(40)?;
+        let required = r.bool()?;
         if r.bool()? { r.nbt()?; }
         r.done()?;
-        // ResourcePackAction::Declined, as defined by mc-protocol.
-        response.var(1);
-        self.send(response_id, response)
+        let hex = |bytes: &[u8; 16]| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let status = |this: &Session, action: i32| -> Result<()> {
+            let mut w = Writer(id.to_vec());
+            w.var(action);
+            this.send(response_id, w)
+        };
+        self.event(json!({"type":"resource_pack_push_received","id":hex(&id),"url":url,"required":required}));
+        // Only a plain HTTP(S) download is accepted; never file or custom schemes.
+        let parsed = reqwest::Url::parse(&url)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "http" | "https"));
+        let Some(parsed) = parsed else {
+            status(self, INVALID_URL)?;
+            self.event(json!({"type":"resource_pack_push_rejected","id":hex(&id),"reason":"invalid_url"}));
+            if required { return Err("required resource pack has an invalid URL".into()); }
+            return Ok(());
+        };
+        status(self, ACCEPTED)?;
+        let download = (|url: reqwest::Url| -> Result<Vec<u8>> {
+            use std::io::Read as _;
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let mut response = client.get(url).send().map_err(|e| e.to_string())?;
+            if !response.status().is_success() {
+                return Err(format!("pack download HTTP {}", response.status()));
+            }
+            let mut bytes = Vec::new();
+            response
+                .take(MAX_PACK_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_PACK_BYTES {
+                return Err("resource pack over 64 MiB".into());
+            }
+            Ok(bytes)
+        })(parsed);
+        let bytes = match download {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                status(self, FAILED_DOWNLOAD)?;
+                self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"download","error":error}));
+                if required { return Err(format!("required resource pack download failed: {error}")); }
+                return Ok(());
+            }
+        };
+        // The push hash is the hex SHA-1 of the zip (40 chars).
+        let digest = format!("{:x}", sha1::Sha1::digest(&bytes));
+        if !hash.is_empty() && !hash.eq_ignore_ascii_case(&digest) {
+            status(self, FAILED_DOWNLOAD)?;
+            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"hash","error":"sha1 mismatch"}));
+            if required { return Err("required resource pack hash mismatch".into()); }
+            return Ok(());
+        }
+        status(self, DOWNLOADED)?;
+        let dir = self.pack_cache_dir()?.join(hex(&id));
+        let extracted = (|| -> Result<()> {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let mut archive =
+                zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+            for index in 0..archive.len() {
+                let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
+                let Some(relative) = entry.enclosed_name() else {
+                    return Err("pack entry escapes the pack root".into());
+                };
+                let out = dir.join(relative);
+                if entry.is_dir() {
+                    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+                } else {
+                    if let Some(parent) = out.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                    let mut file = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut entry, &mut file).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = extracted {
+            status(self, FAILED_RELOAD)?;
+            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"extract","error":error}));
+            if required { return Err(format!("required resource pack extraction failed: {error}")); }
+            return Ok(());
+        }
+        let applied = if self.presentation {
+            let staged = self
+                .content
+                .as_ref()
+                .and_then(|content| content.stage_with_pack(&dir).ok());
+            match staged {
+                Some(staged) => self.install_reloaded(staged).is_ok(),
+                None => false,
+            }
+        } else if let Some(content) = &mut self.content {
+            content.apply_pack_root(&dir).is_ok()
+        } else {
+            false
+        };
+        if applied {
+            status(self, SUCCESSFULLY_LOADED)?;
+            self.event(json!({"type":"resource_pack_applied","id":hex(&id),"root":dir}));
+            Ok(())
+        } else {
+            status(self, FAILED_RELOAD)?;
+            self.event(json!({"type":"resource_pack_push_failed","id":hex(&id),"stage":"apply","error":"resource stack rejected the pack"}));
+            if required { return Err("required resource pack failed to apply".into()); }
+            Ok(())
+        }
+    }
+    /// Directory downloaded server packs are cached in.
+    fn pack_cache_dir(&self) -> Result<std::path::PathBuf> {
+        if let Some(dir) = &self.pack_cache {
+            return Ok(dir.clone());
+        }
+        if let Some(dir) = std::env::var_os("KRASNOKAMEN_CLIENT_PACK_CACHE") {
+            return Ok(std::path::PathBuf::from(dir));
+        }
+        Ok(krasnokamen_paths::data_root(None)?.join("server-resource-packs"))
     }
     fn custom_payload(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let channel = r.string(32767)?;
@@ -664,7 +794,7 @@ impl Session {
                     audio.stop();
                 }
             }
-            cb::RESOURCE_PACK_PUSH => self.decline_resource_pack(r, sb::RESOURCE_PACK)?,
+            cb::RESOURCE_PACK_PUSH => self.resource_pack_push(r, sb::RESOURCE_PACK)?,
             cb::TRANSFER => return Err("server transfer unsupported".into()),
             cb::COOKIE_REQUEST => {
                 let key = r.string(32767)?;
@@ -1104,9 +1234,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resource_pack_push_declined_in_both_phases() {
-        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, sync::mpsc, thread};
+    fn test_pack_zip() -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("pack.mcmeta", options).unwrap();
+        std::io::Write::write_all(&mut zip, br#"{"pack":{"pack_format":84,"min_format":[84,0],"max_format":[84,0],"description":"pack-push test"}}"#).unwrap();
+        zip.start_file("assets/test_pack/marker.txt", options).unwrap();
+        std::io::Write::write_all(&mut zip, b"battle armour").unwrap();
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// Drives one loopback Minecraft server (login+status handshake) plus one HTTP
+    /// server serving `zip_bytes`; applies one pack push in each phase and returns the
+    /// session, the channel of received RESOURCE_PACK bodies, and the peer handles.
+    fn pack_push_harness(
+        zip_bytes: Vec<u8>,
+        push_hash: String,
+        statuses: usize,
+    ) -> (
+        Session,
+        mpsc::Receiver<Vec<u8>>,
+        mpsc::Sender<()>,
+        thread::JoinHandle<()>,
+    ) {
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            sync::mpsc,
+            thread,
+        };
         fn packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
             let mut header = Vec::new();
             loop {
@@ -1121,9 +1277,29 @@ mod tests {
             let id = r.var().unwrap();
             (id, body[r.offset..].to_vec())
         }
+        let http = TcpListener::bind("127.0.0.1:0").unwrap();
+        let http_address = http.local_addr().unwrap();
+        thread::spawn(move || {
+            while let Ok((mut socket, _)) = http.accept() {
+                let mut request = Vec::new();
+                let mut byte = [0];
+                loop {
+                    if socket.read_exact(&mut byte).is_err() { break; }
+                    request.push(byte[0]);
+                    if request.ends_with(b"\r\n\r\n") { break; }
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    zip_bytes.len()
+                );
+                let _ = socket.write_all(head.as_bytes());
+                let _ = socket.write_all(&zip_bytes);
+            }
+        });
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let (ready, wait_ready) = mpsc::channel();
+        let (received, got) = mpsc::channel();
         let (finish, wait_finish) = mpsc::channel();
         let peer = thread::spawn(move || {
             let (mut login, _) = listener.accept().unwrap();
@@ -1137,32 +1313,41 @@ mod tests {
             packet(&mut login);
             packet(&mut login);
             ready.send(()).unwrap();
-            let uuid: Vec<u8> = (0..16).collect();
-            for id in [configuration::serverbound::RESOURCE_PACK, sb::RESOURCE_PACK] {
-                let (received_id, body) = packet(&mut login);
-                assert_eq!(received_id, id);
-                let mut expected = uuid.clone();
-                expected.push(1); // ResourcePackAction::Declined
-                assert_eq!(body, expected);
-                ready.send(()).unwrap();
+            // Two pushes, three status packets each, all RESOURCE_PACK on the login socket.
+            for _ in 0..statuses {
+                loop {
+                    let (received_id, body) = packet(&mut login);
+                    if received_id == configuration::serverbound::RESOURCE_PACK
+                        || received_id == sb::RESOURCE_PACK
+                    {
+                        received.send(body).unwrap();
+                        break;
+                    }
+                }
             }
             wait_finish.recv().unwrap();
         });
         let mut session = Session::new_mode("pack-test".into(), false);
         session.content = Some(Content::test_cube());
+        let cache = std::env::temp_dir().join(format!(
+            "krasnokamen-pack-push-{}-{}",
+            std::process::id(),
+            push_hash.len()
+        ));
+        let _ = std::fs::remove_dir_all(&cache);
+        session.pack_cache = Some(cache);
         session.network = Some(Network::connect(address.to_string(), "PackTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap());
         wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
         let mut push = Writer((0..16).collect());
-        push.string("https://example.invalid/pack.zip");
-        push.string("");
-        push.byte(0); // optional
+        push.string(&format!("http://{http_address}/pack.zip"));
+        push.string(&push_hash);
+        push.byte(0); // not required
         push.byte(0); // no prompt
         for (phase, id) in [
             (Phase::Configuration, configuration::clientbound::RESOURCE_PACK_PUSH),
             (Phase::Play, cb::RESOURCE_PACK_PUSH),
         ] {
             session.apply(phase, id, &push.0).unwrap();
-            wait_ready.recv_timeout(Duration::from_secs(10)).unwrap();
             // A later packet is still processed, not a local disconnect.
             let mut ping = Writer::default();
             ping.i32(123);
@@ -1171,8 +1356,49 @@ mod tests {
             } else {
                 cb::PING
             }, &ping.0).unwrap();
-            assert!(session.error.is_none());
         }
+        assert!(session.error.is_none());
+        (session, got, finish, peer)
+    }
+
+    #[test]
+    fn resource_pack_push_accepted_downloaded_applied_in_both_phases() {
+        let zip = test_pack_zip();
+        let hash = format!("{:x}", sha1::Sha1::digest(&zip));
+        let (session, got, finish, peer) = pack_push_harness(zip, hash, 6);
+        let uuid: Vec<u8> = (0..16).collect();
+        let mut actions = Vec::new();
+        for _ in 0..6 {
+            let body = got.recv_timeout(Duration::from_secs(10)).unwrap();
+            assert_eq!(&body[..16], &uuid[..], "status carries the pushed pack id");
+            actions.push(body[16]);
+        }
+        // Accepted(3) -> Downloaded(4) -> SuccessfullyLoaded(0), once per phase.
+        assert_eq!(actions, vec![3, 4, 0, 3, 4, 0], "{actions:?}");
+        let roots = session.content.as_ref().unwrap().pack_roots();
+        assert_eq!(roots.len(), 1, "the pushed pack is the only extra root: {roots:?}");
+        assert!(
+            roots[0].join("assets/test_pack/marker.txt").exists(),
+            "the verified pack is extracted under the cache: {roots:?}"
+        );
+        finish.send(()).unwrap();
+        peer.join().unwrap();
+    }
+
+    #[test]
+    fn resource_pack_push_hash_mismatch_reports_failed_download() {
+        let zip = test_pack_zip();
+        let bad = "0".repeat(40);
+        let (session, got, finish, peer) = pack_push_harness(zip, bad, 4);
+        let mut actions = Vec::new();
+        for _ in 0..4 {
+            let body = got.recv_timeout(Duration::from_secs(10)).unwrap();
+            actions.push(body[16]);
+        }
+        // Accepted(3) -> FailedDownload(2) per phase; an optional pack never disconnects.
+        assert_eq!(actions, vec![3, 2, 3, 2], "{actions:?}");
+        assert!(session.error.is_none());
+        assert!(session.content.as_ref().unwrap().pack_roots().is_empty());
         finish.send(()).unwrap();
         peer.join().unwrap();
     }

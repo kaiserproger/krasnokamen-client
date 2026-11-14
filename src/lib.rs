@@ -7,7 +7,6 @@ mod controls;
 #[cfg(test)]
 mod controls_tests;
 pub mod computer;
-mod content_paths;
 pub mod entities;
 pub mod environment;
 mod far;
@@ -25,6 +24,7 @@ pub mod profile_textures;
 pub mod protocol;
 pub mod render;
 pub mod replay;
+pub mod session;
 mod screenshot;
 mod singleplayer;
 pub mod terrain;

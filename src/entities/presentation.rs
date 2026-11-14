@@ -61,9 +61,7 @@ pub struct PresentationStats {
     pub waited: u64,
 }
 pub(super) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
-    models
-        .entity_accessor(e, name)
-        .and_then(|i| e.metadata_value(i))
+    models.entity_accessor(e, name).and_then(|i| e.metadata_value(i))
 }
 pub(super) fn number(models: &Models, e: &Entity, name: &str) -> Option<i32> {
     value(models, e, name).and_then(Metadata::int)
@@ -75,14 +73,11 @@ pub(super) fn boolean(models: &Models, e: &Entity, name: &str) -> bool {
 }
 /// `e`'s integer metadata at an accessor index resolved for its kind (`Models::ids`).
 pub(super) fn int_at(e: &Entity, id: Option<u8>) -> Option<i32> {
-    id.and_then(|id| e.metadata_value(id))
-        .and_then(Metadata::int)
+    id.and_then(|id| e.metadata_value(id)).and_then(Metadata::int)
 }
 /// `e`'s boolean metadata at an accessor index resolved for its kind (`Models::ids`).
 pub(super) fn flag_at(e: &Entity, id: Option<u8>) -> bool {
-    id.and_then(|id| e.metadata_value(id))
-        .and_then(Metadata::boolean)
-        .unwrap_or(false)
+    id.and_then(|id| e.metadata_value(id)).and_then(Metadata::boolean).unwrap_or(false)
 }
 
 fn anger(models: &Models, e: &Entity, game_time: i64) -> Option<bool> {
@@ -212,39 +207,12 @@ pub(super) fn entity_light(
         }
         return Ok(best);
     }
-    // Vanilla AbstractArrow.onHitBlock retracts a stuck projectile by
-    // signum(deltaMovement) * 0.05 per axis, and EntityRenderer then samples
-    // light at BlockPos.containing(getLightProbePosition(partial)) = eye
-    // height above that retracted position. The server reports the raw impact
-    // point, so apply the same retraction to the probe: without it a
-    // projectile stuck on a block face samples the opaque cell and renders
-    // black instead of the lit cell in front of the face.
-    let mut position = t.position;
-    if models.schemas[&e.type_name]
-        .hierarchy
-        .iter()
-        .any(|class| class == "net.minecraft.world.entity.projectile.arrow.AbstractArrow")
-        && boolean(models, e, "IN_GROUND")
-    {
-        for axis in 0..3 {
-            // Java Math.signum maps zero to zero (f64::signum(0.0) is 1.0).
-            let velocity = e.velocity[axis];
-            let signum = if velocity > 0. {
-                1.
-            } else if velocity < 0. {
-                -1.
-            } else {
-                0.
-            };
-            position[axis] -= signum * 0.05;
-        }
-    }
     sampled(
         light,
         [
-            position[0],
-            position[1] + f64::from(dimensions.eye_height * scale),
-            position[2],
+            t.position[0],
+            t.position[1] + f64::from(dimensions.eye_height * scale),
+            t.position[2],
         ],
     )
 }
@@ -316,56 +284,6 @@ pub(super) fn material(
             anger: None,
         });
     }
-    // These 26.3 renderers are absent from the exported renderer-family facts.
-    // Their authored models and texture selection follow the 26.3 client layers.
-    if e.type_name == "minecraft:cushion" || e.type_name == "minecraft:sulfur_cube" {
-        let baby = boolean(models, e, "DATA_BABY_ID");
-        let (rig, resource) = if e.type_name == "minecraft:cushion" {
-            const TEXTURES: [&str; 16] = [
-                "minecraft:entity/cushion/white_cushion",
-                "minecraft:entity/cushion/orange_cushion",
-                "minecraft:entity/cushion/magenta_cushion",
-                "minecraft:entity/cushion/light_blue_cushion",
-                "minecraft:entity/cushion/yellow_cushion",
-                "minecraft:entity/cushion/lime_cushion",
-                "minecraft:entity/cushion/pink_cushion",
-                "minecraft:entity/cushion/gray_cushion",
-                "minecraft:entity/cushion/light_gray_cushion",
-                "minecraft:entity/cushion/cyan_cushion",
-                "minecraft:entity/cushion/purple_cushion",
-                "minecraft:entity/cushion/blue_cushion",
-                "minecraft:entity/cushion/brown_cushion",
-                "minecraft:entity/cushion/green_cushion",
-                "minecraft:entity/cushion/red_cushion",
-                "minecraft:entity/cushion/black_cushion",
-            ];
-            let color = number(models, e, "DATA_COLOR").unwrap_or(0);
-            let texture = TEXTURES
-                .get(usize::try_from(color).map_err(|_| "invalid cushion color")?)
-                .ok_or("invalid cushion color")?;
-            ("minecraft:cushion#main", *texture)
-        } else if baby {
-            (
-                "minecraft:sulfur_cube_baby#main",
-                "minecraft:entity/sulfur_cube/sulfur_cube_outer_small",
-            )
-        } else {
-            (
-                "minecraft:sulfur_cube#main",
-                "minecraft:entity/sulfur_cube/sulfur_cube_outer",
-            )
-        };
-        if !models.has_authored_rig(rig) {
-            return Err(format!("missing authored rig {rig}"));
-        }
-        return Ok(Binding {
-            rig: rig.into(),
-            texture: texture(content, resource)?,
-            style: RootStyle::Living,
-            layers: None,
-            anger: None,
-        });
-    }
     let family = models
         .families
         .get(&e.type_name)
@@ -405,11 +323,7 @@ pub(super) fn material(
         } else {
             "WITHER_LOCATION"
         };
-        family
-            .materials
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+        family.materials.get(key).and_then(Value::as_str).map(str::to_owned)
     } else {
         family.texture.clone()
     };
@@ -544,7 +458,7 @@ pub(super) fn material(
         anger: anger(models, e, game_time),
     })
 }
-// All four Krasnokamen-authored boat/raft rigs share a hull bottom at model Y=18
+// All four Solaris-authored boat/raft rigs share a hull bottom at model Y=18
 // pixels. Anchor that surface to the received entity position, not to water.
 fn boat_root(position: Vec3, yaw: f32) -> Mat4 {
     Mat4::from_translation(position + Vec3::new(0., 18. / 16., 0.))
@@ -710,36 +624,27 @@ pub fn append(
     store.frame_partial = partial.clamp(0., 1.);
     store.frame_tick = tick;
     store.crowd.begin_frame();
-    // Mounted bodies can occupy a different raw bucket from their seat.
-    let area = crate::player::Bounds {
-        min: camera.map(|value| value - f64::from(radius)),
-        max: camera.map(|value| value + f64::from(radius)),
-    };
-    let mut visible = std::mem::take(&mut store.visible_ids);
-    visible.clear();
-    visible.extend(store.candidates(area).map(|entity| entity.handle.network_id));
-    for index in 0..visible.len() + usize::from(store.local_render_slot.is_some()) {
-        let slot = if index == visible.len() {
-            store.local_render_slot.unwrap()
-        } else {
-            store.ids[&visible[index]]
-        };
+    // Gathered once for this pass and reused by the shadow and nameplate passes. Mounted
+    // bodies can occupy a different raw bucket from their seat (`Store::candidates`).
+    let range = f64::from(radius);
+    let mut frame = std::mem::take(&mut store.frame_entities);
+    frame.gather(store, &models, camera, range, tick, partial);
+    let local = store.local_render_slot.map(|slot| {
+        super::frame_entities::Entry::of(store, &models, slot, super::physical::Place::Seat(None), camera, range, tick, partial)
+    });
+    for entry in frame.entries.iter().chain(local.as_ref()) {
+        let slot = entry.slot;
         let entity = &store.slots[slot];
         let transform = match &entry.transform {
             Ok(transform) => *transform,
             Err(reason) => {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
+                stats.unrendered.insert(entity.type_name.clone(), reason.clone());
+                store.mark_shown(slot, tick, &models, content)?;
                 continue;
             }
         };
-        let distance = transform.position
-            .iter()
-            .zip(camera)
-            .map(|(a, b)| (a - b) * (a - b))
-            .sum::<f64>();
-        if distance > f64::from(radius) * f64::from(radius) {
+        if entry.distance_squared > range * range || !entry.within {
+            // Not drawn (past the radius or its vanilla distance): a mob waits next tick.
             continue;
         }
         store.mark_shown(slot, tick, &models, content)?;
@@ -765,17 +670,22 @@ pub fn append(
             }
             continue;
         }
-        let item = value(&models, entity, "DATA_ITEM")
-            .or_else(|| value(&models, entity, "DATA_ITEM_STACK_ID"));
+        let mut clock = store.slots[slot].clock.take();
+        let entity = &store.slots[slot];
+        let ids = models.ids(entity);
+        let item = ids.item.and_then(|id| entity.metadata_value(id))
+            .or_else(|| ids.item_stack.and_then(|id| entity.metadata_value(id)));
         let stack = match item { Some(Metadata::Item(stack)) => Some(stack), _ => None };
         let stacks = [stack.or_else(|| entity.equipment_value(0)),
             entity.equipment_value(1), entity.equipment_value(5)];
-        let clock_context = match store.special_render_cache.item_context(
-            entity, stacks, content, transform.position, clock_environment,
-        ) {
+        let clock_context = store.special_render_cache.item_context(
+            entity, stacks, &mut clock, content, transform.position, clock_environment,
+        );
+        store.slots[slot].clock = clock;
+        let clock_context = match clock_context {
             Ok(context) => context,
             Err(reason) => {
-                stats.unrendered.insert(entity.type_name.clone(), format!("item context: {reason}"));
+                stats.unrendered.insert(store.slots[slot].type_name.clone(), format!("item context: {reason}"));
                 continue;
             }
         };
@@ -843,58 +753,24 @@ pub fn append(
             && store.local_render_slot != Some(slot)
             && let Some(kind) = super::crowd::kind(&store.slots[slot].type_name)
         {
-            let Store {
-                crowd,
-                items,
-                equipment_cache,
-                slots,
-                ..
-            } = &mut *store;
-            let routed = super::crowd::try_instance(
-                crowd,
-                items,
-                equipment_cache,
-                &mut slots[slot],
-                super::crowd::Inputs {
-                    models: &models,
-                    content,
-                    frame: EntityDrawFrame {
-                        origin,
-                        transform,
-                        tick,
-                        partial,
-                        light,
-                        parent: None,
-                    },
-                    item_context: clock_context.as_ref(),
-                    bed_direction,
-                },
-            );
+            let Store { crowd, items, equipment_cache, slots, .. } = &mut *store;
+            let routed = super::crowd::try_instance(crowd, items, equipment_cache, &mut slots[slot], super::crowd::Inputs {
+                models: &models,
+                content,
+                frame: EntityDrawFrame { origin, transform, tick, partial, light, parent: None },
+                item_context: clock_context.as_ref(),
+                bed_direction,
+            });
             match routed {
-                Ok(()) => {
-                    append_entity_fire(
-                        &store.slots[slot],
-                        &models,
-                        content,
-                        origin,
-                        camera_rotation[0],
-                        transform,
-                        out,
-                    )?;
+                Ok(resolved) => {
+                    append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], transform, out)?;
                     stats.crowd += 1;
                     stats.crowd_resolved += usize::from(resolved);
                     stats.animated += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
                     continue;
                 }
-                Err(reason) => {
-                    *stats
-                        .crowd_fallback
-                        .entry(kind)
-                        .or_default()
-                        .entry(reason)
-                        .or_default() += 1
-                }
+                Err(reason) => *stats.crowd_fallback.entry(kind).or_default().entry(reason).or_default() += 1,
             }
         }
         let entity = &store.slots[slot];
@@ -931,14 +807,7 @@ pub(super) fn root_matrix(
     frame: EntityDrawFrame,
     bed_direction: &dyn Fn([i32; 3]) -> Option<[i32; 2]>,
 ) -> Mat4 {
-    let EntityDrawFrame {
-        origin,
-        transform: t,
-        tick,
-        partial,
-        parent,
-        ..
-    } = frame;
+    let EntityDrawFrame { origin, transform: t, tick, partial, parent, .. } = frame;
     let body_yaw = entity
         .source
         .as_ref()
@@ -951,21 +820,13 @@ pub(super) fn root_matrix(
     );
     let mut matrix = match binding.style {
         RootStyle::Living => {
-            let body_yaw = if entity.type_name == "minecraft:cushion" {
-                (body_yaw / 90. + 0.5).floor() * 90.
-            } else {
-                body_yaw
-            };
             Mat4::from_translation(relative)
                 * Mat4::from_rotation_y((180. - body_yaw).to_radians())
                 * Mat4::from_scale(Vec3::new(-1., -1., 1.))
                 * Mat4::from_translation(Vec3::new(0., -1.501, 0.))
         }
         RootStyle::Arrow => projectile_root(
-            relative,
-            t.yaw,
-            t.pitch,
-            entity.type_name == "minecraft:trident",
+            relative, t.yaw, t.pitch, entity.type_name == "minecraft:trident",
         ),
         RootStyle::Boat => boat_root(relative, t.yaw),
         RootStyle::Minecart => {
@@ -992,17 +853,12 @@ pub(super) fn root_matrix(
         let (offset, yaw) = match direction {
             Some([x, z]) => {
                 let angle: f32 = match (x, z) {
-                    (0, 1) => 0.,
-                    (0, -1) => 180.,
-                    (-1, 0) => -90.,
-                    (1, 0) => 90.,
+                    (0, 1) => 0., (0, -1) => 180.,
+                    (-1, 0) => -90., (1, 0) => 90.,
                     _ => body_yaw,
                 };
                 let schema = &models.schemas[&entity.type_name];
-                let eye = match (
-                    boolean(models, entity, "DATA_BABY_ID"),
-                    schema.dimension_constants.get("BABY_DIMENSIONS"),
-                ) {
+                let eye = match (flag_at(entity, ids.baby), schema.dimension_constants.get("BABY_DIMENSIONS")) {
                     (true, Some(resources::DimensionConstant::Dimensions(d))) => d.eye_height,
                     _ => schema.dimensions.eye_height,
                 };
@@ -1034,7 +890,11 @@ pub(super) fn root_matrix(
         entity.type_name.as_str(),
         "minecraft:slime" | "minecraft:magma_cube"
     ) {
-        matrix = scale_cube_model(matrix, relative, number(models, entity, "ID_SIZE"));
+        matrix = scale_cube_model(
+            matrix,
+            relative,
+            int_at(entity, ids.size),
+        );
     }
     if entity.type_name == "minecraft:armor_stand"
         && int_at(entity, ids.client_flags).unwrap_or(0) & 1 != 0
@@ -1071,40 +931,32 @@ pub(super) fn root_matrix(
         }
         // Short backward lean when struck; the hit flash rides along.
         if let (Some(damage), None) = (entity.damage_tick, entity.death_tick) {
-            let lean = crate::motion::hurt_lean(tick.saturating_sub(damage) as f32 + partial);
+            let lean =
+                crate::motion::hurt_lean(tick.saturating_sub(damage) as f32 + partial);
             if lean > 0. {
                 let (sin, cos) = body_yaw.to_radians().sin_cos();
                 matrix = Mat4::from_translation(relative)
-                    * Mat4::from_axis_angle(Vec3::new(cos, 0., sin), -lean.to_radians())
+                    * Mat4::from_axis_angle(
+                        Vec3::new(cos, 0., sin),
+                        -lean.to_radians(),
+                    )
                     * Mat4::from_translation(-relative)
                     * matrix;
             }
         }
     }
     let layers = entity.clip.active(tick, partial);
-    let clip = layers
-        .iter()
-        .any(Option::is_some)
+    let clip = layers.iter().any(Option::is_some)
         .then(|| super::clip_pose::library().delta(&layers, super::clip_pose::Channel::Root))
         .flatten();
-    if let Some(death) = entity
-        .death_tick
-        .filter(|_| matches!(binding.style, RootStyle::Living))
-    {
+    if let Some(death) = entity.death_tick.filter(|_| matches!(binding.style, RootStyle::Living)) {
         let vanilla = 1. - clip.map_or(0., |clip| clip.replace);
-        matrix *= death_tilt(
-            &entity.type_name,
-            tick.saturating_sub(death),
-            partial,
-            vanilla,
-        );
+        matrix *= death_tilt(&entity.type_name, tick.saturating_sub(death), partial, vanilla);
     }
     if let Some(clip) = clip {
         matrix *= clip.about(super::clip_pose::FEET);
     }
-    if let Some(parent) = parent {
-        matrix = parent * matrix;
-    }
+    if let Some(parent) = parent { matrix = parent * matrix; }
     matrix
 }
 
@@ -1129,10 +981,7 @@ pub(super) fn death_tilt(type_name: &str, elapsed: u64, partial: f32, strength: 
     let death_time = elapsed as f32 + partial;
     let progress = ((death_time - 1.) / 20. * 1.6).sqrt().min(1.);
     let flip: f32 = match type_name {
-        "minecraft:spider"
-        | "minecraft:cave_spider"
-        | "minecraft:silverfish"
-        | "minecraft:endermite" => 180.,
+        "minecraft:spider" | "minecraft:cave_spider" | "minecraft:silverfish" | "minecraft:endermite" => 180.,
         _ => 90.,
     };
     Mat4::from_translation(LIVING_FEET)
@@ -1149,12 +998,7 @@ pub(super) fn draw_entity(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EntityDrawFrame {
-        tick,
-        partial,
-        light,
-        ..
-    } = frame;
+    let EntityDrawFrame { tick, partial, light, .. } = frame;
     let start = out.vertices.len();
         match entity.binding.as_ref().unwrap() {
             Ok(binding) => {
@@ -1163,43 +1007,26 @@ pub(super) fn draw_entity(
                 let matrix = root_matrix(entity, models, binding, frame, store.bed_direction);
                 let swell = super::creeper::swell(entity, partial);
                 let invisible =
-                    number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
+                    int_at(entity, models.ids(entity).shared_flags).unwrap_or(0) & 32 != 0;
                 evaluate_rig(rig, entity, models, content, tick, partial, matrix, store.transforms);
                 if !invisible {
                     emit_rig_parts(
                         rig,
                         store.transforms,
-                        light,
+                        RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light },
+                        (entity.type_name == "minecraft:armor_stand")
+                            .then(|| int_at(entity, models.ids(entity).client_flags).unwrap_or(0)),
+                        entity.type_name == "minecraft:end_crystal"
+                            && value(models, entity, "DATA_SHOW_BOTTOM")
+                                .and_then(Metadata::boolean) == Some(false),
+                        Some((entity, models, tick, partial)),
                         out,
-                    )
-                {
-                    stats
-                        .unrendered
-                        .insert(format!("{}:outer", entity.type_name), reason);
-                }
-                if entity.type_name == "minecraft:slime" {
-                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
-                        .ok_or("missing authored slime outer rig")?;
-                    evaluate_rig(
-                        shell,
-                        entity,
-                        models,
-                        content,
-                        tick,
-                        partial,
-                        matrix,
+                    )?;
+                    super::villagers::append(
+                        binding.layers.as_ref(),
+                        rig,
                         store.transforms,
-                    );
-                    emit_rig(
-                        shell,
-                        store.transforms,
-                        crate::entities::presentation::RigStyle {
-                            tex,
-                            color: [1.; 3],
-                            layer: EntityMaterial::EntityTranslucent,
-                            alpha: 1.,
-                            light,
-                        },
+                        light,
                         out,
                     )?;
                     if entity.type_name == "minecraft:snow_golem"
@@ -1230,7 +1057,7 @@ pub(super) fn draw_entity(
                         }
                     }
                     if entity.type_name == "minecraft:mooshroom"
-                        && !boolean(models, entity, "DATA_BABY_ID")
+                        && !flag_at(entity, models.ids(entity).baby)
                     {
                         let result = (|| {
                             let brown = number(models, entity, "DATA_TYPE").unwrap_or(0) == 1;
@@ -1277,25 +1104,11 @@ pub(super) fn draw_entity(
                         stats.unrendered.insert("minecraft:player:back".into(), reason);
                     }
                 }
-                super::sheep::append(
-                    entity,
-                    rig,
-                    transforms: store.transforms,
-                },
-                store.items,
-                store.equipment_cache,
-                super::equipment::Frame {
-                    models,
-                    content,
-                    super::sheep::CoatFrame {
-                        baby: boolean(models, entity, "DATA_BABY_ID"),
-                        base_rig: rig,
-                        tick,
-                        partial,
-                        root: matrix,
-                        light,
-                    },
-                    store.transforms,
+                append_equipment(
+                    EquipmentPose { entity, rig, transforms: store.transforms, item_context: store.clock_context },
+                    store.items,
+                    store.equipment_cache,
+                    super::equipment::Frame { models, content, root: matrix, tick, partial, light },
                     out,
                     stats,
                 )?;
@@ -1316,7 +1129,7 @@ pub(super) fn draw_entity(
                     if matches!(entity.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
                         && number(models, entity, "DATA_FLAGS_ID").unwrap_or(0) & 4 != 0
                     {
-                        let baby = boolean(models, entity, "DATA_BABY_ID");
+                        let baby = flag_at(entity, models.ids(entity).baby);
                         let path = match (entity.type_name.as_str(), baby) {
                             ("minecraft:cat", false) => "minecraft:entity/cat/cat_collar",
                             ("minecraft:cat", true) => "minecraft:entity/cat/cat_collar_baby",
@@ -1341,54 +1154,19 @@ pub(super) fn draw_entity(
                                     let transforms = [Mat4::IDENTITY, store.transforms[body]];
                                     emit_rig(collar_rig, &transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
                                 } else {
-                                    "minecraft:red_mushroom"
-                                };
-                                let state = content.resolve_block_state(block, &BTreeMap::new())?;
-                                store.mooshroom_mushroom_states[index] = Some(state);
-                                state
-                            }
-                        };
-                        let mushroom = content
-                            .model_for(state)?
-                            .ok_or("mooshroom mushroom block model unavailable")?;
-                        let head = rig
-                            .bones
-                            .iter()
-                            .zip(store.transforms.iter())
-                            .find_map(|(bone, transform)| {
-                                (bone.role == BoneRole::Head).then_some(*transform)
-                            })
-                            .ok_or("mooshroom has no head bone")?;
-                        append_mooshroom_mushrooms(mushroom, matrix, head, light, out)
-                    })();
-                    if let Err(reason) = result {
-                        stats.unrendered.insert(entity.type_name.clone(), reason);
+                                    emit_rig(rig, store.transforms, crate::entities::presentation::RigStyle { tex: collar, color, layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)
+                                }
+                            });
+                        if let Err(reason) = result {
+                            stats.unrendered.insert(format!("{}:collar", entity.type_name), reason);
+                        }
                     }
-                }
-                let hurt = matches!(binding.style, RootStyle::Living)
-                    && (entity
-                        .damage_tick
-                        .is_some_and(|damage| tick.saturating_sub(damage) < 10)
-                        || entity.death_tick.is_some());
-                let white = super::creeper::flash(swell);
-                if hurt || white > 0. {
-                    let overlay = if hurt { [0., 3.] } else { [white, 10.] };
-                    for vertex in &mut out.vertices[start..] {
-                        vertex.overlay_uv = overlay;
-                    }
-                }
-            }
-            stats.animated += 1;
-            if !invisible && entity.type_name == "minecraft:player" {
-                let profile = store.profiles.get(&entity.uuid).and_then(|p| p.textures);
-                if let Err(reason) = store.equipment_cache.append_player_back(
-                    entity,
-                    profile,
-                    super::equipment::Frame {
+                    super::sheep::append(
+                        entity,
                         models,
                         content,
                         super::sheep::CoatFrame {
-                            baby: boolean(models, entity, "DATA_BABY_ID"),
+                            baby: flag_at(entity, models.ids(entity).baby),
                             base_rig: rig, tick, partial, root: matrix, light,
                         },
                         store.transforms,
@@ -1437,202 +1215,12 @@ pub(super) fn draw_entity(
                     content,
                     frame,
                     out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
-            if entity.type_name == "minecraft:creeper"
-                && let Err(reason) = super::creeper::append_charge(
-                    entity,
-                    models,
-                    content,
-                    (tick, partial, matrix),
-                    store.transforms,
-                    out,
-                )
-            {
-                stats
-                    .unrendered
-                    .insert(format!("{}:charge", entity.type_name), reason);
+                    stats,
+                )? {
+                    stats
+                        .unrendered
+                        .insert(entity.type_name.clone(), reason.clone());
+                }
             }
         }
     Ok(())
@@ -1665,16 +1253,13 @@ pub(super) fn held_item_context(
     };
     let flags = int_at(e, models.ids(e).living_flags).unwrap_or(0);
     let (using_item, use_ticks, crossbow_pull) = held_item_use(e, flags, slot, partial);
-    (
-        context,
-        crate::ui::items::ItemContext {
-            display: context.into(),
-            using_item,
-            use_ticks,
-            crossbow_pull,
-            ..item_context.cloned().unwrap_or_default()
-        },
-    )
+    (context, crate::ui::items::ItemContext {
+        display: context.into(),
+        using_item,
+        use_ticks,
+        crossbow_pull,
+        ..item_context.cloned().unwrap_or_default()
+    })
 }
 
 /// The frame-varying item state `held_item_context` gives the item in `slot`: whether it is
@@ -1682,14 +1267,9 @@ pub(super) fn held_item_context(
 pub(super) fn held_item_use(e: &Entity, flags: i32, slot: usize, partial: f32) -> (bool, f32, f32) {
     let living = e.source.as_ref().and_then(|s| s.living.as_ref());
     (
-        context,
-        crate::ui::items::ItemContext {
-            display: context.into(),
-            using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
-            use_ticks: living.map_or(0., |s| s.item_use_ticks(partial)),
-            crossbow_pull: living.map_or(0., |s| s.crossbow_pull(partial)),
-            ..item_context.cloned().unwrap_or_default()
-        },
+        flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
+        living.map_or(0., |s| s.item_use_ticks(partial)),
+        living.map_or(0., |s| s.crossbow_pull(partial)),
     )
 }
 
@@ -1789,14 +1369,9 @@ fn equipped_arm_rotations(
                     .clamp(-60_f32.to_radians(), 60_f32.to_radians());
             }
             ArmAction::Spyglass => {
-                arms[arm].x = (head.x
-                    - 110_f32.to_radians()
-                    - if number(models, e, "DATA_POSE") == Some(5) {
-                        15_f32.to_radians()
-                    } else {
-                        0.
-                    })
-                .clamp(-2.4, 3.3);
+                arms[arm].x = (head.x - 110_f32.to_radians()
+                    - if int_at(e, ids.pose) == Some(5) { 15_f32.to_radians() } else { 0. })
+                    .clamp(-2.4, 3.3);
                 arms[arm].y = head.y - side * 15_f32.to_radians();
             }
             ArmAction::Horn => {
@@ -1808,150 +1383,6 @@ fn equipped_arm_rotations(
                 if two_handed.is_none() || using && active == hand {
                     two_handed = Some((arm, action));
                 }
-                if entity.type_name == "minecraft:slime" {
-                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
-                        .ok_or("missing authored slime outer rig")?;
-                    evaluate_rig(
-                        shell,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    emit_rig(
-                        shell,
-                        store.transforms,
-                        crate::entities::presentation::RigStyle {
-                            tex,
-                            color: [1.; 3],
-                            layer: EntityMaterial::EntityTranslucent,
-                            alpha: 1.,
-                            light,
-                        },
-                        out,
-                    )?;
-                }
-                if entity.type_name == "minecraft:breeze" {
-                    let wind = super::krasnokamen_models::authored("minecraft:breeze_wind#main")
-                        .ok_or("missing authored breeze wind rig")?;
-                    let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
-                    evaluate_rig(
-                        wind,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    let scroll = ((tick % 2000) as f32 + partial) * 0.01;
-                    emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
-                }
-                if entity.type_name == "minecraft:slime" {
-                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
-                        .ok_or("missing authored slime outer rig")?;
-                    evaluate_rig(
-                        shell,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    emit_rig(
-                        shell,
-                        store.transforms,
-                        crate::entities::presentation::RigStyle {
-                            tex,
-                            color: [1.; 3],
-                            layer: EntityMaterial::EntityTranslucent,
-                            alpha: 1.,
-                            light,
-                        },
-                        out,
-                    )?;
-                }
-                if entity.type_name == "minecraft:breeze" {
-                    let wind = super::krasnokamen_models::authored("minecraft:breeze_wind#main")
-                        .ok_or("missing authored breeze wind rig")?;
-                    let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
-                    evaluate_rig(
-                        wind,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    let scroll = ((tick % 2000) as f32 + partial) * 0.01;
-                    emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
-                }
-                if entity.type_name == "minecraft:slime" {
-                    let shell = super::krasnokamen_models::authored("minecraft:slime_outer#main")
-                        .ok_or("missing authored slime outer rig")?;
-                    evaluate_rig(
-                        shell,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    emit_rig(
-                        shell,
-                        store.transforms,
-                        crate::entities::presentation::RigStyle {
-                            tex,
-                            color: [1.; 3],
-                            layer: EntityMaterial::EntityTranslucent,
-                            alpha: 1.,
-                            light,
-                        },
-                        out,
-                    )?;
-                }
-                if entity.type_name == "minecraft:breeze" {
-                    let wind = super::krasnokamen_models::authored("minecraft:breeze_wind#main")
-                        .ok_or("missing authored breeze wind rig")?;
-                    let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
-                    evaluate_rig(
-                        wind,
-                        entity,
-                        models,
-                        tick,
-                        partial,
-                        matrix,
-                        store.transforms,
-                    );
-                    let scroll = ((tick % 2000) as f32 + partial) * 0.01;
-                    emit_breeze_wind(wind, store.transforms, texture, scroll, light, out)?;
-                }
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
-            }
-        }
-        Err(reason) => {
-            if !append_item_entity(entity, models, store, content, frame, out, stats)? {
-                stats
-                    .unrendered
-                    .insert(entity.type_name.clone(), reason.clone());
             }
         }
     }
@@ -2069,10 +1500,7 @@ pub(super) struct AxisMap {
 }
 impl AxisMap {
     fn set(value: Vec3) -> Self {
-        Self {
-            scale: Vec3::ZERO,
-            offset: value,
-        }
+        Self { scale: Vec3::ZERO, offset: value }
     }
     pub(super) fn apply(self, rest: Vec3) -> Vec3 {
         rest * self.scale + self.offset
@@ -2145,13 +1573,7 @@ pub(super) struct RolePose {
     pub age: f32,
 }
 
-pub(super) fn role_pose(
-    e: &Entity,
-    models: &Models,
-    content: &Content,
-    tick: u64,
-    partial: f32,
-) -> RolePose {
+pub(super) fn role_pose(e: &Entity, models: &Models, content: &Content, tick: u64, partial: f32) -> RolePose {
     let living = e.source.as_ref().and_then(|source| source.living.as_ref());
     // Relative-position packets do not carry useful velocity for locomotion.
     // The source owner advances WalkRule from interpolated position deltas.
@@ -2169,26 +1591,13 @@ pub(super) fn role_pose(
     let t = e.presented_transform(tick, partial);
     let body_yaw = living.map_or(t.yaw, |state| state.body(partial));
     let head_yaw = living.map_or(t.head_yaw, |state| state.head(partial));
-    let head = Vec3::new(
-        t.pitch.to_radians(),
-        ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.)
-            .clamp(-85., 85.)
-            .to_radians(),
-        0.,
-    );
+    let head = Vec3::new(t.pitch.to_radians(),
+        ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.).clamp(-85., 85.).to_radians(), 0.);
     let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
-    let gait = equipped_arm_rotations(
-        e,
-        models,
-        content,
-        head,
-        [
-            (phase + std::f32::consts::PI).cos() * amplitude,
-            phase.cos() * amplitude,
-        ],
-        age,
-        partial,
-    );
+    let riding_arms = if e.vehicle.is_some() { RIDING_ARM_PITCH } else { 0. };
+    let gait = equipped_arm_rotations(e, models, content, head,
+        [(phase + std::f32::consts::PI).cos() * amplitude + riding_arms, phase.cos() * amplitude + riding_arms],
+        age, partial);
     // A received `swing_animation` without a clip sets the vanilla swing's duration.
     let swing_ticks = e.physical.combat.vanilla_ticks().max(1) as f32;
     let attack = e
@@ -2200,24 +1609,22 @@ pub(super) fn role_pose(
         "minecraft:zombie" | "minecraft:husk" | "minecraft:drowned" | "minecraft:giant"
             | "minecraft:zombie_villager" | "minecraft:zombified_piglin"
     );
-    let zombie_arms_raised = zombie_arms && (!boolean(models, e, "DATA_BABY_ID")
+    let ids = models.ids(e);
+    let zombie_arms_raised = zombie_arms && (!flag_at(e, ids.baby)
         || e.equipment_value(0).is_none_or(|stack| stack.empty()));
-    let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
-    let spell = number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0);
+    let aggressive = zombie_arms && int_at(e, ids.mob_flags).unwrap_or(0) & 4 != 0;
+    // Vanilla animateZombieArms yields to a SPEAR pose. A Solaris battle husk
+    // raising its shield (living flags: using, that hand holds a blocking item)
+    // likewise keeps HumanoidModel's BLOCK pose on the shield arm.
+    let blocking_arm = zombie_arms_raised.then(|| blocking_arm(e, models, content)).flatten();
+    let spell = int_at(e, ids.spell).is_some_and(|spell| spell != 0);
     let left_main = left_main_arm(models, e);
-    let attack_hand = e
-        .animation
-        .map_or(0, |(action, _)| usize::from(action == 3));
-    let trident = e.type_name == "minecraft:drowned"
-        && aggressive
-        && e.equipment_value(0)
-            .and_then(|s| content.item_names.get(&s.id))
+    let attack_hand = e.animation.map_or(0, |(action, _)| usize::from(action == 3));
+    let trident = e.type_name == "minecraft:drowned" && aggressive
+        && e.equipment_value(0).and_then(|s| content.item_names.get(&s.id))
             .is_some_and(|name| name == "minecraft:trident");
     let arms = std::array::from_fn(|arm| {
-        let mut map = AxisMap {
-            scale: Vec3::ONE,
-            offset: gait[arm],
-        };
+        let mut map = AxisMap { scale: Vec3::ONE, offset: gait[arm] };
         if spell {
             map = AxisMap::set(gait[arm]);
         }
@@ -2226,7 +1633,7 @@ pub(super) fn role_pose(
         {
             map.offset.x -= (a * std::f32::consts::PI).sin() * 1.2;
         }
-        if zombie_arms {
+        if zombie_arms && blocking_arm != Some(arm) {
             let side = if arm == 0 { 1. } else { -1. };
             map = AxisMap::set(zombie_arm_rotation(side, (zombie_arms_raised, aggressive), age, attack));
         }
@@ -2251,10 +1658,7 @@ pub(super) fn role_pose(
         pitch = crate::motion::lerp(pitch, look_pitch, weight);
     }
     let swing = 1.4 * amplitude * leg_swing;
-    let mut legs = [
-        phase.cos() * swing,
-        (phase + std::f32::consts::PI).cos() * swing,
-    ];
+    let mut legs = [phase.cos() * swing, (phase + std::f32::consts::PI).cos() * swing];
     if super::animation::select::horse_like(&e.type_name) {
         // 26.3 `AbstractEquineModel.setupAnim` (javap): with c = cos(walkPos * 0.6662 + PI) the
         // right hind and left front legs swing +0.5c and +0.8c times the walk speed, the other
@@ -2269,10 +1673,7 @@ pub(super) fn role_pose(
         head: [pitch.to_radians(), yaw_rel.to_radians()],
         arms,
         arm_pivot_z_zero: spell,
-        legs: [
-            phase.cos() * swing,
-            (phase + std::f32::consts::PI).cos() * swing,
-        ],
+        legs,
         riding: e.vehicle.is_some(),
         crouch: int_at(e, models.ids(e).pose) == Some(5),
         phase,
@@ -2292,22 +1693,10 @@ pub(super) fn evaluate_rig(
     out: &mut Vec<Mat4>,
 ) {
     let pose = role_pose(e, models, content, tick, partial);
-    evaluate_posed_rig(
-        rig,
-        e,
-        models,
-        (tick, partial),
-        &pose,
-        &super::clip_pose::library(),
-        root,
-        out,
-    );
+    evaluate_posed_rig(rig, e, models, (tick, partial), &pose, &super::clip_pose::library(), root, out);
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one pose evaluation shared by the entity and crowd paths"
-)]
+#[expect(clippy::too_many_arguments, reason = "one pose evaluation shared by the entity and crowd paths")]
 pub(super) fn evaluate_posed_rig(
     rig: &Rig,
     e: &Entity,
@@ -2321,12 +1710,7 @@ pub(super) fn evaluate_posed_rig(
     out.clear();
     out.reserve(rig.bones.len());
     let living = e.source.as_ref().and_then(|source| source.living.as_ref());
-    let RolePose {
-        phase,
-        amplitude,
-        age,
-        ..
-    } = *pose;
+    let RolePose { phase, amplitude, age, .. } = *pose;
     let pet_sitting = matches!(e.type_name.as_str(), "minecraft:cat" | "minecraft:wolf")
         && number(models, e, "DATA_FLAGS_ID").unwrap_or(0) & 1 != 0;
     let pet_baby = pet_sitting && flag_at(e, models.ids(e).baby);
@@ -2338,17 +1722,12 @@ pub(super) fn evaluate_posed_rig(
     let wave = (age * 0.3).sin();
     let wing_flap = if super::render_living::folds_wings(&e.type_name) {
         (wave + 1.) * 0.7 * wing_beat
-    } else {
-        wave * 0.3
-    };
+    } else { wave * 0.3 };
     let layers = e.clip.active(tick, partial);
     let legs = super::clip_pose::leg_factor(amplitude, pose.riding);
     let carry = if layers.iter().any(Option::is_some) {
         // The entity's main rig sets the waist, so worn parts lean with the body.
-        let main = e
-            .binding
-            .as_ref()
-            .and_then(|binding| binding.as_ref().ok())
+        let main = e.binding.as_ref().and_then(|binding| binding.as_ref().ok())
             .map_or(rig, |binding| models.rig(&binding.rig));
         clips.carry(&layers, super::clip_pose::hip(main))
     } else {
@@ -2387,7 +1766,7 @@ pub(super) fn evaluate_posed_rig(
             rotation.z += roll;
         }
         if pet_sitting {
-            // These are Krasnokamen-authored poses for the embedded rigs: lower the
+            // These are Solaris-authored poses for the embedded rigs: lower the
             // hindquarters and fold the rear legs while the head stays upright.
             match bone.name.as_str() {
                 "body" => {
@@ -2417,16 +1796,8 @@ pub(super) fn evaluate_posed_rig(
             pivot.y += 0.2;
         }
         if pose.riding && matches!(bone.role, BoneRole::RightLeg | BoneRole::LeftLeg) {
-            let side = if bone.role == BoneRole::RightLeg {
-                1.
-            } else {
-                -1.
-            };
-            rotation = Vec3::new(
-                RIDING_LEG_PITCH,
-                side * RIDING_LEG_YAW,
-                side * RIDING_LEG_ROLL,
-            );
+            let side = if bone.role == BoneRole::RightLeg { 1. } else { -1. };
+            rotation = Vec3::new(RIDING_LEG_PITCH, side * RIDING_LEG_YAW, side * RIDING_LEG_ROLL);
         }
         if e.type_name == "minecraft:armor_stand" {
             let field = match bone.name.as_str() {
@@ -2447,14 +1818,7 @@ pub(super) fn evaluate_posed_rig(
             state.apply_part(models, e, bone, age, partial, &mut pivot, &mut rotation, &mut scale);
         }
         if let Some(channel) = super::clip_pose::channel_of(bone) {
-            clips.apply(
-                &layers,
-                channel,
-                legs,
-                bone.rotation,
-                &mut rotation,
-                &mut pivot,
-            );
+            clips.apply(&layers, channel, legs, bone.rotation, &mut rotation, &mut pivot);
         }
         let mut parent = bone.parent.map(|i| out[i]).unwrap_or(root);
         if let Some(carry) = carry
@@ -2815,20 +2179,8 @@ pub(super) fn append_equipment(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EquipmentPose {
-        entity: e,
-        rig,
-        transforms,
-        item_context,
-    } = pose;
-    let super::equipment::Frame {
-        models,
-        content,
-        tick,
-        partial,
-        light,
-        ..
-    } = frame;
+    let EquipmentPose { entity: e, rig, transforms, item_context } = pose;
+    let super::equipment::Frame { models, content, tick, partial, light, .. } = frame;
     let layers = e.clip.active(tick, partial);
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
         let Some(stack) = e.equipment_value(slot) else {
@@ -2915,8 +2267,7 @@ pub(super) fn append_equipment(
             continue;
         };
         let _ = bone;
-        let (context, state) =
-            held_item_context(e, models, slot, anatomical_hand, partial, item_context);
+        let (context, state) = held_item_context(e, models, slot, anatomical_hand, partial, item_context);
         match items.model_with(content, stack, &state) {
             Ok(model) => {
                 let bone = if e.type_name == "minecraft:vex" && slot < 2 {
@@ -2927,23 +2278,12 @@ pub(super) fn append_equipment(
                 } else {
                     *matrix
                 };
-                let bone = match (slot < 2)
-                    .then(|| super::clip_pose::library().grip(&layers, anatomical_hand))
-                    .flatten()
-                {
+                let bone = match (slot < 2).then(|| super::clip_pose::library().grip(&layers, anatomical_hand)).flatten() {
                     Some(grip) => bone * grip,
                     None => bone,
                 };
-                let attachment =
-                    held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
-                append_baked_stack(
-                    model,
-                    attachment * item_matrix(model, context),
-                    light,
-                    content,
-                    stack,
-                    out,
-                )?;
+                let attachment = held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
+                append_baked_stack(model, attachment * item_matrix(model, context), light, content, stack, out)?;
             }
             Err(reason) => {
                 stats
@@ -3030,6 +2370,7 @@ pub fn special_item(
         && (stack.component("minecraft:base_color").is_some()
             || stack.component("minecraft:banner_patterns")
                 .and_then(Value::as_array).is_some_and(|patterns| !patterns.is_empty()));
+    let mut head_skin = None;
     let (rig, texture_name) = match kind {
         "shield" => ("minecraft:shield#main", if shield_patterned {
             "entity/shield/shield_base"
@@ -3128,9 +2469,23 @@ pub fn special_item(
                 .ok_or("copper golem statue item texture missing")?
                 .to_owned(),
         ),
+        "bed" => (
+            match special["part"].as_str() {
+                Some("head") => "minecraft:bed_head#main",
+                Some("foot") => "minecraft:bed_foot#main",
+                _ => return Err("bed item part must be head or foot".into()),
+            },
+            format!(
+                "entity/bed/{}",
+                special["texture"]
+                    .as_str()
+                    .unwrap_or("red")
+                    .trim_start_matches("minecraft:")
+            ),
+        ),
         _ => return Err(format!("unknown special item render family {kind}")),
     };
-    // Krasnokamen-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
+    // Solaris-authored rigs live in the embedded catalog, not in `models.rigs`; `Models::rig`
     // resolves both. A key with neither renders the placeholder box (logged once) rather than
     // failing the GUI/hand item bake and with it the session.
     if !models.has_authored_rig(rig) {
@@ -3282,24 +2637,16 @@ pub fn special_item(
     }
     if kind == "decorated_pot" {
         let sides = models.rig("minecraft:decorated_pot_sides#main");
-        let decorations = stack.component("minecraft:pot_decorations").and_then(Value::as_array);
+        let decorations = stack.component("minecraft:pot_decorations");
         matrices.clear();
         for bone in &sides.bones {
             let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(item_root)
                 * resources::transform(bone.pivot, bone.rotation, bone.scale);
             matrices.push(matrix);
-            let Some(index) = ["back", "left", "right", "front"].iter()
-                .position(|side| *side == bone.name) else { continue };
-            let item = decorations.and_then(|values| values.get(index))
-                .and_then(Value::as_str).unwrap_or("minecraft:brick");
-            let name = if let Some(pattern) = item.strip_prefix("minecraft:")
-                .and_then(|name| name.strip_suffix("_pottery_sherd"))
-            {
-                format!("entity/decorated_pot/{pattern}_pottery_pattern")
-            } else {
-                "entity/decorated_pot/decorated_pot_side".to_owned()
-            };
-            let tex = texture(content, &name)?;
+            if !["back", "left", "right", "front"].contains(&bone.name.as_str()) {
+                continue;
+            }
+            let tex = texture(content, &pot_side_texture(decorations, &bone.name))?;
             for quad in &bone.quads {
                 model.quads.push(BakedQuad {
                     positions: quad.map(|v| matrix.transform_point3(Vec3::new(v[0], v[1], v[2])).to_array()),
@@ -3335,10 +2682,7 @@ pub(super) fn pot_side_texture(decorations: Option<&Value>, side: &str) -> Strin
         .and_then(|sides| sides.get(side))
         .and_then(|template| template.as_str().or_else(|| template["id"].as_str()))
         .unwrap_or("minecraft:brick");
-    match item
-        .strip_prefix("minecraft:")
-        .and_then(|name| name.strip_suffix("_pottery_sherd"))
-    {
+    match item.strip_prefix("minecraft:").and_then(|name| name.strip_suffix("_pottery_sherd")) {
         Some(pattern) => format!("entity/decorated_pot/{pattern}_pottery_pattern"),
         None => "entity/decorated_pot/decorated_pot_side".to_owned(),
     }
@@ -3642,27 +2986,9 @@ mod tests {
         assert!(pole.cubes[0].faces.is_empty());
         let expected = [
             ("base", [-1.5, 0., -0.5], [3., 2., 1.], [4., 0.], false),
-            (
-                "left_spike",
-                [-2.5, -3., -0.5],
-                [1., 4., 1.],
-                [4., 3.],
-                false,
-            ),
-            (
-                "middle_spike",
-                [-0.5, -4., -0.5],
-                [1., 4., 1.],
-                [0., 0.],
-                false,
-            ),
-            (
-                "right_spike",
-                [1.5, -3., -0.5],
-                [1., 4., 1.],
-                [4., 3.],
-                true,
-            ),
+            ("left_spike", [-2.5, -3., -0.5], [1., 4., 1.], [4., 3.], false),
+            ("middle_spike", [-0.5, -4., -0.5], [1., 4., 1.], [0., 0.], false),
+            ("right_spike", [1.5, -3., -0.5], [1., 4., 1.], [4., 3.], true),
         ];
         assert_eq!(pole.bones.len(), expected.len());
         for (part, (name, origin, size, uv, mirror)) in pole.bones.iter().zip(expected) {
@@ -3670,11 +2996,7 @@ mod tests {
             assert_eq!(part.pivot, [0.; 3]);
             assert_eq!(part.cubes.len(), 1);
             let cube = &part.cubes[0];
-            assert_eq!(
-                (cube.origin, cube.size, cube.uv, cube.mirror),
-                (origin, size, uv, mirror),
-                "{name}"
-            );
+            assert_eq!((cube.origin, cube.size, cube.uv, cube.mirror), (origin, size, uv, mirror), "{name}");
             assert!(cube.faces.is_empty(), "{name} uses the source box unwrap");
         }
     }
@@ -3683,40 +3005,24 @@ mod tests {
     /// from local javap of `ModelPart$Cube.<init>` and `ModelPart$Polygon.<init>`: the constructor's
     /// corners v0..v7, each face's corner order and UV rectangle; a polygon maps its corners to
     /// (u1,v0), (u0,v0), (u0,v1), (u1,v1) over `texture`, the layer size times `CubeDefinition.texScale`.
-    fn vanilla_cube_faces(
-        origin: Vec3,
-        size: Vec3,
-        texture: glam::Vec2,
-    ) -> [[(Vec3, glam::Vec2); 4]; 6] {
-        let corner = |x: bool, y: bool, z: bool| {
-            origin
-                + size
-                    * Vec3::new(
-                        f32::from(u8::from(x)),
-                        f32::from(u8::from(y)),
-                        f32::from(u8::from(z)),
-                    )
-        };
+    fn vanilla_cube_faces(origin: Vec3, size: Vec3, texture: glam::Vec2) -> [[(Vec3, glam::Vec2); 4]; 6] {
+        let corner = |x: bool, y: bool, z: bool| origin + size * Vec3::new(
+            f32::from(u8::from(x)), f32::from(u8::from(y)), f32::from(u8::from(z)));
         let v = [
-            corner(false, false, false),
-            corner(true, false, false),
-            corner(true, true, false),
-            corner(false, true, false),
-            corner(false, false, true),
-            corner(true, false, true),
-            corner(true, true, true),
-            corner(false, true, true),
+            corner(false, false, false), corner(true, false, false), corner(true, true, false),
+            corner(false, true, false), corner(false, false, true), corner(true, false, true),
+            corner(true, true, true), corner(false, true, true),
         ];
         let Vec3 { x: w, y: h, z: d } = size;
         let (u1, u2, u22, u3, u4) = (d, d + w, d + w + w, d + w + d, d + w + d + w);
         let (v1, v2) = (d, d + h);
         [
-            ([5, 4, 0, 1], [u1, 0., u2, v1]),  // DOWN
-            ([2, 3, 7, 6], [u2, v1, u22, 0.]), // UP
-            ([0, 4, 7, 3], [0., v1, u1, v2]),  // WEST
-            ([1, 0, 3, 2], [u1, v1, u2, v2]),  // NORTH
-            ([5, 1, 2, 6], [u2, v1, u3, v2]),  // EAST
-            ([4, 5, 6, 7], [u3, v1, u4, v2]),  // SOUTH
+            ([5, 4, 0, 1], [u1, 0., u2, v1]),   // DOWN
+            ([2, 3, 7, 6], [u2, v1, u22, 0.]),  // UP
+            ([0, 4, 7, 3], [0., v1, u1, v2]),   // WEST
+            ([1, 0, 3, 2], [u1, v1, u2, v2]),   // NORTH
+            ([5, 1, 2, 6], [u2, v1, u3, v2]),   // EAST
+            ([4, 5, 6, 7], [u3, v1, u4, v2]),   // SOUTH
         ]
         .map(|(corners, [a0, b0, a1, b1])| {
             let uv = [(a1, b0), (a0, b0), (a0, b1), (a1, b1)];
@@ -3734,35 +3040,15 @@ mod tests {
             * Mat4::from_rotation_y((-53_f32).to_radians())
             * Mat4::from_rotation_z(21_f32.to_radians())
             * Mat4::from_scale(Vec3::splat(0.9));
-        let shaft = (
-            Vec3::new(-12., -2., 0.),
-            Vec3::new(16., 4., 0.),
-            glam::Vec2::new(32., 25.6),
-        );
+        let shaft = (Vec3::new(-12., -2., 0.), Vec3::new(16., 4., 0.), glam::Vec2::new(32., 25.6));
         let parts = [
-            (
-                "back",
-                Vec3::new(-11., 0., 0.),
-                45_f32,
-                0.8,
-                (
-                    Vec3::new(0., -2.5, -2.5),
-                    Vec3::new(0., 5., 5.),
-                    glam::Vec2::new(32., 32.),
-                ),
-            ),
+            ("back", Vec3::new(-11., 0., 0.), 45_f32, 0.8,
+                (Vec3::new(0., -2.5, -2.5), Vec3::new(0., 5., 5.), glam::Vec2::new(32., 32.))),
             ("cross_1", Vec3::ZERO, 45., 1., shaft),
             ("cross_2", Vec3::ZERO, 135., 1., shaft),
         ];
-        let area = |face: &[(Vec3, glam::Vec2); 4]| {
-            (face[1].0 - face[0].0)
-                .cross(face[3].0 - face[0].0)
-                .length()
-        };
-        for key in [
-            "minecraft:arrow#renderer/model",
-            "minecraft:spectral_arrow#renderer/model",
-        ] {
+        let area = |face: &[(Vec3, glam::Vec2); 4]| (face[1].0 - face[0].0).cross(face[3].0 - face[0].0).length();
+        for key in ["minecraft:arrow#renderer/model", "minecraft:spectral_arrow#renderer/model"] {
             let rig = super::super::krasnokamen_models::authored(key).unwrap();
             let mut matrices = Vec::new();
             let root = projectile_root(position, 37., 21., false);
@@ -3771,44 +3057,23 @@ mod tests {
                 matrices.push(parent * resources::transform(bone.pivot, bone.rotation, bone.scale));
             }
             for (name, offset, angle, scale, (origin, size, texture)) in parts {
-                let pose = vanilla_root
-                    * Mat4::from_translation(offset / 16.)
-                    * Mat4::from_rotation_x(angle.to_radians())
-                    * Mat4::from_scale(Vec3::splat(scale));
-                let expected: Vec<_> = vanilla_cube_faces(origin, size, texture)
-                    .into_iter()
+                let pose = vanilla_root * Mat4::from_translation(offset / 16.)
+                    * Mat4::from_rotation_x(angle.to_radians()) * Mat4::from_scale(Vec3::splat(scale));
+                let expected: Vec<_> = vanilla_cube_faces(origin, size, texture).into_iter()
                     .map(|face| face.map(|(p, uv)| (pose.transform_point3(p / 16.), uv)))
-                    .filter(|face| area(face) > 1e-9)
-                    .collect();
+                    .filter(|face| area(face) > 1e-9).collect();
                 let index = rig.part_by_name[name];
-                let actual: Vec<_> = rig.bones[index]
-                    .quads
-                    .iter()
-                    .map(|quad| {
-                        quad.map(|v| {
-                            (
-                                matrices[index].transform_point3(Vec3::new(v[0], v[1], v[2])),
-                                glam::Vec2::new(v[3], v[4]),
-                            )
-                        })
-                    })
-                    .filter(|face| area(face) > 1e-9)
-                    .collect();
+                let actual: Vec<_> = rig.bones[index].quads.iter()
+                    .map(|quad| quad.map(|v| (matrices[index].transform_point3(Vec3::new(v[0], v[1], v[2])),
+                        glam::Vec2::new(v[3], v[4]))))
+                    .filter(|face| area(face) > 1e-9).collect();
                 assert_eq!(actual.len(), expected.len(), "{key} {name}: visible faces");
                 // Same corners, UVs and winding: equal up to a cyclic shift of the corner order.
-                let same = |a: &[(Vec3, glam::Vec2); 4], b: &[(Vec3, glam::Vec2); 4]| {
-                    (0..4).any(|shift| {
-                        (0..4).all(|i| {
-                            a[(i + shift) % 4].0.distance(b[i].0) < 1e-4
-                                && a[(i + shift) % 4].1.distance(b[i].1) < 1e-4
-                        })
-                    })
-                };
+                let same = |a: &[(Vec3, glam::Vec2); 4], b: &[(Vec3, glam::Vec2); 4]| (0..4).any(|shift|
+                    (0..4).all(|i| a[(i + shift) % 4].0.distance(b[i].0) < 1e-4
+                        && a[(i + shift) % 4].1.distance(b[i].1) < 1e-4));
                 for face in &expected {
-                    assert!(
-                        actual.iter().any(|quad| same(quad, face)),
-                        "{key} {name}: missing face {face:?}"
-                    );
+                    assert!(actual.iter().any(|quad| same(quad, face)), "{key} {name}: missing face {face:?}");
                 }
             }
         }
@@ -3820,16 +3085,12 @@ mod tests {
         // Shaft V coordinates account for CubeDefinition's 0.8 texture-height scale.
         let model = super::super::krasnokamen_models::ModelFile::parse(include_str!(
             "../../assets/krasnokamen/models/entity/arrow.json"
-        ))
-        .unwrap();
+        )).unwrap();
         assert_eq!(model.texture.path, "entity/projectiles/arrow.png");
         assert_eq!(model.texture.size, [32, 32]);
         assert_eq!(model.bone_names(), ["back", "cross_1", "cross_2"]);
         let back = &model.bones[0];
-        assert!(
-            (back.pivot[0] - -9.9).abs() < 1e-6,
-            "mesh pose scale 0.9 on -11"
-        );
+        assert!((back.pivot[0] - -9.9).abs() < 1e-6, "mesh pose scale 0.9 on -11");
         assert_eq!(back.rotation, [45., 0., 0.]);
         assert_eq!(back.scale, [0.72, 0.72, 0.72]);
         assert_eq!(back.cubes.len(), 1);
@@ -3850,15 +3111,8 @@ mod tests {
             assert_eq!(cube.faces.len(), 2, "{name} texture-height scaling");
         }
         let rects = model.uv_rects();
-        assert!(
-            rects
-                .iter()
-                .any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 5.])
-        );
-        assert!(
-            !rects.iter().any(|(_, rect)| *rect == [0., 2., 16., 3.]),
-            "old hand-authored brown row"
-        );
+        assert!(rects.iter().any(|(bone, rect)| bone == "cross_1" && *rect == [0., 0., 16., 5.]));
+        assert!(!rects.iter().any(|(_, rect)| *rect == [0., 2., 16., 3.]), "old hand-authored brown row");
     }
 
     #[test]
@@ -3876,39 +3130,16 @@ mod tests {
             };
             assert!(span(axis) > span(other) * 4., "{key}");
             if bone_name == "pole" {
-                let (lo, hi) = bone
-                    .quads
-                    .iter()
-                    .flatten()
-                    .map(|vertex| vertex[1])
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
-                        (lo.min(v), hi.max(v))
-                    });
-                assert_eq!(
-                    (lo, hi),
-                    (2. / 16., 27. / 16.),
-                    "thrown shaft uses the source grip frame"
-                );
-                let tip = rig
-                    .bones
-                    .iter()
-                    .find(|bone| bone.name == "middle_spike")
-                    .unwrap();
-                let tip_y = tip
-                    .quads
-                    .iter()
-                    .flatten()
-                    .map(|vertex| vertex[1])
-                    .fold(f32::INFINITY, f32::min);
+                let (lo, hi) = bone.quads.iter().flatten().map(|vertex| vertex[1])
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                assert_eq!((lo, hi), (2. / 16., 27. / 16.), "thrown shaft uses the source grip frame");
+                let tip = rig.bones.iter().find(|bone| bone.name == "middle_spike").unwrap();
+                let tip_y = tip.quads.iter().flatten().map(|vertex| vertex[1]).fold(f32::INFINITY, f32::min);
                 assert_eq!(tip_y, -4. / 16.);
                 for yaw in [0., 90., 180., 270.] {
                     let root = projectile_root(Vec3::ZERO, yaw, 0., true);
-                    let forward =
-                        projectile_root(Vec3::ZERO, yaw, 0., false).transform_vector3(Vec3::X);
-                    assert!(
-                        (root.transform_point3(Vec3::new(0., tip_y, 0.)) - forward * 0.25).length()
-                            < 1e-5
-                    );
+                    let forward = projectile_root(Vec3::ZERO, yaw, 0., false).transform_vector3(Vec3::X);
+                    assert!((root.transform_point3(Vec3::new(0., tip_y, 0.)) - forward * 0.25).length() < 1e-5);
                 }
             }
         }
@@ -3940,13 +3171,14 @@ mod tests {
         let side_count: usize = sides.bones.iter().map(|bone| bone.quads.len()).sum();
         let back_count = sides.bones.iter().find(|bone| bone.name == "back").unwrap().quads.len();
         assert!(back_count > 0 && side_count > back_count);
-        let plain = special_item(&models, &content, &stack, &special).unwrap();
+        let plain = special_item(&models, &content, &stack, &special, None).unwrap();
         assert_eq!(plain.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count);
+        // The 26.3 component as `inventory::components` decodes it: a side record of templates.
         stack.components = std::sync::Arc::new(BTreeMap::from([(
             "minecraft:pot_decorations".into(),
-            serde_json::json!(["minecraft:angler_pottery_sherd", "minecraft:brick", "minecraft:brick", "minecraft:brick"]),
+            serde_json::json!({"back": {"id": "minecraft:angler_pottery_sherd"}, "front": {"id": "minecraft:brick"}}),
         )]));
-        let patterned = special_item(&models, &content, &stack, &special).unwrap();
+        let patterned = special_item(&models, &content, &stack, &special, None).unwrap();
         assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 42).count(), back_count);
         assert_eq!(patterned.quads.iter().filter(|quad| quad.texture_layer == 41).count(), side_count - back_count);
         assert!(patterned.quads.iter().any(|quad| quad.texture_layer == 40));
@@ -4162,32 +3394,14 @@ mod tests {
             entity.type_name = type_name.into();
             let mut source = entity.source.take().unwrap();
             for x in [0.2, 0.5, 0.8] {
-                source.living.as_mut().unwrap().tick(
-                    &models,
-                    &entity,
-                    &render_living::TickInput {
-                        age: 1,
-                        position: [x, 0., 0.],
-                        yaw: 0.,
-                        alive: true,
-                        passenger: false,
-                        baby: false,
-                        visually_swimming: false,
-                        in_water: false,
-                        uses_y_for_walk: false,
-                        rotation_changed_before_base_tick: false,
-                        is_mob: true,
-                        first_passenger_is_mob: false,
-                        max_head_yaw: 75.,
-                        max_body_head_yaw: 75.,
-                        attack_active: false,
-                        camel_sitting: false,
-                        camel_visually_sitting: false,
-                        camel_sitting_down: false,
-                        camel_pose_transition: false,
-                        camel_pose_time: 0,
-                    },
-                );
+                source.living.as_mut().unwrap().tick(&models, &entity, &render_living::TickInput {
+                    age: 1, position: [x, 0., 0.], yaw: 0., alive: true, passenger: false,
+                    baby: false, visually_swimming: false, in_water: false, uses_y_for_walk: false,
+                    rotation_changed_before_base_tick: false, is_mob: true,
+                    first_passenger_is_mob: false, max_head_yaw: 75., max_body_head_yaw: 75.,
+                    attack_active: false, camel_sitting: false, camel_visually_sitting: false,
+                    camel_sitting_down: false, camel_pose_transition: false, camel_pose_time: 0,
+                });
             }
             entity.source = Some(source);
             role_pose(&entity, &models, &Content::test_cube(), 2, 0.5)
@@ -4195,11 +3409,7 @@ mod tests {
         let horse = pose_of("minecraft:horse");
         assert!(horse.amplitude > 0.1, "walking: {}", horse.amplitude);
         let pair = (horse.phase + std::f32::consts::PI).cos() * horse.amplitude * 0.65;
-        assert!(
-            (horse.legs[0] - pair).abs() < 1e-6 && (horse.legs[1] + pair).abs() < 1e-6,
-            "{:?}",
-            horse.legs
-        );
+        assert!((horse.legs[0] - pair).abs() < 1e-6 && (horse.legs[1] + pair).abs() < 1e-6, "{:?}", horse.legs);
         let zombie = pose_of("minecraft:zombie");
         assert!((zombie.legs[0] - zombie.phase.cos() * 1.4 * zombie.amplitude).abs() < 1e-6);
     }
@@ -4292,6 +3502,7 @@ mod tests {
         let item = special_item(
             &models, &content, &Stack::default(),
             &serde_json::json!({"type":"minecraft:chest","texture":"normal"}),
+            None,
         ).unwrap();
         let rig = models.rig("minecraft:chest#main");
         let root = Mat4::from_translation(Vec3::new(0.5, 1.125, 0.5))
@@ -4342,6 +3553,7 @@ mod tests {
         assert!(body_bottom >= 0. && lid_bottom >= body_top - 1e-6);
         assert!(lid_top > body_top && lid_top <= 1.);
     }
+
 
     #[test]
     fn breeze_wind_emits_wrapped_animated_texture_layer() {
@@ -4474,37 +3686,16 @@ mod tests {
     fn held_trident_preserves_coordinates_for_the_resource_item_graph() {
         let (models, _) = fixture();
         let mut content = Content::test_cube();
-        content.insert_test_texture(
-            "minecraft:entity/trident/trident",
-            TextureRegion {
-                layer: 42,
-                uv: [0., 0., 1., 1.],
-                width: 32,
-                height: 32,
-            },
-        );
-        let item = special_item(
-            &models,
-            &content,
-            &Stack::default(),
-            &serde_json::json!({"type":"minecraft:trident"}),
-        )
-        .unwrap();
+        content.insert_test_texture("minecraft:entity/trident/trident", TextureRegion {
+            layer: 42, uv: [0., 0., 1., 1.], width: 32, height: 32,
+        });
+        let item = special_item(&models, &content, &Stack::default(),
+            &serde_json::json!({"type":"minecraft:trident"}), None).unwrap();
         let rig = models.rig("minecraft:trident#main");
         let pole = rig.bones.iter().find(|bone| bone.name == "pole").unwrap();
-        let (lo, hi) = pole
-            .quads
-            .iter()
-            .flatten()
-            .map(|vertex| vertex[1])
-            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
-                (lo.min(v), hi.max(v))
-            });
-        assert_eq!(
-            (lo, hi),
-            (2. / 16., 27. / 16.),
-            "held shaft keeps the local layer's grip frame"
-        );
+        let (lo, hi) = pole.quads.iter().flatten().map(|vertex| vertex[1])
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        assert_eq!((lo, hi), (2. / 16., 27. / 16.), "held shaft keeps the local layer's grip frame");
         // The resource item graph owns its Y/Z conversion. A second half-turn
         // here reverses the prongs against the actual matched Java control.
         let conversion = Mat4::IDENTITY;
@@ -4517,8 +3708,7 @@ mod tests {
             for source in &bone.quads {
                 let actual = emitted.next().unwrap();
                 for (vertex, point) in source.iter().zip(actual.positions) {
-                    let expected =
-                        matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
+                    let expected = matrix.transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
                     assert!((Vec3::from_array(point) - expected).abs().max_element() < 1e-6);
                 }
             }

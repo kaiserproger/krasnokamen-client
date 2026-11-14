@@ -84,14 +84,12 @@ impl Store {
         };
         let darken = world.source_sky_darken().unwrap_or(0);
         let mut casters = 0;
-        for entity in self.candidates(area) {
-                let position = self.presented_transform(entity, tick, partial)?.position;
-                let distance_squared = position
-                    .iter()
-                    .zip(camera)
-                    .map(|(a, b)| (a - b) * (a - b))
-                    .sum::<f64>();
-                if distance_squared >= SHADOW_RANGE * SHADOW_RANGE {
+        let mut own = super::frame_entities::FrameEntities::default();
+        for entry in self.frame_entities(&mut own, models, camera, SHADOW_RANGE, tick, partial) {
+                let entity = &self.slots[entry.slot];
+                let position = entry.transform.as_ref().map_err(Clone::clone)?.position;
+                let distance_squared = entry.distance_squared;
+                if distance_squared >= SHADOW_RANGE * SHADOW_RANGE || !entry.within {
                     continue;
                 }
                 let Some(radius) = radius(models, entity)? else {

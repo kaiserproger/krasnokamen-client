@@ -76,6 +76,20 @@ class Weapon:
         self.elements.append(el)
 
     def model(self, display):
+        # Java limits element coordinates to [-16, 32]. Contract about the grip
+        # at (8, 8, 8), then undo that contraction in every display transform.
+        extent = max(abs(value - 8) for element in self.elements
+                     for key in ("from", "to") for value in element[key])
+        if extent > 24:
+            factor = 24 / extent
+            for element in self.elements:
+                for key in ("from", "to"):
+                    element[key] = [round(8 + (value - 8) * factor, 12) for value in element[key]]
+                if "rotation" in element:
+                    rotation = element["rotation"]
+                    rotation["origin"] = [round(8 + (value - 8) * factor, 12) for value in rotation["origin"]]
+            for transform in display.values():
+                transform["scale"] = [round(value / factor, 12) for value in transform.get("scale", [1, 1, 1])]
         return {"textures": {"parts": "krasnokamen_battle:item/battle_parts", "particle": "krasnokamen_battle:item/battle_parts"},
                 "elements": self.elements, "display": display}
 
@@ -418,6 +432,10 @@ SHIELDS = {
 
 def main():
     os.makedirs(TEX, exist_ok=True)
+    with open(os.path.join(ROOT, "assets/battle_video/pack.mcmeta"), "w") as meta:
+        json.dump({"pack": {"pack_format": 84, "min_format": [84, 0], "max_format": [84, 0],
+                            "description": "Krasnokamen battle equipment"}}, meta, indent=2)
+        meta.write("\n")
     write_palette()
     for name, fn in (("iron_longsword", longsword), ("iron_flanged_mace", mace), ("iron_spear", spear), ("iron_lance", lance),
                      ("iron_halberd", halberd), ("iron_longbow_standby", longbow), ("iron_heavy_crossbow_standby", crossbow)):

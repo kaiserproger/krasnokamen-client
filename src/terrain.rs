@@ -658,11 +658,32 @@ impl Terrain {
         }
         self.camera = Some(camera);
         let mut changed = self.sync_view(world, camera, render_distance, draws)?;
-        while let Some(completion) = self
-            .replay_completion
-            .take()
+        while let Some(completion) = self.over_budget.take()
+            .or_else(|| self.replay_completion.take())
             .or_else(|| self.receive.try_recv().ok())
         {
+            let valid = completion.generation == self.generation
+                && completion.epochs == self.epochs
+                && self
+                    .sections
+                    .get(&completion.key)
+                    .is_some_and(|s| s.revision == completion.revision)
+                && world
+                    .chunk([completion.key[0], completion.key[2]])
+                    .is_some();
+            // Backpressure, not failure: a result that does not fit waits until
+            // uploads release resident payloads. Alone it must always fit.
+            if valid && let Ok(Some(built)) = &completion.result {
+                let bytes = mesher::geometry_bytes(&built.geometry);
+                if bytes > self.cpu_mesh_budget {
+                    return Err(format!("terrain section {:?} mesh of {bytes} bytes exceeds the CPU mesh budget {}",
+                        completion.key, self.cpu_mesh_budget));
+                }
+                if self.resident_bytes - self.sections[&completion.key].bytes + bytes > self.cpu_mesh_budget {
+                    self.over_budget = Some(completion);
+                    break;
+                }
+            }
             self.in_flight -= 1;
             self.has_pending = true;
             if let Some(section) = self.sections.get_mut(&completion.key) {
@@ -718,30 +739,20 @@ impl Terrain {
     /// Offline export only. Preserve the completion for the ordinary update
     /// path; do not simulate another tick while waiting for worker output.
     pub(crate) fn wait_replay_completion(
-        &mut self,
-        replay: bool,
-        timeout: std::time::Duration,
-    ) -> Result<bool> {
-        if !replay {
-            return Err("terrain blocking completion is forbidden in live mode".into());
-        }
-        if self.replay_completion.is_some() {
-            return Ok(true);
-        }
+        &mut self, replay: bool, timeout: std::time::Duration,
+    ) -> Result<ReplayWait> {
+        if !replay { return Err("terrain blocking completion is forbidden in live mode".into()); }
+        if self.over_budget.is_some() { return Ok(ReplayWait::Upload); }
+        if self.replay_completion.is_some() { return Ok(ReplayWait::Completion); }
         if self.in_flight == 0 {
             if !self.pending.is_empty() {
-                return Err(
-                    "replay terrain has pending sections but no dispatched mesh job".into(),
-                );
+                return Err("replay terrain has pending sections but no dispatched mesh job".into());
             }
             return Ok(ReplayWait::Settled);
         }
-        self.replay_completion = Some(
-            self.receive
-                .recv_timeout(timeout)
-                .map_err(|e| format!("replay terrain completion: {e}"))?,
-        );
-        Ok(true)
+        self.replay_completion = Some(self.receive.recv_timeout(timeout)
+            .map_err(|e| format!("replay terrain completion: {e}"))?);
+        Ok(ReplayWait::Completion)
     }
     /// Score every eligible section once and queue the best `free` jobs.
     /// Prompt jobs go first (and to the front of the worker queue):

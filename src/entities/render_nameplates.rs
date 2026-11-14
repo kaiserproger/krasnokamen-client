@@ -372,15 +372,13 @@ impl Store {
                 .ok_or("entity model cache not activated")?;
             let range = f64::from(radius.min(64.));
             // Same received candidates as bodies, including attached riders.
-            for entity in self.candidates(area) {
-                    let transform = self.presented_transform(entity, tick, partial)?;
+            let mut own = super::frame_entities::FrameEntities::default();
+            for entry in self.frame_entities(&mut own, models, camera, range, tick, partial) {
+                    let entity = &self.slots[entry.slot];
+                    let transform = *entry.transform.as_ref().map_err(Clone::clone)?;
                     let position = transform.position;
-                    let distance_squared = position
-                        .iter()
-                        .zip(camera)
-                        .map(|(a, b)| (a - b) * (a - b))
-                        .sum::<f64>();
-                    if distance_squared > range * range {
+                    let distance_squared = entry.distance_squared;
+                    if distance_squared > range * range || !entry.within {
                         continue;
                     }
                     stats.eligible += 1;
