@@ -58,6 +58,7 @@ pub(crate) use render_blocks::{
     BlockPresentation, BlockRenderStatus, EntityPainter, MovingBlockPainter, StaticBlockSceneFrame,
 };
 pub use resources::Models;
+pub(crate) use resources::Seat;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -593,7 +594,7 @@ impl Store {
             .ok_or("source rider vehicle attachment missing")?
             .map(|value| value * f64::from(scale));
         transform.position = crate::player::vehicle::passenger_position(
-            self, vehicle, entity.handle.network_id, parent_transform.position,
+            self, parent, entity.handle.network_id, parent_transform.position,
             parent_transform.yaw, attachment, transform.yaw,
             parent.physical.seat_motion.as_ref(), parent.physical.seat_game_time,
         )?;

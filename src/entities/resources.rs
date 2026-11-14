@@ -166,8 +166,32 @@ pub struct Ids {
     pub boat: bool,
     /// Vanilla draw-distance rule of the kind (`view_range::within`).
     pub view_rule: super::view_range::Rule,
-    /// `getPassengerAttachmentPoint` is AbstractHorse's or Strider's (`SeatMotion`).
-    pub seat_motion: bool,
+    /// Owner of `getPassengerAttachmentPoint` (`player::vehicle::passenger_position`).
+    pub seat: Seat,
+}
+
+/// Owner of a kind's `getPassengerAttachmentPoint`, which places its passengers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Seat {
+    /// `AbstractBoat`; chest boats and rafts seat differently.
+    Boat { chest: bool, raft: bool },
+    /// `AbstractHorse` (`SeatMotion`).
+    Horse,
+    Camel,
+    /// `Strider` (`SeatMotion`).
+    Strider,
+    CubeMob,
+    /// `Entity`, `Llama`, `AbstractMinecart`: the received `PASSENGER` attachment.
+    Attachment,
+    /// No source seat rule.
+    Unknown,
+}
+
+impl Seat {
+    /// The kind tracks `SeatMotion` (horse stand, strider walk) for its passengers.
+    pub fn moves(self) -> bool {
+        matches!(self, Self::Horse | Self::Strider)
+    }
 }
 
 impl Ids {
@@ -191,7 +215,7 @@ impl Ids {
         charging: [None; 2],
         last_pose_change: None,
         boat: false,
-        seat_motion: false,
+        seat: Seat::Unknown,
         view_rule: super::view_range::Rule::Entity,
     };
     fn of(schema: &EntitySchema) -> Self {
@@ -216,10 +240,26 @@ impl Ids {
             charging: [id("IS_CHARGING_CROSSBOW"), id("DATA_IS_CHARGING_CROSSBOW")],
             last_pose_change: id("LAST_POSE_CHANGE_TICK"),
             boat: schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.vehicle.boat.AbstractBoat"),
-            seat_motion: matches!(
-                schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str),
-                Some("net.minecraft.world.entity.animal.equine.AbstractHorse" | "net.minecraft.world.entity.monster.Strider")
-            ),
+            seat: match schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str) {
+                Some("net.minecraft.world.entity.vehicle.boat.AbstractBoat") => Seat::Boat {
+                    chest: schema.hierarchy.iter().any(|name| {
+                        name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat"
+                    }),
+                    raft: matches!(schema.class.as_str(),
+                        "net.minecraft.world.entity.vehicle.boat.Raft"
+                            | "net.minecraft.world.entity.vehicle.boat.ChestRaft"),
+                },
+                Some("net.minecraft.world.entity.animal.equine.AbstractHorse") => Seat::Horse,
+                Some("net.minecraft.world.entity.animal.camel.Camel") => Seat::Camel,
+                Some("net.minecraft.world.entity.monster.Strider") => Seat::Strider,
+                Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => Seat::CubeMob,
+                Some(
+                    "net.minecraft.world.entity.Entity"
+                    | "net.minecraft.world.entity.animal.equine.Llama"
+                    | "net.minecraft.world.entity.vehicle.minecart.AbstractMinecart",
+                ) => Seat::Attachment,
+                _ => Seat::Unknown,
+            },
             view_rule: super::view_range::Rule::of(&schema.hierarchy, schema.hierarchy.iter().any(|class| class == "net.minecraft.world.entity.player.Player")),
         }
     }
@@ -1527,6 +1567,31 @@ mod tests {
         assert_eq!(b.min[1], 10. - f64::from(0.15f32));
         let b = super::super::physical::bounds_at(&models, &husk, [0., 10., 0.]).unwrap();
         assert_eq!((b.min[1], b.max[1]), (10., 10. + f64::from(1.95f32)));
+    }
+
+    /// Each mount kind's `getPassengerAttachmentPoint` owner selects its seat rule once.
+    #[test]
+    fn mount_seat_rules_resolve_per_kind() {
+        let (_, models) = super::every_kind();
+        let seat = |kind: &str| {
+            let (_, mut e) = super::super::animation_tests::fixture();
+            e.type_name = kind.into();
+            models.ids(&e).seat
+        };
+        assert_eq!(seat("minecraft:oak_boat"), Seat::Boat { chest: false, raft: false });
+        assert_eq!(seat("minecraft:oak_chest_boat"), Seat::Boat { chest: true, raft: false });
+        assert_eq!(seat("minecraft:bamboo_raft"), Seat::Boat { chest: false, raft: true });
+        assert_eq!(seat("minecraft:bamboo_chest_raft"), Seat::Boat { chest: true, raft: true });
+        assert_eq!(seat("minecraft:horse"), Seat::Horse);
+        assert_eq!(seat("minecraft:skeleton_horse"), Seat::Horse);
+        assert_eq!(seat("minecraft:camel"), Seat::Camel);
+        assert_eq!(seat("minecraft:strider"), Seat::Strider);
+        assert_eq!(seat("minecraft:slime"), Seat::CubeMob);
+        for kind in ["minecraft:minecart", "minecraft:llama", "minecraft:pig"] {
+            assert_eq!(seat(kind), Seat::Attachment, "{kind}");
+        }
+        assert!(seat("minecraft:horse").moves() && seat("minecraft:strider").moves());
+        assert!(!seat("minecraft:camel").moves() && !seat("minecraft:oak_boat").moves());
     }
 
     #[test]

@@ -788,7 +788,7 @@ impl Store {
             let standing = super::presentation::flag_at(e, ids.standing);
             // Only a boat reads its bounds from before the tick (`source_state::tick`).
             let boat_bounds = if ids.boat { Some(self.bounds(e.handle, tick, 0.)?) } else { None };
-            let seat_motion = ids.seat_motion;
+            let seat_moves = ids.seat.moves();
             let first = e.passenger_ids.first().and_then(|id| self.get(*id));
             let first_passenger_is_mob = first.is_some_and(|p| models.motion[&p.type_name].is_mob);
             let controlling_passenger = e.passenger_ids.first().is_some_and(|passenger| {
@@ -813,7 +813,7 @@ impl Store {
                 .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
-            if seat_motion {
+            if seat_moves {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = super::presentation::int_at(e, ids.id_flags).unwrap_or(0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
