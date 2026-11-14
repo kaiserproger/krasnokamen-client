@@ -10,6 +10,8 @@ mod local_server;
 #[cfg(test)]
 mod entity_aim_tests;
 #[cfg(test)]
+mod attack_dispatch_tests;
+#[cfg(test)]
 mod mining_start_tests;
 mod observation;
 mod packets;

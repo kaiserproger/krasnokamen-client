@@ -327,12 +327,16 @@ impl Session {
             self.world_tick,
             &mut self.commands,
         )?;
+        // Wire 8 is STAB, queued by the piercing-weapon (spear) arm of
+        // `player.attack`: the packet goes out like any other attack, so it
+        // counts as started. (Hit-test-diag, 15/15 swings: queued
+        // `player_action#41 action=8` reported as "not dispatched".)
         let started = self.commands[start..].iter().any(|command| {
             command.id == sb::ATTACK
                 || (command.id == sb::PLAYER_ACTION
                     && matches!(
                         crate::protocol::Reader::new(&command.payload.0).var(),
-                        Ok(0 | 2 | 7)
+                        Ok(0 | 2 | 7 | 8)
                     ))
         });
         let result = self.player.last_interaction_result();
