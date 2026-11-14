@@ -3790,7 +3790,9 @@ mod tests {
                 Mat4::IDENTITY,
                 &mut sitting,
             );
-            for name in ["body", "left_hind_leg", "right_hind_leg", "tail"] {
+            // Body and legs carry the sit. The vanilla cat's two-cube tail
+            // (`tail1`/`tail2`) is not part of the sit rule, so it is not asserted.
+            for name in ["body", "left_hind_leg", "right_hind_leg"] {
                 let i = rig.bones.iter().position(|bone| bone.name == name).unwrap();
                 assert_ne!(
                     standing[i].to_cols_array(),

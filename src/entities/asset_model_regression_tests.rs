@@ -553,11 +553,20 @@ fn species_layer_scales_preserve_the_feet_and_distinguish_related_mobs() {
             (high - low - expected).abs().max_element() < 1e-5,
             "{id}: lost species scale"
         );
-        let feet = pose[rig.part_by_name["layer_root"]].transform_point3(Vec3::new(0., 1.5, 0.));
-        assert!(
-            (feet - Vec3::new(0., 1.5, 0.)).length() < 1e-5,
-            "{id}: scaling moves the floor"
-        );
+        // The 26.3 layers fold the species scale into the top bones (the dump has no
+        // `layer_root`), so the check is that the hooves stay on the 24 px model floor.
+        // Spider legs are `leg0`..`leg7` and have no per-side name, so the floor check
+        // uses whichever humanoid or quadruped leg bone the rig carries.
+        if let Some(leg) = ["right_hind_leg", "right_leg"]
+            .into_iter()
+            .find(|name| rig.part_by_name.contains_key(*name))
+        {
+            let (_, foot_high) = bounds(rig, &pose, leg);
+            assert!(
+                (foot_high.y * 16. - 24.).abs() < 0.05,
+                "{id}: scaling moves the floor"
+            );
+        }
     }
 }
 
@@ -1054,5 +1063,66 @@ fn cow_horn_cube_and_humanoid_hat_follow_the_26_3_layers() {
             rig.part_by_name.contains_key("hat"),
             "{id}: vanilla hat cube"
         );
+    }
+}
+
+// MODEL-OPUS-N8: left/right mirror flags now come from the 26.3 layers. Each tuple is
+// (rig, bone, expected mirror flags per cube) as the dump bakes them; the pre-fix rigs
+// carried the opposite flags on these cubes.
+#[test]
+fn left_side_mirror_flags_follow_the_26_3_layers() {
+    fn find<'a>(
+        bones: &'a [super::krasnokamen_models::BoneSpec],
+        name: &str,
+    ) -> Option<&'a super::krasnokamen_models::BoneSpec> {
+        bones.iter().find_map(|bone| {
+            (bone.name == name)
+                .then_some(bone)
+                .or_else(|| find(&bone.bones, name))
+        })
+    }
+    let cases: [(&str, &str, &[bool], &str); 6] = [
+        (
+            "cat",
+            "left_hind_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/cat.json"),
+        ),
+        (
+            "cat",
+            "left_front_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/cat.json"),
+        ),
+        (
+            "chicken",
+            "left_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/chicken.json"),
+        ),
+        (
+            "chicken",
+            "left_wing",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/chicken.json"),
+        ),
+        (
+            "wolf",
+            "left_hind_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/wolf.json"),
+        ),
+        (
+            "wolf",
+            "right_hind_leg",
+            &[true],
+            include_str!("../../assets/krasnokamen/models/entity/wolf.json"),
+        ),
+    ];
+    for (rig, bone, expected, source) in cases {
+        let model = super::krasnokamen_models::ModelFile::parse(source).unwrap();
+        let spec = find(&model.bones, bone).unwrap_or_else(|| panic!("{rig}: {bone}"));
+        let flags: Vec<bool> = spec.cubes.iter().map(|cube| cube.mirror).collect();
+        assert_eq!(flags, expected, "{rig}: {bone} mirror flags");
     }
 }
