@@ -270,6 +270,7 @@ impl super::Store {
                         transforms: &mut self.transforms,
                         items: &mut self.items,
                         equipment_cache: &mut self.equipment_cache,
+                        profiles: &self.profiles,
                         snow_pumpkin_state: &mut self.snow_pumpkin_state,
                         mooshroom_mushroom_states: &mut self.mooshroom_mushroom_states,
                         // A spawner preview has no bed in the world to lie along.

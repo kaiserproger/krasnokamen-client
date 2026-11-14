@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "happy_ghast_body_equipment",
+  "texture": {"path": "entity/equipment/happy_ghast_body/green_harness.png", "size": [128, 128]},
+  "bones": [
+    {
+      "name": "body", "pivot": [0, -6, 0],
+      "cubes": [
+        {"origin": [-16.2, -16.2, -8.2], "size": [32.4, 32.4, 16.4], "faces": {"up": [32, 0, 64, 32], "down": [32, 0, 64, 32], "right": [0, 32, 32, 64], "front": [32, 32, 64, 64], "left": [64, 32, 96, 64], "back": [96, 32, 128, 64]}},
+        {"origin": [-10, -8, -8.7], "size": [20, 5, 0.4], "faces": {"up": [5, 77, 45, 85], "down": [5, 77, 45, 85], "right": [5, 77, 45, 85], "front": [5, 77, 45, 85], "left": [5, 77, 45, 85], "back": [5, 77, 45, 85]}}
+      ]
+    }
+  ]
+}

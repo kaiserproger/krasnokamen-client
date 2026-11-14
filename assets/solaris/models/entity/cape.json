@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "cape",
+  "texture": {"path": "entity/equipment/wings/elytra.png", "size": [64, 32]},
+  "bones": [
+    {
+      "name": "body", "pivot": [0, 0, 0],
+      "bones": [
+        {
+          "name": "cape", "pivot": [0, 1, 2.7],
+          "cubes": [
+            {"origin": [-5, 0, 0], "size": [10, 16, 0.3], "faces": {"front": [1, 1, 11, 17], "back": [12, 1, 22, 17], "left": [0, 1, 1, 17], "right": [11, 1, 12, 17], "up": [1, 0, 11, 1], "down": [11, 0, 21, 1]}}
+          ]
+        }
+      ]
+    }
+  ]
+}

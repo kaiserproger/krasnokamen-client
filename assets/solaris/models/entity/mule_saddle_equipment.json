@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "mule_saddle_equipment",
+  "texture": {"path": "entity/equipment/mule_saddle/saddle.png", "size": [64, 64]},
+  "roles": {
+    "head": ["head"]
+  },
+  "bones": [
+    {
+      "name": "body", "pivot": [0, 9, 2],
+      "cubes": [
+        {"origin": [-4, -6, -4], "size": [8, 1, 8], "faces": {"up": [35, 0, 45, 8], "down": [35, 0, 45, 8], "front": [35, 0, 45, 8], "back": [35, 0, 45, 8], "left": [35, 0, 45, 8], "right": [35, 0, 45, 8]}},
+        {"origin": [-5.2, -5, -1], "size": [0.4, 10, 2], "faces": {"up": [8, 8, 16, 10], "down": [8, 8, 16, 10], "front": [8, 8, 16, 10], "back": [8, 8, 16, 10], "left": [8, 8, 16, 10], "right": [8, 8, 16, 10]}},
+        {"origin": [4.8, -5, -1], "size": [0.4, 10, 2], "faces": {"up": [8, 8, 16, 10], "down": [8, 8, 16, 10], "front": [8, 8, 16, 10], "back": [8, 8, 16, 10], "left": [8, 8, 16, 10], "right": [8, 8, 16, 10]}}
+      ]
+    },
+    {
+      "name": "head", "pivot": [0, 4, -10],
+      "cubes": [
+        {"origin": [-3.2, 0, -2], "size": [6.4, 0.5, 0.5], "faces": {"up": [8, 8, 16, 10], "down": [8, 8, 16, 10], "front": [8, 8, 16, 10], "back": [8, 8, 16, 10], "left": [8, 8, 16, 10], "right": [8, 8, 16, 10]}}
+      ]
+    }
+  ]
+}

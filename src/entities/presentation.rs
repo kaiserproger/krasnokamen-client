@@ -418,6 +418,7 @@ pub(super) struct DrawStore<'a> {
     pub(super) transforms: &'a mut Vec<Mat4>,
     pub(super) items: &'a mut crate::ui::items::ItemModels,
     pub(super) equipment_cache: &'a mut super::equipment::Cache,
+    pub(super) profiles: &'a BTreeMap<String, super::profiles::PlayerProfile>,
     pub(super) snow_pumpkin_state: &'a mut Option<u32>,
     pub(super) mooshroom_mushroom_states: &'a mut [Option<u32>; 2],
     pub(super) clock_context: Option<&'a crate::ui::items::ItemContext>,
@@ -651,6 +652,7 @@ pub fn append(
             transforms: &mut store.transforms,
             items: &mut store.items,
             equipment_cache: &mut store.equipment_cache,
+            profiles: &store.profiles,
             snow_pumpkin_state: &mut store.snow_pumpkin_state,
             mooshroom_mushroom_states: &mut store.mooshroom_mushroom_states,
             clock_context: clock_context.as_ref(),
@@ -959,6 +961,14 @@ pub(super) fn draw_entity(
                     }
                 }
                 stats.animated += 1;
+                if !invisible && entity.type_name == "minecraft:player" {
+                    let profile = store.profiles.get(&entity.uuid).and_then(|p| p.textures);
+                    if let Err(reason) = store.equipment_cache.append_player_back(entity, profile,
+                        super::equipment::Frame { models, content, root: matrix, tick, partial, light }, out)
+                    {
+                        stats.unrendered.insert("minecraft:player:back".into(), reason);
+                    }
+                }
                 append_equipment(
                     EquipmentPose { entity, rig, transforms: store.transforms },
                     store.items,

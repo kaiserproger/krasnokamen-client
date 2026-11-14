@@ -22,6 +22,8 @@ struct Asset {
 struct LayerDefinition {
     texture: String,
     dyeable: Option<Dyeable>,
+    #[serde(default)]
+    use_player_texture: bool,
 }
 #[derive(Deserialize)]
 struct Dyeable {
@@ -31,6 +33,7 @@ struct Layer {
     texture: TextureRegion,
     // None is an untinted layer; Some(None) draws only when the item is dyed.
     dyeable: Option<Option<i32>>,
+    use_player_texture: bool,
 }
 impl Layer {
     fn color(&self, dyed: i32) -> Option<[f32; 3]> {
@@ -78,6 +81,76 @@ impl Cache {
         self.assets.entry(asset.into()).or_default()
             .insert(kind.into(), load_asset(content, asset, kind));
     }
+    fn wings_asset<'a>(&mut self, stack: &'a Stack, content: &Content) -> Result<Option<&'a str>> {
+        let Some(asset) = armor_asset(stack, 4) else { return Ok(None) };
+        self.activate(content, asset, "wings");
+        Ok(self.assets[asset]["wings"].as_ref().map_err(Clone::clone)?
+            .as_ref().filter(|layers| !layers.is_empty()).map(|_| asset))
+    }
+
+    pub(super) fn append_player_back(
+        &mut self,
+        e: &Entity,
+        profile: Option<super::profiles::ProfileTextures>,
+        frame: Frame<'_>,
+        out: &mut DynamicGeometry,
+    ) -> Result<()> {
+        let Frame { models, content, root, tick, partial, light } = frame;
+        let wings = match e.equipment_value(4) {
+            Some(stack) => self.wings_asset(stack, content)?,
+            None => None,
+        };
+        let (key, cape) = if wings.is_some() {
+            ("minecraft:elytra#main", None)
+        } else if let Some(cape) = profile.and_then(|p| p.cape) {
+            ("minecraft:cape#main", Some(cape))
+        } else {
+            return Ok(());
+        };
+        if !models.has_authored_rig(key) {
+            return Err(format!("player back rig not activated: {key}"));
+        }
+        let rig = models.rig(key);
+        p::evaluate_rig(rig, e, models, tick, partial, root, &mut self.transforms);
+        let gliding = p::number(models, e, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 128 != 0;
+        let living = e.source.as_ref().and_then(|s| s.living.as_ref());
+        let sway = living.map_or(0., |s| {
+            (s.walk.position(partial) * 0.7).sin() * s.walk.speed(partial).clamp(0., 1.) * 0.12
+        });
+        // Independently chosen visual motion, not vanilla animation constants.
+        for (index, bone) in rig.bones.iter().enumerate() {
+            let mut rotation = bone.rotation;
+            match bone.name.as_str() {
+                "wing_right" => rotation.z += if gliding { 0.95 } else { 0.12 },
+                "wing_left" => rotation.z -= if gliding { 0.95 } else { 0.12 },
+                "cape" => rotation.x += 0.12 + sway.abs(),
+                _ => continue,
+            }
+            let parent = bone.parent.map_or(root, |i| self.transforms[i]);
+            self.transforms[index] = parent
+                * super::resources::transform(bone.pivot, rotation, bone.scale);
+        }
+        let style = |tex| p::RigStyle {
+            tex, color: [1.; 3], layer: EntityMaterial::ArmorCutoutNoCull, alpha: 1., light,
+        };
+        if let Some(asset) = wings {
+            let layers = self.assets[asset]["wings"].as_ref().map_err(Clone::clone)?
+                .as_ref().ok_or("wings layer disappeared")?;
+            let player_texture = profile.and_then(|p| p.elytra.or(p.cape));
+            for layer in layers {
+                let texture = if layer.use_player_texture {
+                    player_texture.unwrap_or(layer.texture)
+                } else {
+                    layer.texture
+                };
+                p::emit_rig(rig, &self.transforms, style(texture), out)?;
+            }
+        } else if let Some(cape) = cape {
+            p::emit_rig(rig, &self.transforms, style(cape), out)?;
+        }
+        Ok(())
+    }
+
 
     pub(super) fn append(
         &mut self,
@@ -91,22 +164,21 @@ impl Cache {
         let Some(asset) = armor_asset(stack, slot) else {
             return Ok(false);
         };
+        // Player back layers have their own profile-aware draw hook.
+        if e.type_name == "minecraft:player" && slot == 4
+            && self.wings_asset(stack, content)?.is_some()
+        {
+            return Ok(true);
+        }
         let stand = e.type_name == "minecraft:armor_stand";
         let baby = !stand && p::boolean(models, e, "DATA_BABY_ID");
-        let horse = e.type_name == "minecraft:horse" && matches!(slot, 6 | 7);
-        let wolf = e.type_name == "minecraft:wolf" && slot == 6;
-        let animal = horse || wolf;
+        let overlay = animal_overlay(&e.type_name, slot);
+        let animal = overlay.is_some();
         if animal && baby {
             return Err("baby animal equipment overlay is not available".into());
         }
-        let (key, kind) = if wolf {
-            (Some("minecraft:wolf_body_equipment#main"), "wolf_body")
-        } else if horse {
-            match slot {
-                6 => (Some("minecraft:horse_body_equipment#main"), "horse_body"),
-                7 => (Some("minecraft:horse_saddle_equipment#main"), "horse_saddle"),
-                _ => unreachable!(),
-            }
+        let (key, kind) = if let Some((key, kind)) = overlay {
+            (Some(key), kind)
         } else {
             let key = if stand {
                 // Small stands scale the whole adult rig about their feet, including equipment.
@@ -244,6 +316,7 @@ fn load_asset(content: &Content, asset: &str, kind: &str) -> Result<Option<Vec<L
         activated.push(Layer {
             texture: p::texture(content, &format!("{ns}:entity/equipment/{kind}/{path}"))?,
             dyeable: definition.dyeable.map(|v| v.color_when_undyed),
+            use_player_texture: definition.use_player_texture,
         });
     }
     Ok(Some(activated))
@@ -284,6 +357,33 @@ fn armor_rig(slot: usize) -> Option<&'static str> {
     })
 }
 
+fn animal_overlay(species: &str, slot: usize) -> Option<(&'static str, &'static str)> {
+    Some(match (species, slot) {
+        ("minecraft:horse", 6) => ("minecraft:horse_body_equipment#main", "horse_body"),
+        ("minecraft:wolf", 6) => ("minecraft:wolf_body_equipment#main", "wolf_body"),
+        ("minecraft:llama" | "minecraft:trader_llama", 6) =>
+            ("minecraft:llama_body_equipment#main", "llama_body"),
+        ("minecraft:happy_ghast", 6) =>
+            ("minecraft:happy_ghast_body_equipment#main", "happy_ghast_body"),
+        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 6) =>
+            ("minecraft:nautilus_body_equipment#main", "nautilus_body"),
+        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 7) =>
+            ("minecraft:nautilus_saddle_equipment#main", "nautilus_saddle"),
+        ("minecraft:horse", 7) => ("minecraft:horse_saddle_equipment#main", "horse_saddle"),
+        ("minecraft:pig", 7) => ("minecraft:pig_saddle_equipment#main", "pig_saddle"),
+        ("minecraft:strider", 7) => ("minecraft:strider_saddle_equipment#main", "strider_saddle"),
+        ("minecraft:camel", 7) => ("minecraft:camel_saddle_equipment#main", "camel_saddle"),
+        ("minecraft:camel_husk", 7) => ("minecraft:camel_husk_saddle_equipment#main", "camel_husk_saddle"),
+        ("minecraft:donkey", 7) => ("minecraft:donkey_saddle_equipment#main", "donkey_saddle"),
+        ("minecraft:mule", 7) => ("minecraft:mule_saddle_equipment#main", "mule_saddle"),
+        ("minecraft:skeleton_horse", 7) =>
+            ("minecraft:skeleton_horse_saddle_equipment#main", "skeleton_horse_saddle"),
+        ("minecraft:zombie_horse", 7) =>
+            ("minecraft:zombie_horse_saddle_equipment#main", "zombie_horse_saddle"),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +396,7 @@ mod tests {
 
         let mut content = Content::test_cube();
         content.entity_names.insert(1, kind.into());
+        content.insert_test_resource("assets/test/equipment/cloth.json", br#"{"layers":{}}"#);
         let slots = [(4, "chest"), (3, "legs"), (2, "feet"), (5, "head")];
         for (index, (_, name)) in slots.iter().enumerate() {
             let id = index as u32 + 1;
@@ -430,6 +531,7 @@ mod tests {
                             height,
                         },
                         dyeable: Some(Some(0x804020)),
+                        use_player_texture: false,
                     }])),
                 )
             })
@@ -437,6 +539,8 @@ mod tests {
         );
         (store, models, content, cache)
     }
+
+    include!("equipment_tests.rs");
 
     #[test]
     fn horse_received_body_and_saddle_layers_render_and_strip_independently() {
@@ -820,6 +924,7 @@ mod tests {
         layers.push(Layer {
             texture: layers[0].texture,
             dyeable: None,
+            use_player_texture: false,
         });
         content.insert_test_texture("minecraft:misc/enchanted_glint_armor", layers[0].texture);
         let entity = store.get(4).unwrap();
@@ -918,11 +1023,13 @@ mod tests {
         let plain = Layer {
             texture,
             dyeable: None,
+            use_player_texture: false,
         };
         assert_eq!(plain.color(0x123456), Some([1.; 3]));
         let leather = Layer {
             texture,
             dyeable: Some(Some(0x804020)),
+            use_player_texture: false,
         };
         assert_eq!(
             leather.color(0),
@@ -932,6 +1039,7 @@ mod tests {
         let only_dyed = Layer {
             texture,
             dyeable: Some(None),
+            use_player_texture: false,
         };
         assert_eq!(only_dyed.color(0), None);
         assert_eq!(only_dyed.color(0xff0000), Some([1., 0., 0.]));
@@ -1023,6 +1131,7 @@ mod tests {
                 Ok(Some(vec![Layer {
                     texture,
                     dyeable: None,
+                    use_player_texture: false,
                 }])),
             )]),
         );
@@ -1061,6 +1170,7 @@ mod tests {
             .push(Layer {
                 texture,
                 dyeable: None,
+                use_player_texture: false,
             });
         out = DynamicGeometry::default();
         assert!(cache
