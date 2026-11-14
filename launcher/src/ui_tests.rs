@@ -8,7 +8,7 @@ fn test_app() -> App {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let root = scratch.join(format!(
-        "solaris-redesign-test-{}-{}",
+        "krasnokamen-redesign-test-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
@@ -109,7 +109,7 @@ fn main_screen_is_not_an_inline_administration_form() {
         "Address editing belongs in a dialog"
     );
     for expected in [
-        "Solaris test",
+        "Krasnokamen test",
         "Profiles",
         "Servers",
         "Install & Play",
@@ -154,7 +154,7 @@ fn nested_navigation_starts_reveal_before_painting_new_content() {
         })
     }
     for (initial, control, title) in [
-        (SettingsTab::General, "Appearance", "Solaris Themes"),
+        (SettingsTab::General, "Appearance", "Krasnokamen Themes"),
         (
             SettingsTab::Appearance,
             "Background & motion",
@@ -212,10 +212,10 @@ fn nested_navigation_starts_reveal_before_painting_new_content() {
 }
 
 #[test]
-fn header_uses_the_real_solaris_logo_and_uploads_it_only_once() {
+fn header_uses_the_real_krasnokamen_logo_and_uploads_it_only_once() {
     let ctx = egui::Context::default();
     let mut app = test_app();
-    let icon = load_icon().expect("Bundled Solaris logo must decode");
+    let icon = load_icon().expect("Bundled Krasnokamen logo must decode");
     let size = Vec2::new(820.0, 530.0);
     let first = paint(&mut app, &ctx, size, vec![]);
     let (texture_id, _) = first
@@ -223,7 +223,7 @@ fn header_uses_the_real_solaris_logo_and_uploads_it_only_once() {
         .set
         .iter()
         .find(|(_, delta)| delta.image.size() == [icon.width as usize, icon.height as usize])
-        .expect("Header must upload the bundled Solaris artwork, not draw a generic pill");
+        .expect("Header must upload the bundled Krasnokamen artwork, not draw a generic pill");
     let second = paint(&mut app, &ctx, size, vec![]);
     assert!(
         !second

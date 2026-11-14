@@ -1,9 +1,10 @@
 use crate::api::{Command, InputIntent, Request, SharedState};
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{
+    Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc,
 };
 use std::time::{Duration, Instant};
 
@@ -78,14 +79,19 @@ pub(super) struct WriterAction<'a> {
 }
 impl std::fmt::Debug for WriterAction<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WriterAction").field("fence", &self.fence).finish()
+        f.debug_struct("WriterAction")
+            .field("fence", &self.fence)
+            .finish()
     }
 }
 impl Drop for WriterAction<'_> {
     fn drop(&mut self) {
         let mut control = self.core.control.lock();
-        let Some(lease) = control.lease.as_mut()
-            .filter(|lease| Arc::ptr_eq(&lease.live, &self.fence)) else {
+        let Some(lease) = control
+            .lease
+            .as_mut()
+            .filter(|lease| Arc::ptr_eq(&lease.live, &self.fence))
+        else {
             return;
         };
         lease.active_actions -= 1;
@@ -290,7 +296,10 @@ impl Core {
             }
             lease.active_actions += 1;
             lease.expires = Instant::now() + WRITER_IDLE_TTL;
-            return Ok(WriterAction { core: self, fence: lease.live.clone() });
+            return Ok(WriterAction {
+                core: self,
+                fence: lease.live.clone(),
+            });
         }
         let live = Arc::new(AtomicBool::new(true));
         c.lease = Some(Lease {
@@ -305,7 +314,10 @@ impl Core {
             pending_ui_respawn: false,
         });
         c.controller_revision = c.controller_revision.wrapping_add(1);
-        Ok(WriterAction { core: self, fence: live })
+        Ok(WriterAction {
+            core: self,
+            fence: live,
+        })
     }
     /// Watchdog decision under the control lock: the revocation reason plus the fence
     /// of the lease that was checked, or the next expiry deadline.

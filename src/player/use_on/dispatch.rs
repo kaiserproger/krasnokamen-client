@@ -43,7 +43,12 @@ impl Player {
                 self.block_item_result(item_owner, hit, hand, world, content, inventory, entities)?;
             if result.consumes() {
                 self.predict_block_interaction(
-                    item_owner, BlockUse { hit, hand }, false, world, content, inventory,
+                    item_owner,
+                    BlockUse { hit, hand },
+                    false,
+                    world,
+                    content,
+                    inventory,
                 )?;
                 return Ok(result);
             }
@@ -81,7 +86,9 @@ impl Player {
         {
             return Ok(Outcome::Pass);
         }
-        self.item_on_result(action, world, content, inventory, entities, tick, world_tick)
+        self.item_on_result(
+            action, world, content, inventory, entities, tick, world_tick,
+        )
     }
 
     pub(super) fn item_on_result(
@@ -102,8 +109,9 @@ impl Player {
         };
         let owner = content.item_use_owner(item.id, true)?;
         let first_prediction = self.use_predictions.len();
-        let result =
-            self.source_item_on(owner, hit, hand, world, content, inventory, entities, tick, world_tick)?;
+        let result = self.source_item_on(
+            owner, hit, hand, world, content, inventory, entities, tick, world_tick,
+        )?;
         if self.abilities.instabuild {
             let slot = if hand == 1 {
                 45

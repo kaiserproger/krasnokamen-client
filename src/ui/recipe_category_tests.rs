@@ -217,11 +217,17 @@ fn creative_tab_hover_shows_full_title_and_hides_on_leave() {
     let mut baseline = crate::api::MeshGeometry::default();
     ui.render(&content, &inventory, &mut baseline).unwrap();
     for index in [0, 3] {
-        let node = ui.nodes.iter()
+        let node = ui
+            .nodes
+            .iter()
             .find(|node| node.id == format!("creative/tab/minecraft:tab_{index}"))
             .unwrap();
         assert_eq!(node.label, titles[index]);
-        let painted = ui.text.language.plain(node.component.as_deref().unwrap()).unwrap();
+        let painted = ui
+            .text
+            .language
+            .plain(node.component.as_deref().unwrap())
+            .unwrap();
         assert!(painted.ends_with('…') && painted != titles[index]);
         let [x, y, w, h] = node.bounds;
         ui.execute(
@@ -234,12 +240,20 @@ fn creative_tab_hover_shows_full_title_and_hides_on_leave() {
             },
             &mut inventory,
             &content,
-        ).unwrap();
+        )
+        .unwrap();
         let tree = ui.semantic_tree(&inventory, &content).unwrap();
         let nodes = tree["nodes"].as_array().unwrap();
-        let tooltip = nodes.iter().find(|node| node["id"] == "component/hover/text").unwrap();
+        let tooltip = nodes
+            .iter()
+            .find(|node| node["id"] == "component/hover/text")
+            .unwrap();
         assert_eq!(tooltip["label"], titles[index]);
-        assert!(nodes.iter().any(|node| node["id"] == "component/hover/background"));
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node["id"] == "component/hover/background")
+        );
         let mut hovered = crate::api::MeshGeometry::default();
         ui.render(&content, &inventory, &mut hovered).unwrap();
         assert!(hovered.vertices.len() > baseline.vertices.len());
@@ -254,7 +268,8 @@ fn creative_tab_hover_shows_full_title_and_hides_on_leave() {
             },
             &mut inventory,
             &content,
-        ).unwrap();
+        )
+        .unwrap();
         let tree = ui.semantic_tree(&inventory, &content).unwrap();
         assert!(!tree["nodes"].as_array().unwrap().iter().any(|node| {
             node["id"] == "component/hover/text" || node["id"] == "component/hover/background"
