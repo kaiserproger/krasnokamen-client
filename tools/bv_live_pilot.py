@@ -136,6 +136,7 @@ LOG_AGAIN = 2.0  # seconds before the same refusal is logged again
 FIGHT_DROP = 1   # blocks he may step down in a fight: a deeper drop cannot be climbed out of by jumping
 APPROACH = 14.0  # an enemy this close (blocks) that he has not been able to swing at for IDLE_ENGAGE seconds is walked up to
 IDLE_ENGAGE = 4.0
+FIGHT_Y_LOG = 0.5  # blocks of height change in a fight step that get a `fight step y` line
 STUCK_STEPS = 3  # such steps in a row after which he goes around instead of pushing on
 STAND_MOVED = 0.3  # blocks moved in a step below which he counts as standing
 STAND_LOG = 2.0  # seconds between `stand` lines while he does not move in a fight
@@ -242,7 +243,7 @@ class Guard:
     def refuse(self, line: str, key: tuple):
         self.refusals.append(line)
         now = time.monotonic()
-        if now - self.logged.get(key, -1e9) >= LOG_AGAIN:
+        if "(drop deeper than" in line or now - self.logged.get(key, -1e9) >= LOG_AGAIN:  # a fight's drop refusal is always logged
             self.logged[key] = now
             log(line)
 
@@ -310,6 +311,7 @@ class Pilot:
         self.observed: dict = {}  # the whole last minecraft_observe taken by player()
         self.jam_kind = "friend"  # what stood under the crosshair last: friend | unknown-side | block
         self.jam = 0  # swings in a row not made because a friend or block stood under the crosshair
+        self.jam_at = -1e9  # when the last of them happened
 
     def keys(self, wanted: set[str]):
         release = self.held - wanted
@@ -476,6 +478,7 @@ CONTACT_READ = CONTACT + 2.0  # in a fight only neighbours this close (blocks) a
 CONTACT_CLASSIFY = 1    # unread neighbours classified per step in a fight (nearest, within CONTACT + 2)
 STRENGTH_READY = 0.9    # attack strength (client HUD bar) from which a swing is made
 MAIN_HAND_TTL = 30.0    # seconds the main-hand item read for the diagnostics is reused
+JAM_FRESH = 4.0    # seconds a jam counts after its last skipped swing (swings stop being tried inside the weapon's minimum reach)
 JAM_SKIPS = 2     # swings skipped in a row because a friend or block is under the crosshair: he steps aside
 SIDESTEP = 1.0    # blocks per sidestep pulse
 SIDESTEP_MAX = 1.5  # blocks one way before he tries the other side
@@ -645,6 +648,7 @@ def attack_input(client: Client, pilot: Pilot, target, args, sides: dict, blocke
         seen.append(kind)
     blocked[ident] = time.monotonic() + BLOCK_FOR
     pilot.jam += 1
+    pilot.jam_at = time.monotonic()
     pilot.jam_kind = ("friend" if any(x.startswith("friend") for x in seen) else
                       "unknown-side" if any(x.startswith("unknown-side") for x in seen) else "block")
     log(f"attack skipped (crosshair {', '.join(seen)}; target {ident} left alone {BLOCK_FOR} s)")
@@ -693,6 +697,7 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
                 return False
             blocked[ident] = time.monotonic() + BLOCK_FOR
             pilot.jam += 1
+            pilot.jam_at = time.monotonic()
             pilot.jam_kind = "friend" if side == args.side else "unknown-side"
             log("attack occluded by", "friend" if side == args.side else "unknown-side entity", other,
                 "(not attacking); leaving", ident, "for", BLOCK_FOR, "s")
@@ -701,6 +706,8 @@ def attack_once(client: Client, pilot: Pilot, target, args, sides: dict, blocked
             log("attack occluded by block:", text[:160])
             blocked[ident] = time.monotonic() + BLOCK_FOR
             pilot.jam += 1
+            pilot.jam_at = time.monotonic()
+            pilot.jam_kind = "block"
         elif "reach" in text:
             log("attack out of reach (client):", text[:160])
         elif "not dispatched" in text:
@@ -745,6 +752,7 @@ def rank(args, client: Client):
     decision = None  # the sidestep decision of the last step, logged once its outcome is known
     episode = 0  # sidestep steps in the current detour
     stuck = 0  # fight steps in a row that asked for a walk and got nowhere (a wall in the way)
+    fought = False  # the last step was a fight step (its height change is logged)
     standing_since = None  # when the current spell of standing still began
     stand, last_stand = None, -1e9  # the last fight step's facts, and when a `stand` line was last written
     side_dir, side_from, sidestepping = 1.0, None, False  # sidestep: direction, where this way began, last step was one
@@ -772,6 +780,7 @@ def rank(args, client: Client):
             last_goal, drift = None, [0.0, 0.0]
             pilot.sent_look = None
             decision, stand, sidestepping, side_from, episode, pilot.jam = _forget(decision, episode, "respawn")
+            fought = False
             log("respawned at", [round(v, 1) for v in last], "; waiting for the server to re-slot")
             choose_melee(client, args.melee_slot)
             interval = weapon_profile(client, args)
@@ -783,9 +792,13 @@ def rank(args, client: Client):
             log("teleported to", [round(v, 1) for v in here], "; rank offset resets, facing", round(float(me.get("yaw", yaw))))
             offset, anchor, target, last_goal, drift = None, None, None, None, [0.0, 0.0]
             decision, stand, sidestepping, side_from, episode, pilot.jam = _forget(decision, episode, "teleport")
+            fought = False
             yaw = rest_yaw = float(me.get("yaw", yaw))
             pitch = float(me.get("pitch", pitch))
             interval = weapon_profile(client, args)
+        if fought and last is not None and abs(here[1] - last[1]) >= FIGHT_Y_LOG:
+            drop = last[1] - here[1]
+            log(f"fight step y {last[1]:.1f} -> {here[1]:.1f} ({'drop' if drop > 0 else 'rise'} {abs(drop):.1f})")
         last, last_step = here, stepped
         if stand is not None and stand["swing"] != "sent" and math.dist(stand["before"], here) < STAND_MOVED:
             standing_since = stepped if standing_since is None else standing_since
@@ -905,10 +918,18 @@ def rank(args, client: Client):
         pilot.look(yaw, pitch)
         wanted: set[str] = set()
         steer = None
+        if pilot.jam and time.monotonic() - pilot.jam_at > JAM_FRESH:
+            pilot.jam = 0  # nothing has blocked a swing for a while: the old count says nothing about now
         step_aside, flip = False, ""
         if contact:
-            too_close = eye_distance(me, focus) < args.min_reach  # a spear misses inside its minimum reach
-            if enemy is None or pilot.jam >= JAM_SKIPS or stuck >= STUCK_STEPS:
+            too_close = eye_distance(me, focus) < args.min_reach  # a spear misses inside its minimum reach: back off first, a sidestep cannot help
+            aside_wanted = enemy is None or pilot.jam >= JAM_SKIPS or stuck >= STUCK_STEPS
+            if too_close or (not aside_wanted and focus["distance"] > args.engage + ENGAGE_SLACK):
+                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
+                gap = [here[0] - focus["x"], here[2] - focus["z"]]
+                length = math.hypot(*gap) or 1.0
+                steer = [focus["x"] + gap[0] / length * args.engage, focus["z"] + gap[1] / length * args.engage]
+            elif aside_wanted:
                 # A friend stands in the line (every enemy blocked, or swings skipped in a row): one step sideways,
                 # the other way when the guard refused it or this way went SIDESTEP_MAX; never stand still in a fight.
                 flip = ""
@@ -922,11 +943,6 @@ def rank(args, client: Client):
                 length = math.hypot(*line) or 1.0
                 steer = [here[0] - line[1] / length * SIDESTEP * side_dir, here[2] + line[0] / length * SIDESTEP * side_dir]
                 step_aside = True
-            elif focus["distance"] > args.engage + ENGAGE_SLACK or too_close:
-                # To args.engage blocks from him (walk up, or back off when too close), along the line from him to here.
-                gap = [here[0] - focus["x"], here[2] - focus["z"]]
-                length = math.hypot(*gap) or 1.0
-                steer = [focus["x"] + gap[0] / length * args.engage, focus["z"] + gap[1] / length * args.engage]
             else:
                 steer = [here[0], here[2]]  # close enough: hold the place
         elif target is not None:
@@ -979,7 +995,7 @@ def rank(args, client: Client):
         elif sidestepping:
             log(f"sidestep ended after {episode} step(s): {'fight over' if not contact else 'jam cleared (counter ' + str(pilot.jam) + ')'}")
             episode = 0
-        sidestepping, walked_last = step_aside, bool(walked)
+        sidestepping, walked_last, fought = step_aside, bool(walked), contact
         if not step_aside:
             side_from = None
         nearest = enemies[0] if enemies else None

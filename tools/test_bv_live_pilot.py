@@ -50,6 +50,7 @@ class MarchingRank:
         self.vanish = None  # (time, ids): from that time those soldiers are far away
         self.selected_free = True  # reads of the selected item (the weapon interval) also take no march time
         self.since_attack, self.charge_full, self.hud = 99, 13, True  # ticks since the last attack; ticks to full strength; HUD in observe
+        self.follow_floor = False  # his y follows the floor of his column (steps down)
         self.reach_limit = 3.0  # the client's raycast reach for entities
         self.press_distances = []  # eye distance to the entity under the crosshair at each attack press
         self.press_strengths = []  # attack strength at each attack press
@@ -103,6 +104,11 @@ class MarchingRank:
             self.samples.append((self.now, self.me[1] - slot[1], math.dist(self.me, slot)))
         if self.now >= self.duration:
             raise Stop
+
+    def feet_y(self):
+        """His feet: on the floor of the column he stands in when `follow_floor`, else always 64."""
+        floor = self.floor(self.me[0], self.me[1])
+        return float(floor + 1) if self.follow_floor and floor is not None and floor < 64 else 64.0
 
     def solid_at(self, x, z):
         floor = self.floor(x, z)
@@ -170,7 +176,7 @@ class MarchingRank:
         if name == "minecraft_wait_for_play":
             return {}
         if name == "minecraft_observe":
-            return {"state_version": 1, "player": {"x": self.me[0], "y": 64.0, "z": self.me[1], "yaw": self.yaw,
+            return {"state_version": 1, "player": {"x": self.me[0], "y": self.feet_y(), "z": self.me[1], "yaw": self.yaw,
                                                   "pitch": 0.0, "health": 0.0 if self.dead else 20.0, "horizontal_collision": False},
                     "inputs": {"held": sorted(self.held)},
                     "using": {"item": "minecraft:shield"} if self.always_using or "use" in self.held or self.using_ticks else None,
@@ -1087,6 +1093,45 @@ class Fight(unittest.TestCase):
         lines = [line for line in logs if line.startswith("stand fight;")]
         self.assertTrue(lines, "a swing that was tried and refused hid the explanation")
         self.assertTrue(all("swing tried, not sent" in line for line in lines), lines[:2])
+
+    def test_a_spear_user_with_the_enemy_inside_the_minimum_reach_backs_off_after_a_jam_not_sidesteps_for_ever(self):
+        # G2L4's first minute: two swings skipped behind friends (jam 2), then the enemies close in inside the spear's 2.0
+        # minimum reach, where no swing is tried, so the count never cleared and he sidestepped for 50 s.
+        sim = MarchingRank(0.05, march=0.0, duration=30.0)
+        sim.soldiers = {1000: [0.0, 1.0], 1001: [0.4, 1.2]}
+        sim.hotbar, sim.selected = {0: IRON_SPEAR}, 0
+        sim.hud, sim.charge_full, sim.reach_limit = True, 21, 4.5
+        real_init = pilot.Pilot.__init__
+        def init(self, client):
+            real_init(self, client)
+            self.jam, self.jam_at, self.jam_kind = 2, 0.0, "friend"
+        with mock.patch.object(pilot.Pilot, "__init__", init):
+            logs = logged(sim, lambda: self.run_rank(sim))
+        self.assertTrue(sim.press_times, "he sidestepped for ever instead of backing off: " + "\n".join(logs[-3:]))
+        self.assertGreaterEqual(math.dist(sim.me, [0.0, 1.0]), 2.0)
+
+    def test_an_old_jam_does_not_keep_him_sidestepping_when_nothing_blocks_any_more(self):
+        sim = MarchingRank(0.05, march=0.0, duration=40.0)
+        sim.soldiers = {500 + i: [0.5 * (i - 3), 1.2] for i in range(7)}
+        sim.soldiers[1000] = [0.0, 2.3]
+        sim.spawn = [(8.0, 1000, [0.0, 6.0])] + [(8.0, 500 + i, [30.0 + i, 30.0]) for i in range(7)]  # the friends leave, the enemy steps out of reach
+        logs = logged(sim, lambda: self.run_rank(sim))
+        self.assertTrue([t for t in sim.press_times if t > 12.0], "still sidestepping on a stale jam: " + "\n".join(logs[-4:]))
+
+    def test_a_refused_drop_in_a_fight_is_logged_every_time(self):
+        floor = lambda x, z: 61 if z > 0.5 else 63
+        sim, logs = duel({1000: (0.0, 4.3, 64.0)}, duration=15.0, bare=True, floor=floor)
+        refused = [line for line in logs if line.startswith("edge refused forward") and "drop deeper than 1" in line]
+        self.assertGreaterEqual(len(refused), 15, "throttled to one line per 2 s")
+        self.assertEqual([line for line in logs if line.startswith("fight step y")], [])
+
+    def test_a_one_block_step_down_in_a_fight_is_taken_and_logged(self):
+        floor = lambda x, z: 62 if z > 0.5 else 63
+        sim = MarchingRank(0.05, march=0.0, duration=15.0, floor=floor)
+        sim.soldiers, sim.follow_floor = {1000: [0.0, 4.3]}, True
+        logs = logged(sim, lambda: self.run_rank(sim))
+        self.assertIn("fight step y 64.0 -> 63.0 (drop 1.0)", logs)
+        self.assertGreater(sim.me[1], 0.6, "he did not step down")
 
     def test_the_other_side_is_tried_when_the_guard_refuses_one(self):
         for void in (lambda x, z: None if x > 0.3 else 63, lambda x, z: None if x < -0.3 else 63):
