@@ -87,3 +87,13 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   the binary; protocol ids, dimensions, metadata accessors, texture/variant selection, head/body
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
   the launcher needs no JDK and nothing is derived from the client jar for entities.
+* Zombie family arms (`zombie`, `husk`, `drowned`, `giant`, `zombie_villager`, `zombified_piglin`) follow
+  26.3 `ZombieModel.setupAttackAnimation` -> `AnimationUtils.animateZombieArms` plus the `bobModelPart`
+  pair (`presentation::zombie_arm_rotation`): the arms are assigned (80 degrees forward, 120 aggressive,
+  hanging for a baby that holds an item), never walk-swung. Not ported: the drowned trident-throw
+  arm and the spear arm pose.
+* Spider and cave spider legs follow 26.3 `SpiderModel.setupAnim` (`presentation::spider_leg_swing`):
+  per leg pair a yaw offset -(cos(2 pos 0.6662 + shift) 0.4) speed and a roll offset
+  abs(sin(pos 0.6662 + shift) 0.4) speed, shifts 0, pi, pi/2, 3pi/2 from the hind pair forward, left
+  legs mirrored. The spider and goat rigs are the gate-line fits against Java 26.3 captures; the sheep
+  and wool rigs use the `QuadrupedModel` offsets (head y 6, legs z +7 hind and -5 front).

@@ -398,7 +398,7 @@ impl Player {
                     * Mat4::from_translation(Vec3::new(side * 0.14, -0.58, 0.))
                     * Mat4::from_rotation_z(side * 0.25)
                     * Mat4::from_rotation_x(-0.15);
-                entities.append_local_arm(content, right, shoulder, light, &mut scene.dynamic)?;
+                entities.append_local_arm(content, right, shoulder, light, &mut scene.hand)?;
                 match failure {
                     Some(reason) => return Err(reason),
                     None => continue,
@@ -427,7 +427,7 @@ impl Player {
                     },
                     quad.alpha,
                     light,
-                    &mut scene.dynamic,
+                    &mut scene.hand,
                 )?;
             }
         }

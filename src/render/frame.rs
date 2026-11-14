@@ -847,6 +847,49 @@ impl Renderer {
                 self.stats.terrain_phase2_api_calls += phase2_calls;
             }
         }
+        // First-person hand: the source clears depth before `renderItemInHand`, so the
+        // hand and held item always draw over terrain and entities and never clip into
+        // a block the player stands against. Nothing after this reads scene depth.
+        if self.hand.ranges.iter().any(|range| !range.is_empty()) {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("first-person hand"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.post.scene_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_bind_group(0, &self.camera_bind, &[]);
+            pass.set_bind_group(1, &self.atlas_bind, &[]);
+            pass.set_bind_group(2, &self.shadow.bind, &[]);
+            pass.set_vertex_buffer(0, self.hand.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.instances.slice(..));
+            pass.set_index_buffer(self.hand.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for &family in &self.pipelines.dynamic_order {
+                let range = self.hand.ranges[family].clone();
+                if range.is_empty() || material::MATERIALS[family].shader.kind == 11 {
+                    continue;
+                }
+                pass.set_pipeline(&self.pipelines.dynamic[self.pipelines.dynamic_index[family]]);
+                self.stats.submitted_indices += u64::from(range.end - range.start);
+                self.stats.draw_calls += 1;
+                pass.draw_indexed(range, 0, 1..2);
+            }
+        }
         self.post
             .encode(&mut encoder, &self.targets.color_view, fancy, &self.timing);
         self.stats.draw_calls += if fancy { 3 } else { 1 };

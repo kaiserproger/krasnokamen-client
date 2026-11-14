@@ -607,6 +607,7 @@ impl App {
                 .unwrap_or_else(|e| e.into_inner());
             if capture.is_some() {
                 shared.data["terrain_capture"] = self.session.capture_terrain_metrics();
+                shared.data["gait_capture"] = self.session.capture_gait_frame();
             }
             renderer.render(self.session.scene(), capture, &shared)?;
             self.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());

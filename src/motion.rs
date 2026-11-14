@@ -341,6 +341,25 @@ mod tests {
         assert!(m.hand(1., 70., 0.).offset[0].abs() < 0.001);
     }
 
+    /// ISSUE-1-02: the source first-person hand is still at idle (26.3
+    /// `FirstPersonHandsAndItemsRenderer`); a native idle sway made a held tool drift
+    /// ("floating") off its anchor. Red when the time-based sway is restored.
+    #[test]
+    fn view_motion_hand_is_perfectly_still_at_rest() {
+        let mut m = ViewMotion::default();
+        let input = ViewInput { yaw: 25., pitch: 10., grounded: true, ..Default::default() };
+        for _ in 0..2000 {
+            m.step(1. / 60., &input);
+        }
+        for walking in [0., 0.5, 1.] {
+            let hand = m.hand(walking, 25., 10.);
+            // The old sway was +-0.004/0.005 blocks and 0.5 degrees.
+            assert!(hand.offset.iter().all(|v| v.abs() < 1e-4), "walking {walking}: {hand:?}");
+            assert!(hand.roll_deg.abs() < 1e-3, "walking {walking}: {hand:?}");
+            m.step(0.37, &input);
+        }
+    }
+
     #[test]
     fn view_motion_time_split_does_not_change_the_result() {
         let input = ViewInput { yaw: 40., strafe: -1., grounded: true, ..Default::default() };
@@ -704,25 +723,20 @@ impl ViewMotion {
         self.lag[1] = damp(self.lag[1], input.pitch, LAG_RATE, dt);
         self.consume = damp(self.consume, input.consume, 12., dt);
     }
-    /// Hand offsets for the current spring state; `walking` is the 0..1
-    /// bob amplitude that suppresses idle sway while the walk bob dominates.
-    pub fn hand(&self, walking: f32, yaw: f32, pitch: f32) -> HandPose {
-        let idle = 1. - smoothstep(walking * 3.);
-        let t = (self.time % 600.) as f32;
+    /// Hand offsets for the current spring state. The source first-person hand is
+    /// perfectly still at idle (only the camera bob moves it), so the rest pose carries
+    /// no time-based sway: the held-item baseline stays exactly on the vanilla anchor
+    /// `(side*0.56, -0.52, -0.72)`.
+    pub fn hand(&self, _walking: f32, yaw: f32, pitch: f32) -> HandPose {
         let turn = angle_delta(self.lag[0], yaw);
         let tilt = pitch - self.lag[1];
         HandPose {
             offset: [
-                (t * 0.9).sin() * 0.004 * idle
-                    - (turn * 0.0035).clamp(-0.06, 0.06)
-                    - self.roll.x * 0.004,
-                (t * 1.3 + 1.).sin() * 0.005 * idle
-                    + (tilt * 0.003).clamp(-0.05, 0.05)
-                    + self.dip.x * 0.5
-                    - self.bump.x * 0.5,
+                -(turn * 0.0035).clamp(-0.06, 0.06) - self.roll.x * 0.004,
+                (tilt * 0.003).clamp(-0.05, 0.05) + self.dip.x * 0.5 - self.bump.x * 0.5,
                 -self.bump.x,
             ],
-            roll_deg: (t * 0.7).sin() * 0.5 * idle - (turn * 0.25).clamp(-5., 5.),
+            roll_deg: -(turn * 0.25).clamp(-5., 5.),
         }
     }
 }

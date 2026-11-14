@@ -192,14 +192,15 @@ impl Renderer {
         {
             return Err("missing_required_end_sky_texture".into());
         }
-        let directional = scene
-            .dynamic
-            .indices
-            .iter()
-            .enumerate()
-            .any(|(family, indices)| {
-                !indices.is_empty() && material::MATERIALS[family].shader.cardinal
-            });
+        let directional = [&scene.dynamic, &scene.hand].into_iter().any(|geometry| {
+            geometry
+                .indices
+                .iter()
+                .enumerate()
+                .any(|(family, indices)| {
+                    !indices.is_empty() && material::MATERIALS[family].shader.cardinal
+                })
+        });
         if directional && env.light_directions.is_none() {
             return Err("missing_required_source_cardinal_light_directions".into());
         }
@@ -239,12 +240,14 @@ impl Renderer {
         }
         // Validate independent presentation streams before any resident replacement.
         Stream::validate_size(&scene.dynamic.vertices, &scene.dynamic.indices, layers)?;
+        Stream::validate_size(&scene.hand.vertices, &scene.hand.indices, layers)?;
         Stream::validate_size(&scene.overlay.vertices, &scene.overlay.indices, layers)?;
         if scene.lightmap.is_none()
             && scene
                 .vertices
                 .iter()
                 .chain(scene.dynamic.vertices.iter())
+                .chain(scene.hand.vertices.iter())
                 .chain(
                     scene
                         .chunks
@@ -386,6 +389,13 @@ impl Renderer {
             &scene.dynamic.vertices,
             &scene.dynamic.indices,
             material::MATERIALS.map(|m| m.sort),
+        )?;
+        self.hand.upload(
+            &self.device,
+            &self.queue,
+            &scene.hand.vertices,
+            &scene.hand.indices,
+            material::MATERIALS.map(|_| false),
         )?;
         self.overlay.upload(
             &self.device,

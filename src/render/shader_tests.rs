@@ -1172,3 +1172,140 @@ fn hiz_rejects_hidden_sections_and_preserves_every_pixel_across_turns() {
     }
     assert!(seen_rejection);
 }
+
+fn flat_quad(z: f32, half: f32, color: f32) -> Vec<crate::api::Vertex> {
+    [[-half, -half, z], [-half, half, z], [half, half, z], [half, -half, z]]
+        .into_iter()
+        .map(|position| crate::api::Vertex {
+            position,
+            color: [color; 3],
+            normal: [0., 0., -1.],
+            alpha: 1.,
+            uv: [-1.; 2],
+            overlay_uv: [-1.; 2],
+            overlay_tint: [1.; 3],
+            light: [-1.; 2],
+            ..crate::api::Vertex::zeroed()
+        })
+        .collect()
+}
+
+/// ISSUE-1-21: the held item the player pushes into a wall. The hand quad lies behind
+/// an opaque terrain wall (as an item does when the player stands against a block).
+/// Emitted as ordinary dynamic geometry the wall hides it; emitted as hand geometry
+/// (the source clears depth before `renderItemInHand`) it is drawn over the wall.
+#[test]
+fn first_person_hand_draws_over_a_wall_it_is_inside() {
+    let mut renderer = pollster::block_on(Renderer::new_offscreen(
+        64,
+        64,
+        PathBuf::from(".analysis/shaders-hand-regression"),
+    ))
+    .unwrap();
+    let sprite = Some(crate::api::SkyTexture {
+        uv: [0., 0., 1., 1.],
+        layer: 0,
+    });
+    let mut scene = Scene {
+        yaw: 0.,
+        pitch: 0.,
+        texture_rgba: Some(Arc::new(vec![128, 128, 128, 255])),
+        texture_width: 1,
+        texture_height: 1,
+        texture_layers: 1,
+        texture_revision: 1,
+        environment: crate::api::WorldEnvironment {
+            display_encoded: true,
+            sky_kind: SkyKind::Overworld,
+            sky_color: [0.; 3],
+            fog_color: [0.; 3],
+            sun_angle: 0.,
+            moon_angle: 180.,
+            sun_texture: sprite,
+            moon_texture: sprite,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut wall = crate::api::MeshGeometry::default();
+    wall.vertices = flat_quad(4., 2., 0.3);
+    wall.indices[0] = vec![0, 1, 2, 0, 2, 3];
+    scene.chunks.insert(
+        [0; 3],
+        crate::api::ChunkDraw {
+            revision: 1,
+            origin: [0.; 3],
+            bounds_min: [-2., -2., 4.],
+            bounds_max: [2., 2., 4.],
+            visibility: visibility::ALL_OPEN,
+            geometry: Some(Arc::new(wall)),
+            fade_duration_ms: Some(0),
+        },
+    );
+    let center = (32 * 64 + 32) * 4;
+    let lightning = EntityMaterial::Lightning as usize;
+
+    renderer.set_fancy_shaders(false);
+    let wall_only = pixels(&mut renderer, &scene)[center];
+    assert!(wall_only < 120, "the wall must be dark so the additive item shows, got {wall_only}");
+
+    // Control: the item behind the wall as ordinary dynamic geometry is occluded.
+    scene.dynamic.vertices = flat_quad(6., 1., 0.5);
+    scene.dynamic.indices[lightning] = vec![0, 1, 2, 0, 2, 3];
+    scene.revision += 1;
+    assert_eq!(pixels(&mut renderer, &scene)[center], wall_only, "dynamic quad must be hidden");
+
+    // The same quad as hand geometry wins over the wall.
+    scene.hand = std::mem::take(&mut scene.dynamic);
+    scene.revision += 1;
+    let hand = pixels(&mut renderer, &scene)[center];
+    // `Lightning` blends additively: over a hidden quad the wall stays, over the wall it adds ~128.
+    assert!(hand >= wall_only + 100, "hand pixel {hand}, wall pixel {wall_only}");
+}
+
+/// ISSUE-1-03: the F3 `indices` figure is the index count submitted this frame. It depends
+/// on where the camera looks but must never accumulate over frames: eight frames over an
+/// unchanged scene submit the same nonzero count (red when the per-frame `FrameStats` reset in
+/// `Renderer::render` is removed).
+#[test]
+fn submitted_index_count_is_per_frame_not_cumulative() {
+    let mut renderer = pollster::block_on(Renderer::new_offscreen(
+        64,
+        64,
+        PathBuf::from(".analysis/index-count-per-frame"),
+    ))
+    .unwrap();
+    renderer.set_fancy_shaders(false);
+    let mut scene = Scene {
+        camera_position: [0., 2., 0.],
+        pitch: 20.,
+        revision: 1,
+        ..Scene::default()
+    };
+    scene.chunks.insert(
+        [0; 3],
+        crate::api::ChunkDraw {
+            revision: 1,
+            origin: [0.; 3],
+            bounds_min: [-1., 0., 1.],
+            bounds_max: [1., 0., 4.],
+            visibility: visibility::ALL_OPEN,
+            geometry: Some(Arc::new(terrain_release_quad())),
+            fade_duration_ms: Some(0),
+        },
+    );
+    let mut expected = None;
+    for _ in 0..8 {
+        renderer.render(&scene, None, &observation()).unwrap();
+        renderer
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(30)),
+            })
+            .unwrap();
+        let indices = renderer.stats.submitted_indices;
+        assert!(indices >= 6, "frame must submit the terrain quad");
+        assert_eq!(*expected.get_or_insert(indices), indices, "counts must reset each frame");
+    }
+}

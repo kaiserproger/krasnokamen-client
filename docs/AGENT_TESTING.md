@@ -559,6 +559,14 @@ extra rotation or scale; only an empty hand draws the bare arm. Regressions:
 `entities::animation_tests::held_tool_points_forward_from_the_fist_not_along_the_arm`.
 Before/after captures are in `.analysis/issue1/shots/` (`held-*`, `villager-*`).
 
+The first-person hand and item (`Scene::hand`, written by `Player::append_first_person`) are drawn in
+their own `first-person hand` pass after the world passes, with the depth buffer cleared first, as the
+source clears depth before `GameRenderer.renderItemInHand`: a tool never clips into the block the
+player stands against (ISSUE-1-21). Regression
+`render::shader_tests::first_person_hand_draws_over_a_wall_it_is_inside` (the same quad as ordinary
+dynamic geometry stays hidden behind the wall; as hand geometry it is drawn over it); real-client gate
+`tools/harness/tool_clipping_scene.json` (`tool_wall_visible`).
+
 The villager family (villager, wandering trader, witch) has no per-hand arm bones, only
 the crossed `arms` bone (model role `crossed_arms`; the witch also has the `nose` role). The
 main-hand item is a ground-context item at the source `CrossedArmsItemLayer` pose

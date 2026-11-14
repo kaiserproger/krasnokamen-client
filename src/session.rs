@@ -533,6 +533,7 @@ impl Session {
         self.scene.vertices.clear();
         self.scene.indices.clear();
         self.scene.dynamic = Default::default();
+        self.scene.hand = Default::default();
         self.scene.entity_presentation = Default::default();
         self.scene.overlay = Default::default();
         self.scene.revision += 1;

@@ -231,6 +231,7 @@ impl Renderer {
             self.stats.terrain_upload_bytes
                 + self.stats.texture_upload_bytes
                 + self.dynamic.uploaded_bytes
+                + self.hand.uploaded_bytes
                 + self.overlay.uploaded_bytes
                 + self.sunrise.uploaded_bytes
                 + self.instance_data.len() as u64 * 16

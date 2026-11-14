@@ -678,6 +678,24 @@ pub(super) fn evaluate_rig(
         .animation
         .map(|(_, start)| (tick.saturating_sub(start) as f32 + partial) / 6.)
         .filter(|f| *f < 1.);
+    let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
+    // Source `ZombieModel.setupAttackAnimation` (zombie, husk, drowned, giant, zombie villager,
+    // zombified piglin): both arms are assigned, never walk-swung, 80 degrees forward at idle and
+    // 120 degrees while the mob is aggressive; a baby holding an item hangs them (`raised`).
+    let zombie_arms = matches!(
+        e.type_name.as_str(),
+        "minecraft:zombie"
+            | "minecraft:husk"
+            | "minecraft:drowned"
+            | "minecraft:giant"
+            | "minecraft:zombie_villager"
+            | "minecraft:zombified_piglin"
+    );
+    let zombie_arms_raised = !(zombie_arms
+        && boolean(models, e, "DATA_BABY_ID")
+        && e.equipment_value(0).is_some_and(|stack| !stack.empty()));
+    let aggressive = zombie_arms && number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 4 != 0;
+    let spider = matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider");
     for bone in &rig.bones {
         let mut rotation = bone.rotation;
         let mut pivot = bone.pivot;
@@ -703,6 +721,10 @@ pub(super) fn evaluate_rig(
             BoneRole::LeftLeg => {
                 rotation.x += (phase + std::f32::consts::PI).cos() * 1.4 * amplitude * leg_swing
             }
+            BoneRole::RightArm | BoneRole::LeftArm if zombie_arms => {
+                let side = if bone.role == BoneRole::RightArm { 1. } else { -1. };
+                rotation = zombie_arm_rotation(side, (zombie_arms_raised, aggressive), age, attack);
+            }
             BoneRole::RightArm => {
                 rotation.x += (phase + std::f32::consts::PI).cos() * amplitude;
                 if using && flags & 2 == 0 {
@@ -725,6 +747,10 @@ pub(super) fn evaluate_rig(
                 rotation.x = -0.9;
             }
             BoneRole::Nose | BoneRole::CrossedArms | BoneRole::Fixed => {}
+        }
+        if spider && let Some((yaw, roll)) = spider_leg_swing(&bone.name, phase, amplitude) {
+            rotation.y += yaw;
+            rotation.z += roll;
         }
         if crouch && bone.name == "body" {
             rotation.x += 0.5;
@@ -753,6 +779,40 @@ pub(super) fn evaluate_rig(
         let parent = bone.parent.map(|i| out[i]).unwrap_or(root);
         out.push(parent * resources::transform(pivot, rotation, bone.scale));
     }
+}
+/// Source `ZombieModel.setupAttackAnimation` -> `AnimationUtils.animateZombieArms` (26.3), then the
+/// `bobModelPart` pair of `HumanoidModel.setupAnim`: both arms are assigned, not added to, so the
+/// humanoid walk swing never reaches them. `raised` is false only for a baby that holds an item
+/// (arms hang, the swing terms flip sign). `side` is +1 for the right arm and -1 for the left;
+/// `attack` is the swing progress.
+pub(super) fn zombie_arm_rotation(
+    side: f32,
+    (raised, aggressive): (bool, bool),
+    age: f32,
+    attack: Option<f32>,
+) -> Vec3 {
+    use std::f32::consts::PI;
+    let direction = if raised { 1. } else { -1. };
+    let (swing, recover) = attack.map_or((0., 0.), |a| {
+        (direction * (a * PI).sin(), ((1. - (1. - a) * (1. - a)) * PI).sin())
+    });
+    let base = if raised { -PI / if aggressive { 1.5 } else { 2.25 } } else { 0. };
+    Vec3::new(
+        base + swing * 1.2 - recover * 0.4 + side * (age * 0.067).sin() * 0.05,
+        -direction * side * (0.1 - swing * 0.6),
+        side * ((age * 0.09).cos() * 0.05 + 0.05),
+    )
+}
+/// Source `SpiderModel.setupAnim`: yaw and roll offsets of leg `legN` (N = 0..8, pairs of right
+/// and left legs from the hind pair to the front pair). `phase` is walk position * 0.6662.
+pub(super) fn spider_leg_swing(name: &str, phase: f32, speed: f32) -> Option<(f32, f32)> {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let index: usize = name.strip_prefix("leg")?.parse().ok().filter(|i| *i < 8)?;
+    let shift = [0., PI, FRAC_PI_2, 3. * FRAC_PI_2][index / 2];
+    let side = if index % 2 == 0 { 1. } else { -1. };
+    let yaw = -((phase * 2. + shift).cos() * 0.4) * speed;
+    let roll = ((phase + shift).sin() * 0.4).abs() * speed;
+    Some((side * yaw, side * roll))
 }
 pub(super) fn emit_rig(
     rig: &Rig,

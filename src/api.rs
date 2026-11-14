@@ -437,6 +437,9 @@ pub struct Scene {
     pub texture_patches: Vec<AtlasPatch>,
     pub chunks: BTreeMap<[i32; 3], ChunkDraw>,
     pub dynamic: DynamicGeometry,
+    /// First-person hand and held item. Drawn in its own pass after a depth clear, like
+    /// the source `GameRenderer.renderItemInHand`, so it never clips into a block.
+    pub hand: DynamicGeometry,
     pub entity_presentation: crate::entities::PresentationStats,
     /// Physical-pixel UI geometry, composited in painter order without depth.
     pub overlay: MeshGeometry,

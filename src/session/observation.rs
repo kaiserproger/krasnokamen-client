@@ -12,6 +12,26 @@ impl Session {
             .as_ref()
             .map_or(Value::Null, Terrain::capture_metrics)
     }
+    /// Living animation inputs sampled after this capture's scene extraction.
+    pub(crate) fn capture_gait_frame(&self) -> Value {
+        Value::Array(
+            self.entities
+                .received_entities()
+                .filter_map(|entity| {
+                    let living = entity.source.as_ref()?.living.as_ref()?;
+                    let transform =
+                        entity.presented_transform(self.client_tick, self.presentation_partial);
+                    Some(json!({
+                        "entity_uuid": entity.uuid,
+                        "entity_type": entity.type_name,
+                        "position": transform.position,
+                        "walk_position": living.walk.position(self.presentation_partial),
+                        "walk_speed": living.walk.speed(self.presentation_partial),
+                    }))
+                })
+                .collect(),
+        )
+    }
     pub fn minecraft_observation(&self) -> Value {
         let screen = self
             .ui
@@ -544,6 +564,10 @@ impl Session {
         ];
         self.scene.dynamic.vertices.clear();
         for indices in &mut self.scene.dynamic.indices {
+            indices.clear();
+        }
+        self.scene.hand.vertices.clear();
+        for indices in &mut self.scene.hand.indices {
             indices.clear();
         }
         self.scene.entity_presentation = Default::default();

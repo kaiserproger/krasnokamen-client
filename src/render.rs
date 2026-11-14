@@ -363,6 +363,7 @@ pub struct Renderer {
     uploaded_meshes: Vec<([i32; 3], u64)>,
     fixture: Option<ResidentMesh>,
     dynamic: Stream<{ EntityMaterial::COUNT }>,
+    hand: Stream<{ EntityMaterial::COUNT }>,
     overlay: Stream,
     sunrise: Stream,
     sunrise_geometry: crate::api::MeshGeometry,
@@ -672,6 +673,7 @@ impl Renderer {
         let outline = outline::Outline::new(&device, config.width, config.height);
         let post = post::Post::new(&device, config.width, config.height);
         let dynamic = Stream::new(&device);
+        let hand = Stream::new(&device);
         let overlay = Stream::new(&device);
         let sunrise = Stream::new(&device);
         let mut mdi = mdi_enabled.then(|| {
@@ -743,6 +745,7 @@ impl Renderer {
             staged_chunks: Vec::new(),
             uploaded_meshes: Vec::new(),
             dynamic,
+            hand,
             overlay,
             sunrise,
             sunrise_geometry: Default::default(),
@@ -1315,6 +1318,7 @@ impl Renderer {
                         .get("terrain_capture")
                         .cloned()
                         .unwrap_or(Value::Null);
+                    metadata["gait_frame"] = observation.data["gait_capture"].clone();
                     metadata["terrain_submission"] = self.section_upload_receipts();
                     // API calls and logical terrain draws differ under MDI.
                     // Entity/block-entity contributions share material draws.

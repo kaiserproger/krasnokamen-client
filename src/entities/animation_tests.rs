@@ -633,3 +633,162 @@ fn crossed_arms_rigs_emit_the_held_item_at_the_source_anchor() {
         );
     }
 }
+
+/// ISSUE-1-19: zombies walked like players, arms swinging at the sides. The source
+/// `AbstractZombieModel` holds both arms forward (80 degrees; 120 when aggressive) whatever
+/// the walk, and a baby that holds an item keeps the humanoid pose.
+#[test]
+fn animation_zombie_family_raises_both_arms_and_walking_does_not_swing_them() {
+    let (mut models, mut entity) = fixture();
+    let mut schema = models.schemas.remove("minecraft:pig").unwrap();
+    schema.accessors.insert("DATA_MOB_FLAGS_ID".into(), [15, 0]);
+    schema.accessors.insert("DATA_BABY_ID".into(), [16, 8]);
+    let rig = rig();
+    for name in ["zombie", "husk", "drowned", "giant", "zombie_villager", "zombified_piglin"] {
+        entity.type_name = format!("minecraft:{name}");
+        models.schemas.insert(entity.type_name.clone(), schema);
+        for (flags, baby, held, min_y, max_y) in [
+            (0, false, false, 0.15, 0.20),
+            (4, false, false, -0.6, -0.4),
+            (0, true, true, 0.93, 1.01),
+            (0, true, false, 0.15, 0.20),
+        ] {
+            entity.metadata.insert(15, Metadata::Byte(flags));
+            entity.metadata.insert(16, Metadata::Bool(baby));
+            entity.equipment[0] = held.then(|| {
+                let mut stack = Stack::default();
+                stack.id = 1;
+                stack.count = 1;
+                stack
+            });
+            let mut pose = vec![];
+            presentation::evaluate_rig(&rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut pose);
+            for arm in [2, 3] {
+                let direction = pose[arm].transform_vector3(Vec3::Y);
+                assert!((min_y..=max_y).contains(&direction.y), "{name} arm {arm}: {direction:?}");
+            }
+        }
+        schema = models.schemas.remove(&entity.type_name).unwrap();
+    }
+    entity.type_name = "minecraft:zombie".into();
+    models.schemas.insert(entity.type_name.clone(), schema);
+    entity.metadata.insert(16, Metadata::Bool(false));
+    entity.equipment[0] = None;
+    let mut idle = vec![];
+    presentation::evaluate_rig(&rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut idle);
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let mut walking = vec![];
+    presentation::evaluate_rig(&rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut walking);
+    assert_ne!(idle[0], walking[0], "legs still swing");
+    assert_eq!(idle[2], walking[2], "walking must not move the raised right arm");
+    assert_eq!(idle[3], walking[3], "walking must not move the raised left arm");
+}
+
+/// ISSUE-1-19: spider legs did not move at all. Source `SpiderModel.setupAnim` offsets every
+/// leg's yaw and roll from the received walk, and the legs return to rest when it stops.
+#[test]
+fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
+    let (models, mut entity) = fixture();
+    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    entity.type_name = "minecraft:spider".into();
+    let pose = |entity: &Entity| {
+        let mut matrices = vec![];
+        presentation::evaluate_rig(rig, entity, &models, 2, 1., Mat4::IDENTITY, &mut matrices);
+        matrices
+    };
+    let idle = pose(&entity);
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let moving = pose(&entity);
+    for index in 0..8 {
+        let bone = rig.part_by_name[&format!("leg{index}")];
+        assert_ne!(idle[bone], moving[bone], "leg{index} must move");
+    }
+    for _ in 0..80 {
+        tick_walk(&models, &mut entity, 0.4);
+    }
+    let stopped = pose(&entity);
+    for index in 0..8 {
+        let bone = rig.part_by_name[&format!("leg{index}")];
+        let a = idle[bone].to_cols_array();
+        let b = stopped[bone].to_cols_array();
+        assert!(a.iter().zip(b).all(|(x, y)| (*x - y).abs() < 1e-5), "leg{index}");
+    }
+}
+
+#[test]
+fn spider_leg_swing_follows_the_source_pairs() {
+    // Right and left legs of a pair mirror each other; the four pairs run a quarter cycle apart.
+    let (right_yaw, right_roll) = presentation::spider_leg_swing("leg0", 0.3, 1.).unwrap();
+    let (left_yaw, left_roll) = presentation::spider_leg_swing("leg1", 0.3, 1.).unwrap();
+    assert_eq!((right_yaw, right_roll), (-left_yaw, -left_roll));
+    assert!(right_roll >= 0.);
+    let (next_yaw, _) = presentation::spider_leg_swing("leg2", 0.3, 1.).unwrap();
+    assert_ne!(right_yaw, next_yaw);
+    assert_eq!(presentation::spider_leg_swing("leg0", 0.3, 0.), Some((0., 0.)));
+    assert_eq!(presentation::spider_leg_swing("head", 0.3, 1.), None);
+    assert_eq!(presentation::spider_leg_swing("leg8", 0.3, 1.), None);
+}
+
+#[test]
+fn zombie_arm_rotation_matches_the_26_3_animate_zombie_arms_formula() {
+    use std::f32::consts::PI;
+    let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+    let right = presentation::zombie_arm_rotation(1., (true, false), 0., None);
+    close(right.x, -PI / 2.25);
+    close(right.y, -0.1);
+    close(right.z, 0.1);
+    let left = presentation::zombie_arm_rotation(-1., (true, false), 0., None);
+    close(left.y, 0.1);
+    close(left.z, -0.1);
+    close(presentation::zombie_arm_rotation(1., (true, true), 0., None).x, -PI / 1.5);
+    // Mid swing: +1.2 sin(a pi) - 0.4 sin((1 - (1 - a)^2) pi), the same for both arms.
+    let recover = (0.75 * PI).sin();
+    close(
+        presentation::zombie_arm_rotation(1., (true, false), 0., Some(0.5)).x,
+        -PI / 2.25 + 1.2 - 0.4 * recover,
+    );
+    close(
+        presentation::zombie_arm_rotation(1., (true, false), 0., Some(0.5)).y,
+        -(0.1 - 0.6),
+    );
+    // A baby holding an item: arms hang and the swing terms flip sign.
+    close(presentation::zombie_arm_rotation(1., (false, false), 0., None).x, 0.);
+    close(
+        presentation::zombie_arm_rotation(1., (false, false), 0., Some(0.5)).x,
+        -1.2 - 0.4 * recover,
+    );
+    // Bob: both arms sway, in opposite directions, with age.
+    let age = 40.;
+    let bob_r = presentation::zombie_arm_rotation(1., (true, false), age, None);
+    let bob_l = presentation::zombie_arm_rotation(-1., (true, false), age, None);
+    close(bob_r.x + bob_l.x, -2. * PI / 2.25);
+    close(bob_r.z + bob_l.z, 0.);
+}
+
+/// ISSUE-1-19: the rig's legs carry exactly the source `SpiderModel.setupAnim` offsets on top
+/// of their rest rotation (red while the legs are static or use another swing).
+#[test]
+fn spider_rig_legs_carry_the_26_3_walk_offsets() {
+    let (models, mut entity) = fixture();
+    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    entity.type_name = "minecraft:spider".into();
+    tick_walk(&models, &mut entity, 0.2);
+    tick_walk(&models, &mut entity, 0.4);
+    let living = entity.source.as_ref().unwrap().living.as_ref().unwrap();
+    let (phase, speed) = (living.walk.position(1.) * 0.6662, living.walk.speed(1.));
+    assert!(speed > 0.05, "fixture must walk, speed {speed}");
+    let mut out = vec![];
+    presentation::evaluate_rig(rig, &entity, &models, 2, 1., Mat4::IDENTITY, &mut out);
+    for index in 0..8 {
+        let name = format!("leg{index}");
+        let at = rig.part_by_name[&name];
+        let bone = &rig.bones[at];
+        let (yaw, roll) = presentation::spider_leg_swing(&name, phase, speed).unwrap();
+        let parent = bone.parent.map_or(Mat4::IDENTITY, |p| out[p]);
+        let expected = parent
+            * resources::transform(bone.pivot, bone.rotation + Vec3::new(0., yaw, roll), bone.scale);
+        assert!(expected.abs_diff_eq(out[at], 1e-5), "{name}: {expected:?} vs {:?}", out[at]);
+    }
+}
