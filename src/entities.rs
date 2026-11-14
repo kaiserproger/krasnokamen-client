@@ -286,6 +286,8 @@ pub struct Store {
     pub(crate) own_id: Option<i32>,
     pub(crate) own_metadata: BTreeMap<u8, Metadata>,
     pub(crate) presentation_tick: u64,
+    /// Measurement-only cumulative calls that actually advance an entity presentation.
+    pub(crate) measured_entity_ticks: u64,
     /// Partial tick of the last rendered frame; lets a mid-tick packet start its
     /// interpolation from the pose already on screen instead of snapping.
     pub(crate) frame_partial: f32,

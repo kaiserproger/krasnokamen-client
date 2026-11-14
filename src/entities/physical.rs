@@ -805,6 +805,7 @@ impl Store {
                 }
                 continue;
             }
+            self.measured_entity_ticks += 1;
             let waited = u8::try_from(std::mem::take(&mut e.physical.waited)).unwrap_or(u8::MAX);
             e.physical.lerp_progress = e
                 .physical

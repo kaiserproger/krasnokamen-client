@@ -162,6 +162,8 @@ pub struct Session {
     commands: Vec<PacketCommand>,
     events: VecDeque<Value>,
     packet_counts: BTreeMap<i32, u64>,
+    interest_measurement: Option<(Instant, Instant)>,
+    interest_packet_bytes: BTreeMap<i32, u64>,
     ignored_presentation: BTreeMap<i32, u64>,
     status: Option<Value>,
     server_frozen: bool,
@@ -279,6 +281,9 @@ impl Session {
             commands: Vec::with_capacity(32),
             events: VecDeque::with_capacity(64),
             packet_counts: BTreeMap::new(),
+            interest_measurement: (std::env::var_os("SOLARIS_INTEREST_MEASURE").is_some())
+                .then(|| { let now = Instant::now(); (now, now) }),
+            interest_packet_bytes: BTreeMap::new(),
             ignored_presentation: BTreeMap::new(),
             status: None,
             server_frozen: false,

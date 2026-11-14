@@ -147,6 +147,9 @@ impl Session {
         }
         self.packet_sequence += 1;
         *self.packet_counts.entry(id).or_default() += 1;
+        if self.interest_measurement.is_some() && phase == Phase::Play {
+            *self.interest_packet_bytes.entry(id).or_default() += body.len() as u64;
+        }
         self.apply(phase, id, body).map_err(|error| format!("{phase:?} packet 0x{id:02x} sequence {}: {error}", self.packet_sequence))?;
         self.changed_state();
         Ok(())

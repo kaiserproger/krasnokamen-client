@@ -867,6 +867,24 @@ impl Session {
                         _ => None,
                     }
                 } }, &mut self.scene.dynamic)?;
+                if let Some((begin, previous)) = &mut self.interest_measurement
+                    && previous.elapsed().as_secs_f64() >= 10.
+                {
+                    let now = std::time::Instant::now();
+                    eprintln!("interest_measure {}", json!({
+                        "elapsed_s": now.duration_since(*begin).as_secs_f64(),
+                        "unix_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(),
+                        "client_tick": self.client_tick, "world_tick": self.world_tick,
+                        "known": self.entities.len(), "entity_ticks_total": self.entities.measured_entity_ticks,
+                        "presentation": self.scene.entity_presentation,
+                        "packets_total": self.packet_sequence, "packet_counts": self.packet_counts,
+                        "play_packet_body_bytes": self.interest_packet_bytes,
+                        "camera": self.scene.camera_position, "server_position": self.player.server_position,
+                        "health": self.player.health, "render_distance": self.render_distance,
+                        "entity_distance": self.entity_distance_scaling
+                    }));
+                    *previous = now;
+                }
                 self.entities.append_shadow_geometry(
                     content,
                     world,
