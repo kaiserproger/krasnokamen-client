@@ -1,14 +1,15 @@
 use super::{
     catalog,
-    control::{nonce, Core},
+    control::{Core, nonce},
 };
 use crate::api::{Command, Request};
 use serde_json::Value;
 use std::{
     path::{Component, Path},
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     time::Duration,
 };
@@ -91,7 +92,11 @@ pub(super) fn execute(
         return Err("window_not_focused".into());
     }
     let capture_fence = if capture {
-        core.capture_fence(session, &observation.connection_epoch, &observation.dimension_epoch)?
+        core.capture_fence(
+            session,
+            &observation.connection_epoch,
+            &observation.dimension_epoch,
+        )?
     } else {
         None
     };
@@ -210,7 +215,9 @@ pub(super) fn execute(
             reply,
             expected_connection_epoch: connection,
             expected_dimension_epoch: dimension,
-            automation_fence: writer.as_ref().map(|writer| writer.fence.clone())
+            automation_fence: writer
+                .as_ref()
+                .map(|writer| writer.fence.clone())
                 .or_else(|| capture_fence.clone()),
             cancelled: Some(cancelled.clone()),
         })
@@ -237,7 +244,8 @@ pub(super) fn execute(
             return Err("owner_result_unknown".into());
         }
     };
-    if ui_respawn && result.is_ok()
+    if ui_respawn
+        && result.is_ok()
         && let Some(fence) = &mut respawn_fence
     {
         fence.retain_after_success = true;

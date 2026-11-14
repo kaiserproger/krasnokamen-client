@@ -3,7 +3,7 @@ use std::io::Read;
 
 /// Program for seed 81 and the server's `lod_column` answers, written by the
 /// server test `lod_program_exports_without_the_seed` with
-/// `SOLARIS_LOD_PROGRAM_FIXTURE` set.
+/// `KRASNOKAMEN_LOD_PROGRAM_FIXTURE` set.
 pub(crate) fn fixture() -> (Vec<u8>, Vec<(i32, i32, i32, String)>) {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

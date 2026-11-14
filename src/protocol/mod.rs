@@ -288,7 +288,8 @@ pub fn extract(buffer: &mut Vec<u8>, threshold: Option<usize>) -> Result<Option<
 /// Observe the exact decompressed packet before splitting its original ID bytes.
 /// The observer is the network-to-session recording tap, not a transport logger.
 pub(crate) fn extract_observed(
-    buffer: &mut Vec<u8>, threshold: Option<usize>,
+    buffer: &mut Vec<u8>,
+    threshold: Option<usize>,
     mut observe: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<Option<(i32, Vec<u8>)>> {
     let mut h = Reader::new(buffer);

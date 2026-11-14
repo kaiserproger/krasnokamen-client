@@ -80,8 +80,15 @@ impl Player {
         } else {
             36 + u16::from(inventory.selected_slot)
         })?;
-        if using.crossbow_components.as_ref().is_some_and(|components| !Arc::ptr_eq(components, &item.components)) {
-            let charge_ticks = crossbow_charge_ticks(item, content, &mut |kind| match kind { EffectSample::Uniform => f64::from(self.random_float()), EffectSample::Gaussian => self.random_gaussian() })?;
+        if using
+            .crossbow_components
+            .as_ref()
+            .is_some_and(|components| !Arc::ptr_eq(components, &item.components))
+        {
+            let charge_ticks = crossbow_charge_ticks(item, content, &mut |kind| match kind {
+                EffectSample::Uniform => f64::from(self.random_float()),
+                EffectSample::Gaussian => self.random_gaussian(),
+            })?;
             let using = self.using.as_mut().unwrap();
             using.crossbow_charge_ticks = charge_ticks;
             using.crossbow_components = Some(Arc::clone(&item.components));
