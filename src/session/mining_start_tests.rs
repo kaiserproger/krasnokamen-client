@@ -40,6 +40,12 @@ pub(super) fn session() -> Session {
             },
         )
         .unwrap();
+    session.environment.activate_dimension(
+        "minecraft:overworld",
+        &json!({"min_y":0,"height":16,"has_skylight":false,"has_ceiling":true,"skybox":"none"}),
+        0,
+    ).unwrap();
+    session.environment.publish_world(&mut session.world).unwrap();
     session.entities.models = Some(Arc::new(Models {
         rigs: BTreeMap::new(),
         schemas: BTreeMap::new(),
@@ -146,6 +152,50 @@ pub(super) fn connect(session: &mut Session) -> TcpListener {
     let address = listener.local_addr().unwrap().to_string();
     session.network = Some(Network::connect(address, "Miner".into(), 8, true, Arc::new(|| {})).unwrap());
     listener
+}
+
+#[test]
+fn frozen_world_wait_ticks_uses_live_client_clock() {
+    let mut session = session();
+    let _peer = connect(&mut session);
+    session.server_frozen = true;
+    session.environment.frozen = true;
+    let started = minecraft::start(&mut session, "minecraft_wait_ticks", &json!({"ticks": 2}));
+    let Ok(Outcome::Pending(mut task)) = started else {
+        panic!("wait_ticks must start pending");
+    };
+    assert!(task.on_event(&mut session).unwrap().is_none());
+    session.tick_after_events(true);
+    assert!(task.on_event(&mut session).unwrap().is_none());
+    session.tick_after_events(true);
+    assert!(task.on_event(&mut session).unwrap().is_some());
+    assert_eq!(session.world_tick, 0);
+    assert_eq!(session.client_tick, 2);
+    let started = minecraft::start(&mut session, "minecraft_press_inputs",
+        &json!({"keys": ["key.keyboard.w"], "ticks": 2}));
+    let Ok(Outcome::Pending(mut held)) = started else {
+        panic!("bounded input must start pending");
+    };
+    assert!(session.keys.contains("forward"));
+    session.tick_after_events(true);
+    assert!(held.on_event(&mut session).unwrap().is_none());
+    assert!(session.keys.contains("forward"));
+    session.tick_after_events(true);
+    assert!(held.on_event(&mut session).unwrap().is_some());
+    assert!(!session.keys.contains("forward"));
+    assert_eq!(session.world_tick, 0);
+    let content = session.content.as_ref().unwrap();
+    session.environment.apply(
+        crate::protocol::packet_ids::play::clientbound::TICKING_STEP,
+        &mut crate::protocol::Reader::new(&[1]), content, session.world_tick,
+    ).unwrap();
+    session.step_ticks = 1;
+    let local = session.client_tick;
+    session.tick_after_events(true);
+    assert_eq!(session.client_tick, local + 1);
+    assert_eq!(session.world_tick, 1, "one authorized world step advances once");
+    session.tick_after_events(true);
+    assert_eq!(session.world_tick, 1, "world freezes again after its step budget");
 }
 
 #[test]

@@ -597,7 +597,7 @@ mod baby_armor_alignment_tests {
                 entity.transform.pitch = pitch;
                 entity.previous.pitch = pitch;
                 let mut body_transforms = Vec::new();
-                presentation::evaluate_rig(body, &entity, &models, 0, 1., Mat4::IDENTITY, &mut body_transforms);
+                presentation::evaluate_rig(body, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut body_transforms);
                 for (slot, parts) in [
                     ("head", &["head"][..]),
                     ("chest", &["body", "right_arm", "left_arm"][..]),
@@ -605,7 +605,7 @@ mod baby_armor_alignment_tests {
                 ] {
                     let armor = authored(&format!("minecraft:{family}#layer3/babyModelSet/{slot}")).unwrap();
                     let mut armor_transforms = Vec::new();
-                    presentation::evaluate_rig(armor, &entity, &models, 0, 1., Mat4::IDENTITY, &mut armor_transforms);
+                    presentation::evaluate_rig(armor, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut armor_transforms);
                     for name in parts {
                         let (body_min, body_max) = emitted_bounds(body, &body_transforms, name);
                         let (armor_min, armor_max) = emitted_bounds(armor, &armor_transforms, name);
@@ -637,8 +637,8 @@ mod wing_symmetry_tests {
             let rig = authored(&format!("minecraft:{kind}#main")).unwrap();
             let mut rest = Vec::new();
             let mut animated = Vec::new();
-            presentation::evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut rest);
-            presentation::evaluate_rig(rig, &entity, &models, 3, 0., Mat4::IDENTITY, &mut animated);
+            presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut rest);
+            presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 3, 0., Mat4::IDENTITY, &mut animated);
             for &(negative, positive) in pairs {
                 let a = rig.part_by_name[negative];
                 let b = rig.part_by_name[positive];
@@ -678,8 +678,8 @@ mod crystal_animation_tests {
         let rig = authored("minecraft:end_crystal#renderer/model").unwrap();
         let mut first = Vec::new();
         let mut later = Vec::new();
-        presentation::evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut first);
-        presentation::evaluate_rig(rig, &entity, &models, 4, 0., Mat4::IDENTITY, &mut later);
+        presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut first);
+        presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 4, 0., Mat4::IDENTITY, &mut later);
         let base = rig.part_by_name["base"];
         assert_eq!(first[base], later[base]);
         for name in ["glass_outer", "glass_inner", "core"] {

@@ -97,6 +97,7 @@ pub struct Session {
     pub(crate) far: crate::far::Far,
     scene: Scene,
     presentation_partial: f32,
+    local_partial: f32,
     camera_mode: u8,
     renderer_scene_confirmation: Option<(u64, u64, u64)>,
     animation_patches: Vec<crate::api::AtlasPatch>,
@@ -120,6 +121,7 @@ pub struct Session {
     container_packet_version: u64,
     packet_sequence: u64,
     pub(crate) client_tick: u64,
+    pub(crate) world_tick: u64,
     keys: BTreeSet<String>,
     registries: BTreeMap<String, Vec<(String, Value)>>,
     registry_tags: BTreeMap<String, BTreeMap<String, Vec<i32>>>,
@@ -212,6 +214,7 @@ impl Session {
             far: crate::far::Far::default(),
             scene: Scene::default(),
             presentation_partial: 0.,
+            local_partial: 0.,
             camera_mode: 0,
             renderer_scene_confirmation: None,
             animation_patches: Vec::new(),
@@ -229,6 +232,7 @@ impl Session {
             container_packet_version: 0,
             packet_sequence: 0,
             client_tick: 0,
+            world_tick: 0,
             keys: BTreeSet::new(),
             registries: BTreeMap::new(),
             registry_tags: BTreeMap::new(),
@@ -513,6 +517,7 @@ impl Session {
         // Bootstrap failed -> fail() must return to Title; success clears it.
         self.title_allowed = was_title;
         self.client_tick = 0;
+        self.world_tick = 0;
         self.phase = "loading_resources".into();
         self.error = None;
         self.address = Some(address.into());
@@ -969,19 +974,29 @@ impl Session {
         if self.phase != "play" || !self.player.pose_known {
             return changed;
         }
-        if self.server_frozen && self.step_ticks <= 0 {
-            return changed;
+        self.client_tick += 1;
+        let world_advances = !self.server_frozen || self.step_ticks > 0;
+        if !world_advances && self.world.chunk([
+            (self.player.position[0].floor() as i32).div_euclid(16),
+            (self.player.position[2].floor() as i32).div_euclid(16),
+        ]).is_none() {
+            self.camera();
+            return true;
         }
         if self.step_ticks > 0 {
             self.step_ticks -= 1;
         }
-        let previous = self.client_tick;
-        self.client_tick += 1;
+        let previous = self.world_tick;
+        if world_advances {
+            self.world_tick += 1;
+        }
         let result = (|| {
             let mut start = Instant::now();
-            self.environment.tick(self.client_tick);
-            self.player.update_world_time(self.environment.game_time(), self.client_tick);
-            self.environment.publish_world(&mut self.world)?;
+            if world_advances {
+                self.environment.tick(self.world_tick);
+                self.player.update_world_time(self.environment.game_time(), self.world_tick);
+                self.environment.publish_world(&mut self.world)?;
+            }
             self.tick_detail_ms[1] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
             self.player.update_environment_context(&self.world)?;
@@ -997,15 +1012,19 @@ impl Session {
                 return Ok(());
             }
             start = Instant::now();
-            self.world.border.tick();
+            if world_advances {
+                self.world.border.tick();
+            }
             self.tick_detail_ms[3] += start.elapsed().as_secs_f64() * 1000.;
             let content = self.content.as_ref().ok_or("content unavailable")?;
             // Block effects stay on the 20Hz game tick (visual only); kept
             // after the chunk gate exactly as before, only timed now.
             start = Instant::now();
-            self.block_effects.tick(&self.world, content);
-            if self.presentation {
-                self.torch_particles.tick(&self.world, content, self.player.position, self.client_tick);
+            if world_advances {
+                self.block_effects.tick(&self.world, content);
+                if self.presentation {
+                    self.torch_particles.tick(&self.world, content, self.player.position, self.world_tick);
+                }
             }
             self.tick_detail_ms[4] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
@@ -1013,32 +1032,35 @@ impl Session {
                 crate::player::InteractionWorld { world: &self.world, content, inventory: &self.inventory, entities: &self.entities },
                 &self.keys,
                 self.client_tick,
+                self.world_tick,
                 &mut self.commands,
             )?;
             self.environment
                 .tick_vignette(&self.world, self.player.eye_position())?;
             self.tick_detail_ms[5] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
-            self.entities.set_look_target(
-                (self.player.pose_known && self.player.game_mode != 3)
-                    .then(|| self.player.eye_position()),
-            );
-            self.entities.tick_presentation(
-                self.client_tick,
-                false,
-                &self.world,
-                content,
-                self.environment.game_time(),
-            )?;
-            self.tick_detail_ms[6] += start.elapsed().as_secs_f64() * 1000.;
-            start = Instant::now();
-            self.entities.tick_block_sources(
-                &self.world,
-                content,
-                self.environment.game_time(),
-                &[self.player.position],
-                false,
-            )?;
+            if world_advances {
+                self.entities.set_look_target(
+                    (self.player.pose_known && self.player.game_mode != 3)
+                        .then(|| self.player.eye_position()),
+                );
+                self.entities.tick_presentation(
+                    self.world_tick,
+                    false,
+                    &self.world,
+                    content,
+                    self.environment.game_time(),
+                )?;
+                self.tick_detail_ms[6] += start.elapsed().as_secs_f64() * 1000.;
+                start = Instant::now();
+                self.entities.tick_block_sources(
+                    &self.world,
+                    content,
+                    self.environment.game_time(),
+                    &[self.player.position],
+                    false,
+                )?;
+            }
             self.tick_detail_ms[7] += start.elapsed().as_secs_f64() * 1000.;
             start = Instant::now();
             self.inventory.experience_level = self.player.experience_level;
@@ -1050,7 +1072,9 @@ impl Session {
             start = Instant::now();
             self.consume_player_effects()?;
             self.flush_commands()?;
-            self.animate_atlas(previous)?;
+            if world_advances {
+                self.animate_atlas(previous)?;
+            }
             self.tick_detail_ms[9] += start.elapsed().as_secs_f64() * 1000.;
             self.revision += 1;
             start = Instant::now();
@@ -1079,7 +1103,7 @@ impl Session {
         self.camera_mode == 0 && self.content.as_ref().is_some_and(|content| self.player.is_scoping(content))
     }
     fn camera(&mut self) {
-        let view = self.player.visual_view(self.presentation_partial);
+        let view = self.player.visual_view(self.local_partial);
         let yaw = self.player.yaw;
         self.scene.camera_position = view.eye;
         self.scene.yaw = yaw;
@@ -1106,7 +1130,7 @@ impl Session {
         self.scene.fov_deg = self.fov_deg * view.fov * if self.first_person_scoping() { 0.1 } else { 1. };
         self.scene.hurt_tilt_deg = self.player.hurt_tilt_deg(
             self.client_tick,
-            self.presentation_partial,
+            self.local_partial,
             self.damage_tilt_strength,
         );
         self.scene.hurt_direction = self.player.hurt_direction;
@@ -1166,11 +1190,11 @@ impl Session {
     pub(crate) fn prepare_frame(&mut self, partial: f32) -> Result<()> {
         self.animate_ui();
         if self.presentation && self.phase == "play" && self.player.pose_known {
-            self.presentation_partial = if self.server_frozen { 0. } else { partial.clamp(0., 1.) };
-            self.player
-                .visual_animate(self.client_tick as f64 + f64::from(self.presentation_partial));
+            self.local_partial = partial.clamp(0., 1.);
+            self.presentation_partial = if self.server_frozen { 0. } else { self.local_partial };
+            self.player.visual_animate(self.client_tick as f64 + f64::from(self.local_partial));
             if let Some(terrain) = &mut self.terrain {
-                let now = (self.client_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
+                let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
                 self.block_motion.step(terrain, &self.world, now)?;
             }
             // Animated geometry samples the same tick pair as the camera.
@@ -1182,7 +1206,7 @@ impl Session {
     pub(crate) fn capture_gait_frame(&self) -> Value {
         Value::Array(self.entities.received_entities().filter_map(|entity| {
             let living = entity.source.as_ref()?.living.as_ref()?;
-            let transform = entity.presented_transform(self.client_tick, self.presentation_partial);
+            let transform = entity.presented_transform(self.world_tick, self.presentation_partial);
             Some(json!({
                 "entity_uuid": entity.uuid,
                 "entity_type": entity.type_name,
@@ -1248,7 +1272,7 @@ impl Session {
             return Ok(());
         }
         let content = self.content.as_ref().ok_or("content unavailable")?;
-        content.animation_patches(previous, self.client_tick, &mut self.animation_patches)?;
+        content.animation_patches(previous, self.world_tick, &mut self.animation_patches)?;
         for patch in self.animation_patches.drain(..) {
             if let Some(old) = self.scene.texture_patches.iter_mut().find(|old| {
                 old.mip_level == patch.mip_level
@@ -1461,20 +1485,66 @@ mod cpu_hotpath_tests {
     }
 
     #[test]
-    fn frozen_server_tick_skips_game_tick_without_advancing_client_tick() {
+    fn frozen_server_keeps_client_clock_advancing_without_world_chunk() {
         let mut session = Session::new_mode("cpu-frozen".into(), false);
         session.phase = "play".into();
         session.player.pose_known = true;
         session.server_frozen = true;
         session.step_ticks = 0;
         let tick = session.client_tick;
-        // Frozen server: the whole 20Hz game tick (block effects included)
-        // is skipped until steps arrive.
-        assert!(!session.tick(), "frozen idle tick must report unchanged");
-        assert_eq!(session.client_tick, tick, "frozen server must not advance game ticks");
-        // Drained-first entry agrees with the direct entry when frozen.
-        assert!(!session.tick_after_events(true), "drained frozen tick must also report unchanged");
-        assert_eq!(session.client_tick, tick);
+        assert!(session.tick());
+        assert_eq!(session.client_tick, tick + 1);
+        assert_eq!(session.world_tick, 0);
+        assert!(session.tick_after_events(true));
+        assert_eq!(session.client_tick, tick + 2);
+        assert_eq!(session.world_tick, 0);
+    }
+
+    #[test]
+    fn frozen_world_keeps_local_player_and_teleport_camera_live() {
+        let mut session = super::mining_start_tests::session();
+        let _peer = super::mining_start_tests::connect(&mut session);
+        session.server_frozen = true;
+        session.environment.frozen = true;
+        let tick = session.client_tick;
+        let world_time = session.environment.game_time();
+        let pose = session.player.pose_revision;
+        assert!(session.tick_after_events(true));
+        assert!(session.player.pose_revision > pose, "local player still ticks");
+        assert_eq!(session.client_tick, tick + 1);
+        assert_eq!(session.world_tick, 0);
+        assert_eq!(session.environment.game_time(), world_time);
+        // A moving local player remains frame-interpolated while the world is frozen.
+        session.player.position[0] += 1.;
+        session.local_partial = 0.;
+        session.camera();
+        let old_x = session.scene.camera_position[0];
+        session.local_partial = 1.;
+        session.camera();
+        assert!((session.scene.camera_position[0] - old_x - 1.).abs() < 0.01);
+        let mut packet = crate::protocol::Writer::default();
+        packet.var(17);
+        for value in [7.5_f64, 6., 7.5, 0., 0., 0.] {
+            packet.0.extend(value.to_be_bytes());
+        }
+        packet.0.extend(70_f32.to_be_bytes());
+        packet.0.extend(5_f32.to_be_bytes());
+        packet.0.extend(0_i32.to_be_bytes());
+        assert!(session.player.apply(
+            crate::protocol::packet_ids::play::clientbound::PLAYER_POSITION,
+            &mut crate::protocol::Reader::new(&packet.0),
+            session.content.as_ref().unwrap(), session.client_tick,
+        ).unwrap());
+        session.tick_after_events(true);
+        session.local_partial = 1.;
+        session.camera();
+        assert!((session.scene.camera_position[0] - 7.5).abs() < 0.1);
+        assert!((session.scene.camera_position[2] - 7.5).abs() < 0.1);
+        assert_eq!(session.scene.yaw, 70.);
+        assert_eq!(session.client_tick, tick + 2);
+        assert_eq!(session.world_tick, 0);
+        assert_eq!(session.environment.game_time(), world_time);
+        assert!((session.scene.camera_position[0] - session.player.position[0]).abs() < 0.1);
     }
 
     #[test]

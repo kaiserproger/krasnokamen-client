@@ -277,7 +277,7 @@ fn entity_value(session: &Session, entity: &Entity) -> Result<Value> {
         .and_then(Metadata::int);
     let bounds = session
         .entities
-        .entity_bounds(entity.handle, session.client_tick)?;
+        .entity_bounds(entity.handle, session.world_tick)?;
     let mut value = Identity::capture(entity).value();
     let object = value.as_object_mut().unwrap();
     extend(
@@ -323,7 +323,7 @@ fn aim_entity(session: &mut Session, handle: Handle) -> Result<Option<String>> {
 fn in_reach(session: &Session, handle: Handle) -> Result<bool> {
     let bounds = session
         .entities
-        .entity_bounds(handle, session.client_tick)?;
+        .entity_bounds(handle, session.world_tick)?;
     let eye = session.player.eye_position();
     let nearest: [f64; 3] =
         std::array::from_fn(|axis| eye[axis].clamp(bounds.min[axis], bounds.max[axis]));
@@ -400,7 +400,7 @@ fn collection_value(
 pub(super) fn visible_item(session: &Session, item: &str, origin: [i32; 3]) -> Result<bool> {
     Ok(session
         .entities
-        .nearest_visible_item(item, origin, content(session)?, session.client_tick)?
+        .nearest_visible_item(item, origin, content(session)?, session.world_tick)?
         .is_some())
 }
 /// A cursor opts into network-id order; ordinary calls retain nearest-first order.
@@ -794,7 +794,7 @@ impl Task {
                     item,
                     near,
                     content(session)?,
-                    session.client_tick,
+                    session.world_tick,
                 )?;
                 *saw_drop |= drop.is_some();
                 let collected = inventory_count(session, item)? >= *before + *count;

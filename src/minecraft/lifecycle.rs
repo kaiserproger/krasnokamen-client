@@ -237,7 +237,7 @@ fn require_targeted(session: &Session, position: [i32; 3]) -> Result<()> {
         &session.world,
         content,
         &session.entities,
-        session.client_tick,
+        session.world_tick,
     )? {
         Some(Hit::Block(hit)) if hit.position == position => Ok(()),
         Some(Hit::Block(hit)) => Err(format!(
@@ -262,7 +262,7 @@ fn attack_blocker(session: &Session) -> Result<Option<AttackBlocker>> {
         &session.world,
         content,
         &session.entities,
-        session.client_tick,
+        session.world_tick,
     )?;
     session.player.attack_blocker(
         target.as_ref(),
@@ -304,7 +304,7 @@ fn read_block(session: &Session, position: [i32; 3], scratch: &mut Vec<Bounds>) 
         position,
         &session.world,
         content,
-        session.client_tick,
+        session.world_tick,
         scratch,
     )? {
         scratch.is_empty()
@@ -432,7 +432,7 @@ fn probe_clear(
         &session.world,
         content,
         &session.entities,
-        session.client_tick,
+        session.world_tick,
         area,
         scratch,
     )?;
@@ -443,7 +443,7 @@ fn probe_clear(
         area,
         session.player.entity_id,
         None,
-        session.client_tick,
+        session.world_tick,
         session.player.position,
         &session.world,
         content,
@@ -1129,7 +1129,7 @@ impl Task {
                     item,
                     *position,
                     require_play(session)?,
-                    session.client_tick,
+                    session.world_tick,
                 )?;
                 *saw_drop |= drop.is_some();
                 let received_air = session

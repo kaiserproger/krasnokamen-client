@@ -1,24 +1,490 @@
 {
   "schema": 1,
   "id": "pufferfish",
-  "texture": {"path": "entity/fish/pufferfish.png", "size": [32, 32]},
+  "texture": {
+    "path": "entity/fish/pufferfish.png",
+    "size": [
+      32,
+      32
+    ]
+  },
   "bones": [
     {
-      "name": "body", "pivot": [0, 14, 0],
+      "name": "body",
+      "pivot": [
+        0,
+        14,
+        0
+      ],
       "cubes": [
-        {"origin": [-4, 0, -4], "size": [8, 8, 8], "uv": [0, 0]}
+        {
+          "origin": [
+            -4,
+            0,
+            -4
+          ],
+          "size": [
+            8,
+            8,
+            8
+          ],
+          "uv": [
+            0,
+            0
+          ]
+        }
       ]
     },
     {
-      "name": "tail_base", "pivot": [0, 15, 4],
+      "name": "right_fin",
+      "pivot": [
+        -4,
+        15,
+        -2
+      ],
       "cubes": [
-        {"origin": [-1.5, 0, -2], "size": [3, 3, 5], "uv": [16, 22]}
+        {
+          "origin": [
+            -2,
+            0,
+            -1
+          ],
+          "size": [
+            2,
+            1,
+            2
+          ],
+          "uv": [
+            24,
+            0
+          ]
+        }
       ]
     },
     {
-      "name": "tail", "pivot": [0, 14.5, 9],
+      "name": "left_fin",
+      "pivot": [
+        4,
+        15,
+        -2
+      ],
       "cubes": [
-        {"origin": [-0.5, 0, -4], "size": [1, 5, 8], "uv": [12, 24], "faces": {"right": [12, 27, 20, 32], "left": [12, 27, 20, 32], "up": [12, 27, 13, 32], "down": [12, 27, 13, 32], "front": [12, 27, 13, 32], "back": [12, 27, 13, 32]}}
+        {
+          "origin": [
+            0,
+            0,
+            -1
+          ],
+          "size": [
+            2,
+            1,
+            2
+          ],
+          "uv": [
+            24,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "name": "top_front_spines",
+      "pivot": [
+        0,
+        14,
+        -4
+      ],
+      "rotation": [
+        45,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            -1,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              15,
+              17,
+              23,
+              18
+            ],
+            "back": [
+              23,
+              17,
+              15,
+              18
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "top_middle_spines",
+      "pivot": [
+        0,
+        14,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            -1,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              15,
+              17,
+              23,
+              18
+            ],
+            "back": [
+              23,
+              17,
+              15,
+              18
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "top_back_spines",
+      "pivot": [
+        0,
+        14,
+        4
+      ],
+      "rotation": [
+        -45,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            -1,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              23,
+              18,
+              31,
+              19
+            ],
+            "back": [
+              31,
+              18,
+              23,
+              19
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bottom_front_spines",
+      "pivot": [
+        0,
+        22,
+        -4
+      ],
+      "rotation": [
+        -45,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            0,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              15,
+              20,
+              23,
+              21
+            ],
+            "back": [
+              23,
+              20,
+              15,
+              21
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bottom_middle_spines",
+      "pivot": [
+        0,
+        22,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            0,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              15,
+              20,
+              23,
+              21
+            ],
+            "back": [
+              23,
+              20,
+              15,
+              21
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bottom_back_spines",
+      "pivot": [
+        0,
+        22,
+        4
+      ],
+      "rotation": [
+        45,
+        0,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -4,
+            0,
+            0
+          ],
+          "size": [
+            8,
+            1,
+            0
+          ],
+          "faces": {
+            "front": [
+              15,
+              20,
+              23,
+              21
+            ],
+            "back": [
+              23,
+              20,
+              15,
+              21
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "right_front_spines",
+      "pivot": [
+        -4,
+        14,
+        -4
+      ],
+      "rotation": [
+        0,
+        -45,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -1,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            8,
+            0
+          ],
+          "faces": {
+            "front": [
+              5,
+              17,
+              6,
+              25
+            ],
+            "back": [
+              6,
+              17,
+              5,
+              25
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "left_front_spines",
+      "pivot": [
+        4,
+        14,
+        -4
+      ],
+      "rotation": [
+        0,
+        45,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            8,
+            0
+          ],
+          "faces": {
+            "front": [
+              1,
+              17,
+              2,
+              25
+            ],
+            "back": [
+              2,
+              17,
+              1,
+              25
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "right_back_spines",
+      "pivot": [
+        -4,
+        14,
+        4
+      ],
+      "rotation": [
+        0,
+        45,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            -1,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            8,
+            0
+          ],
+          "faces": {
+            "front": [
+              9,
+              17,
+              10,
+              25
+            ],
+            "back": [
+              10,
+              17,
+              9,
+              25
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "left_back_spines",
+      "pivot": [
+        4,
+        14,
+        4
+      ],
+      "rotation": [
+        0,
+        -45,
+        0
+      ],
+      "cubes": [
+        {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            8,
+            0
+          ],
+          "faces": {
+            "front": [
+              9,
+              17,
+              10,
+              25
+            ],
+            "back": [
+              10,
+              17,
+              9,
+              25
+            ]
+          }
+        }
       ]
     }
   ]

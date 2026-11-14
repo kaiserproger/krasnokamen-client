@@ -52,8 +52,10 @@ pub use hud::{
     WaypointId, WaypointPosition, WaypointState,
 };
 pub use packets::{
-    AdvancementState, BossBar, ChatLine, ChatReceipt, ChatVerification, MapDecoration, MapState,
+    AdvancementState, BossBar, ChatLine, ChatReceipt, ChatVerification, MapDecoration, MapRenderView, MapState,
 };
+#[cfg(test)]
+pub(crate) use packets::MapRenderFixture;
 use serde::{Deserialize, Serialize};
 pub use state::*;
 

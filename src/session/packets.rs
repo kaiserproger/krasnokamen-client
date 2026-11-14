@@ -256,11 +256,11 @@ impl Session {
         let mut handled = false;
         if self
             .environment
-            .apply(id, &mut Reader::new(r.bytes), content, self.client_tick)?
+            .apply(id, &mut Reader::new(r.bytes), content, self.world_tick)?
         {
             self.environment.publish_world(&mut self.world)?;
             if id == cb::SET_TIME {
-                self.player.update_world_time(self.environment.game_time(), self.client_tick);
+                self.player.update_world_time(self.environment.game_time(), self.world_tick);
             }
             self.server_frozen = self.environment.frozen;
             if id == cb::TICKING_STEP {
@@ -295,10 +295,10 @@ impl Session {
             let snapshot = self.predicted_blocks.get_mut(&position)
                 .and_then(|prediction| prediction.block_entity.as_mut());
             self.entities.receive_block_entity_data(
-                &mut Reader::new(r.bytes), content, self.client_tick, snapshot,
+                &mut Reader::new(r.bytes), content, self.world_tick, snapshot,
             )?;
             handled = true;
-        } else if self.entities.apply(id, &mut Reader::new(r.bytes), content, self.client_tick)? {
+        } else if self.entities.apply(id, &mut Reader::new(r.bytes), content, self.world_tick)? {
             handled = true;
         }
         if let Some(ui) = &mut self.ui {
@@ -310,6 +310,18 @@ impl Session {
             }
             if ui.apply(id, &mut Reader::new(r.bytes), content)? {
                 handled = true;
+            }
+        }
+        if id == cb::ENTITY_EVENT {
+            // 26.3 ClientboundEntityEventPacket: raw int entity ID + byte.
+            // LocalPlayer.handleEntityEvent maps 24..28 to permission levels 0..4.
+            // The entity owner above still receives every animation/status event.
+            let mut event = Reader::new(r.bytes);
+            let entity = event.i32()?;
+            let status = event.u8()?;
+            event.done()?;
+            if entity == self.player.entity_id && (24..=28).contains(&status) {
+                self.player.permission_level = Some(status - 24);
             }
         }
         if handled {
@@ -340,6 +352,7 @@ impl Session {
             cb::DISCONNECT => return Err(format!("Play disconnect: {}", r.nbt()?)),
             cb::LOGIN => {
                 self.player.entity_id = r.i32()?;
+                self.player.permission_level = None;
                 self.entities.own_id = Some(self.player.entity_id);
                 r.bool()?;
                 for _ in 0..r.count(64)? {
@@ -405,7 +418,7 @@ impl Session {
                                 block_position,
                                 state,
                                 content,
-                                self.client_tick,
+                                self.world_tick,
                             )?;
                         }
                     }
@@ -427,7 +440,7 @@ impl Session {
                         block.raw_nbt.clone(),
                         state,
                         content,
-                        self.client_tick,
+                        self.world_tick,
                     )?;
                 }
                 self.world.insert(position, chunk)?;
@@ -705,7 +718,7 @@ impl Session {
         self.world
             .configure_environment_context(&dimension, seed, sea_level)?;
         self.environment
-            .activate_dimension(&dimension, data, self.client_tick)?;
+            .activate_dimension(&dimension, data, self.world_tick)?;
         self.environment.publish_world(&mut self.world)?;
         self.player.update_environment_context(&self.world)?;
         self.player.set_mode(mode)?;
@@ -810,7 +823,7 @@ impl Session {
             return Ok(());
         }
         let old = self.world.block(position);
-        let now = (self.client_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
+        let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
         if let Some(old_state) = self.world.block(position) {
             if content.info(old_state)?.block != new_block {
                 self.entities.remove_block_entity(position);
@@ -819,7 +832,7 @@ impl Session {
         self.world
             .set(position, state, |id| content.block_is_air(id))?;
         self.entities
-            .ensure_block_entity(position, state, content, self.client_tick)?;
+            .ensure_block_entity(position, state, content, self.world_tick)?;
         self.received_blocks.insert(position, self.packet_sequence);
         // Stale crack entries die with the block they referenced.
         self.destruction.retain(|_, (pos, _)| *pos != position);
@@ -846,7 +859,7 @@ impl Session {
     fn reconcile_ack(&mut self, sequence: i32) -> Result<()> {
         let mut blocks = std::mem::take(&mut self.predicted_blocks);
         let content = self.content.as_ref().ok_or("content unavailable")?;
-        let now = (self.client_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
+        let now = (self.world_tick as f64 + f64::from(self.presentation_partial)) * 0.05;
         for (position, block) in &mut blocks {
             if block.sequence <= sequence {
                 let new_block = content.info(block.received)?.block;
@@ -868,7 +881,7 @@ impl Session {
                     *position,
                     block.received,
                     content,
-                    self.client_tick,
+                    self.world_tick,
                 )?;
                 self.player.block_changed(*position, block.received);
                 self.entities.block_changed(*position, block.received);
@@ -1120,7 +1133,7 @@ mod tests {
         assert_eq!(session.item_spawn.as_ref().unwrap().pos, [-31, 70, 42]);
     }
 
-    fn session_with_received_cube(position: [i32; 3]) -> Session {
+    pub(super) fn session_with_received_cube(position: [i32; 3]) -> Session {
         let mut session = Session::new_mode("received-prediction-test".into(), false);
         let mut content = Content::test_cube();
         for state in [0, 1] {
@@ -2189,3 +2202,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "map_effect_packet_tests.rs"]
+mod map_effect_packet_tests;

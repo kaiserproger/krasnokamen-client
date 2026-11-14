@@ -49,6 +49,7 @@ pub(crate) const ACTIONS: &[(&str, &str, Binding)] = &[
     ("hotbar_7", "Hotbar 7", Binding::Key(KeyCode::Digit7)),
     ("hotbar_8", "Hotbar 8", Binding::Key(KeyCode::Digit8)),
     ("hotbar_9", "Hotbar 9", Binding::Key(KeyCode::Digit9)),
+    ("pick", "Pick block", Binding::Mouse(MouseButton::Middle)),
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,7 +62,11 @@ impl Default for Bindings {
 }
 impl Bindings {
     pub(crate) fn from_value(value: &serde_json::Value) -> Option<Self> {
-        let map: BTreeMap<String, Binding> = serde_json::from_value(value.clone()).ok()?;
+        let mut map: BTreeMap<String, Binding> = serde_json::from_value(value.clone()).ok()?;
+        // Settings written before pick was configurable retain all their existing bindings.
+        if !map.contains_key("pick") {
+            map.insert("pick".into(), Binding::Mouse(MouseButton::Middle));
+        }
         if map.len() != ACTIONS.len() || ACTIONS.iter().any(|(id, _, _)| !map.contains_key(*id)) {
             return None;
         }

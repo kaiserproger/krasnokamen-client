@@ -1,15 +1,19 @@
-//! Bounded, client-local terrain fragments. Simulation advances on game ticks,
-//! never render frames; sprites come from the broken state's baked block model.
+//! Bounded received level-event effects: terrain fragments and potion impacts.
+//! Simulation advances on game ticks, never render frames.
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
-    protocol::{Result, content::Content, models::TintKind, world::World},
+    protocol::{Result, content::{Content, TextureRegion}, models::TintKind, world::World},
 };
 
 impl super::Session {
     pub(super) fn present_block_break(&mut self, event: i32, position: [i32; 3], data: i32) -> Result<bool> {
-        if event != 2001 || !self.presentation || data < 0 {
-            return Ok(false);
+        if !self.presentation { return Ok(false); }
+        if matches!(event, 2002 | 2007) {
+            let content = self.content.as_ref().ok_or("content unavailable")?;
+            return self.block_effects.potion(content, position, data, event == 2007,
+                self.client_tick ^ self.packet_sequence);
         }
+        if event != 2001 || data < 0 { return Ok(false); }
         let content = self.content.as_ref().ok_or("content unavailable")?;
         if content.info(data as u32).is_err() {
             return Ok(false);
@@ -29,14 +33,18 @@ struct Fragment {
     color: [f32; 3],
     size: f32,
     remaining: u8,
+    // (sprite family, original lifetime); None is a falling terrain/bottle fragment.
+    spell: Option<(usize, u8)>,
 }
 #[derive(Default)]
 pub(super) struct BlockEffects {
     fragments: Vec<Fragment>,
+    spell_sprites: [Option<[TextureRegion; 8]>; 2],
 }
 impl BlockEffects {
     pub fn clear(&mut self) {
         self.fragments.clear();
+        self.spell_sprites = [None; 2];
     }
     pub fn burst(&mut self, content: &Content, world: &World, position: [i32; 3], state: u32, seed: u64) -> Result<bool> {
         if content.block_is_air(state)? {
@@ -98,9 +106,72 @@ impl BlockEffects {
                         color,
                         size: 0.05 + next() * 0.05,
                         remaining: 20 + (next() * 20.) as u8,
+                        spell: None,
                     });
                 }
             }
+        }
+        Ok(true)
+    }
+    /// 26.3 LevelEventHandler: 2002 is EFFECT, 2007 is INSTANT_EFFECT
+    /// (not a splash/lingering discriminator). RGB is the received event data.
+    pub fn potion(&mut self, content: &Content, position: [i32; 3], data: i32, instant: bool, seed: u64) -> Result<bool> {
+        let family = usize::from(instant);
+        if self.spell_sprites[family].is_none() {
+            let prefix = if instant { "spell" } else { "effect" };
+            let lookup = |frame| {
+                let name = format!("minecraft:particle/{prefix}_{frame}");
+                content.texture(&name).ok_or_else(|| format!("potion impact sprite missing: {name}"))
+            };
+            let mut sprites = [lookup(7)?; 8];
+            for (index, sprite) in sprites.iter_mut().enumerate().skip(1) {
+                *sprite = lookup(7 - index)?;
+            }
+            self.spell_sprites[family] = Some(sprites);
+        }
+        let bottle = content.texture("minecraft:item/splash_potion")
+            .ok_or("potion impact bottle sprite missing")?;
+        let sprite = self.spell_sprites[family].as_ref().unwrap()[0];
+        let uv = |sprite: TextureRegion| {
+            let [u0, v0, u1, v1] = sprite.uv;
+            [[u0, v1], [u1, v1], [u1, v0], [u0, v0]]
+        };
+        if self.fragments.len() + 108 > MAX_FRAGMENTS {
+            self.fragments.drain(..self.fragments.len() + 108 - MAX_FRAGMENTS);
+        }
+        let mut random = seed ^ 0xa0761d6478bd642f;
+        let mut next = || {
+            random ^= random << 13; random ^= random >> 7; random ^= random << 17;
+            (random >> 40) as f32 / (1u32 << 24) as f32
+        };
+        let center = [f64::from(position[0]) + 0.5, f64::from(position[1]), f64::from(position[2]) + 0.5];
+        let color = [16, 8, 0].map(|shift| ((data >> shift) & 255) as f32 / 255.);
+        // Bottle shards use the real item sprite, not a block-state substitute.
+        for _ in 0..8 {
+            self.fragments.push(Fragment {
+                position: center, previous: center,
+                velocity: [(f64::from(next()) - 0.5) * 0.3, f64::from(next()) * 0.2, (f64::from(next()) - 0.5) * 0.3],
+                uv: uv(bottle), layer: bottle.layer, color: [1.; 3],
+                size: 0.04, remaining: 20 + (next() * 20.) as u8, spell: None,
+            });
+        }
+        // Authored deterministic motion with the observed radial spawn, tint
+        // brightness, rising spell gravity and finite vanilla lifetime range.
+        for _ in 0..100 {
+            let radius = next() * 4.;
+            let angle = next() * std::f32::consts::TAU;
+            let (sin, cos) = angle.sin_cos();
+            let at = [center[0] + f64::from(cos * radius * 0.1), center[1] + 0.3,
+                center[2] + f64::from(sin * radius * 0.1)];
+            let brightness = 0.75 + next() * 0.25;
+            let lifetime = (8. / (next() * 0.8 + 0.2)) as u8;
+            self.fragments.push(Fragment {
+                position: at, previous: at,
+                velocity: [(f64::from(next()) - 0.5) * 0.1, 0.002 + f64::from(next()) * 0.1,
+                    (f64::from(next()) - 0.5) * 0.1],
+                uv: uv(sprite), layer: sprite.layer, color: color.map(|v| v * brightness),
+                size: 0.075, remaining: lifetime, spell: Some((family, lifetime)),
+            });
         }
         Ok(true)
     }
@@ -108,11 +179,11 @@ impl BlockEffects {
         self.fragments.retain_mut(|fragment| {
             fragment.remaining = fragment.remaining.saturating_sub(1);
             if fragment.remaining == 0 { return false; }
-            fragment.velocity[1] -= 0.04;
+            fragment.velocity[1] += if fragment.spell.is_some() { 0.004 } else { -0.04 };
             let old = fragment.position;
             let mut next = std::array::from_fn(|i| old[i] + fragment.velocity[i]);
             let cell = next.map(|v| v.floor() as i32);
-            if fragment.velocity[1] < 0.
+            if fragment.spell.is_none() && fragment.velocity[1] < 0.
                 && let Some(state) = world.block(cell)
                 && let Some(boxes) = content.collision_boxes(state)
             {
@@ -133,7 +204,8 @@ impl BlockEffects {
             }
             fragment.previous = old;
             fragment.position = next;
-            fragment.velocity = fragment.velocity.map(|v| v * 0.98);
+            let friction = if fragment.spell.is_some() { 0.96 } else { 0.98 };
+            fragment.velocity = fragment.velocity.map(|v| v * friction);
             true
         });
     }
@@ -156,8 +228,17 @@ impl BlockEffects {
             let positions = [[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]].map(|[x, y]| {
                 std::array::from_fn(|i| center[i] + fragment.size * fade * (right[i] * x + up[i] * y))
             });
-            crate::entities::presentation_emit(positions, fragment.uv, fragment.color, fragment.layer,
-                EntityMaterial::EntityCutout, 1., [f32::from(sky), f32::from(block)], out)?;
+            let (uv, layer, material) = if let Some((family, lifetime)) = fragment.spell {
+                let age = lifetime - fragment.remaining;
+                let index = (usize::from(age) * 8 / usize::from(lifetime)).min(7);
+                let sprite = self.spell_sprites[family].as_ref().ok_or("potion sprites unavailable")?[index];
+                let [u0, v0, u1, v1] = sprite.uv;
+                ([[u0, v1], [u1, v1], [u1, v0], [u0, v0]], sprite.layer, EntityMaterial::EntityTranslucent)
+            } else {
+                (fragment.uv, fragment.layer, EntityMaterial::EntityCutout)
+            };
+            crate::entities::presentation_emit(positions, uv, fragment.color, layer,
+                material, 1., [f32::from(sky), f32::from(block)], out)?;
         }
         Ok(())
     }
