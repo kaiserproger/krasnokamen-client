@@ -7,7 +7,7 @@ use crate::{
     ui::UiState,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -123,7 +123,7 @@ pub(crate) struct Outgoing {
 impl Loader {
     /// This opt-in is supplied by the local launcher, never a received manifest.
     pub fn local_permissions() -> Result<BTreeSet<String>> {
-        let value = std::env::var("SOLARIS_CLIENT_LOADER_PERMISSIONS").unwrap_or_default();
+        let value = std::env::var("KRASNOKAMEN_CLIENT_LOADER_PERMISSIONS").unwrap_or_default();
         let mut grants = BTreeSet::new();
         for permission in value.split(',').filter(|s| !s.is_empty()) {
             if !PERMISSIONS.contains(&permission) || !grants.insert(permission.to_owned()) {
@@ -165,14 +165,14 @@ impl Loader {
     fn request_artifact(&self) -> Result<Outgoing> {
         let transfer = self.transfer.as_ref().ok_or("no Loader transfer")?;
         outgoing(
-            "solaris:loader/request",
+            "krasnokamen:loader/request",
             json!({"protocol":3,"cache_key":transfer.manifest.bundles[transfer.next].cache_key}),
         )
     }
     fn acknowledge(&mut self) -> Result<Outgoing> {
         self.acknowledged = true;
         outgoing(
-            "solaris:loader/ack",
+            "krasnokamen:loader/ack",
             json!({"protocol":3,"platform":"native","loader_version":env!("CARGO_PKG_VERSION"),"accepted_permissions":self.accepted,"cached_bundles":self.cache_keys,"carrier_block_state_ids":{}}),
         )
     }
@@ -294,7 +294,7 @@ impl Loader {
             return Err("undeclared_loader_view".into());
         }
         outgoing(
-            "solaris:loader/view_action",
+            "krasnokamen:loader/view_action",
             json!({"protocol":3,"message":"view_request","request_kind":key}),
         )
     }
@@ -404,7 +404,7 @@ impl Loader {
                 return Err("stale or unpermitted Loader selection cancellation".into());
             }
             let token = token.to_owned();
-            let out = outgoing("solaris:loader/view_action", message)?;
+            let out = outgoing("krasnokamen:loader/view_action", message)?;
             view.selections.remove(&token);
             return Ok(out);
         }
@@ -480,7 +480,7 @@ impl Loader {
                 return Err("stale Loader selection token".into());
             }
         }
-        let out = outgoing("solaris:loader/view_action", message)?;
+        let out = outgoing("krasnokamen:loader/view_action", message)?;
         view.last_action = Some(sequence);
         Ok(out)
     }
@@ -699,9 +699,11 @@ fn activate(
         return Err("Loader archive entry limit".into());
     }
     let mut first = zip.by_index(0).map_err(|e| e.to_string())?;
-    if first.name() != "solaris-client.json" || first.is_dir() || first.size() > MAX_MESSAGE as u64
+    if first.name() != "krasnokamen-client.json"
+        || first.is_dir()
+        || first.size() > MAX_MESSAGE as u64
     {
-        return Err("Loader archive must begin with bounded solaris-client.json".into());
+        return Err("Loader archive must begin with bounded krasnokamen-client.json".into());
     }
     let mut index_bytes = Vec::with_capacity(first.size() as usize);
     first
@@ -858,7 +860,7 @@ mod tests {
     fn bundle() -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         zip.start_file(
-            "solaris-client.json",
+            "krasnokamen-client.json",
             zip::write::SimpleFileOptions::default(),
         )
         .unwrap();
@@ -899,7 +901,7 @@ mod tests {
         let ack = loader
             .begin(&serde_json::to_vec(&value).unwrap(), &BTreeSet::new())
             .unwrap();
-        assert_eq!(ack.channel, "solaris:loader/ack");
+        assert_eq!(ack.channel, "krasnokamen:loader/ack");
         assert!(loader.acknowledged);
         assert_eq!(
             serde_json::from_slice::<Value>(&ack.payload).unwrap()["cached_bundles"],
@@ -916,7 +918,7 @@ mod tests {
                 &BTreeSet::new(),
             )
             .unwrap();
-        assert_eq!(ack.channel, "solaris:loader/ack");
+        assert_eq!(ack.channel, "krasnokamen:loader/ack");
         assert!(loader.acknowledged);
         value = manifest(&bytes);
         value["bundles"][0]["content"] = json!(["blocks"]);
@@ -929,7 +931,7 @@ mod tests {
         let mut loader = begin(&value).unwrap();
         assert!(loader.request_view("example:panel", true).is_err());
         let ack = loader.artifact(&chunk(&value, &bytes)).unwrap().unwrap();
-        assert_eq!(ack.channel, "solaris:loader/ack");
+        assert_eq!(ack.channel, "krasnokamen:loader/ack");
         assert!(loader.request_view("example:panel", true).is_ok());
         assert!(loader.request_view("example:other", true).is_err());
         assert!(loader.request_view("example:panel", false).is_err());
@@ -947,9 +949,11 @@ mod tests {
         assert!(loader.artifact(&chunk(&value, &corrupt)).is_err());
         assert!(!loader.acknowledged);
         let mut loader = begin(&value).unwrap();
-        assert!(loader
-            .artifact(&chunk(&value, &bytes[..bytes.len() - 1]))
-            .is_err());
+        assert!(
+            loader
+                .artifact(&chunk(&value, &bytes[..bytes.len() - 1]))
+                .is_err()
+        );
         assert!(!loader.acknowledged);
     }
     #[test]
@@ -961,7 +965,7 @@ mod tests {
         ] {
             let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
             zip.start_file(
-                "solaris-client.json",
+                "krasnokamen-client.json",
                 zip::write::SimpleFileOptions::default(),
             )
             .unwrap();
@@ -979,7 +983,7 @@ mod tests {
         let index = json!({"schema":2,"assets":[{"id":"example:data","path":"assets/example/data.txt","size_bytes":3,"sha256":"0".repeat(64)}]});
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         zip.start_file(
-            "solaris-client.json",
+            "krasnokamen-client.json",
             zip::write::SimpleFileOptions::default(),
         )
         .unwrap();
@@ -1014,7 +1018,7 @@ mod tests {
         ]});
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         zip.start_file(
-            "solaris-client.json",
+            "krasnokamen-client.json",
             zip::write::SimpleFileOptions::default(),
         )
         .unwrap();
