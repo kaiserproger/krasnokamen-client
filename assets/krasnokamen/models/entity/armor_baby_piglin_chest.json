@@ -1,217 +1,59 @@
 {
   "schema": 1,
   "id": "armor_baby_piglin_chest",
-  "texture": {
-    "path": "entity/equipment/humanoid_baby/iron.png",
-    "size": [
-      64,
-      64
-    ]
-  },
+  "texture": {"path": "entity/equipment/humanoid_baby/iron.png", "size": [64, 64]},
   "roles": {
-    "right_arm": [
-      "right_arm"
-    ],
-    "left_arm": [
-      "left_arm"
-    ]
+    "right_arm": ["right_arm"],
+    "left_arm": ["left_arm"]
   },
   "bones": [
     {
-      "name": "body",
-      "pivot": [
-        0,
-        15,
-        0
-      ],
+      "name": "body", "pivot": [0, 18, 0],
       "cubes": [
+        {"origin": [-3, -3, -1.5], "size": [6, 5, 3], "uv": [0, 17], "inflate": 0.7}
+      ]
+    },
+    {
+      "name": "right_arm", "pivot": [-4, 15, 0],
+      "cubes": [
+        {"origin": [-1, 0, -1.53], "size": [2, 5, 3], "uv": [30, 25], "inflate": 0.7}
+      ]
+    },
+    {
+      "name": "left_arm", "pivot": [4, 15, 0],
+      "cubes": [
+        {"origin": [-1, 0, -1.53], "size": [2, 5, 3], "uv": [30, 17], "inflate": 0.7}
+      ]
+    },
+    {
+      "name": "head", "pivot": [0, 15, 0],
+      "bones": [
         {
-          "origin": [
-            -3.5,
-            0,
-            -2
-          ],
-          "size": [
-            7,
-            5,
-            4
-          ],
-          "uv": [
-            0,
-            16
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              4,
-              16,
-              11,
-              20
-            ],
-            "down": [
-              12,
-              16,
-              19,
-              20
-            ],
-            "right": [
-              0,
-              20,
-              4,
-              25
-            ],
-            "front": [
-              4,
-              20,
-              11,
-              25
-            ],
-            "left": [
-              12,
-              20,
-              16,
-              25
-            ],
-            "back": [
-              16,
-              20,
-              23,
-              25
-            ]
-          }
+          "name": "hat"
         }
       ]
     },
     {
-      "name": "right_arm",
-      "pivot": [
-        -4.5,
-        15,
-        0
-      ],
-      "cubes": [
+      "name": "inner_body", "pivot": [0, 18, 0]
+    },
+    {
+      "name": "left_leg", "pivot": [1.5, 20, 0.5],
+      "bones": [
         {
-          "origin": [
-            -1,
-            0,
-            -1.5
-          ],
-          "size": [
-            2,
-            5,
-            3
-          ],
-          "uv": [
-            0,
-            16
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              8,
-              21,
-              10,
-              24
-            ],
-            "down": [
-              8,
-              21,
-              10,
-              24
-            ],
-            "right": [
-              0,
-              20,
-              3,
-              25
-            ],
-            "front": [
-              4,
-              21,
-              6,
-              26
-            ],
-            "left": [
-              8,
-              20,
-              11,
-              25
-            ],
-            "back": [
-              12,
-              20,
-              14,
-              25
-            ]
-          }
+          "name": "right_foot"
         }
       ]
     },
     {
-      "name": "left_arm",
-      "pivot": [
-        4.5,
-        15,
-        0
-      ],
-      "cubes": [
+      "name": "right_leg", "pivot": [-1.5, 20, 0.5],
+      "bones": [
         {
-          "origin": [
-            -1,
-            0,
-            -1.5
-          ],
-          "size": [
-            2,
-            5,
-            3
-          ],
-          "uv": [
-            0,
-            16
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              8,
-              21,
-              10,
-              24
-            ],
-            "down": [
-              8,
-              21,
-              10,
-              24
-            ],
-            "right": [
-              0,
-              20,
-              3,
-              25
-            ],
-            "front": [
-              4,
-              21,
-              6,
-              26
-            ],
-            "left": [
-              8,
-              20,
-              11,
-              25
-            ],
-            "back": [
-              12,
-              20,
-              14,
-              25
-            ]
-          },
-          "mirror": true
+          "name": "left_foot"
         }
       ]
+    },
+    {
+      "name": "waist", "pivot": [0, 19, 0]
     }
   ]
 }

@@ -1,83 +1,52 @@
 {
   "schema": 1,
   "id": "armor_baby_zombie_villager_head",
-  "texture": {
-    "path": "entity/equipment/humanoid_baby/iron.png",
-    "size": [
-      64,
-      64
-    ]
-  },
+  "texture": {"path": "entity/equipment/humanoid_baby/iron.png", "size": [64, 64]},
   "roles": {
-    "head": [
-      "head"
-    ]
+    "head": ["head"]
   },
   "bones": [
     {
-      "name": "head",
-      "pivot": [
-        0,
-        10,
-        0
-      ],
+      "name": "head", "pivot": [0, 15, 0],
       "cubes": [
+        {"origin": [-4.4, -7.5, -4.8], "size": [8.8, 9, 8.6], "uv": [0, 0], "faces": {"up": [8, 0, 17, 8], "down": [17, 0, 26, 8], "right": [0, 8, 8, 16], "front": [8, 8, 17, 16], "left": [17, 8, 25, 16], "back": [25, 8, 34, 16]}}
+      ],
+      "bones": [
         {
-          "origin": [
-            -4,
-            -8,
-            -3.5
-          ],
-          "size": [
-            8,
-            8,
-            7
-          ],
-          "uv": [
-            0,
-            0
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              8,
-              0,
-              16,
-              7
-            ],
-            "down": [
-              16,
-              0,
-              24,
-              7
-            ],
-            "right": [
-              0,
-              8,
-              7,
-              16
-            ],
-            "front": [
-              8,
-              8,
-              16,
-              16
-            ],
-            "left": [
-              16,
-              8,
-              23,
-              16
-            ],
-            "back": [
-              24,
-              8,
-              32,
-              16
-            ]
-          }
+          "name": "hat"
         }
       ]
+    },
+    {
+      "name": "right_arm", "pivot": [-3.5, 15.5, 0]
+    },
+    {
+      "name": "inner_body", "pivot": [0, 18, 0]
+    },
+    {
+      "name": "left_leg", "pivot": [1.5, 20, 0.5],
+      "bones": [
+        {
+          "name": "right_foot"
+        }
+      ]
+    },
+    {
+      "name": "left_arm", "pivot": [3.5, 15.5, 0]
+    },
+    {
+      "name": "right_leg", "pivot": [-1.5, 20, 0.5],
+      "bones": [
+        {
+          "name": "left_foot"
+        }
+      ]
+    },
+    {
+      "name": "waist", "pivot": [0, 19, 0]
+    },
+    {
+      "name": "body", "pivot": [0, 18, 0]
     }
   ]
 }

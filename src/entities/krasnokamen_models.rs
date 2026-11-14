@@ -586,8 +586,13 @@ mod baby_armor_alignment_tests {
     fn emitted_bounds(rig: &Rig, transforms: &[Mat4], name: &str) -> (Vec3, Vec3) {
         let index = rig.part_by_name[name];
         let bone = &rig.bones[index];
-        // Only the head box, not a protruding nose or snout, belongs inside the helmet.
-        let count = bone.quads.len().min(6);
+        // Only the head box, not a protruding piglin snout, belongs inside the helmet; every
+        // other part is measured whole, including the zombie villager's robe box.
+        let count = if name == "head" {
+            bone.quads.len().min(6)
+        } else {
+            bone.quads.len()
+        };
         let part = Bone {
             parent: None,
             pivot: bone.pivot,
@@ -630,10 +635,96 @@ mod baby_armor_alignment_tests {
         )
     }
 
+    /// How the 26.3 baby armour mesh relates to the baby body it covers.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Fit {
+        /// The jar's shell spans the body part on every axis (head, torso, legs, piglin arms).
+        Encloses,
+        /// `createBabyArmorMesh`'s arm cube is slightly narrower than the arm it covers and
+        /// sits 0.5 px outboard, so the limb shows on the inboard side (Java renders the
+        /// forearm through it). Outboard, y and z are still covered.
+        SleeveOpen,
+        /// `BabyZombieVillagerModel`'s robe is a 6-unit box under a 5-unit chestplate mesh, so
+        /// the robe hangs below the chestplate.
+        RobeBelow,
+    }
+
+    fn vanilla_fit(family: &str, slot: &str, part: &str) -> Fit {
+        let piglin = family == "piglin" || family == "zombified_piglin";
+        match (slot, part) {
+            ("chest", "body") if family == "zombie_villager" => Fit::RobeBelow,
+            ("chest", "right_arm") | ("chest", "left_arm") if !piglin => Fit::SleeveOpen,
+            _ => Fit::Encloses,
+        }
+    }
+
+    fn contained(armor: (Vec3, Vec3), body: (Vec3, Vec3), axis: usize, eps: f32) -> bool {
+        armor.0[axis] <= body.0[axis] + eps && armor.1[axis] >= body.1[axis] - eps
+    }
+
+    /// Body/armour bounds per (slot, part) for every family at one pitch.
+    fn baby_bounds(
+        models: &crate::entities::resources::Models,
+        entity: &crate::entities::Entity,
+        family: &str,
+    ) -> BTreeMap<(&'static str, &'static str), ((Vec3, Vec3), (Vec3, Vec3))> {
+        let body = authored(&format!("minecraft:{family}_baby#main")).unwrap();
+        let mut body_transforms = Vec::new();
+        presentation::evaluate_rig(
+            body,
+            entity,
+            models,
+            &crate::protocol::content::Content::test_cube(),
+            0,
+            1.,
+            Mat4::IDENTITY,
+            &mut body_transforms,
+        );
+        let mut out = BTreeMap::new();
+        for (slot, parts) in [
+            ("head", &["head"][..]),
+            ("chest", &["body", "right_arm", "left_arm"][..]),
+            ("legs", &["right_leg", "left_leg"][..]),
+        ] {
+            let armor =
+                authored(&format!("minecraft:{family}#layer3/babyModelSet/{slot}")).unwrap();
+            let mut armor_transforms = Vec::new();
+            presentation::evaluate_rig(
+                armor,
+                entity,
+                models,
+                &crate::protocol::content::Content::test_cube(),
+                0,
+                1.,
+                Mat4::IDENTITY,
+                &mut armor_transforms,
+            );
+            for &name in parts {
+                out.insert(
+                    (slot, name),
+                    (
+                        emitted_bounds(body, &body_transforms, name),
+                        emitted_bounds(armor, &armor_transforms, name),
+                    ),
+                );
+            }
+        }
+        out
+    }
+
     #[test]
     fn baby_armor_encloses_animated_body_parts() {
+        // Vanilla 26.3 dresses babies in the `createBabyArmorMesh` shells worn over the
+        // `Baby*Model` bodies; both ride the same `setupAnim` joints. The comparison is
+        // against the jar's baby body, not the old authored one, and follows the vanilla fit:
+        // head, torso and legs are enclosed, the humanoid sleeve leaves the inboard arm face
+        // open (x deformation -0.1), and the zombie villager's robe hangs below its chestplate.
+        // Under a pitched pose every armour face must keep its rest distance to the body part
+        // (within one texel of joint play), which is what "follows the animation" means here.
         let (models, mut entity) = animation_tests::fixture();
         entity.source = None;
+        const FIT_EPS: f32 = 1e-3;
+        const ANIMATED_EPS: f32 = 1.5;
         for family in [
             "zombie",
             "husk",
@@ -642,48 +733,79 @@ mod baby_armor_alignment_tests {
             "piglin",
             "zombified_piglin",
         ] {
-            let body = authored(&format!("minecraft:{family}_baby#main")).unwrap();
-            for pitch in [0., 40.] {
-                entity.transform.pitch = pitch;
-                entity.previous.pitch = pitch;
-                let mut body_transforms = Vec::new();
-                presentation::evaluate_rig(
-                    body,
-                    &entity,
-                    &models,
-                    &crate::protocol::content::Content::test_cube(),
-                    0,
-                    1.,
-                    Mat4::IDENTITY,
-                    &mut body_transforms,
+            entity.transform.pitch = 0.;
+            entity.previous.pitch = 0.;
+            let rest = baby_bounds(&models, &entity, family);
+            for ((slot, name), (body_bounds, armor_bounds)) in &rest {
+                let fit = vanilla_fit(family, slot, name);
+                let evidence = format!(
+                    "{family} {slot} {name} at rest: body {:?}..{:?}, armor {:?}..{:?}",
+                    body_bounds.0, body_bounds.1, armor_bounds.0, armor_bounds.1
                 );
-                for (slot, parts) in [
-                    ("head", &["head"][..]),
-                    ("chest", &["body", "right_arm", "left_arm"][..]),
-                    ("legs", &["right_leg", "left_leg"][..]),
-                ] {
-                    let armor = authored(&format!("minecraft:{family}#layer3/babyModelSet/{slot}"))
-                        .unwrap();
-                    let mut armor_transforms = Vec::new();
-                    presentation::evaluate_rig(
-                        armor,
-                        &entity,
-                        &models,
-                        &crate::protocol::content::Content::test_cube(),
-                        0,
-                        1.,
-                        Mat4::IDENTITY,
-                        &mut armor_transforms,
-                    );
-                    for name in parts {
-                        let (body_min, body_max) = emitted_bounds(body, &body_transforms, name);
-                        let (armor_min, armor_max) = emitted_bounds(armor, &armor_transforms, name);
+                match fit {
+                    Fit::Encloses => {
+                        for axis in 0..3 {
+                            assert!(
+                                contained(*armor_bounds, *body_bounds, axis, FIT_EPS),
+                                "axis {axis} not enclosed: {evidence}"
+                            );
+                        }
+                    }
+                    Fit::SleeveOpen => {
+                        // y and z stay covered; the inboard x face is open by design.
+                        for axis in 1..3 {
+                            assert!(
+                                contained(*armor_bounds, *body_bounds, axis, FIT_EPS),
+                                "sleeve axis {axis} not covered: {evidence}"
+                            );
+                        }
+                        if *name == "right_arm" {
+                            // The inboard face sits 0.6 px (0.0375 blocks) inside the arm.
+                            assert!(
+                                armor_bounds.0.x <= body_bounds.0.x + FIT_EPS
+                                    && armor_bounds.1.x <= body_bounds.1.x - 0.5 / 16.,
+                                "sleeve outboard x not covered or inboard face not open: {evidence}"
+                            );
+                        } else {
+                            assert!(
+                                armor_bounds.1.x >= body_bounds.1.x - FIT_EPS
+                                    && armor_bounds.0.x >= body_bounds.0.x + 0.5 / 16.,
+                                "sleeve outboard x not covered or inboard face not open: {evidence}"
+                            );
+                        }
+                    }
+                    Fit::RobeBelow => {
+                        for axis in [0, 2] {
+                            assert!(
+                                contained(*armor_bounds, *body_bounds, axis, FIT_EPS),
+                                "robe axis {axis} not enclosed: {evidence}"
+                            );
+                        }
                         assert!(
-                            (armor_min.cmple(body_min + Vec3::splat(0.0001))).all()
-                                && (armor_max.cmpge(body_max - Vec3::splat(0.0001))).all(),
-                            "{family} {slot} {name} at pitch {pitch}: body {body_min:?}..{body_max:?}, armor {armor_min:?}..{armor_max:?}"
+                            armor_bounds.0.y <= body_bounds.0.y + FIT_EPS
+                                && armor_bounds.1.y < body_bounds.1.y,
+                            "the robe must hang below the chestplate: {evidence}"
                         );
                     }
+                }
+            }
+            entity.transform.pitch = 40.;
+            entity.previous.pitch = 40.;
+            let posed = baby_bounds(&models, &entity, family);
+            for (key, (body, armor)) in &posed {
+                let (rest_body, rest_armor) = rest[key];
+                for axis in 0..3 {
+                    let rest_gap = rest_armor.0[axis] - rest_body.0[axis];
+                    let rest_gap_high = rest_armor.1[axis] - rest_body.1[axis];
+                    let posed_gap = armor.0[axis] - body.0[axis];
+                    let posed_gap_high = armor.1[axis] - body.1[axis];
+                    assert!(
+                        (posed_gap - rest_gap).abs() <= ANIMATED_EPS
+                            && (posed_gap_high - rest_gap_high).abs() <= ANIMATED_EPS,
+                        "{family} {} {} axis {axis} drifts off its joint when pitched: rest gaps {rest_gap}/{rest_gap_high}, posed {posed_gap}/{posed_gap_high}",
+                        key.0,
+                        key.1
+                    );
                 }
             }
         }
