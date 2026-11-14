@@ -167,12 +167,30 @@ fn animation_received_motion_swings_limbs_without_velocity_packets() {
     let (models, mut entity) = fixture();
     let rig = rig();
     let mut idle = vec![];
-    presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut idle);
+    presentation::evaluate_rig(
+        &rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        0,
+        1.,
+        Mat4::IDENTITY,
+        &mut idle,
+    );
     tick_walk(&models, &mut entity, 0.2);
     tick_walk(&models, &mut entity, 0.4);
     assert_eq!(entity.velocity, [0.; 3]);
     let mut moving = vec![];
-    presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut moving);
+    presentation::evaluate_rig(
+        &rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        2,
+        1.,
+        Mat4::IDENTITY,
+        &mut moving,
+    );
     assert_ne!(moving[0], idle[0]);
     assert_ne!(moving[2], idle[2]);
     let right = moving[0].transform_vector3(Vec3::Y);
@@ -182,18 +200,36 @@ fn animation_received_motion_swings_limbs_without_velocity_packets() {
         "opposite legs must swing in opposite directions"
     );
     let mut halfway = vec![];
-    presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 2, 0.5, Mat4::IDENTITY, &mut halfway);
+    presentation::evaluate_rig(
+        &rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        2,
+        0.5,
+        Mat4::IDENTITY,
+        &mut halfway,
+    );
     assert_ne!(halfway[0], moving[0]);
 }
 
 #[test]
 fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
     let (models, mut entity) = fixture();
-    let rig = solaris_models::authored("minecraft:spider#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:spider#main").unwrap();
     entity.type_name = "minecraft:spider".into();
     let pose = |entity: &Entity| {
         let mut matrices = vec![];
-        presentation::evaluate_rig(rig, entity, &models, &crate::protocol::content::Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut matrices);
+        presentation::evaluate_rig(
+            rig,
+            entity,
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            2,
+            1.,
+            Mat4::IDENTITY,
+            &mut matrices,
+        );
         matrices
     };
     let idle = pose(&entity);
@@ -212,21 +248,42 @@ fn animation_spider_walk_moves_all_legs_and_settles_when_idle() {
         let bone = rig.part_by_name[&format!("leg{index}")];
         let a = idle[bone].to_cols_array();
         let b = stopped[bone].to_cols_array();
-        assert!(a.iter().zip(b).all(|(x, y)| (*x - y).abs() < 1e-5), "leg{index}");
+        assert!(
+            a.iter().zip(b).all(|(x, y)| (*x - y).abs() < 1e-5),
+            "leg{index}"
+        );
     }
 }
 
 #[test]
 fn animation_zombie_authored_legs_follow_received_motion() {
     let (models, mut entity) = fixture();
-    let rig = solaris_models::authored("minecraft:zombie#main").unwrap();
+    let rig = krasnokamen_models::authored("minecraft:zombie#main").unwrap();
     entity.type_name = "minecraft:zombie".into();
     let mut idle = vec![];
-    presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut idle);
+    presentation::evaluate_rig(
+        rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        0,
+        1.,
+        Mat4::IDENTITY,
+        &mut idle,
+    );
     tick_walk(&models, &mut entity, 0.2);
     tick_walk(&models, &mut entity, 0.4);
     let mut moving = vec![];
-    presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut moving);
+    presentation::evaluate_rig(
+        rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        2,
+        1.,
+        Mat4::IDENTITY,
+        &mut moving,
+    );
     for name in ["right_leg", "left_leg"] {
         let bone = rig.part_by_name[name];
         assert_ne!(idle[bone], moving[bone], "{name}");
@@ -251,29 +308,55 @@ fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
     let content = Content::test_cube();
     let section = |state: u32| {
         Arc::new(Section {
-            blocks: Palette { bits: 0, values: vec![state], words: Vec::new(), size: 4096 },
-            biomes: Palette { bits: 0, values: vec![0], words: Vec::new(), size: 64 },
+            blocks: Palette {
+                bits: 0,
+                values: vec![state],
+                words: Vec::new(),
+                size: 4096,
+            },
+            biomes: Palette {
+                bits: 0,
+                values: vec![0],
+                words: Vec::new(),
+                size: 64,
+            },
             non_empty_block_count: if state == 0 { 0 } else { 4096 },
         })
     };
     // Solid cubes up to y = 16, air above.
     let mut world = World::new(0, 32);
     world
-        .insert([0, 0], Chunk {
-            sections: vec![section(1), section(0)],
-            sky: BTreeMap::new(),
-            block: BTreeMap::new(),
-            block_entities: crate::protocol::world::empty_block_entities(),
-            surface_heightmap: Arc::new(SurfaceHeightmap::new(32).unwrap()),
-            surface_heightmap_received: false,
-        })
+        .insert(
+            [0, 0],
+            Chunk {
+                sections: vec![section(1), section(0)],
+                sky: BTreeMap::new(),
+                block: BTreeMap::new(),
+                block_entities: crate::protocol::world::empty_block_entities(),
+                surface_heightmap: Arc::new(SurfaceHeightmap::new(32).unwrap()),
+                surface_heightmap_received: false,
+            },
+        )
         .unwrap();
-    let rig = solaris_models::authored("minecraft:chicken#main").unwrap();
-    let wing = rig.bones.iter().position(|bone| bone.role == BoneRole::WingNegativeX).unwrap();
+    let rig = krasnokamen_models::authored("minecraft:chicken#main").unwrap();
+    let wing = rig
+        .bones
+        .iter()
+        .position(|bone| bone.role == BoneRole::WingNegativeX)
+        .unwrap();
     let wing_at = |entity: &mut Entity, tick: u64| {
         entity.source.as_mut().unwrap().age = tick as i32;
         let mut pose = vec![];
-        presentation::evaluate_rig(rig, entity, &models, &crate::protocol::content::Content::test_cube(), tick, 0.5, Mat4::IDENTITY, &mut pose);
+        presentation::evaluate_rig(
+            rig,
+            entity,
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            tick,
+            0.5,
+            Mat4::IDENTITY,
+            &mut pose,
+        );
         pose[wing]
     };
     let settle_at = |entity: &mut Entity, y: f64| {
@@ -282,18 +365,33 @@ fn animation_chicken_wings_rest_on_received_ground_and_beat_in_midair() {
         entity.previous = entity.transform;
         for _ in 0..6 {
             let bounds = physical::bounds(&models, entity, 0, 0.).unwrap();
-            source_state::tick(entity, &models, &world, &content, 0, 0, false, false, bounds).unwrap();
+            source_state::tick(
+                entity, &models, &world, &content, 0, 0, false, false, bounds,
+            )
+            .unwrap();
         }
     };
     settle_at(&mut entity, 16.);
     let rest = wing_at(&mut entity, 3);
     for tick in [4, 7, 11] {
-        assert_eq!(wing_at(&mut entity, tick), rest, "a chicken standing on a block must not flap");
+        assert_eq!(
+            wing_at(&mut entity, tick),
+            rest,
+            "a chicken standing on a block must not flap"
+        );
     }
     settle_at(&mut entity, 20.);
-    assert_ne!(wing_at(&mut entity, 3), wing_at(&mut entity, 7), "a chicken in midair must flap");
+    assert_ne!(
+        wing_at(&mut entity, 3),
+        wing_at(&mut entity, 7),
+        "a chicken in midair must flap"
+    );
     settle_at(&mut entity, 16.);
-    assert_eq!(wing_at(&mut entity, 9), rest, "wings fold again after landing");
+    assert_eq!(
+        wing_at(&mut entity, 9),
+        rest,
+        "wings fold again after landing"
+    );
 }
 
 #[test]
@@ -306,23 +404,44 @@ fn animation_creeper_fuse_swells_and_flashes_and_charge_draws_an_aura() {
     use std::sync::Arc;
     let (mut models, mut entity) = fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();
-    for (name, index) in [("DATA_SHARED_FLAGS_ID", [0, 0]), ("DATA_SWELL_DIR", [16, 1]),
-                          ("DATA_IS_POWERED", [17, 8]), ("DATA_IS_IGNITED", [18, 8])] {
+    for (name, index) in [
+        ("DATA_SHARED_FLAGS_ID", [0, 0]),
+        ("DATA_SWELL_DIR", [16, 1]),
+        ("DATA_IS_POWERED", [17, 8]),
+        ("DATA_IS_IGNITED", [18, 8]),
+    ] {
         schema.accessors.insert(name.into(), index);
     }
     let motion = models.motion.remove("minecraft:pig").unwrap();
     entity.type_name = "minecraft:creeper".into();
     models.schemas.insert(entity.type_name.clone(), schema);
     models.motion.insert(entity.type_name.clone(), motion);
-    models.families.insert(entity.type_name.clone(), resources::Family {
-        rig: "minecraft:creeper#main".into(), baby_rig: None,
-        texture: Some("minecraft:entity/creeper/creeper".into()), textures: vec![],
-        renderer_class: None, materials: BTreeMap::new(),
-    });
+    models.families.insert(
+        entity.type_name.clone(),
+        resources::Family {
+            rig: "minecraft:creeper#main".into(),
+            baby_rig: None,
+            texture: Some("minecraft:entity/creeper/creeper".into()),
+            textures: vec![],
+            renderer_class: None,
+            materials: BTreeMap::new(),
+        },
+    );
     entity.source = Some(source_state::SourceState::new(&entity, &models).unwrap());
     let mut content = Content::test_cube();
-    for (name, layer) in [("minecraft:entity/creeper/creeper", 1), ("minecraft:entity/creeper/creeper_armor", 2)] {
-        content.insert_test_texture(name, TextureRegion { uv: [0., 0., 1., 1.], layer, width: 64, height: 32 });
+    for (name, layer) in [
+        ("minecraft:entity/creeper/creeper", 1),
+        ("minecraft:entity/creeper/creeper_armor", 2),
+    ] {
+        content.insert_test_texture(
+            name,
+            TextureRegion {
+                uv: [0., 0., 1., 1.],
+                layer,
+                width: 64,
+                height: 32,
+            },
+        );
     }
     let models = Arc::new(models);
     let mut store = Store::new();
@@ -340,24 +459,48 @@ fn animation_creeper_fuse_swells_and_flashes_and_charge_draws_an_aura() {
     };
     let render = |store: &mut Store| {
         let mut out = DynamicGeometry::default();
-        let stats = presentation::append(store, EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0., 1., -4.], camera_rotation: [0.; 2],
-        radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None,
-        light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None, }, &mut out).unwrap();
+        let stats = presentation::append(
+            store,
+            EntityRenderFrame {
+                maps: crate::ui::MapRenderFixture::empty().view(),
+                tint_source: &|_, _| Ok([1.; 3]),
+                content: &content,
+                origin: [0.; 3],
+                camera: [0., 1., -4.],
+                camera_rotation: [0.; 2],
+                radius: 32.,
+                tick: 0,
+                partial: 0.,
+                game_time: 0,
+                clock_environment: None,
+                light: &|_| Ok(Some([15., 0.])),
+                bed_direction: &|_| None,
+            },
+            &mut out,
+        )
+        .unwrap();
         assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
         out
     };
     let body = |out: &DynamicGeometry| {
         let indices = &out.indices[EntityMaterial::EntityCutout as usize];
-        let xs = indices.iter().map(|&i| out.vertices[i as usize].position[0]);
+        let xs = indices
+            .iter()
+            .map(|&i| out.vertices[i as usize].position[0]);
         let (low, high) = xs.fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(x), h.max(x)));
-        let flashing = indices.iter().any(|&i| out.vertices[i as usize].overlay_uv[0] > 0.);
+        let flashing = indices
+            .iter()
+            .any(|&i| out.vertices[i as usize].overlay_uv[0] > 0.);
         (high - low, flashing)
     };
     set(&mut store, 16, Metadata::Int(-1));
     let idle = render(&mut store);
     let (idle_width, idle_flash) = body(&idle);
     assert!(!idle_flash, "an idle creeper must not flash");
-    assert!(idle.indices[EntityMaterial::EnergySwirl as usize].is_empty(), "uncharged creepers have no aura");
+    assert!(
+        idle.indices[EntityMaterial::EnergySwirl as usize].is_empty(),
+        "uncharged creepers have no aura"
+    );
     set(&mut store, 16, Metadata::Int(1));
     let mut flashes = [false; 2];
     let mut widths = vec![];
@@ -367,19 +510,38 @@ fn animation_creeper_fuse_swells_and_flashes_and_charge_draws_an_aura() {
         flashes[usize::from(flashing)] = true;
         widths.push(width);
     }
-    assert_eq!(flashes, [true, true], "the fuse must blink white on and off");
-    assert!(widths.windows(2).all(|w| w[1] >= w[0] - 1e-4), "the creeper keeps growing while the fuse burns");
-    assert!(widths[29] > idle_width * 1.2, "a creeper about to explode is visibly swollen: {widths:?}");
+    assert_eq!(
+        flashes,
+        [true, true],
+        "the fuse must blink white on and off"
+    );
+    assert!(
+        widths.windows(2).all(|w| w[1] >= w[0] - 1e-4),
+        "the creeper keeps growing while the fuse burns"
+    );
+    assert!(
+        widths[29] > idle_width * 1.2,
+        "a creeper about to explode is visibly swollen: {widths:?}"
+    );
     set(&mut store, 16, Metadata::Int(-1));
     tick(&mut store, 40);
     let (calm_width, calm_flash) = body(&render(&mut store));
-    assert!((calm_width - idle_width).abs() < 1e-3 && !calm_flash, "a defused creeper returns to normal");
+    assert!(
+        (calm_width - idle_width).abs() < 1e-3 && !calm_flash,
+        "a defused creeper returns to normal"
+    );
     set(&mut store, 17, Metadata::Bool(true));
-    assert!(!render(&mut store).indices[EntityMaterial::EnergySwirl as usize].is_empty(), "charged aura");
+    assert!(
+        !render(&mut store).indices[EntityMaterial::EnergySwirl as usize].is_empty(),
+        "charged aura"
+    );
     set(&mut store, 0, Metadata::Byte(32));
     let invisible = render(&mut store);
     assert!(invisible.indices[EntityMaterial::EntityCutout as usize].is_empty());
-    assert!(!invisible.indices[EntityMaterial::EnergySwirl as usize].is_empty(), "the aura stays visible");
+    assert!(
+        !invisible.indices[EntityMaterial::EnergySwirl as usize].is_empty(),
+        "the aura stays visible"
+    );
 }
 
 #[test]
@@ -389,7 +551,14 @@ fn animation_zombie_family_raises_both_arms() {
     schema.accessors.insert("DATA_MOB_FLAGS_ID".into(), [15, 0]);
     schema.accessors.insert("DATA_BABY_ID".into(), [16, 8]);
     let rig = rig();
-    for name in ["zombie", "husk", "drowned", "giant", "zombie_villager", "zombified_piglin"] {
+    for name in [
+        "zombie",
+        "husk",
+        "drowned",
+        "giant",
+        "zombie_villager",
+        "zombified_piglin",
+    ] {
         entity.type_name = format!("minecraft:{name}");
         models.schemas.insert(entity.type_name.clone(), schema);
         for (flags, baby, held, min_y, max_y) in [
@@ -407,10 +576,22 @@ fn animation_zombie_family_raises_both_arms() {
                 stack
             });
             let mut pose = vec![];
-            presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut pose);
+            presentation::evaluate_rig(
+                &rig,
+                &entity,
+                &models,
+                &crate::protocol::content::Content::test_cube(),
+                0,
+                0.,
+                Mat4::IDENTITY,
+                &mut pose,
+            );
             for arm in [2, 3] {
                 let direction = pose[arm].transform_vector3(Vec3::Y);
-                assert!((min_y..=max_y).contains(&direction.y), "{name} arm {arm}: {direction:?}");
+                assert!(
+                    (min_y..=max_y).contains(&direction.y),
+                    "{name} arm {arm}: {direction:?}"
+                );
             }
         }
         schema = models.schemas.remove(&entity.type_name).unwrap();
@@ -425,7 +606,16 @@ fn animation_zombie_idle_arms_bob_and_attack_moves_both() {
     let rig = rig();
     let pose = |entity: &Entity, tick| {
         let mut out = vec![];
-        presentation::evaluate_rig(&rig, entity, &models, &crate::protocol::content::Content::test_cube(), tick, 0., Mat4::IDENTITY, &mut out);
+        presentation::evaluate_rig(
+            &rig,
+            entity,
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            tick,
+            0.,
+            Mat4::IDENTITY,
+            &mut out,
+        );
         out
     };
     let idle = pose(&entity, 0);
@@ -447,7 +637,16 @@ fn animation_villager_model_family_swings_legs_at_half_amplitude() {
     tick_walk(&models, &mut entity, 0.4);
     let swing = |entity: &Entity| {
         let mut matrices = vec![];
-        presentation::evaluate_rig(&rig, entity, &models, &crate::protocol::content::Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut matrices);
+        presentation::evaluate_rig(
+            &rig,
+            entity,
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            2,
+            1.,
+            Mat4::IDENTITY,
+            &mut matrices,
+        );
         matrices[0].transform_vector3(Vec3::Y).z.asin()
     };
     let humanoid = swing(&entity);
@@ -511,8 +710,26 @@ fn animation_idle_is_not_driven_by_global_clock_or_stale_velocity() {
     let rig = rig();
     let mut first = vec![];
     let mut later = vec![];
-    presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 1., Mat4::IDENTITY, &mut first);
-    presentation::evaluate_rig(&rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 100, 1., Mat4::IDENTITY, &mut later);
+    presentation::evaluate_rig(
+        &rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        0,
+        1.,
+        Mat4::IDENTITY,
+        &mut first,
+    );
+    presentation::evaluate_rig(
+        &rig,
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        100,
+        1.,
+        Mat4::IDENTITY,
+        &mut later,
+    );
     assert_eq!(first, later);
 }
 
@@ -527,7 +744,16 @@ fn animation_head_tracks_relative_to_lagged_body() {
     entity.transform.pitch = 25.;
     entity.previous.pitch = 25.;
     let mut matrices = vec![];
-    presentation::evaluate_rig(&rig(), &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0.5, Mat4::IDENTITY, &mut matrices);
+    presentation::evaluate_rig(
+        &rig(),
+        &entity,
+        &models,
+        &crate::protocol::content::Content::test_cube(),
+        0,
+        0.5,
+        Mat4::IDENTITY,
+        &mut matrices,
+    );
     let expected =
         Mat4::from_rotation_y(40f32.to_radians()) * Mat4::from_rotation_x(25f32.to_radians());
     for (actual, expected) in matrices[4]
@@ -539,7 +765,6 @@ fn animation_head_tracks_relative_to_lagged_body() {
     }
 }
 
-
 #[test]
 fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     let (mut models, mut entity) = fixture();
@@ -548,30 +773,61 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     schema.accessors.insert("SLEEPING_POS_ID".into(), [14, 11]);
     // Entity metadata body from the server: pose=2 and optional head block position=(0,0,0).
     let packet = [6, 20, 2, 14, 11, 1, 0, 0, 0, 0, 0, 0, 0, 0, 255];
-    entity.metadata = metadata::decode(&mut crate::protocol::Reader::new(&packet), &Content::test_cube(), &models).unwrap();
-    models.rigs.insert("authored:rig".into(), Rig {
-        bones: vec![Bone {
-            parent: None, pivot: Vec3::ZERO, rotation: Vec3::ZERO, scale: Vec3::ONE,
-            role: BoneRole::Fixed, name: "body".into(),
-            quads: vec![[[0., 0., 0., 0., 0.], [1., 0., 0., 1., 0.],
-                         [1., 1., 0., 1., 1.], [0., 1., 0., 0., 1.]]],
-            normals: vec![[0., 0., 1.]],
-        }],
-        part_by_name: BTreeMap::new(),
-    });
+    entity.metadata = metadata::decode(
+        &mut crate::protocol::Reader::new(&packet),
+        &Content::test_cube(),
+        &models,
+    )
+    .unwrap();
+    models.rigs.insert(
+        "authored:rig".into(),
+        Rig {
+            bones: vec![Bone {
+                parent: None,
+                pivot: Vec3::ZERO,
+                rotation: Vec3::ZERO,
+                scale: Vec3::ONE,
+                role: BoneRole::Fixed,
+                name: "body".into(),
+                quads: vec![[
+                    [0., 0., 0., 0., 0.],
+                    [1., 0., 0., 1., 0.],
+                    [1., 1., 0., 1., 1.],
+                    [0., 1., 0., 0., 1.],
+                ]],
+                normals: vec![[0., 0., 1.]],
+            }],
+            part_by_name: BTreeMap::new(),
+        },
+    );
     entity.binding = Some(Ok(presentation::Binding {
         rig: "authored:rig".into(),
-        texture: crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1 },
-        style: presentation::RootStyle::Living, layers: None,
+        texture: crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 1,
+            height: 1,
+        },
+        style: presentation::RootStyle::Living,
+        layers: None,
         anger: None,
     }));
     models.poses.insert(2, "SLEEPING".into());
-    models.schemas.get_mut(&entity.type_name).unwrap().dimension_constants.insert(
-        "SLEEPING_DIMENSIONS".into(),
-        resources::DimensionConstant::Dimensions(resources::Dimensions {
-            width: 0.2, height: 0.2, eye_height: 0.2, fixed: true, attachments: BTreeMap::new(),
-        }),
-    );
+    models
+        .schemas
+        .get_mut(&entity.type_name)
+        .unwrap()
+        .dimension_constants
+        .insert(
+            "SLEEPING_DIMENSIONS".into(),
+            resources::DimensionConstant::Dimensions(resources::Dimensions {
+                width: 0.2,
+                height: 0.2,
+                eye_height: 0.2,
+                fixed: true,
+                attachments: BTreeMap::new(),
+            }),
+        );
     let mut store = Store::new();
     store.models = Some(Arc::new(models));
     store.local_avatar = Some(entity);
@@ -579,16 +835,41 @@ fn rc2_received_sleep_pose_rotates_rig_horizontally() {
     let mut axes = Vec::new();
     for direction in [[0, 1], [-1, 0], [0, -1], [1, 0]] {
         let mut geometry = DynamicGeometry::default();
-        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|position| {
-            assert_eq!(position, [0, 0, 0]);
-            Some(direction)
-        } }, &mut geometry).unwrap();
+        store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &Content::test_cube(),
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    light: &|_| Ok(Some([15., 0.])),
+                    bed_direction: &|position| {
+                        assert_eq!(position, [0, 0, 0]);
+                        Some(direction)
+                    },
+                },
+                &mut geometry,
+            )
+            .unwrap();
         assert_eq!(geometry.vertices.len(), 4);
-        assert!(geometry.vertices[0].normal[1] < -0.99, "the model back must face downward");
+        assert!(
+            geometry.vertices[0].normal[1] < -0.99,
+            "the model back must face downward"
+        );
         let a = Vec3::from_array(geometry.vertices[0].position);
         let b = Vec3::from_array(geometry.vertices[3].position);
         let axis = b - a;
-        assert!(axis.y.abs() < 1e-5, "body axis must be horizontal: {axis:?}");
+        assert!(
+            axis.y.abs() < 1e-5,
+            "body axis must be horizontal: {axis:?}"
+        );
         axes.push(axis);
     }
     assert!(axes[0].dot(axes[2]) < -0.99);
@@ -609,16 +890,39 @@ fn rc2_passenger_packet_bends_villager_legs_and_dismount_restores_them() {
     store.ids.insert(42, 1);
     let matrices = |store: &Store| {
         let mut out = Vec::new();
-        presentation::evaluate_rig(&rig(), store.get(41).unwrap(), &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut out);
+        presentation::evaluate_rig(
+            &rig(),
+            store.get(41).unwrap(),
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            0,
+            0.,
+            Mat4::IDENTITY,
+            &mut out,
+        );
         out
     };
     let standing = matrices(&store);
     // Vehicle 42, one passenger 41: the ordinary SET_PASSENGERS wire body.
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &Content::test_cube(), 0).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[42, 1, 41]),
+            &Content::test_cube(),
+            0,
+        )
+        .unwrap();
     let seated = matrices(&store);
     assert!(seated[0].transform_vector3(Vec3::Y).z.abs() > 0.9);
     assert!(seated[1].transform_vector3(Vec3::Y).z.abs() > 0.9);
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 0]), &Content::test_cube(), 0).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[42, 0]),
+            &Content::test_cube(),
+            0,
+        )
+        .unwrap();
     assert_eq!(matrices(&store), standing);
 }
 
@@ -628,44 +932,82 @@ fn seat_attachment_fixture() -> Store {
     let (mut models, mut rider) = fixture();
     let (mut seat_models, mut seat) = fixture();
     let mut rider_schema = models.schemas.remove("minecraft:pig").unwrap();
-    rider_schema.dimensions.attachments.insert("VEHICLE".into(), vec![[0., 0.25, 0.]]);
-    models.schemas.insert("minecraft:villager".into(), rider_schema);
+    rider_schema
+        .dimensions
+        .attachments
+        .insert("VEHICLE".into(), vec![[0., 0.25, 0.]]);
+    models
+        .schemas
+        .insert("minecraft:villager".into(), rider_schema);
     let facts = models.motion.remove("minecraft:pig").unwrap();
     models.motion.insert("minecraft:villager".into(), facts);
     let mut seat_schema = seat_models.schemas.remove("minecraft:pig").unwrap();
-    seat_schema.method_owners.insert("getPassengerAttachmentPoint".into(),
-        "net.minecraft.world.entity.Entity".into());
-    seat_schema.accessors.insert("DATA_CLIENT_FLAGS".into(), [8, 0]);
-    seat_schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
-    seat_schema.dimensions.attachments.insert("PASSENGER".into(), vec![[1., 1., 0.]]);
+    seat_schema.method_owners.insert(
+        "getPassengerAttachmentPoint".into(),
+        "net.minecraft.world.entity.Entity".into(),
+    );
+    seat_schema
+        .accessors
+        .insert("DATA_CLIENT_FLAGS".into(), [8, 0]);
+    seat_schema
+        .accessors
+        .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+    seat_schema
+        .dimensions
+        .attachments
+        .insert("PASSENGER".into(), vec![[1., 1., 0.]]);
     let mut marker = seat_schema.dimensions.clone();
     marker.width = 0.;
     marker.height = 0.;
     marker.eye_height = 0.;
     marker.attachments.insert("PASSENGER".into(), vec![[0.; 3]]);
     marker.attachments.insert("VEHICLE".into(), vec![[0.; 3]]);
-    seat_schema.dimension_constants.insert("MARKER_DIMENSIONS".into(),
-        resources::DimensionConstant::Dimensions(marker));
-    models.schemas.insert("minecraft:armor_stand".into(), seat_schema);
-    models.motion.insert("minecraft:armor_stand".into(),
-        seat_models.motion.remove("minecraft:pig").unwrap());
-    models.rigs.insert("authored:seat_quad".into(), Rig {
-        bones: vec![Bone {
-            parent: None, pivot: Vec3::ZERO, rotation: Vec3::ZERO, scale: Vec3::ONE,
-            role: BoneRole::Fixed, name: "body".into(),
-            quads: vec![[[0., 0., 0., 0., 0.], [1., 0., 0., 1., 0.],
-                [1., 1., 0., 1., 1.], [0., 1., 0., 0., 1.]]],
-            normals: vec![[0., 0., 1.]],
-        }],
-        part_by_name: BTreeMap::new(),
-    });
-    let binding = || Some(Ok(presentation::Binding {
-        rig: "authored:seat_quad".into(),
-        texture: crate::protocol::content::TextureRegion {
-            uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1,
+    seat_schema.dimension_constants.insert(
+        "MARKER_DIMENSIONS".into(),
+        resources::DimensionConstant::Dimensions(marker),
+    );
+    models
+        .schemas
+        .insert("minecraft:armor_stand".into(), seat_schema);
+    models.motion.insert(
+        "minecraft:armor_stand".into(),
+        seat_models.motion.remove("minecraft:pig").unwrap(),
+    );
+    models.rigs.insert(
+        "authored:seat_quad".into(),
+        Rig {
+            bones: vec![Bone {
+                parent: None,
+                pivot: Vec3::ZERO,
+                rotation: Vec3::ZERO,
+                scale: Vec3::ONE,
+                role: BoneRole::Fixed,
+                name: "body".into(),
+                quads: vec![[
+                    [0., 0., 0., 0., 0.],
+                    [1., 0., 0., 1., 0.],
+                    [1., 1., 0., 1., 1.],
+                    [0., 1., 0., 0., 1.],
+                ]],
+                normals: vec![[0., 0., 1.]],
+            }],
+            part_by_name: BTreeMap::new(),
         },
-        style: presentation::RootStyle::Object, layers: None, anger: None,
-    }));
+    );
+    let binding = || {
+        Some(Ok(presentation::Binding {
+            rig: "authored:seat_quad".into(),
+            texture: crate::protocol::content::TextureRegion {
+                uv: [0., 0., 1., 1.],
+                layer: 0,
+                width: 1,
+                height: 1,
+            },
+            style: presentation::RootStyle::Object,
+            layers: None,
+            anger: None,
+        }))
+    };
     rider.type_name = "minecraft:villager".into();
     rider.position = [500., 202., 500.];
     rider.transform.position = rider.position;
@@ -687,34 +1029,72 @@ fn seat_attachment_fixture() -> Store {
     for entity in [rider, seat] {
         let id = entity.handle.network_id;
         store.ids.insert(id, store.slots.len());
-        store.spatial.entry(cell(entity.position)).or_default().insert(id);
+        store
+            .spatial
+            .entry(cell(entity.position))
+            .or_default()
+            .insert(id);
         store.physical_active.insert(id);
         store.slots.push(entity);
     }
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]),
-        &Content::test_cube(), 0).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[42, 1, 41]),
+            &Content::test_cube(),
+            0,
+        )
+        .unwrap();
     store
 }
 
-fn seat_attachment_frame(store: &mut Store, tick: u64, partial: f32, camera: [f64; 3])
-    -> (PresentationStats, DynamicGeometry)
-{
+fn seat_attachment_frame(
+    store: &mut Store,
+    tick: u64,
+    partial: f32,
+    camera: [f64; 3],
+) -> (PresentationStats, DynamicGeometry) {
     let mut geometry = DynamicGeometry::default();
-    let stats = store.append_geometry(EntityRenderFrame {
-        maps: crate::ui::MapRenderFixture::empty().view(),
-        tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(),
-        origin: [0.; 3], camera, camera_rotation: [0.; 2], radius: 32.,
-        tick, partial, game_time: 0, clock_environment: None,
-        light: &|position| Ok(Some(if position[1] < 202.5 { [3., 7.] } else { [13., 1.] })),
-        bed_direction: &|_| None,
-    }, &mut geometry).unwrap();
+    let stats = store
+        .append_geometry(
+            EntityRenderFrame {
+                maps: crate::ui::MapRenderFixture::empty().view(),
+                tint_source: &|_, _| Ok([1.; 3]),
+                content: &Content::test_cube(),
+                origin: [0.; 3],
+                camera,
+                camera_rotation: [0.; 2],
+                radius: 32.,
+                tick,
+                partial,
+                game_time: 0,
+                clock_environment: None,
+                light: &|position| {
+                    Ok(Some(if position[1] < 202.5 {
+                        [3., 7.]
+                    } else {
+                        [13., 1.]
+                    }))
+                },
+                bed_direction: &|_| None,
+            },
+            &mut geometry,
+        )
+        .unwrap();
     (stats, geometry)
 }
 
 fn seat_attachment_assert_vertex(geometry: &DynamicGeometry, expected: [f64; 3]) {
-    assert_eq!(geometry.vertices.len(), 4, "the rider's actual rig quad must be submitted");
+    assert_eq!(
+        geometry.vertices.len(),
+        4,
+        "the rider's actual rig quad must be submitted"
+    );
     for (actual, expected) in geometry.vertices[0].position.into_iter().zip(expected) {
-        assert!((f64::from(actual) - expected).abs() < 0.001, "{actual} vs {expected}");
+        assert!(
+            (f64::from(actual) - expected).abs() < 0.001,
+            "{actual} vs {expected}"
+        );
     }
 }
 
@@ -725,7 +1105,12 @@ fn seat_attachment_marker_anchor_reaches_rig_and_bounds_without_rewriting_body()
     let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
     assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
     seat_attachment_assert_vertex(&geometry, [9.5, 201.25, -199.5]);
-    assert!(geometry.vertices.iter().all(|vertex| vertex.light == [3., 7.]));
+    assert!(
+        geometry
+            .vertices
+            .iter()
+            .all(|vertex| vertex.light == [3., 7.])
+    );
     let bounds = store.bounds(handle, 1, 0.5).unwrap();
     assert_eq!(bounds.min, [9., 201.25, -200.]);
     assert_eq!(bounds.max, [10., 202.25, -199.]);
@@ -747,17 +1132,33 @@ fn seat_attachment_parent_yaw_scale_and_changed_attachments_reach_frame() {
     rider.attributes.insert(1, 2.);
     rider.transform.yaw = 90.;
     rider.previous.yaw = 90.;
-    Arc::get_mut(store.models.as_mut().unwrap()).unwrap().schemas
-        .get_mut("minecraft:villager").unwrap().dimensions.attachments
+    Arc::get_mut(store.models.as_mut().unwrap())
+        .unwrap()
+        .schemas
+        .get_mut("minecraft:villager")
+        .unwrap()
+        .dimensions
+        .attachments
         .insert("VEHICLE".into(), vec![[0.25, 0.25, 0.5]]);
     let (_, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
     seat_attachment_assert_vertex(&geometry, [10.5, 203., -198.]);
     let models = Arc::get_mut(store.models.as_mut().unwrap()).unwrap();
-    models.schemas.get_mut("minecraft:armor_stand").unwrap().dimensions.attachments
+    models
+        .schemas
+        .get_mut("minecraft:armor_stand")
+        .unwrap()
+        .dimensions
+        .attachments
         .insert("PASSENGER".into(), vec![[0., 2., 1.]]);
     let (_, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
     seat_attachment_assert_vertex(&geometry, [8.5, 205., -200.]);
-    assert_eq!(store.bounds(store.get(41).unwrap().handle, 1, 0.5).unwrap().min[1], 205.);
+    assert_eq!(
+        store
+            .bounds(store.get(41).unwrap().handle, 1, 0.5)
+            .unwrap()
+            .min[1],
+        205.
+    );
 }
 
 #[test]
@@ -767,12 +1168,33 @@ fn seat_attachment_dismount_and_parent_removal_restore_received_body() {
     let uuid = store.get(41).unwrap().uuid.clone();
     let (_, mounted) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
     seat_attachment_assert_vertex(&mounted, [9.5, 201.25, -199.5]);
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 0]), &Content::test_cube(), 1).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[42, 0]),
+            &Content::test_cube(),
+            1,
+        )
+        .unwrap();
     let (_, ordinary) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
     seat_attachment_assert_vertex(&ordinary, [500., 202., 500.]);
     assert_eq!(store.bounds(handle, 1, 0.5).unwrap().min[1], 202.);
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &Content::test_cube(), 1).unwrap();
-    store.apply(cb::REMOVE_ENTITIES, &mut Reader::new(&[1, 42]), &Content::test_cube(), 1).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[42, 1, 41]),
+            &Content::test_cube(),
+            1,
+        )
+        .unwrap();
+    store
+        .apply(
+            cb::REMOVE_ENTITIES,
+            &mut Reader::new(&[1, 42]),
+            &Content::test_cube(),
+            1,
+        )
+        .unwrap();
     let (_, removed) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
     seat_attachment_assert_vertex(&removed, [500., 202., 500.]);
     assert_eq!(store.get(41).unwrap().handle, handle);
@@ -790,12 +1212,16 @@ fn seat_attachment_freeze_and_step_preserve_parent_interpolation() {
     seat.physical.lerp_progress = 1;
     let world = crate::protocol::world::World::new(0, 384);
     let content = Content::test_cube();
-    store.tick_presentation(1, true, &world, &content, 100).unwrap();
+    store
+        .tick_presentation(1, true, &world, &content, 100)
+        .unwrap();
     let (_, frozen_start) = seat_attachment_frame(&mut store, 1, 0., [9.5, 201.5, -199.5]);
     let (_, frozen_end) = seat_attachment_frame(&mut store, 1, 0.9, [9.5, 201.5, -199.5]);
     seat_attachment_assert_vertex(&frozen_start, [10.5, 202.25, -199.5]);
     seat_attachment_assert_vertex(&frozen_end, [10.5, 202.25, -199.5]);
-    store.tick_presentation(2, false, &world, &content, 101).unwrap();
+    store
+        .tick_presentation(2, false, &world, &content, 101)
+        .unwrap();
     let (_, stepped) = seat_attachment_frame(&mut store, 2, 0.5, [9.5, 201.5, -199.5]);
     seat_attachment_assert_vertex(&stepped, [11.5, 203.25, -199.5]);
     let (_, later) = seat_attachment_frame(&mut store, 2, 0.9, [9.5, 201.5, -199.5]);
@@ -815,9 +1241,20 @@ fn seat_attachment_nested_parents_and_local_prediction_keep_their_owners() {
     outer.passenger_ids.clear();
     outer.passengers.clear();
     store.ids.insert(43, store.slots.len());
-    store.spatial.entry(cell(outer.position)).or_default().insert(43);
+    store
+        .spatial
+        .entry(cell(outer.position))
+        .or_default()
+        .insert(43);
     store.slots.push(outer);
-    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[43, 1, 42]), &Content::test_cube(), 1).unwrap();
+    store
+        .apply(
+            cb::SET_PASSENGERS,
+            &mut Reader::new(&[43, 1, 42]),
+            &Content::test_cube(),
+            1,
+        )
+        .unwrap();
     let (_, nested) = seat_attachment_frame(&mut store, 1, 0.5, [12.5, 205.5, -196.5]);
     seat_attachment_assert_vertex(&nested, [12.5, 205.25, -196.5]);
     // The real local-avatar extraction slot is outside the received index.
@@ -827,21 +1264,35 @@ fn seat_attachment_nested_parents_and_local_prediction_keep_their_owners() {
     if slot < store.slots.len() {
         store.ids.insert(store.slots[slot].handle.network_id, slot);
     }
-    store.spatial.get_mut(&cell(avatar.position)).unwrap().remove(&41);
+    store
+        .spatial
+        .get_mut(&cell(avatar.position))
+        .unwrap()
+        .remove(&41);
     store.local_avatar = Some(avatar);
     store.set_local_visible(true);
     store.local_entity_id = Some(41);
     let (_, predicted) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
     seat_attachment_assert_vertex(&predicted, [500., 202., 500.]);
-    assert_eq!(store.local_avatar.as_ref().unwrap().position, [500., 202., 500.]);
+    assert_eq!(
+        store.local_avatar.as_ref().unwrap().position,
+        [500., 202., 500.]
+    );
 }
 
 #[test]
 fn seat_attachment_unsupported_parent_rule_is_reported_not_drawn_at_body() {
     let mut store = seat_attachment_fixture();
-    Arc::get_mut(store.models.as_mut().unwrap()).unwrap().schemas
-        .get_mut("minecraft:armor_stand").unwrap().method_owners
-        .insert("getPassengerAttachmentPoint".into(), "authored.unsupported".into());
+    Arc::get_mut(store.models.as_mut().unwrap())
+        .unwrap()
+        .schemas
+        .get_mut("minecraft:armor_stand")
+        .unwrap()
+        .method_owners
+        .insert(
+            "getPassengerAttachmentPoint".into(),
+            "authored.unsupported".into(),
+        );
     let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
     assert!(geometry.vertices.is_empty());
     assert!(stats.unrendered["minecraft:villager"].starts_with("unknown_source_mount_seat:"));
@@ -852,7 +1303,24 @@ fn animation_local_render_slot_is_restored_even_when_extraction_fails() {
     let mut store = Store::new();
     store.local_avatar = Some(entity);
     store.set_local_visible(true);
-    let result = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut DynamicGeometry::default());
+    let result = store.append_geometry(
+        crate::entities::EntityRenderFrame {
+            maps: crate::ui::MapRenderFixture::empty().view(),
+            tint_source: &|_, _| Ok([1.; 3]),
+            content: &Content::test_cube(),
+            origin: [0.; 3],
+            camera: [0.; 3],
+            camera_rotation: [0.; 2],
+            radius: 32.,
+            tick: 0,
+            partial: 0.,
+            game_time: 0,
+            clock_environment: None,
+            light: &|_| Ok(Some([15., 0.])),
+            bed_direction: &|_| None,
+        },
+        &mut DynamicGeometry::default(),
+    );
     assert!(result.is_err());
     assert!(store.local_avatar.is_some());
     assert!(store.local_render_slot.is_none());
@@ -956,14 +1424,34 @@ fn animation_hurt_flash_is_emitted_and_expires_on_real_rig_vertices() {
     store.set_local_visible(true);
     for (tick, expected) in [(10, [0., 3.]), (19, [0., 3.]), (20, [0., 10.])] {
         let mut geometry = DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick, partial: 0.5, game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
+        let stats = store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &Content::test_cube(),
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick,
+                    partial: 0.5,
+                    game_time: 0,
+                    clock_environment: None,
+                    light: &|_| Ok(Some([15., 0.])),
+                    bed_direction: &|_| None,
+                },
+                &mut geometry,
+            )
             .unwrap();
         assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
         assert_eq!(geometry.vertices.len(), 4);
-        assert!(geometry
-            .vertices
-            .iter()
-            .all(|vertex| vertex.overlay_uv == expected));
+        assert!(
+            geometry
+                .vertices
+                .iter()
+                .all(|vertex| vertex.overlay_uv == expected)
+        );
         assert_eq!(store.len(), 0);
     }
 }
@@ -1036,10 +1524,23 @@ fn first_person_arm_uses_baked_geometry_skin_uvs_and_normals() {
     let mut player = crate::player::Player::new();
     player.pose_known = true;
     let mut scene = crate::api::Scene::default();
-    player.append_first_person(&Content::test_cube(), &crate::inventory::InventoryStore::default(), &mut store, &mut scene, crate::player::FirstPersonFrame { partial: 1., light: [15., 0.], item_context: &crate::ui::items::ItemContext::default(), ui: None })
+    player
+        .append_first_person(
+            &Content::test_cube(),
+            &crate::inventory::InventoryStore::default(),
+            &mut store,
+            &mut scene,
+            crate::player::FirstPersonFrame {
+                partial: 1.,
+                light: [15., 0.],
+                item_context: &crate::ui::items::ItemContext::default(),
+                ui: None,
+            },
+        )
         .unwrap();
     let camera = Mat4::look_to_rh(Vec3::ZERO, Vec3::Z, Vec3::Y);
-    let tip_normal = camera.transform_vector3(Vec3::from_array(scene.first_person.vertices[0].normal));
+    let tip_normal =
+        camera.transform_vector3(Vec3::from_array(scene.first_person.vertices[0].normal));
     assert!(
         tip_normal.z < -0.5,
         "the fist points away from the camera; the long arm sides, not its end cap, face the viewer",
@@ -1055,15 +1556,22 @@ fn first_person_missing_local_profile_uses_uuid_skin_like_remote_players() {
     models.default_skins = (0..18)
         .map(|index| {
             let texture = format!("authored:skin-{index}");
-            content.insert_test_texture(&texture, crate::protocol::content::TextureRegion {
-                uv: [0., 0., 1., 1.],
-                layer: index,
-                width: 64,
-                height: 64,
-            });
+            content.insert_test_texture(
+                &texture,
+                crate::protocol::content::TextureRegion {
+                    uv: [0., 0., 1., 1.],
+                    layer: index,
+                    width: 64,
+                    height: 64,
+                },
+            );
             resources::DefaultSkin {
                 texture,
-                model: if index % 2 == 0 { PlayerModel::Slim } else { PlayerModel::Wide },
+                model: if index % 2 == 0 {
+                    PlayerModel::Slim
+                } else {
+                    PlayerModel::Wide
+                },
             }
         })
         .collect();
@@ -1076,11 +1584,14 @@ fn first_person_missing_local_profile_uses_uuid_skin_like_remote_players() {
         assert_eq!(local.texture.layer, index as u32);
         assert_eq!(local.texture.layer, remote.texture.layer);
         assert_eq!(local.rig, remote.rig);
-        assert_eq!(local.rig, if index % 2 == 0 {
-            "minecraft:player_slim#main"
-        } else {
-            "minecraft:player#main"
-        });
+        assert_eq!(
+            local.rig,
+            if index % 2 == 0 {
+                "minecraft:player_slim#main"
+            } else {
+                "minecraft:player#main"
+            }
+        );
     }
 }
 
@@ -1108,13 +1619,15 @@ fn first_person_local_avatar_ignores_empty_equipment_stacks() {
     store
         .sync_local_avatar(&player, &inventory, &world, &content, (1, 1))
         .unwrap();
-    assert!(store
-        .local_avatar
-        .as_ref()
-        .unwrap()
-        .equipment
-        .iter()
-        .all(Option::is_none));
+    assert!(
+        store
+            .local_avatar
+            .as_ref()
+            .unwrap()
+            .equipment
+            .iter()
+            .all(Option::is_none)
+    );
     let mut item = Stack::default();
     item.id = 1;
     item.count = 1;
@@ -1148,11 +1661,22 @@ fn local_avatar_death_tick_holds_the_first_dead_tick_until_alive() {
     store.models = Some(Arc::new(models));
     let world = crate::protocol::world::World::default();
     for (tick, health, expected) in [
-        (1, 20., None), (2, 0., Some(2)), (3, 0., Some(2)), (9, 0., Some(2)), (10, 20., None), (12, 0., Some(12)),
+        (1, 20., None),
+        (2, 0., Some(2)),
+        (3, 0., Some(2)),
+        (9, 0., Some(2)),
+        (10, 20., None),
+        (12, 0., Some(12)),
     ] {
         player.health = Some(health);
-        store.sync_local_avatar(&player, &inventory, &world, &content, (tick, tick as i64)).unwrap();
-        assert_eq!(store.local_avatar.as_ref().unwrap().death_tick, expected, "tick {tick}");
+        store
+            .sync_local_avatar(&player, &inventory, &world, &content, (tick, tick as i64))
+            .unwrap();
+        assert_eq!(
+            store.local_avatar.as_ref().unwrap().death_tick,
+            expected,
+            "tick {tick}"
+        );
     }
 }
 
@@ -1175,7 +1699,7 @@ fn crossed_arms_rigs_emit_the_held_item_at_the_source_anchor() {
         ("minecraft:witch", 1, "arms"),
         ("minecraft:witch", 2, "nose"),
     ] {
-        let rig = solaris_models::authored(kind).unwrap();
+        let rig = krasnokamen_models::authored(kind).unwrap();
         let mut items = crate::ui::items::ItemModels::new();
         items.insert_test_model("test:held", cube.clone());
         let mut stack = Stack::default();
@@ -1188,19 +1712,44 @@ fn crossed_arms_rigs_emit_the_held_item_at_the_source_anchor() {
         entity.type_name = kind.into();
         entity.equipment[0] = Some(stack);
         let mut transforms = vec![];
-        presentation::evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut transforms);
+        presentation::evaluate_rig(
+            rig,
+            &entity,
+            &models,
+            &crate::protocol::content::Content::test_cube(),
+            0,
+            0.,
+            Mat4::IDENTITY,
+            &mut transforms,
+        );
         let mut out = DynamicGeometry::default();
         let mut stats = presentation::PresentationStats::default();
         presentation::append_equipment(
-            presentation::EquipmentPose { item_context: None, entity: &entity, rig, transforms: &transforms },
+            presentation::EquipmentPose {
+                item_context: None,
+                entity: &entity,
+                rig,
+                transforms: &transforms,
+            },
             &mut items,
             &mut equipment::Cache::default(),
-            equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 0, partial: 0., light: [15., 0.] },
+            equipment::Frame {
+                models: &models,
+                content: &content,
+                root: Mat4::IDENTITY,
+                tick: 0,
+                partial: 0.,
+                light: [15., 0.],
+            },
             &mut out,
             &mut stats,
         )
         .unwrap();
-        assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
+        assert!(
+            stats.unrendered.is_empty(),
+            "{kind}: {:?}",
+            stats.unrendered
+        );
         assert_eq!(out.vertices.len(), 24, "{kind} item {item} emitted");
         let centroid = out
             .vertices
@@ -1224,7 +1773,10 @@ fn no_ai_mob_head_never_glances_at_the_local_player() {
         .unwrap()
         .accessors
         .insert("DATA_MOB_FLAGS_ID".into(), [15, 0]);
-    assert!(physical::may_glance(&models, &entity), "an AI mob keeps its idle glance");
+    assert!(
+        physical::may_glance(&models, &entity),
+        "an AI mob keeps its idle glance"
+    );
     entity.metadata.insert(15, Metadata::Byte(1));
     assert!(
         !physical::may_glance(&models, &entity),
@@ -1261,9 +1813,32 @@ fn armor_stand_renders_feet_on_plate_and_respects_part_flags() {
     store.local_avatar = Some(entity);
     store.set_local_visible(true);
     let mut render = |flags: i8| {
-        store.local_avatar.as_mut().unwrap().metadata.insert(15, Metadata::Byte(flags));
+        store
+            .local_avatar
+            .as_mut()
+            .unwrap()
+            .metadata
+            .insert(15, Metadata::Byte(flags));
         let mut geometry = DynamicGeometry::default();
-        store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry)
+        store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &Content::test_cube(),
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    light: &|_| Ok(Some([15., 0.])),
+                    bed_direction: &|_| None,
+                },
+                &mut geometry,
+            )
             .unwrap();
         geometry
     };
@@ -1276,18 +1851,29 @@ fn armor_stand_renders_feet_on_plate_and_respects_part_flags() {
             && (0.6..1.2).contains(&v.position[1])
     };
     let default = render(0);
-    assert!(default.vertices.iter().any(plate), "plate should be at foot level");
-    assert!(!default.vertices.iter().any(arm), "arms are hidden by default");
-    assert!(render(4).vertices.iter().any(arm), "ShowArms renders the arms");
+    assert!(
+        default.vertices.iter().any(plate),
+        "plate should be at foot level"
+    );
+    assert!(
+        !default.vertices.iter().any(arm),
+        "arms are hidden by default"
+    );
+    assert!(
+        render(4).vertices.iter().any(arm),
+        "ShowArms renders the arms"
+    );
     assert!(
         !render(8).vertices.iter().any(plate),
         "NoBasePlate hides the plate"
     );
     let height = |geometry: &DynamicGeometry| {
-        let (min, max) = geometry.vertices.iter().fold(
-            (f32::INFINITY, f32::NEG_INFINITY),
-            |(min, max), v| (min.min(v.position[1]), max.max(v.position[1])),
-        );
+        let (min, max) = geometry
+            .vertices
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), v| {
+                (min.min(v.position[1]), max.max(v.position[1]))
+            });
         max - min
     };
     let small = render(1);
@@ -1310,7 +1896,9 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
         let (mut fixture_models, _) = fixture();
         let mut schema = fixture_models.schemas.remove("minecraft:pig").unwrap();
         schema.accessors.insert("DATA_ITEM".into(), [9, 7]);
-        schema.accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+        schema
+            .accessors
+            .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
         models.schemas.insert(kind.into(), schema);
     }
     let mut store = Store::new();
@@ -1318,9 +1906,15 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
     let mut content = Content::test_cube();
     content.item_names.insert(1, "minecraft:clock".into());
     content.item_names.insert(2, "minecraft:stone".into());
-    for (name, layer) in [("test:early", 11), ("test:late", 22), ("minecraft:stone", 33)] {
+    for (name, layer) in [
+        ("test:early", 11),
+        ("test:late", 22),
+        ("minecraft:stone", 33),
+    ] {
         let mut model = content.models[0].clone();
-        for quad in &mut model.quads { quad.texture_layer = layer; }
+        for quad in &mut model.quads {
+            quad.texture_layer = layer;
+        }
         store.items.insert_test_model(name, model);
     }
     let clock_graph = json!({
@@ -1328,13 +1922,28 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
         "fallback":{"type":"minecraft:model","model":"test:early"},
         "entries":[{"threshold":0.125,"model":{"type":"minecraft:model","model":"test:late"}}]
     });
-    content.insert_test_resource("assets/minecraft/items/clock.json", json!({"model":clock_graph.clone()}).to_string().as_bytes());
-    content.insert_test_resource("assets/minecraft/items/stone.json", br#"{"model":{"type":"minecraft:model","model":"minecraft:stone"}}"#);
-    store.items.insert_test_graph("minecraft:clock", clock_graph.clone());
+    content.insert_test_resource(
+        "assets/minecraft/items/clock.json",
+        json!({"model":clock_graph.clone()}).to_string().as_bytes(),
+    );
+    content.insert_test_resource(
+        "assets/minecraft/items/stone.json",
+        br#"{"model":{"type":"minecraft:model","model":"minecraft:stone"}}"#,
+    );
+    store
+        .items
+        .insert_test_graph("minecraft:clock", clock_graph.clone());
     store.items.insert_test_graph("clock", clock_graph);
-    for (id, kind, item) in [(1, "minecraft:item_frame", 1), (2, "minecraft:item", 1), (3, "minecraft:item", 2)] {
+    for (id, kind, item) in [
+        (1, "minecraft:item_frame", 1),
+        (2, "minecraft:item", 1),
+        (3, "minecraft:item", 2),
+    ] {
         let (_, mut entity) = fixture();
-        entity.handle = Handle { network_id: id, generation: id as u64 };
+        entity.handle = Handle {
+            network_id: id,
+            generation: id as u64,
+        };
         entity.type_name = kind.into();
         entity.spawn_data = 2;
         entity.binding = Some(Err("item uses item renderer".into()));
@@ -1347,7 +1956,8 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
         stack.id = item;
         stack.count = 1;
         if id == 1 {
-            Arc::make_mut(&mut stack.components).insert("minecraft:item_model".into(), json!("clock"));
+            Arc::make_mut(&mut stack.components)
+                .insert("minecraft:item_model".into(), json!("clock"));
         }
         entity.metadata.insert(9, Metadata::Item(stack));
         store.ids.insert(id, store.slots.len());
@@ -1356,8 +1966,14 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
     }
     let mut context = ItemContext {
         world: Some(ItemWorldContext {
-            dimension: "minecraft:overworld".into(), position: [0.; 3], yaw: 0.,
-            game_tick: 0, sun_angle: 0., moon_phase: 0., spawn: None, death: None,
+            dimension: "minecraft:overworld".into(),
+            position: [0.; 3],
+            yaw: 0.,
+            game_tick: 0,
+            sun_angle: 0.,
+            moon_phase: 0.,
+            spawn: None,
+            death: None,
             needles: Arc::default(),
         }),
         ..Default::default()
@@ -1369,49 +1985,113 @@ fn world_clock_frame_and_drop_change_model_but_stone_does_not() {
         if point[0] == 0. && fail_frame.get() {
             return Err("test time sample failure".into());
         }
-        Ok((if point[0] == 0. { frame_angle.get() } else { ground_angle.get() }, 0.))
+        Ok((
+            if point[0] == 0. {
+                frame_angle.get()
+            } else {
+                ground_angle.get()
+            },
+            0.,
+        ))
     };
     let mut render = |context: &ItemContext| {
         let mut geometry = DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: Some((context, &at)), light: &|_| Ok(Some([15., 15.])), bed_direction: &|_| None }, &mut geometry).unwrap();
-        let count = |layer| geometry.vertices.iter().filter(|v| v.texture_layer == layer).count();
-        (count(11), count(22), count(33), stats.unrendered.get("minecraft:item_frame").cloned())
+        let stats = store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &content,
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: Some((context, &at)),
+                    light: &|_| Ok(Some([15., 15.])),
+                    bed_direction: &|_| None,
+                },
+                &mut geometry,
+            )
+            .unwrap();
+        let count = |layer| {
+            geometry
+                .vertices
+                .iter()
+                .filter(|v| v.texture_layer == layer)
+                .count()
+        };
+        (
+            count(11),
+            count(22),
+            count(33),
+            stats.unrendered.get("minecraft:item_frame").cloned(),
+        )
     };
     let before = render(&context);
-    assert!(before.0 > 0 && before.1 == 0 && before.2 > 0 && before.3.is_none(), "{before:?}");
-    assert_eq!(before.0, before.2 * 2, "clock frame and drop must both render");
+    assert!(
+        before.0 > 0 && before.1 == 0 && before.2 > 0 && before.3.is_none(),
+        "{before:?}"
+    );
+    assert_eq!(
+        before.0,
+        before.2 * 2,
+        "clock frame and drop must both render"
+    );
     frame_angle.set(90.);
     for tick in 1..=100 {
         context.world.as_mut().unwrap().game_tick = tick;
         let after = render(&context);
-        if tick == 1 { assert_eq!(after, before, "clock wobble should not jump to its target"); }
+        if tick == 1 {
+            assert_eq!(after, before, "clock wobble should not jump to its target");
+        }
     }
     let frame_changed = render(&context);
-    assert_eq!((frame_changed.0, frame_changed.1, frame_changed.2), (before.2, before.2, before.2),
-        "unqualified frame clock must change independently of dropped clock");
+    assert_eq!(
+        (frame_changed.0, frame_changed.1, frame_changed.2),
+        (before.2, before.2, before.2),
+        "unqualified frame clock must change independently of dropped clock"
+    );
     ground_angle.set(90.);
     for tick in 101..=200 {
         context.world.as_mut().unwrap().game_tick = tick;
         render(&context);
     }
     let both_changed = render(&context);
-    assert_eq!((both_changed.0, both_changed.1, both_changed.2), (0, before.0, before.2));
+    assert_eq!(
+        (both_changed.0, both_changed.1, both_changed.2),
+        (0, before.0, before.2)
+    );
     fail_frame.set(true);
     context.world.as_mut().unwrap().game_tick = 201;
     let failed_frame = render(&context);
-    assert_eq!((failed_frame.0, failed_frame.1, failed_frame.2), (0, before.2, before.2));
-    assert!(failed_frame.3.is_some_and(|reason| reason.contains("test time sample failure")));
+    assert_eq!(
+        (failed_frame.0, failed_frame.1, failed_frame.2),
+        (0, before.2, before.2)
+    );
+    assert!(
+        failed_frame
+            .3
+            .is_some_and(|reason| reason.contains("test time sample failure"))
+    );
 }
 
 fn action_fixture(kind: &str) -> (Models, Entity, Content) {
     let (mut models, mut e) = fixture();
     let mut schema = models.schemas.remove("minecraft:pig").unwrap();
     for (name, accessor) in [
-        ("DATA_LIVING_ENTITY_FLAGS", [8, 0]), ("DATA_PLAYER_MAIN_HAND", [15, 42]),
-        ("DATA_BABY_ID", [16, 8]), ("DATA_SPELL_CASTING_ID", [17, 0]),
-        ("IS_CHARGING_CROSSBOW", [18, 8]), ("DATA_POSE", [6, 20]),
+        ("DATA_LIVING_ENTITY_FLAGS", [8, 0]),
+        ("DATA_PLAYER_MAIN_HAND", [15, 42]),
+        ("DATA_BABY_ID", [16, 8]),
+        ("DATA_SPELL_CASTING_ID", [17, 0]),
+        ("IS_CHARGING_CROSSBOW", [18, 8]),
+        ("DATA_POSE", [6, 20]),
         ("ARMADILLO_STATE", [19, 1]),
-    ] { schema.accessors.insert(name.into(), accessor); }
+    ] {
+        schema.accessors.insert(name.into(), accessor);
+    }
     let motion = models.motion.remove("minecraft:pig").unwrap();
     e.type_name = kind.into();
     models.schemas.insert(kind.into(), schema);
@@ -1425,15 +2105,26 @@ fn action_stack(id: u32, components: serde_json::Value) -> Stack {
     let mut stack = Stack::default();
     stack.id = id;
     stack.count = 1;
-    stack.components = Arc::new(components.as_object().unwrap().iter()
-        .map(|(k, v)| (k.clone(), v.clone())).collect());
+    stack.components = Arc::new(
+        components
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    );
     stack
 }
 
 fn action_age(models: &Models, e: &mut Entity, content: &Content, age: i32) {
     let mut source = e.source.take().unwrap();
     source.age = age;
-    source.living.as_mut().unwrap().prepare_item_use(models, e, content, age).unwrap();
+    source
+        .living
+        .as_mut()
+        .unwrap()
+        .prepare_item_use(models, e, content, age)
+        .unwrap();
     e.source = Some(source);
 }
 
@@ -1449,12 +2140,18 @@ fn animation_use_actions_follow_logical_hand_and_do_not_follow_item_model() {
     content.item_names.insert(1, "minecraft:bow".into());
     content.item_names.insert(2, "minecraft:bread".into());
     let rig = rig();
-    e.equipment[0] = Some(action_stack(1, json!({"minecraft:item_model":"minecraft:bread"})));
+    e.equipment[0] = Some(action_stack(
+        1,
+        json!({"minecraft:item_model":"minecraft:bread"}),
+    ));
     e.metadata.insert(8, Metadata::Byte(1));
     action_age(&models, &mut e, &content, 1);
     let right_bow = action_pose(&models, &e, &content, &rig);
     for index in [2, 3] {
-        assert!(right_bow[index].transform_vector3(Vec3::Y).z < -0.8, "both arms aim");
+        assert!(
+            right_bow[index].transform_vector3(Vec3::Y).z < -0.8,
+            "both arms aim"
+        );
     }
     e.metadata.insert(15, Metadata::Arm(0));
     let left_bow = action_pose(&models, &e, &content, &rig);
@@ -1463,13 +2160,23 @@ fn animation_use_actions_follow_logical_hand_and_do_not_follow_item_model() {
         let left = left_bow[b].transform_vector3(Vec3::Y);
         assert!((Vec3::new(-right.x, right.y, right.z) - left).length() < 1e-5);
     }
-    e.equipment[0] = Some(action_stack(2, json!({
-        "minecraft:consumable":{}, "minecraft:item_model":"minecraft:bow"
-    })));
+    e.equipment[0] = Some(action_stack(
+        2,
+        json!({
+            "minecraft:consumable":{}, "minecraft:item_model":"minecraft:bow"
+        }),
+    ));
     action_age(&models, &mut e, &content, 2);
     let eating = action_pose(&models, &e, &content, &rig);
-    assert!(eating[3].transform_vector3(Vec3::Y).y > 0.9, "third-person food uses ITEM, not an invented bow pose");
-    assert_eq!(eating[2], Mat4::IDENTITY, "empty opposite hand is not raised");
+    assert!(
+        eating[3].transform_vector3(Vec3::Y).y > 0.9,
+        "third-person food uses ITEM, not an invented bow pose"
+    );
+    assert_eq!(
+        eating[2],
+        Mat4::IDENTITY,
+        "empty opposite hand is not raised"
+    );
     e.equipment[0] = Some(action_stack(2, json!({"minecraft:blocks_attacks":{}})));
     let shield = action_pose(&models, &e, &content, &rig);
     let across_chest = shield[3].transform_vector3(Vec3::Y);
@@ -1477,7 +2184,10 @@ fn animation_use_actions_follow_logical_hand_and_do_not_follow_item_model() {
     e.metadata.insert(8, Metadata::Byte(0));
     action_age(&models, &mut e, &content, 3);
     let stopped = action_pose(&models, &e, &content, &rig);
-    assert!(stopped[3].transform_vector3(Vec3::Y).y > 0.9, "release restores held-item rest");
+    assert!(
+        stopped[3].transform_vector3(Vec3::Y).y > 0.9,
+        "release restores held-item rest"
+    );
 }
 
 #[test]
@@ -1496,7 +2206,16 @@ fn animation_offhand_use_and_attack_mirror_the_selected_main_arm() {
     e.equipment[1] = None;
     e.animation = Some((0, 0));
     let mut attack = Vec::new();
-    presentation::evaluate_rig(&rig, &e, &models, &content, 3, 0., Mat4::IDENTITY, &mut attack);
+    presentation::evaluate_rig(
+        &rig,
+        &e,
+        &models,
+        &content,
+        3,
+        0.,
+        Mat4::IDENTITY,
+        &mut attack,
+    );
     assert!(attack[3].transform_vector3(Vec3::Y).z < -0.8);
     assert_eq!(attack[2], Mat4::IDENTITY);
 }
@@ -1512,12 +2231,22 @@ fn animation_crossbow_charge_hold_release_and_identity_reset() {
     let start = action_pose(&models, &e, &content, &rig);
     action_age(&models, &mut e, &content, 22);
     let pulling = action_pose(&models, &e, &content, &rig);
-    assert_ne!(start[3], pulling[3], "support arm pulls back while charging");
+    assert_ne!(
+        start[3], pulling[3],
+        "support arm pulls back while charging"
+    );
     assert_eq!(start[2], pulling[2], "holding arm stays braced");
     e.observed_tick = 999;
-    assert_eq!(pulling, action_pose(&models, &e, &content, &rig), "movement receipt does not restart use");
+    assert_eq!(
+        pulling,
+        action_pose(&models, &e, &content, &rig),
+        "movement receipt does not restart use"
+    );
     e.metadata.insert(8, Metadata::Byte(0));
-    e.equipment[0] = Some(action_stack(1, json!({"minecraft:charged_projectiles":[{"id":"minecraft:arrow"}]})));
+    e.equipment[0] = Some(action_stack(
+        1,
+        json!({"minecraft:charged_projectiles":[{"id":"minecraft:arrow"}]}),
+    ));
     action_age(&models, &mut e, &content, 23);
     let hold = action_pose(&models, &e, &content, &rig);
     assert_ne!(pulling[2], hold[2]);
@@ -1529,7 +2258,16 @@ fn animation_crossbow_charge_hold_release_and_identity_reset() {
     action_age(&models, &mut e, &content, 24);
     assert_eq!(start, action_pose(&models, &e, &content, &rig));
     e.source = Some(source_state::SourceState::new(&e, &models).unwrap());
-    assert_eq!(e.source.as_ref().unwrap().living.as_ref().unwrap().item_use_ticks(0.), 0.);
+    assert_eq!(
+        e.source
+            .as_ref()
+            .unwrap()
+            .living
+            .as_ref()
+            .unwrap()
+            .item_use_ticks(0.),
+        0.
+    );
 }
 
 #[test]
@@ -1556,16 +2294,25 @@ fn animation_casting_is_distinct_from_crossbow_and_clears_on_received_spell_end(
 #[test]
 fn animation_roleless_named_parts_move_without_erasing_authored_orientation() {
     for (kind, part) in [
-        ("cod", "tail"), ("salmon", "body_rear"), ("tropical_fish", "tail"),
-        ("squid", "tentacle1"), ("glow_squid", "tentacle1"), ("ghast", "tentacle_0"),
-        ("blaze", "stick0"), ("guardian", "tail"), ("elder_guardian", "tail"),
-        ("dolphin", "tail"), ("silverfish", "segment0"), ("endermite", "head"),
-        ("nautilus", "body"), ("zombie_nautilus", "body"),
+        ("cod", "tail"),
+        ("salmon", "body_rear"),
+        ("tropical_fish", "tail"),
+        ("squid", "tentacle1"),
+        ("glow_squid", "tentacle1"),
+        ("ghast", "tentacle_0"),
+        ("blaze", "stick0"),
+        ("guardian", "tail"),
+        ("elder_guardian", "tail"),
+        ("dolphin", "tail"),
+        ("silverfish", "segment0"),
+        ("endermite", "head"),
+        ("nautilus", "body"),
+        ("zombie_nautilus", "body"),
     ] {
         let (models, mut e, content) = action_fixture(&format!("minecraft:{kind}"));
         e.velocity = [0.1, 0., 0.];
         e.source.as_mut().unwrap().living.as_mut().unwrap().in_water = true;
-        let rig = solaris_models::authored(&format!("minecraft:{kind}#main")).unwrap();
+        let rig = krasnokamen_models::authored(&format!("minecraft:{kind}#main")).unwrap();
         let bone = rig.part_by_name[part];
         e.source.as_mut().unwrap().age = 1;
         let first = action_pose(&models, &e, &content, rig);
@@ -1575,7 +2322,8 @@ fn animation_roleless_named_parts_move_without_erasing_authored_orientation() {
         assert!(later[bone].to_cols_array().iter().all(|v| v.is_finite()));
         if kind.ends_with("squid") {
             // Squid movement bends around X only; the asset's UV yaw remains in the matrix.
-            let rest_yaw = Mat4::from_rotation_y(rig.bones[bone].rotation.y).transform_vector3(Vec3::X);
+            let rest_yaw =
+                Mat4::from_rotation_y(rig.bones[bone].rotation.y).transform_vector3(Vec3::X);
             assert!((later[bone].transform_vector3(Vec3::X) - rest_yaw).length() < 1e-4);
         }
     }
@@ -1584,9 +2332,17 @@ fn animation_roleless_named_parts_move_without_erasing_authored_orientation() {
 #[test]
 fn animation_modern_action_timers_change_parts_and_return_to_rest() {
     use render_living::Modern;
-    for kind in ["frog", "warden", "rabbit", "breeze", "copper_golem", "creaking", "sniffer"] {
+    for kind in [
+        "frog",
+        "warden",
+        "rabbit",
+        "breeze",
+        "copper_golem",
+        "creaking",
+        "sniffer",
+    ] {
         let (models, mut e, content) = action_fixture(&format!("minecraft:{kind}"));
-        let rig = solaris_models::authored(&format!("minecraft:{kind}#main")).unwrap();
+        let rig = krasnokamen_models::authored(&format!("minecraft:{kind}#main")).unwrap();
         e.source.as_mut().unwrap().age = 5;
         let idle = action_pose(&models, &e, &content, rig);
         match &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
@@ -1601,11 +2357,19 @@ fn animation_modern_action_timers_change_parts_and_return_to_rest() {
         }
         let action = action_pose(&models, &e, &content, rig);
         assert_ne!(idle, action, "{kind} timer must reach actual part matrices");
-        if let Modern::CopperGolem { interactions, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
-            for timer in interactions { timer.stop(); }
+        if let Modern::CopperGolem { interactions, .. } =
+            &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+        {
+            for timer in interactions {
+                timer.stop();
+            }
         }
         e.source.as_mut().unwrap().age = 200;
-        assert_eq!(idle, action_pose(&models, &e, &content, rig), "{kind} action ends or leaves its looping state");
+        assert_eq!(
+            idle,
+            action_pose(&models, &e, &content, rig),
+            "{kind} action ends or leaves its looping state"
+        );
     }
 }
 
@@ -1615,22 +2379,28 @@ fn animation_armadillo_roll_and_warden_roar_reach_part_matrices() {
     // Armadillo: received ARMADILLO_STATE rolled (2) tucks head, legs and tail into the shell.
     {
         let (models, mut e, content) = action_fixture("minecraft:armadillo");
-        let rig = solaris_models::authored("minecraft:armadillo#main").unwrap();
+        let rig = krasnokamen_models::authored("minecraft:armadillo#main").unwrap();
         e.source.as_mut().unwrap().age = 5;
         let idle = action_pose(&models, &e, &content, rig);
         e.metadata.insert(19, Metadata::Int(2));
         let rolled = action_pose(&models, &e, &content, rig);
         for name in ["head", "tail", "right_front_leg", "left_hind_leg"] {
-            assert_ne!(idle[rig.part_by_name[name]], rolled[rig.part_by_name[name]],
-                "armadillo {name} must tuck when rolled");
+            assert_ne!(
+                idle[rig.part_by_name[name]], rolled[rig.part_by_name[name]],
+                "armadillo {name} must tuck when rolled"
+            );
         }
         e.metadata.insert(19, Metadata::Int(0));
-        assert_eq!(idle, action_pose(&models, &e, &content, rig), "unrolling restores the pose");
+        assert_eq!(
+            idle,
+            action_pose(&models, &e, &content, rig),
+            "unrolling restores the pose"
+        );
     }
     // Warden: the roar timer drives head pitch and arm spread.
     {
         let (models, mut e, content) = action_fixture("minecraft:warden");
-        let rig = solaris_models::authored("minecraft:warden#main").unwrap();
+        let rig = krasnokamen_models::authored("minecraft:warden#main").unwrap();
         e.source.as_mut().unwrap().age = 5;
         let idle = action_pose(&models, &e, &content, rig);
         match &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
@@ -1639,15 +2409,20 @@ fn animation_armadillo_roll_and_warden_roar_reach_part_matrices() {
         }
         let roaring = action_pose(&models, &e, &content, rig);
         for name in ["head", "right_arm", "left_arm"] {
-            assert_ne!(idle[rig.part_by_name[name]], roaring[rig.part_by_name[name]],
-                "warden {name} must move during roar");
+            assert_ne!(
+                idle[rig.part_by_name[name]], roaring[rig.part_by_name[name]],
+                "warden {name} must move during roar"
+            );
         }
     }
 }
 
 #[test]
 fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
-    use crate::ui::{item_dynamic::ItemWorldContext, items::{ItemContext, ItemModels}};
+    use crate::ui::{
+        item_dynamic::ItemWorldContext,
+        items::{ItemContext, ItemModels},
+    };
     let (models, mut e, mut content) = action_fixture("minecraft:player");
     content.item_names.insert(1, "test:clock".into());
     let graph = json!({
@@ -1655,7 +2430,10 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
         "fallback":{"type":"minecraft:model","model":"test:early"},
         "entries":[{"threshold":0.4,"model":{"type":"minecraft:model","model":"test:late"}}]
     });
-    content.insert_test_resource("assets/test/items/clock.json", json!({"model":graph.clone()}).to_string().as_bytes());
+    content.insert_test_resource(
+        "assets/test/items/clock.json",
+        json!({"model":graph.clone()}).to_string().as_bytes(),
+    );
     let mut items = ItemModels::new();
     for (name, layer) in [("test:early", 31), ("test:late", 32)] {
         let mut model = content.models[0].clone();
@@ -1671,30 +2449,61 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
     rig.bones[3].pivot.x = 0.5;
     let mut context = ItemContext {
         world: Some(ItemWorldContext {
-            dimension: "minecraft:overworld".into(), position: [0.;3], yaw: 0.,
-            game_tick: 0, sun_angle: 0., moon_phase: 0., spawn: None, death: None,
+            dimension: "minecraft:overworld".into(),
+            position: [0.; 3],
+            yaw: 0.,
+            game_tick: 0,
+            sun_angle: 0.,
+            moon_phase: 0.,
+            spawn: None,
+            death: None,
             needles: Arc::default(),
-        }), ..Default::default()
+        }),
+        ..Default::default()
     };
     let mut cache = render_special::Cache::default();
     let sample = std::cell::Cell::new(0.);
-    let at = |_: [f64;3]| Ok((sample.get(), 0.));
+    let at = |_: [f64; 3]| Ok((sample.get(), 0.));
     let mut equipment = equipment::Cache::default();
     let mut render = |e: &Entity, base: &ItemContext| {
-        let state = cache.item_context(e, [e.equipment_value(0), None, None], &content,
-            e.position, Some((base, &at))).unwrap().unwrap();
+        let state = cache
+            .item_context(
+                e,
+                [e.equipment_value(0), None, None],
+                &content,
+                e.position,
+                Some((base, &at)),
+            )
+            .unwrap()
+            .unwrap();
         let transforms = action_pose(&models, e, &content, &rig);
         let mut out = DynamicGeometry::default();
         let mut stats = presentation::PresentationStats::default();
         presentation::append_equipment(
-            presentation::EquipmentPose { entity: e, rig: &rig, transforms: &transforms, item_context: Some(&state) },
-            &mut items, &mut equipment,
-            equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY,
-                tick: 0, partial: 0., light: [15.;2] }, &mut out, &mut stats,
-        ).unwrap();
+            presentation::EquipmentPose {
+                entity: e,
+                rig: &rig,
+                transforms: &transforms,
+                item_context: Some(&state),
+            },
+            &mut items,
+            &mut equipment,
+            equipment::Frame {
+                models: &models,
+                content: &content,
+                root: Mat4::IDENTITY,
+                tick: 0,
+                partial: 0.,
+                light: [15.; 2],
+            },
+            &mut out,
+            &mut stats,
+        )
+        .unwrap();
         assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
         assert!(!out.vertices.is_empty());
-        let center_x = out.vertices.iter().map(|v| v.position[0]).sum::<f32>() / out.vertices.len() as f32;
+        let center_x =
+            out.vertices.iter().map(|v| v.position[0]).sum::<f32>() / out.vertices.len() as f32;
         (center_x, out.vertices[0].texture_layer)
     };
     let (right, early) = render(&e, &context);
@@ -1703,18 +2512,42 @@ fn held_equipment_uses_anatomical_side_and_borrowed_dynamic_model_context() {
     sample.set(180.);
     context.world.as_mut().unwrap().game_tick = 1;
     let (left, late) = render(&e, &context);
-    assert!(left > 0. && late == 32, "left-handed held clock must both move sides and advance model");
-    assert!((left + right).abs() < 1e-4, "hand anchors mirror: {left} {right}");
+    assert!(
+        left > 0. && late == 32,
+        "left-handed held clock must both move sides and advance model"
+    );
+    assert!(
+        (left + right).abs() < 1e-4,
+        "hand anchors mirror: {left} {right}"
+    );
     e.equipment[0] = None;
     let transforms = action_pose(&models, &e, &content, &rig);
     let mut removed = DynamicGeometry::default();
     presentation::append_equipment(
-        presentation::EquipmentPose { entity: &e, rig: &rig, transforms: &transforms, item_context: None },
-        &mut ItemModels::new(), &mut equipment::Cache::default(),
-        equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY,
-            tick: 0, partial: 0., light: [15.;2] }, &mut removed, &mut presentation::PresentationStats::default(),
-    ).unwrap();
-    assert!(removed.vertices.is_empty(), "equipment removal clears held geometry");
+        presentation::EquipmentPose {
+            entity: &e,
+            rig: &rig,
+            transforms: &transforms,
+            item_context: None,
+        },
+        &mut ItemModels::new(),
+        &mut equipment::Cache::default(),
+        equipment::Frame {
+            models: &models,
+            content: &content,
+            root: Mat4::IDENTITY,
+            tick: 0,
+            partial: 0.,
+            light: [15.; 2],
+        },
+        &mut removed,
+        &mut presentation::PresentationStats::default(),
+    )
+    .unwrap();
+    assert!(
+        removed.vertices.is_empty(),
+        "equipment removal clears held geometry"
+    );
 }
 
 #[test]
@@ -1723,14 +2556,24 @@ fn animation_modern_baby_adult_and_identity_changes_do_not_reuse_action_timers()
     for baby in [false, true] {
         let (models, mut e, content) = action_fixture("minecraft:camel");
         e.metadata.insert(16, Metadata::Bool(baby));
-        let rig = solaris_models::authored(if baby { "minecraft:camel_baby#main" } else { "minecraft:camel#main" }).unwrap();
+        let rig = krasnokamen_models::authored(if baby {
+            "minecraft:camel_baby#main"
+        } else {
+            "minecraft:camel#main"
+        })
+        .unwrap();
         let standing = action_pose(&models, &e, &content, rig);
-        if let Modern::Camel { sit_pose, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+        if let Modern::Camel { sit_pose, .. } =
+            &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+        {
             sit_pose.start(0);
         }
         let sitting = action_pose(&models, &e, &content, rig);
         for name in ["body", "right_hind_leg", "left_hind_leg"] {
-            assert_ne!(standing[rig.part_by_name[name]], sitting[rig.part_by_name[name]], "{baby}:{name}");
+            assert_ne!(
+                standing[rig.part_by_name[name]], sitting[rig.part_by_name[name]],
+                "{baby}:{name}"
+            );
         }
         e.uuid = "00000000-0000-0000-0000-000000000099".into();
         e.source = Some(source_state::SourceState::new(&e, &models).unwrap());
@@ -1747,43 +2590,76 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
     use render_living::Modern;
     let extent = |rig: &Rig, pose: &[Mat4], bone: &str, axis: usize| {
         let index = rig.part_by_name[bone];
-        rig.bones[index].quads.iter().flatten()
+        rig.bones[index]
+            .quads
+            .iter()
+            .flatten()
             .map(|v| pose[index].transform_point3(glam::Vec3::new(v[0], v[1], v[2]))[axis])
-            .fold((f32::MAX, f32::MIN), |(low, high), value| (low.min(value), high.max(value)))
+            .fold((f32::MAX, f32::MIN), |(low, high), value| {
+                (low.min(value), high.max(value))
+            })
     };
     let (models, mut e, content) = action_fixture("minecraft:camel");
     e.metadata.insert(16, Metadata::Bool(false));
     let pairs = [
-        ("minecraft:camel#main", "minecraft:camel_saddle_equipment#main"),
-        ("minecraft:camel_husk#main", "minecraft:camel_husk_saddle_equipment#main"),
+        (
+            "minecraft:camel#main",
+            "minecraft:camel_saddle_equipment#main",
+        ),
+        (
+            "minecraft:camel_husk#main",
+            "minecraft:camel_husk_saddle_equipment#main",
+        ),
     ];
     let mut feet = Vec::new();
     for (base, _) in pairs {
-        let rig = solaris_models::authored(base).unwrap();
+        let rig = krasnokamen_models::authored(base).unwrap();
         let standing = action_pose(&models, &e, &content, rig);
         // Model space is Y-down: the standing feet are the lowest leg point.
         feet.push(extent(rig, &standing, "right_hind_leg", 1).1);
         for bone in ["neck", "humps"] {
             let (front, back) = extent(rig, &standing, bone, 2);
-            assert!(!(front..=back).contains(&-0.5), "{base}: {bone} occupies the rider's seat line");
+            assert!(
+                !(front..=back).contains(&-0.5),
+                "{base}: {bone} occupies the rider's seat line"
+            );
         }
     }
-    for (sitting, seat) in [(false, 2.375f32 - 0.375), (true, 2.375 - 1.43 - 0.375 + 0.2)] {
+    for (sitting, seat) in [
+        (false, 2.375f32 - 0.375),
+        (true, 2.375 - 1.43 - 0.375 + 0.2),
+    ] {
         if sitting {
-            if let Modern::Camel { sit_pose, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+            if let Modern::Camel { sit_pose, .. } =
+                &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+            {
                 sit_pose.start(0);
             }
         }
         for ((base, saddle), feet) in pairs.into_iter().zip(&feet) {
-            let rig = solaris_models::authored(base).unwrap();
+            let rig = krasnokamen_models::authored(base).unwrap();
             let (back, belly) = extent(rig, &action_pose(&models, &e, &content, rig), "body", 1);
-            assert!((feet - back - seat).abs() <= 1. / 16.,
-                "{base} sitting={sitting}: back {} blocks above feet, seat {seat}", feet - back);
-            assert!(belly <= feet + 1e-4, "{base} sitting={sitting}: body sinks below its feet");
-            let saddle_rig = solaris_models::authored(saddle).unwrap();
-            let (pad, _) = extent(saddle_rig, &action_pose(&models, &e, &content, saddle_rig), "body", 1);
-            assert!((feet - pad - seat).abs() <= 1. / 16.,
-                "{saddle} sitting={sitting}: saddle {} blocks above feet, seat {seat}", feet - pad);
+            assert!(
+                (feet - back - seat).abs() <= 1. / 16.,
+                "{base} sitting={sitting}: back {} blocks above feet, seat {seat}",
+                feet - back
+            );
+            assert!(
+                belly <= feet + 1e-4,
+                "{base} sitting={sitting}: body sinks below its feet"
+            );
+            let saddle_rig = krasnokamen_models::authored(saddle).unwrap();
+            let (pad, _) = extent(
+                saddle_rig,
+                &action_pose(&models, &e, &content, saddle_rig),
+                "body",
+                1,
+            );
+            assert!(
+                (feet - pad - seat).abs() <= 1. / 16.,
+                "{saddle} sitting={sitting}: saddle {} blocks above feet, seat {seat}",
+                feet - pad
+            );
         }
     }
 }
@@ -1792,31 +2668,63 @@ fn camel_back_and_saddle_carry_the_received_standing_and_sitting_seat() {
 fn animation_crossbow_enchantment_update_preserves_elapsed_use_and_reuses_shared_effects() {
     let (models, mut e, mut content) = action_fixture("minecraft:player");
     content.item_names.insert(1, "minecraft:crossbow".into());
-    content.set_registries(BTreeMap::from([("minecraft:enchantment".into(), vec![
-        ("test:quick".into(), json!({"effects":{"minecraft:crossbow_charge_time":{
-            "type":"minecraft:add", "value":-0.75
-        }}})),
-        ("test:random".into(), json!({"effects":{"minecraft:crossbow_charge_time":{
-            "type":"minecraft:remove_binomial", "chance":0.5
-        }}})),
-    ])]));
+    content.set_registries(BTreeMap::from([(
+        "minecraft:enchantment".into(),
+        vec![
+            (
+                "test:quick".into(),
+                json!({"effects":{"minecraft:crossbow_charge_time":{
+                    "type":"minecraft:add", "value":-0.75
+                }}}),
+            ),
+            (
+                "test:random".into(),
+                json!({"effects":{"minecraft:crossbow_charge_time":{
+                    "type":"minecraft:remove_binomial", "chance":0.5
+                }}}),
+            ),
+        ],
+    )]));
     e.equipment[0] = Some(action_stack(1, json!({})));
     e.metadata.insert(8, Metadata::Byte(1));
     action_age(&models, &mut e, &content, 10);
     action_age(&models, &mut e, &content, 22);
-    assert!((e.source.as_ref().unwrap().living.as_ref().unwrap().crossbow_pull(0.) - 0.48).abs() < 1e-5);
-    e.equipment[0] = Some(action_stack(1, json!({"minecraft:enchantments":{"test:quick":1}})));
+    assert!(
+        (e.source
+            .as_ref()
+            .unwrap()
+            .living
+            .as_ref()
+            .unwrap()
+            .crossbow_pull(0.)
+            - 0.48)
+            .abs()
+            < 1e-5
+    );
+    e.equipment[0] = Some(action_stack(
+        1,
+        json!({"minecraft:enchantments":{"test:quick":1}}),
+    ));
     action_age(&models, &mut e, &content, 22);
     let living = e.source.as_ref().unwrap().living.as_ref().unwrap();
-    assert_eq!(living.item_use_ticks(0.), 12., "component refresh is not a new use action");
-    assert_eq!(living.crossbow_pull(0.), 1., "updated fast charge is already fully drawn");
+    assert_eq!(
+        living.item_use_ticks(0.),
+        12.,
+        "component refresh is not a new use action"
+    );
+    assert_eq!(
+        living.crossbow_pull(0.),
+        1.,
+        "updated fast charge is already fully drawn"
+    );
     let random = action_stack(1, json!({"minecraft:enchantments":{"test:random":1}}));
     let mut draws = 0;
     let fast = crate::player::crossbow_charge_ticks(&random, &content, &mut |sample| {
         assert!(matches!(sample, crate::player::EffectSample::Uniform));
         draws += 1;
         0.
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(fast, 1.);
     assert_eq!(draws, 2, "same binomial draws as the gameplay effect owner");
     let slow = crate::player::crossbow_charge_ticks(&random, &content, &mut |_| 0.75).unwrap();
@@ -1826,39 +2734,90 @@ fn animation_crossbow_enchantment_update_preserves_elapsed_use_and_reuses_shared
 #[test]
 fn received_aquatic_shape_state_selects_part_identity_and_matching_texture() {
     let (mut models, mut e, mut content) = action_fixture("minecraft:tropical_fish");
-    models.schemas.get_mut(&e.type_name).unwrap().accessors.insert("DATA_ID_TYPE_VARIANT".into(), [23, 1]);
-    models.families.insert(e.type_name.clone(), resources::Family {
-        rig: "minecraft:tropical_fish#main".into(), baby_rig: None,
-        texture: Some("test:large".into()), textures: vec![], renderer_class: None,
-        materials: BTreeMap::from([
-            ("SMALL_TEXTURE".into(), json!("test:small")),
-            ("LARGE_TEXTURE".into(), json!("test:large")),
-        ]),
-    });
+    models
+        .schemas
+        .get_mut(&e.type_name)
+        .unwrap()
+        .accessors
+        .insert("DATA_ID_TYPE_VARIANT".into(), [23, 1]);
+    models.families.insert(
+        e.type_name.clone(),
+        resources::Family {
+            rig: "minecraft:tropical_fish#main".into(),
+            baby_rig: None,
+            texture: Some("test:large".into()),
+            textures: vec![],
+            renderer_class: None,
+            materials: BTreeMap::from([
+                ("SMALL_TEXTURE".into(), json!("test:small")),
+                ("LARGE_TEXTURE".into(), json!("test:large")),
+            ]),
+        },
+    );
     for (texture, layer) in [("test:small", 1), ("test:large", 2)] {
-        content.insert_test_texture(texture, crate::protocol::content::TextureRegion {
-            layer, uv:[0.,0.,1.,1.], width:32, height:32,
-        });
+        content.insert_test_texture(
+            texture,
+            crate::protocol::content::TextureRegion {
+                layer,
+                uv: [0., 0., 1., 1.],
+                width: 32,
+                height: 32,
+            },
+        );
     }
     let store = Store::new();
-    for (packed, large) in [(0, false), (256, false), (1, true), (1281, true), (512, false)] {
+    for (packed, large) in [
+        (0, false),
+        (256, false),
+        (1, true),
+        (1281, true),
+        (512, false),
+    ] {
         e.metadata.insert(23, Metadata::Int(packed));
         let binding = presentation::material(&store, &models, &e, &content, 0).unwrap();
-        assert_eq!(binding.rig, if large { "minecraft:tropical_fish_large#main" } else { "minecraft:tropical_fish#main" });
+        assert_eq!(
+            binding.rig,
+            if large {
+                "minecraft:tropical_fish_large#main"
+            } else {
+                "minecraft:tropical_fish#main"
+            }
+        );
         assert_eq!(binding.texture.layer, if large { 2 } else { 1 });
     }
     let schema = models.schemas.remove(&e.type_name).unwrap();
     e.type_name = "minecraft:pufferfish".into();
     models.schemas.insert(e.type_name.clone(), schema);
-    models.schemas.get_mut(&e.type_name).unwrap().accessors.insert("PUFF_STATE".into(), [24, 1]);
-    models.families.insert(e.type_name.clone(), resources::Family {
-        rig: "minecraft:pufferfish#main".into(), baby_rig: None, texture:Some("test:small".into()),
-        textures:vec![], renderer_class:None, materials:BTreeMap::new(),
-    });
-    for (puff, expected) in [(0, "pufferfish_small"), (1, "pufferfish_medium"), (2, "pufferfish"), (0, "pufferfish_small")] {
+    models
+        .schemas
+        .get_mut(&e.type_name)
+        .unwrap()
+        .accessors
+        .insert("PUFF_STATE".into(), [24, 1]);
+    models.families.insert(
+        e.type_name.clone(),
+        resources::Family {
+            rig: "minecraft:pufferfish#main".into(),
+            baby_rig: None,
+            texture: Some("test:small".into()),
+            textures: vec![],
+            renderer_class: None,
+            materials: BTreeMap::new(),
+        },
+    );
+    for (puff, expected) in [
+        (0, "pufferfish_small"),
+        (1, "pufferfish_medium"),
+        (2, "pufferfish"),
+        (0, "pufferfish_small"),
+    ] {
         e.metadata.insert(24, Metadata::Int(puff));
-        assert_eq!(presentation::material(&store, &models, &e, &content, 0).unwrap().rig,
-            format!("minecraft:{expected}#main"));
+        assert_eq!(
+            presentation::material(&store, &models, &e, &content, 0)
+                .unwrap()
+                .rig,
+            format!("minecraft:{expected}#main")
+        );
     }
 }
 
@@ -1867,36 +2826,68 @@ fn modern_visibility_reaches_submitted_geometry_for_tongue_croak_and_shell() {
     use render_living::Modern;
     for kind in ["frog", "armadillo"] {
         let (mut models, mut e, content) = action_fixture(&format!("minecraft:{kind}"));
-        let parts: &[&str] = if kind == "frog" { &["body","tongue","croaking_body"] } else { &["body","head","cube"] };
+        let parts: &[&str] = if kind == "frog" {
+            &["body", "tongue", "croaking_body"]
+        } else {
+            &["body", "head", "cube"]
+        };
         let model = json!({
             "schema":1, "id":"test_pose", "texture":{"path":"test.png","size":[16,16]},
             "bones":parts.iter().map(|name| json!({
                 "name":name,"cubes":[{"origin":[0,0,0],"size":[1,1,1],"uv":[0,0]}]
             })).collect::<Vec<_>>()
         });
-        let rig = solaris_models::ModelFile::parse(&model.to_string()).unwrap().bake().unwrap();
+        let rig = krasnokamen_models::ModelFile::parse(&model.to_string())
+            .unwrap()
+            .bake()
+            .unwrap();
         models.rigs.insert("test:pose#main".into(), rig);
         e.binding = Some(Ok(presentation::Binding {
-            rig:"test:pose#main".into(),
-            texture:crate::protocol::content::TextureRegion { layer:9,uv:[0.,0.,1.,1.],width:16,height:16 },
-            style:presentation::RootStyle::Living, layers:None, anger:None,
+            rig: "test:pose#main".into(),
+            texture: crate::protocol::content::TextureRegion {
+                layer: 9,
+                uv: [0., 0., 1., 1.],
+                width: 16,
+                height: 16,
+            },
+            style: presentation::RootStyle::Living,
+            layers: None,
+            anger: None,
         }));
         let models = Arc::new(models);
         let mut store = Store::new();
         store.models = Some(models);
-        store.ids.insert(41,0);
-        store.spatial.entry([0,0]).or_default().insert(41);
+        store.ids.insert(41, 0);
+        store.spatial.entry([0, 0]).or_default().insert(41);
         store.slots.push(e);
         let render = |store: &mut Store| {
             let mut out = DynamicGeometry::default();
-            let stats = store.append_geometry(crate::entities::EntityRenderFrame {
-                maps:crate::ui::MapRenderFixture::empty().view(), tint_source:&|_,_|Ok([1.;3]),
-                content:&content,origin:[0.;3],camera:[0.;3],camera_rotation:[0.;2],
-                radius:32.,tick:0,partial:0.,game_time:0,clock_environment:None,
-                light:&|_|Ok(Some([15.;2])),bed_direction:&|_|None,
-            }, &mut out).unwrap();
+            let stats = store
+                .append_geometry(
+                    crate::entities::EntityRenderFrame {
+                        maps: crate::ui::MapRenderFixture::empty().view(),
+                        tint_source: &|_, _| Ok([1.; 3]),
+                        content: &content,
+                        origin: [0.; 3],
+                        camera: [0.; 3],
+                        camera_rotation: [0.; 2],
+                        radius: 32.,
+                        tick: 0,
+                        partial: 0.,
+                        game_time: 0,
+                        clock_environment: None,
+                        light: &|_| Ok(Some([15.; 2])),
+                        bed_direction: &|_| None,
+                    },
+                    &mut out,
+                )
+                .unwrap();
             assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
-            assert!(out.vertices.iter().all(|v| v.position.iter().all(|n| n.is_finite())));
+            assert!(
+                out.vertices
+                    .iter()
+                    .all(|v| v.position.iter().all(|n| n.is_finite()))
+            );
             out.vertices.len()
         };
         let idle = render(&mut store);
@@ -1904,18 +2895,36 @@ fn modern_visibility_reaches_submitted_geometry_for_tongue_croak_and_shell() {
         e.source.as_mut().unwrap().age = 5;
         match &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
             Modern::Frog { tongue, .. } => tongue.start(0),
-            Modern::Armadillo { .. } => { e.metadata.insert(19,Metadata::Int(2)); }
+            Modern::Armadillo { .. } => {
+                e.metadata.insert(19, Metadata::Int(2));
+            }
             _ => unreachable!(),
         }
         let active = render(&mut store);
-        assert_eq!((idle, active), if kind == "frog" { (24,48) } else { (48,24) });
+        assert_eq!(
+            (idle, active),
+            if kind == "frog" { (24, 48) } else { (48, 24) }
+        );
         let e = &mut store.slots[0];
-        if let Modern::Frog { tongue, croak, .. } = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
-            tongue.stop(); croak.start(0);
-            assert_eq!(render(&mut store), 48, "croaking throat geometry is conditional");
-        } else { e.metadata.insert(19,Metadata::Int(0)); }
+        if let Modern::Frog { tongue, croak, .. } =
+            &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+        {
+            tongue.stop();
+            croak.start(0);
+            assert_eq!(
+                render(&mut store),
+                48,
+                "croaking throat geometry is conditional"
+            );
+        } else {
+            e.metadata.insert(19, Metadata::Int(0));
+        }
         store.slots[0].source.as_mut().unwrap().age = 100;
-        assert_eq!(render(&mut store), idle, "ending the action restores exact visible part set");
+        assert_eq!(
+            render(&mut store),
+            idle,
+            "ending the action restores exact visible part set"
+        );
     }
 }
 
@@ -1930,7 +2939,11 @@ fn animation_aimed_and_single_hand_use_actions_have_distinct_silhouettes() {
         (2, "minecraft:spyglass", json!({})),
         (3, "minecraft:goat_horn", json!({})),
         (4, "minecraft:brush", json!({})),
-        (5, "test:spear", json!({"minecraft:kinetic_weapon":{"delay_ticks":10}})),
+        (
+            5,
+            "test:spear",
+            json!({"minecraft:kinetic_weapon":{"delay_ticks":10}}),
+        ),
     ] {
         content.item_names.insert(id, item.into());
         e.equipment[0] = Some(action_stack(id, components));
@@ -1938,15 +2951,33 @@ fn animation_aimed_and_single_hand_use_actions_have_distinct_silhouettes() {
         action_age(&models, &mut e, &content, id as i32 * 20 + 10);
         let pose = action_pose(&models, &e, &content, &rig);
         directions.push(pose[2].transform_vector3(Vec3::Y));
-        assert_eq!(pose[3], Mat4::IDENTITY, "{item} does not commandeer the empty opposite arm");
+        assert_eq!(
+            pose[3],
+            Mat4::IDENTITY,
+            "{item} does not commandeer the empty opposite arm"
+        );
     }
     assert!(directions[0].y < -0.95, "trident is raised overhead");
-    assert!(directions[1].y < 0. && directions[1].z < -0.8, "spyglass reaches the eye");
-    assert!(directions[2].y > 0. && directions[2].z < -0.8, "horn is held at the mouth");
-    assert!(directions[3].y > 0.7 && directions[3].z < -0.5, "brush extends down and forward");
-    assert!(directions[4].y > 0.1 && directions[4].z < -0.9, "spear is braced forward, not thrown overhead");
+    assert!(
+        directions[1].y < 0. && directions[1].z < -0.8,
+        "spyglass reaches the eye"
+    );
+    assert!(
+        directions[2].y > 0. && directions[2].z < -0.8,
+        "horn is held at the mouth"
+    );
+    assert!(
+        directions[3].y > 0.7 && directions[3].z < -0.5,
+        "brush extends down and forward"
+    );
+    assert!(
+        directions[4].y > 0.1 && directions[4].z < -0.9,
+        "spear is braced forward, not thrown overhead"
+    );
     for (i, a) in directions.iter().enumerate() {
-        for b in &directions[i+1..] { assert!((*a-*b).length() > 0.1); }
+        for b in &directions[i + 1..] {
+            assert!((*a - *b).length() > 0.1);
+        }
     }
 }
 
@@ -1962,8 +2993,14 @@ fn animation_drowned_trident_pose_takes_precedence_on_the_actual_main_arm() {
     for (flags, holding, other) in [(4, 2, 3), (6, 3, 2)] {
         e.metadata.insert(22, Metadata::Byte(flags));
         let pose = action_pose(&models, &e, &content, &rig);
-        assert!(pose[holding].transform_vector3(Vec3::Y).z > 0.6, "trident arm is cocked behind the head");
-        assert!(pose[other].transform_vector3(Vec3::Y).z < -0.6, "other arm retains aggressive zombie pose");
+        assert!(
+            pose[holding].transform_vector3(Vec3::Y).z > 0.6,
+            "trident arm is cocked behind the head"
+        );
+        assert!(
+            pose[other].transform_vector3(Vec3::Y).z < -0.6,
+            "other arm retains aggressive zombie pose"
+        );
     }
 }
 
@@ -1971,37 +3008,66 @@ fn animation_drowned_trident_pose_takes_precedence_on_the_actual_main_arm() {
 fn animation_bat_rest_and_axolotl_play_dead_are_reversible_for_babies_and_adults() {
     use render_living::Modern;
     let (models, mut bat, content) = action_fixture("minecraft:bat");
-    let bat_rig = solaris_models::authored("minecraft:bat#main").unwrap();
+    let bat_rig = krasnokamen_models::authored("minecraft:bat#main").unwrap();
     let flight = action_pose(&models, &bat, &content, bat_rig);
-    if let Modern::Bat { rest, .. } = &mut bat.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+    if let Modern::Bat { rest, .. } =
+        &mut bat.source.as_mut().unwrap().living.as_mut().unwrap().modern
+    {
         rest.start(0);
     }
     let hanging = action_pose(&models, &bat, &content, bat_rig);
-    assert_ne!(flight[0], hanging[0], "hanging reverses the body's orientation");
+    assert_ne!(
+        flight[0], hanging[0],
+        "hanging reverses the body's orientation"
+    );
     for wing in ["left_wing", "right_wing"] {
-        assert_ne!(flight[bat_rig.part_by_name[wing]], hanging[bat_rig.part_by_name[wing]], "resting wings fold");
+        assert_ne!(
+            flight[bat_rig.part_by_name[wing]], hanging[bat_rig.part_by_name[wing]],
+            "resting wings fold"
+        );
     }
-    if let Modern::Bat { rest, .. } = &mut bat.source.as_mut().unwrap().living.as_mut().unwrap().modern {
+    if let Modern::Bat { rest, .. } =
+        &mut bat.source.as_mut().unwrap().living.as_mut().unwrap().modern
+    {
         rest.stop();
     }
     assert_eq!(flight, action_pose(&models, &bat, &content, bat_rig));
     for baby in [false, true] {
         let (models, mut e, content) = action_fixture("minecraft:axolotl");
         e.metadata.insert(16, Metadata::Bool(baby));
-        let rig = solaris_models::authored(if baby { "minecraft:axolotl_baby#main" } else { "minecraft:axolotl#main" }).unwrap();
+        let rig = krasnokamen_models::authored(if baby {
+            "minecraft:axolotl_baby#main"
+        } else {
+            "minecraft:axolotl#main"
+        })
+        .unwrap();
         let idle = action_pose(&models, &e, &content, rig);
-        if let Modern::Axolotl(state) = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
-            for age in 0..10 { state.tick(age, baby, true, true, false, false); }
+        if let Modern::Axolotl(state) =
+            &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+        {
+            for age in 0..10 {
+                state.tick(age, baby, true, true, false, false);
+            }
         }
         let dead = action_pose(&models, &e, &content, rig);
         assert_ne!(dead[0], idle[0], "{baby}: playing dead rolls the body");
-        if let Modern::Axolotl(state) = &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern {
-            for age in 10..21 { state.tick(age, baby, false, true, false, false); }
+        if let Modern::Axolotl(state) =
+            &mut e.source.as_mut().unwrap().living.as_mut().unwrap().modern
+        {
+            for age in 10..21 {
+                state.tick(age, baby, false, true, false, false);
+            }
         }
         let alive = action_pose(&models, &e, &content, rig);
         for index in [0, rig.part_by_name["body"]] {
-            assert!(alive[index].to_cols_array().iter().zip(idle[index].to_cols_array())
-                .all(|(a,b)| (*a-b).abs() < 1e-5), "{baby}: recovery restores posture");
+            assert!(
+                alive[index]
+                    .to_cols_array()
+                    .iter()
+                    .zip(idle[index].to_cols_array())
+                    .all(|(a, b)| (*a - b).abs() < 1e-5),
+                "{baby}: recovery restores posture"
+            );
         }
     }
 }
@@ -2009,36 +3075,71 @@ fn animation_bat_rest_and_axolotl_play_dead_are_reversible_for_babies_and_adults
 #[test]
 fn animation_wither_invulnerability_scale_reaches_visible_geometry() {
     let (mut models, mut e, content) = action_fixture("minecraft:wither");
-    models.schemas.get_mut(&e.type_name).unwrap().accessors.insert("DATA_ID_INV".into(), [22, 1]);
+    models
+        .schemas
+        .get_mut(&e.type_name)
+        .unwrap()
+        .accessors
+        .insert("DATA_ID_INV".into(), [22, 1]);
     e.binding = Some(Ok(presentation::Binding {
-        rig:"minecraft:wither#main".into(), style:presentation::RootStyle::Living,
-        texture:crate::protocol::content::TextureRegion { layer:9,uv:[0.,0.,1.,1.],width:64,height:64 },
-        layers:None,anger:None,
+        rig: "minecraft:wither#main".into(),
+        style: presentation::RootStyle::Living,
+        texture: crate::protocol::content::TextureRegion {
+            layer: 9,
+            uv: [0., 0., 1., 1.],
+            width: 64,
+            height: 64,
+        },
+        layers: None,
+        anger: None,
     }));
     let mut store = Store::new();
     store.models = Some(Arc::new(models));
-    store.ids.insert(41,0);
-    store.spatial.entry([0,0]).or_default().insert(41);
+    store.ids.insert(41, 0);
+    store.spatial.entry([0, 0]).or_default().insert(41);
     store.slots.push(e);
     let render_width = |store: &mut Store| {
         let mut out = DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame {
-            maps:crate::ui::MapRenderFixture::empty().view(),tint_source:&|_,_|Ok([1.;3]),
-            content:&content,origin:[0.;3],camera:[0.;3],camera_rotation:[0.;2],
-            radius:32.,tick:0,partial:0.,game_time:0,clock_environment:None,
-            light:&|_|Ok(Some([15.;2])),bed_direction:&|_|None,
-        }, &mut out).unwrap();
+        let stats = store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &content,
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    light: &|_| Ok(Some([15.; 2])),
+                    bed_direction: &|_| None,
+                },
+                &mut out,
+            )
+            .unwrap();
         assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
-        let (low, high) = out.vertices.iter().fold((f32::INFINITY,f32::NEG_INFINITY),
-            |(low,high),v| (low.min(v.position[0]),high.max(v.position[0])));
-        high-low
+        let (low, high) = out
+            .vertices
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), v| {
+                (low.min(v.position[0]), high.max(v.position[0]))
+            });
+        high - low
     };
     let adult = render_width(&mut store);
     assert!(adult > 1., "the visible wither body must actually be drawn");
-    for (invulnerability, ratio) in [(220,0.75),(110,0.875),(0,1.)] {
-        store.slots[0].metadata.insert(22,Metadata::Int(invulnerability));
+    for (invulnerability, ratio) in [(220, 0.75), (110, 0.875), (0, 1.)] {
+        store.slots[0]
+            .metadata
+            .insert(22, Metadata::Int(invulnerability));
         let width = render_width(&mut store);
-        assert!((width/adult-ratio).abs() < 1e-4, "{invulnerability}: {width}/{adult}");
+        assert!(
+            (width / adult - ratio).abs() < 1e-4,
+            "{invulnerability}: {width}/{adult}"
+        );
     }
 }
 
@@ -2052,11 +3153,20 @@ fn animation_kinetic_weapon_uses_the_component_zero_delay_default() {
     action_age(&models, &mut e, &content, 2);
     let rig = rig();
     let immediate = action_pose(&models, &e, &content, &rig)[2].transform_vector3(Vec3::Y);
-    assert!(immediate.z < -0.9, "omitted delay is zero, not an invented ten-tick windup");
-    e.equipment[0] = Some(action_stack(1, json!({"minecraft:kinetic_weapon":{"delay_ticks":10}})));
+    assert!(
+        immediate.z < -0.9,
+        "omitted delay is zero, not an invented ten-tick windup"
+    );
+    e.equipment[0] = Some(action_stack(
+        1,
+        json!({"minecraft:kinetic_weapon":{"delay_ticks":10}}),
+    ));
     action_age(&models, &mut e, &content, 2);
     let delayed = action_pose(&models, &e, &content, &rig)[2].transform_vector3(Vec3::Y);
-    assert!(delayed.z > -0.8, "an explicit delay retains its authored windup");
+    assert!(
+        delayed.z > -0.8,
+        "an explicit delay retains its authored windup"
+    );
     assert!(immediate.is_finite() && delayed.is_finite());
 }
 
@@ -2070,23 +3180,42 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
     let (models, mut entity) = fixture();
     entity.binding = Some(Ok(presentation::Binding {
         rig: "authored:rig".into(),
-        texture: crate::protocol::content::TextureRegion { uv: [0., 0., 1., 1.], layer: 0, width: 1, height: 1 },
+        texture: crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 1,
+            height: 1,
+        },
         style: presentation::RootStyle::Living,
         layers: None,
         anger: None,
     }));
     entity.transform.position = [10.5, 64., -3.5];
     entity.death_tick = Some(100);
-    let Some(Ok(binding)) = entity.binding.as_ref() else { unreachable!() };
+    let Some(Ok(binding)) = entity.binding.as_ref() else {
+        unreachable!()
+    };
     let relative = Vec3::new(2.5, 4., -3.5);
     // (ticks since the death event, partial, vanilla degrees): the render deathTime is 0
     // until the first dead tick, then ticks + partial.
     for (elapsed, partial, degrees) in [
-        (0, 0.5, 0.), (1, 0., 0.), (1, 0.5, 18.), (2, 0., 25.455_845), (5, 0.5, 54.),
-        (10, 0., 76.367_53), (13, 0.5, 90.), (14, 0., 90.), (19, 0.75, 90.),
+        (0, 0.5, 0.),
+        (1, 0., 0.),
+        (1, 0.5, 18.),
+        (2, 0., 25.455_845),
+        (5, 0.5, 54.),
+        (10, 0., 76.367_53),
+        (13, 0.5, 90.),
+        (14, 0., 90.),
+        (19, 0.75, 90.),
     ] {
         let frame = presentation::EntityDrawFrame {
-            origin: [8., 60., 0.], transform: entity.transform, tick: 100 + elapsed, partial, light: [15., 0.], parent: None,
+            origin: [8., 60., 0.],
+            transform: entity.transform,
+            tick: 100 + elapsed,
+            partial,
+            light: [15., 0.],
+            parent: None,
         };
         let root = presentation::root_matrix(&entity, &models, binding, frame, &|_| None);
         let vanilla = Mat4::from_translation(relative)
@@ -2094,21 +3223,43 @@ fn death_tilt_turns_about_the_feet_on_the_vanilla_curve() {
             * Mat4::from_rotation_z(f32::to_radians(degrees))
             * Mat4::from_scale(Vec3::new(-1., -1., 1.))
             * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
-        assert!(root.abs_diff_eq(vanilla, 1e-4), "deathTime {elapsed}+{partial}: {root:?} != {vanilla:?}");
+        assert!(
+            root.abs_diff_eq(vanilla, 1e-4),
+            "deathTime {elapsed}+{partial}: {root:?} != {vanilla:?}"
+        );
         // The feet stay on the received position; a point 1.8 blocks up sinks to the ground.
         let feet = root.transform_point3(Vec3::new(0., 1.501, 0.));
-        assert!(feet.abs_diff_eq(relative, 1e-4), "deathTime {elapsed}+{partial}: feet {feet:?}");
+        assert!(
+            feet.abs_diff_eq(relative, 1e-4),
+            "deathTime {elapsed}+{partial}: feet {feet:?}"
+        );
         let head = root.transform_point3(Vec3::new(0., 1.501 - 1.8, 0.)) - relative;
-        assert!((head.y - 1.8 * f32::to_radians(degrees).cos()).abs() < 1e-4, "deathTime {elapsed}+{partial}: head {head:?}");
+        assert!(
+            (head.y - 1.8 * f32::to_radians(degrees).cos()).abs() < 1e-4,
+            "deathTime {elapsed}+{partial}: head {head:?}"
+        );
     }
     // getFlipDegrees: 180 for spiders, cave spiders, silverfish and endermites; a death clip
     // that replaces the root scales the vanilla turn down.
-    let about_feet = |degrees: f32| Mat4::from_translation(Vec3::new(0., 1.501, 0.))
-        * Mat4::from_rotation_z(degrees.to_radians())
-        * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
-    for (name, flip) in [("minecraft:spider", 180.), ("minecraft:cave_spider", 180.), ("minecraft:silverfish", 180.),
-        ("minecraft:endermite", 180.), ("minecraft:zombie", 90.)] {
-        assert!(presentation::death_tilt(name, 14, 0., 1.).abs_diff_eq(about_feet(flip), 1e-5), "{name}");
-        assert!(presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5), "{name}");
+    let about_feet = |degrees: f32| {
+        Mat4::from_translation(Vec3::new(0., 1.501, 0.))
+            * Mat4::from_rotation_z(degrees.to_radians())
+            * Mat4::from_translation(Vec3::new(0., -1.501, 0.))
+    };
+    for (name, flip) in [
+        ("minecraft:spider", 180.),
+        ("minecraft:cave_spider", 180.),
+        ("minecraft:silverfish", 180.),
+        ("minecraft:endermite", 180.),
+        ("minecraft:zombie", 90.),
+    ] {
+        assert!(
+            presentation::death_tilt(name, 14, 0., 1.).abs_diff_eq(about_feet(flip), 1e-5),
+            "{name}"
+        );
+        assert!(
+            presentation::death_tilt(name, 14, 0., 0.25).abs_diff_eq(about_feet(flip * 0.25), 1e-5),
+            "{name}"
+        );
     }
 }

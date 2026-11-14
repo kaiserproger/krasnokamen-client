@@ -117,29 +117,59 @@ fn tnt_flashes_white_and_swells_only_at_fuse_end() {
 #[test]
 fn tnt_uses_received_block_state_and_fuse_boundaries() {
     let (mut models, mut entity) = subject("minecraft:tnt");
-    models.schemas.get_mut("minecraft:tnt").unwrap().accessors
+    models
+        .schemas
+        .get_mut("minecraft:tnt")
+        .unwrap()
+        .accessors
         .insert("DATA_BLOCK_STATE_ID".into(), [8, 0]);
-    entity.metadata.insert(8, super::super::Metadata::BlockState(0));
+    entity
+        .metadata
+        .insert(8, super::super::Metadata::BlockState(0));
     let mut store = Store::new();
     store.special_render_cache.tnt_state = Some(1);
     store.slots.push(entity);
     let mut out = DynamicGeometry::default();
     let render = |store: &mut Store, out: &mut DynamicGeometry| {
         let transform = store.slots[0].presented_transform(0, 0.);
-        super::super::append(store, 0, &models, &Content::test_cube(), [0.; 3],
-            0, 0., transform, None, crate::ui::MapRenderFixture::empty().view(), &|_| Ok(Some([7., 11.])), &|_, _| Ok([1.; 3]), out).unwrap()
+        super::super::append(
+            store,
+            0,
+            &models,
+            &Content::test_cube(),
+            [0.; 3],
+            0,
+            0.,
+            transform,
+            None,
+            crate::ui::MapRenderFixture::empty().view(),
+            &|_| Ok(Some([7., 11.])),
+            &|_, _| Ok([1.; 3]),
+            out,
+        )
+        .unwrap()
     };
     assert_eq!(render(&mut store, &mut out), Handled::NoGeometry);
     assert!(out.vertices.is_empty());
-    store.slots[0].metadata.insert(8, super::super::Metadata::BlockState(1));
+    store.slots[0]
+        .metadata
+        .insert(8, super::super::Metadata::BlockState(1));
     assert_eq!(render(&mut store, &mut out), Handled::Rendered);
     assert_eq!(out.vertices.len(), 24);
     assert_eq!(tnt_appearance(9., 0.).0, 1.);
     assert!(tnt_appearance(8., 0.).0 > 1.);
     assert_ne!(tnt_appearance(4., 0.).1, tnt_appearance(4., 0.01).1);
     let flashing = draw("minecraft:tnt", 2);
-    let low = flashing.vertices.iter().map(|v| v.position[1]).fold(f32::INFINITY, f32::min);
-    let high = flashing.vertices.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
+    let low = flashing
+        .vertices
+        .iter()
+        .map(|v| v.position[1])
+        .fold(f32::INFINITY, f32::min);
+    let high = flashing
+        .vertices
+        .iter()
+        .map(|v| v.position[1])
+        .fold(f32::NEG_INFINITY, f32::max);
     assert!(((low + high) * 0.5 - 0.5).abs() < 1e-5);
 }
 
@@ -276,7 +306,8 @@ fn rope_anchors_sag_light_and_unleash_follow_received_entities() {
         super::super::Handled::Unhandled
     );
     assert!(!out.indices[EntityMaterial::Leash as usize].is_empty());
-    let (start, end) = leash_anchors(&store.slots[0], &store.slots[1], &models, &store, 0, 0.).unwrap();
+    let (start, end) =
+        leash_anchors(&store.slots[0], &store.slots[1], &models, &store, 0, 0.).unwrap();
     for (actual, expected) in start.into_iter().zip([0., 0.7, 0.5]) {
         assert!((actual - expected).abs() < 1e-6);
     }
@@ -376,8 +407,13 @@ fn local_player_holder_resolves_even_without_a_received_entity_row() {
 fn missing_holder_light_does_not_hide_the_leashed_entity() {
     let (mut models, mut mob) = subject("minecraft:pig");
     let (mut holder_models, mut holder) = subject("minecraft:leash_knot");
-    models.schemas.insert("minecraft:leash_knot".into(),
-        holder_models.schemas.remove("minecraft:leash_knot").unwrap());
+    models.schemas.insert(
+        "minecraft:leash_knot".into(),
+        holder_models
+            .schemas
+            .remove("minecraft:leash_knot")
+            .unwrap(),
+    );
     holder.handle.network_id = 42;
     holder.transform.position = [4., 0., 0.];
     holder.position = holder.transform.position;
@@ -388,19 +424,39 @@ fn missing_holder_light_does_not_hide_the_leashed_entity() {
     let mut out = DynamicGeometry::default();
     let transform = store.slots[0].presented_transform(0, 0.);
     let result = super::super::append(
-        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., transform, None,
+        &mut store,
+        0,
+        &models,
+        &Content::test_cube(),
+        [0.; 3],
+        0,
+        0.,
+        transform,
+        None,
         crate::ui::MapRenderFixture::empty().view(),
         &|pos| Ok(if pos[0] > 2. { None } else { Some([7., 11.]) }),
         &|_, _| Ok([1.; 3]),
         &mut out,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(result, Handled::Unhandled);
     assert!(out.indices[EntityMaterial::Leash as usize].is_empty());
     let result = super::super::append(
-        &mut store, 0, &models, &Content::test_cube(), [0.; 3], 0, 0., transform, None,
+        &mut store,
+        0,
+        &models,
+        &Content::test_cube(),
+        [0.; 3],
+        0,
+        0.,
+        transform,
+        None,
         crate::ui::MapRenderFixture::empty().view(),
-        &|_| Ok(Some([7., 11.])), &|_, _| Ok([1.; 3]), &mut out,
-    ).unwrap();
+        &|_| Ok(Some([7., 11.])),
+        &|_, _| Ok([1.; 3]),
+        &mut out,
+    )
+    .unwrap();
     assert_eq!(result, Handled::Unhandled);
     assert!(!out.indices[EntityMaterial::Leash as usize].is_empty());
 }
@@ -411,7 +467,12 @@ fn burning_flag_transitions_reach_each_entity_draw_route() {
     use crate::protocol::content::TextureRegion;
     use std::sync::Arc;
 
-    let region = |layer| TextureRegion { uv: [0., 0., 1., 1.], layer, width: 16, height: 16 };
+    let region = |layer| TextureRegion {
+        uv: [0., 0., 1., 1.],
+        layer,
+        width: 16,
+        height: 16,
+    };
     let mut content = Content::test_cube();
     for (name, layer) in [
         ("minecraft:block/fire_0", 42),
@@ -422,22 +483,46 @@ fn burning_flag_transitions_reach_each_entity_draw_route() {
         content.insert_test_texture(name, region(layer));
     }
     let faces: serde_json::Map<String, serde_json::Value> =
-        ["north", "south", "east", "west", "up", "down"].into_iter()
-            .map(|face| (face.into(), serde_json::json!({"texture":"#frame"}))).collect();
+        ["north", "south", "east", "west", "up", "down"]
+            .into_iter()
+            .map(|face| (face.into(), serde_json::json!({"texture":"#frame"})))
+            .collect();
     let frame_model = serde_json::to_vec(&serde_json::json!({
         "textures":{"frame":"test/frame"},
         "elements":[{"from":[2,2,14],"to":[14,14,16],"faces":faces}]
-    })).unwrap();
-    content.insert_test_resource("assets/minecraft/models/block/item_frame.json", &frame_model);
+    }))
+    .unwrap();
+    content.insert_test_resource(
+        "assets/minecraft/models/block/item_frame.json",
+        &frame_model,
+    );
 
-    for kind in ["minecraft:pig", "minecraft:tnt", "minecraft:falling_block", "minecraft:item_frame", "minecraft:experience_orb"] {
+    for kind in [
+        "minecraft:pig",
+        "minecraft:tnt",
+        "minecraft:falling_block",
+        "minecraft:item_frame",
+        "minecraft:experience_orb",
+    ] {
         let (mut models, mut entity) = subject(kind);
-        models.schemas.get_mut(kind).unwrap().accessors.insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
-        entity.spawn_data = if kind == "minecraft:falling_block" { 1 } else { 2 };
+        models
+            .schemas
+            .get_mut(kind)
+            .unwrap()
+            .accessors
+            .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+        entity.spawn_data = if kind == "minecraft:falling_block" {
+            1
+        } else {
+            2
+        };
         if kind == "minecraft:pig" {
             entity.binding = Some(Ok(Binding {
-                rig: "minecraft:pig#renderer_main".into(), texture: region(1),
-                style: RootStyle::Living, layers: None, anger: None,
+                rig: "minecraft:pig#renderer_main".into(),
+                texture: region(1),
+                style: RootStyle::Living,
+                layers: None,
+                anger: None,
             }));
         }
         let id = entity.handle.network_id;
@@ -449,17 +534,35 @@ fn burning_flag_transitions_reach_each_entity_draw_route() {
         store.slots.push(entity);
         let mut baseline = 0;
         for flags in [0, 1, 0, 33] {
-            store.slots[0].metadata.insert(0, super::super::Metadata::Byte(flags));
+            store.slots[0]
+                .metadata
+                .insert(0, super::super::Metadata::Byte(flags));
             let mut out = DynamicGeometry::default();
-            let stats = p::append(&mut store, crate::entities::EntityRenderFrame {
-                content: &content, origin: [0.; 3], camera: [0.; 3],
-                camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0.,
-                game_time: 0, clock_environment: None,
-                maps: crate::ui::MapRenderFixture::empty().view(),
-                tint_source: &|_, _| Ok([1.; 3]),
-                light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None,
-            }, &mut out).unwrap();
-            assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
+            let stats = p::append(
+                &mut store,
+                crate::entities::EntityRenderFrame {
+                    content: &content,
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    light: &|_| Ok(Some([15., 0.])),
+                    bed_direction: &|_| None,
+                },
+                &mut out,
+            )
+            .unwrap();
+            assert!(
+                stats.unrendered.is_empty(),
+                "{kind}: {:?}",
+                stats.unrendered
+            );
             let fire = out.indices[EntityMaterial::EntityFire as usize].len();
             if flags == 1 && kind != "minecraft:falling_block" {
                 assert_eq!(fire, 12, "{kind}: expected one two-quad overlay");
@@ -486,11 +589,22 @@ fn biome_tints_color_emitted_block_faces_and_cache_per_kind() {
     let sample = |kind, position| {
         assert_eq!(position, [-2, 65, 4]);
         count.set(count.get() + 1);
-        Ok(if kind == TintKind::Grass { [0.1, 0.6, 0.2] } else { [0.3, 0.4, 0.5] })
+        Ok(if kind == TintKind::Grass {
+            [0.1, 0.6, 0.2]
+        } else {
+            [0.3, 0.4, 0.5]
+        })
     };
     let mut out = DynamicGeometry::default();
-    p::append_block_quads(&model, 0, glam::Mat4::IDENTITY, [15., 15.],
-        |quad| block_tint(quad.tint, [-2, 65, 4], &cache, &sample), &mut out).unwrap();
+    p::append_block_quads(
+        &model,
+        0,
+        glam::Mat4::IDENTITY,
+        [15., 15.],
+        |quad| block_tint(quad.tint, [-2, 65, 4], &cache, &sample),
+        &mut out,
+    )
+    .unwrap();
     assert_eq!(count.get(), 2);
     assert!(out.vertices.iter().any(|v| v.color == [0.1, 0.6, 0.2]));
     assert!(out.vertices.iter().any(|v| v.color == [0.3, 0.4, 0.5]));
