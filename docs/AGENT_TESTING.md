@@ -2,6 +2,35 @@
 
 ## Authority and implementation truth
 
+The generic `armor_baby_{head,chest,legs,feet}` models were removed as unreachable.
+The equipment resolver scales the adult shell for small armor stands; the baby
+humanoid wearers in the 26.3 entity facts select their family-specific shells.
+`baby_armor_only_embeds_reachable_family_shells` checks that inventory. This is
+source coverage, not a paired graphical armor acceptance.
+`magma_cube_eye_texels_occupy_adjacent_upper_face_slices` checks the resting
+eye rows against the 26.3 front reference. It does not cover the jumping
+underside or establish full magma cube visual parity.
+`skeleton_and_creeper_limb_texture_handedness_is_not_interchangeable` checks
+the reported limb texture direction; graphical texture review remains separate.
+Baby zombie and husk chestplate caps now sample the covered region already
+used by the other baby humanoid armor shells. The authored
+`baby_zombie_and_husk_chest_shoulders_use_covered_atlas_region` regression
+checks both arms and both wearers; paired graphics are still required.
+Baby armour shells now sample every face at 1:1 texel density
+(`baby_armor_shell_faces_sample_texels_1_to_1`, all families and slots), and a
+visible leggings band remains above the boots in every baby family
+(`baby_leggings_stay_visible_above_boots_in_every_family`). Both are source
+checks; the paired equipped frames are the visual acceptance.
+`camel_husk_rig_stays_geometry_identical_to_camel` locks the husk to the camel
+rig (vanilla bakes ModelLayers.CAMEL for CamelHuskRenderer).
+`glow_squid_tentacle_yaw_matches_vanilla_ring`,
+`cow_and_mooshroom_front_legs_match_vanilla_quadruped` and
+`bed_has_no_legacy_entity_rig_with_mirrored_leg` cover the N10 items against
+the decompiled 26.3 sources; beds render through the vanilla block models.
+`animation_armadillo_roll_and_warden_roar_reach_part_matrices` extends the
+keyframe-animation coverage (OPUS-8) to the armadillo roll and warden roar;
+real-client frames remain the visual acceptance.
+
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
 

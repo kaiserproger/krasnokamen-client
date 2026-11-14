@@ -2163,6 +2163,41 @@ mod tests {
     }
 
     #[test]
+    fn baby_armor_only_embeds_reachable_family_shells() {
+        let doc = Models::parse().unwrap();
+        let mut baby_wearers = Vec::new();
+        for (kind, armor) in &doc.armor_models {
+            if !doc.entities[kind].accessors.contains_key("DATA_BABY_ID") {
+                continue;
+            }
+            baby_wearers.push(kind.as_str());
+            for part in ["head", "chest", "legs", "feet"] {
+                let key = &armor.baby[part];
+                let id = krasnokamen_models::model_id(key);
+                assert_ne!(id, format!("armor_baby_{part}"), "{kind} {part}");
+                assert!(
+                    krasnokamen_models::authored(key).is_some(),
+                    "{kind} {part}: {key}"
+                );
+            }
+        }
+        assert_eq!(
+            baby_wearers,
+            [
+                "minecraft:drowned",
+                "minecraft:husk",
+                "minecraft:piglin",
+                "minecraft:zombie",
+                "minecraft:zombie_villager",
+                "minecraft:zombified_piglin",
+            ]
+        );
+        for part in ["head", "chest", "legs", "feet"] {
+            assert!(krasnokamen_models::authored(&format!("armor_baby_{part}")).is_none());
+        }
+    }
+
+    #[test]
     fn dimension_constants_preserve_decimal_dimensions_and_attachments() {
         let dimensions = r#"{"width":0.2,"height":0.2,"eye_height":0.2,"fixed":true,"attachments":{"NAME_TAG":[[0.0,0.20000000298023224,0.0]]}}"#;
         let value: DimensionConstant = serde_json::from_str(dimensions).unwrap();
