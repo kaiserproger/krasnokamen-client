@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 pub(super) fn enabled() -> bool {
     static ENABLED: LazyLock<bool> =
-        LazyLock::new(|| std::env::var_os("SOLARIS_CLIENT_GREEDY").is_none_or(|v| v != "0"));
+        LazyLock::new(|| std::env::var_os("KRASNOKAMEN_CLIENT_GREEDY").is_none_or(|v| v != "0"));
     *ENABLED
 }
 
@@ -47,9 +47,7 @@ fn eligible(vertices: &[Vertex; 4], cell: [i32; 3], face: usize, flat_fluid: boo
     } else {
         cell[axis] as f32 + (face % 2) as f32
     };
-    if flat_fluid
-        && !(cell[axis] as f32..=cell[axis] as f32 + 1.).contains(&plane)
-    {
+    if flat_fluid && !(cell[axis] as f32..=cell[axis] as f32 + 1.).contains(&plane) {
         return false;
     }
     if first.alpha != 1. || first.overlay_uv != [-1.; 2] {
@@ -114,21 +112,22 @@ fn eligible(vertices: &[Vertex; 4], cell: [i32; 3], face: usize, flat_fluid: boo
 }
 
 fn same(a: &Face, b: &Face, tangent: [usize; 2], normal: usize) -> bool {
-    a.backward == b.backward && a.vertices.iter().zip(&b.vertices).all(|(av, bv)| {
-        av.color == bv.color
-            && av.light == bv.light
-            && av.uv == bv.uv
-            && av.normal == bv.normal
-            && av.texture_layer == bv.texture_layer
-            && av.alpha == bv.alpha
-            && av.overlay_uv == bv.overlay_uv
-            && av.overlay_tint == bv.overlay_tint
-            && av.position[normal] == bv.position[normal]
-            && tangent.iter().enumerate().all(|(i, &axis)| {
-                (av.position[axis] - a.cell[i] as f32).round()
-                    == (bv.position[axis] - b.cell[i] as f32).round()
-            })
-    })
+    a.backward == b.backward
+        && a.vertices.iter().zip(&b.vertices).all(|(av, bv)| {
+            av.color == bv.color
+                && av.light == bv.light
+                && av.uv == bv.uv
+                && av.normal == bv.normal
+                && av.texture_layer == bv.texture_layer
+                && av.alpha == bv.alpha
+                && av.overlay_uv == bv.overlay_uv
+                && av.overlay_tint == bv.overlay_tint
+                && av.position[normal] == bv.position[normal]
+                && tangent.iter().enumerate().all(|(i, &axis)| {
+                    (av.position[axis] - a.cell[i] as f32).round()
+                        == (bv.position[axis] - b.cell[i] as f32).round()
+                })
+        })
 }
 
 impl Greedy {
@@ -158,7 +157,12 @@ impl Greedy {
         face: usize,
         backward: bool,
     ) -> bool {
-        if !eligible(&vertices, cell, face, self.layer == RenderLayer::Translucent) {
+        if !eligible(
+            &vertices,
+            cell,
+            face,
+            self.layer == RenderLayer::Translucent,
+        ) {
             return false;
         }
         let tangent = axes(face);

@@ -1,8 +1,8 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::collision;
 use super::*;
 use crate::inventory::Stack;
 use crate::protocol::content::FluidState;
+use crate::protocol::packet_ids::play::serverbound as sb;
 
 #[derive(Default)]
 struct Environment {
@@ -147,8 +147,13 @@ impl Player {
         if self.sprinting != self.sent_sprinting {
             // Hunger, collision and use effects can deny a held sprint key.
             self.entity_command(
-                if self.sprinting { PlayerCommand::StartSprinting } else { PlayerCommand::StopSprinting },
-                0, out,
+                if self.sprinting {
+                    PlayerCommand::StartSprinting
+                } else {
+                    PlayerCommand::StopSprinting
+                },
+                0,
+                out,
             );
             self.sent_sprinting = self.sprinting;
         }
@@ -1383,15 +1388,19 @@ mod tests {
     #[test]
     fn dimension_lava_rate_uses_received_environment_attribute_not_legacy_ultrawarm() {
         assert!(!dimension_fast_lava(&serde_json::json!({"ultrawarm":true})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
-        )
-        .unwrap());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":true}})
+            )
+            .unwrap()
+        );
         assert!(!dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"and","argument":true}}})).unwrap());
         assert!(dimension_fast_lava(&serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":{"modifier":"nand","argument":true}}})).unwrap());
-        assert!(dimension_fast_lava(
-            &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
-        )
-        .is_err());
+        assert!(
+            dimension_fast_lava(
+                &serde_json::json!({"attributes":{"minecraft:gameplay/fast_lava":"true"}})
+            )
+            .is_err()
+        );
     }
 }

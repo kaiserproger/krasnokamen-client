@@ -2,8 +2,8 @@
 //! not an approximate species list; server tags remain authoritative.
 use super::{Entity, Handle, Metadata, Models, Store};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -128,7 +128,10 @@ pub(crate) fn physical_peek(amount: f32) -> f32 {
 pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
     let position = e.presented_transform(tick, partial).position;
-    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    if matches!(
+        e.type_name.as_str(),
+        "minecraft:item_frame" | "minecraft:glow_item_frame"
+    ) {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
         let normal = direction(face)?;

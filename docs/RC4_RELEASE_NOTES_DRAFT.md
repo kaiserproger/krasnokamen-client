@@ -1,4 +1,4 @@
-# Solaris native client 1.0.0-rc.4 — draft
+# Krasnokamen native client 1.0.0-rc.4 — draft
 
 Changes in the current RC4 candidate since RC3 (not a release approval):
 

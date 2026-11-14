@@ -1,5 +1,5 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::{InventoryStore, Menu, MenuKind, PacketCommand, Stack, UiContext};
+use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     protocol::{Result, Writer, content::Content},
     ui::{ClickMode, UiIntent},
@@ -537,7 +537,10 @@ impl InventoryStore {
         self.sync_player();
         self.experience_level = experience_level;
         self.player_slot_identities = player_slot_identities;
-        if commands.last().is_some_and(|command| command.id == sb::CONTAINER_CLOSE) {
+        if commands
+            .last()
+            .is_some_and(|command| command.id == sb::CONTAINER_CLOSE)
+        {
             self.close();
         } else {
             self.revision += 1;
