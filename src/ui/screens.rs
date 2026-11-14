@@ -8,7 +8,7 @@ use crate::{
     inventory::{InventoryStore, MenuKind},
     protocol::Result,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 impl UiState {
     pub(crate) fn rebuild(&mut self, inventory: &InventoryStore, content: &Content) -> Result<()> {
         self.nodes.clear();
@@ -404,17 +404,24 @@ impl UiState {
         let mut high = label.chars().count();
         while low < high {
             let middle = low + (high - low).div_ceil(2);
-            let end = label.char_indices().nth(middle).map_or(label.len(), |(end, _)| end);
+            let end = label
+                .char_indices()
+                .nth(middle)
+                .map_or(label.len(), |(end, _)| end);
             if self.text.width(&label[..end], false)? <= available {
                 low = middle;
             } else {
                 high = middle - 1;
             }
         }
-        let end = label.char_indices().nth(low).map_or(label.len(), |(end, _)| end);
+        let end = label
+            .char_indices()
+            .nth(low)
+            .map_or(label.len(), |(end, _)| end);
         // Keep the complete accessible label; only the painted component is shortened.
-        self.nodes.last_mut().expect("button added above").component =
-            Some(std::sync::Arc::new(json!({"text":format!("{}…", &label[..end])})));
+        self.nodes.last_mut().expect("button added above").component = Some(std::sync::Arc::new(
+            json!({"text":format!("{}…", &label[..end])}),
+        ));
         Ok(())
     }
     pub(crate) fn edit_node(
@@ -451,14 +458,20 @@ impl UiState {
             Paint::Image(name.into(), [0., 0., 1., 1.]),
         )
     }
-    fn menu_tree(&mut self, inventory: &InventoryStore, content: &Content, min_y: f32) -> Result<()> {
+    fn menu_tree(
+        &mut self,
+        inventory: &InventoryStore,
+        content: &Content,
+        min_y: f32,
+    ) -> Result<()> {
         if self.screen != Screen::Creative {
             self.panel();
         }
         let menu = inventory.menu();
         let layout = Layout::menu(menu)?;
         let has_recipe = self.screen != Screen::Creative && menu.kind.recipe_book().is_some();
-        let compact_recipe = has_recipe && self.recipe_open
+        let compact_recipe = has_recipe
+            && self.recipe_open
             && self.width < layout.width + super::catalogue::RECIPE_BOOK_WIDTH;
         let x = if has_recipe && self.recipe_open && !compact_recipe {
             (self.width - layout.width - super::catalogue::RECIPE_BOOK_WIDTH) / 2.
@@ -469,10 +482,19 @@ impl UiState {
         let y = ((self.height - layout.height) / 2.).max(min_y);
         if compact_recipe {
             self.button(
-                "recipe/book", "Recipes", [self.width - 54., 8., 50., 20.],
-                NodeAction::RecipeBook, true, None,
+                "recipe/book",
+                "Recipes",
+                [self.width - 54., 8., 50., 20.],
+                NodeAction::RecipeBook,
+                true,
+                None,
             )?;
-            self.recipe_panel(inventory, content, super::catalogue::RECIPE_CATEGORY_WIDTH + 2., y)?;
+            self.recipe_panel(
+                inventory,
+                content,
+                super::catalogue::RECIPE_CATEGORY_WIDTH + 2.,
+                y,
+            )?;
             return Ok(());
         }
         let name = if menu.kind == MenuKind::Lectern {
@@ -632,7 +654,13 @@ impl UiState {
         self.menu_controls(inventory, content, x, y)?;
         Ok(())
     }
-    fn recipe_panel(&mut self, inventory: &InventoryStore, content: &Content, x: f32, y: f32) -> Result<()> {
+    fn recipe_panel(
+        &mut self,
+        inventory: &InventoryStore,
+        content: &Content,
+        x: f32,
+        y: f32,
+    ) -> Result<()> {
         if !self.fields.contains_key("recipe/search") {
             self.field("recipe/search", String::new(), 256, false)?;
         }
@@ -1193,12 +1221,22 @@ impl UiState {
             ] {
                 if rect[2] > 0. && rect[3] > 0. {
                     self.add(
-                        format!("hud/scope/{id}"), "presentation", String::new(), rect,
-                        true, None, NodeAction::None, Paint::Solid([0.; 3], 1.),
+                        format!("hud/scope/{id}"),
+                        "presentation",
+                        String::new(),
+                        rect,
+                        true,
+                        None,
+                        NodeAction::None,
+                        Paint::Solid([0.; 3], 1.),
                     )?;
                 }
             }
-            self.sprite("hud/scope", "minecraft:misc/spyglass_scope", [x, y, size, size])?;
+            self.sprite(
+                "hud/scope",
+                "minecraft:misc/spyglass_scope",
+                [x, y, size, size],
+            )?;
         }
         // F3 overlay (vanilla): renders on top even when HUD is hidden.
         if !self.debug_lines.is_empty() {
@@ -1524,7 +1562,11 @@ impl UiState {
             let max_text_width = (self.width - 20.).max(1.);
             let mut table_y = 30.;
             if let Some(header) = self.tab_header.clone() {
-                let width = self.text.layout(&header, f32::MAX)?.width.ceil()
+                let width = self
+                    .text
+                    .layout(&header, f32::MAX)?
+                    .width
+                    .ceil()
                     .clamp(1., max_text_width);
                 let height = self.text.layout(&header, width)?.height.ceil().max(12.);
                 self.rich_label(
@@ -1535,11 +1577,20 @@ impl UiState {
                 )?;
                 table_y = 18. + height;
             }
-            let names: Vec<_> = self.hud.players.iter().take(80).map(|p| {
-                (p.id.clone(), std::sync::Arc::new(serde_json::json!({
-                    "text": "", "extra": [p.name, {"text": format!(" {}ms", p.latency)}]
-                })))
-            }).collect();
+            let names: Vec<_> = self
+                .hud
+                .players
+                .iter()
+                .take(80)
+                .map(|p| {
+                    (
+                        p.id.clone(),
+                        std::sync::Arc::new(serde_json::json!({
+                            "text": "", "extra": [p.name, {"text": format!(" {}ms", p.latency)}]
+                        })),
+                    )
+                })
+                .collect();
             // 26.3 PlayerTabOverlay balances at most 20 rows per column.
             let columns = names.len().max(1).div_ceil(20);
             let row_count = names.len().div_ceil(columns);
@@ -1547,8 +1598,8 @@ impl UiState {
             for (_, name) in &names {
                 column_width = column_width.max(self.text.layout(name, f32::MAX)?.width.ceil());
             }
-            column_width = column_width.min(((self.width - 20. - (columns - 1) as f32 * 5.)
-                / columns as f32).max(1.));
+            column_width = column_width
+                .min(((self.width - 20. - (columns - 1) as f32 * 5.) / columns as f32).max(1.));
             let mut row_heights = vec![10f32; row_count];
             for (i, (_, name)) in names.iter().enumerate() {
                 row_heights[i % row_count] = row_heights[i % row_count]
@@ -1563,13 +1614,21 @@ impl UiState {
                 self.rich_label(
                     &format!("tab/player/{id}"),
                     name,
-                    [left + (i / row_count) as f32 * (column_width + 5.),
-                        y, column_width, row_heights[row]],
+                    [
+                        left + (i / row_count) as f32 * (column_width + 5.),
+                        y,
+                        column_width,
+                        row_heights[row],
+                    ],
                     false,
                 )?;
             }
             if let Some(footer) = self.tab_footer.clone() {
-                let width = self.text.layout(&footer, f32::MAX)?.width.ceil()
+                let width = self
+                    .text
+                    .layout(&footer, f32::MAX)?
+                    .width
+                    .ceil()
                     .clamp(1., max_text_width);
                 let height = self.text.layout(&footer, width)?.height.ceil().max(12.);
                 self.rich_label(
@@ -1657,25 +1716,38 @@ mod item8_layout_tests {
 
     fn inside(ui: &UiState, id: &str) {
         let [x, y, w, h] = node(ui, id).bounds;
-        assert!(x >= 0. && y >= 0. && x + w <= ui.width && y + h <= ui.height,
-            "{id} outside {}x{}: {:?}", ui.width, ui.height, [x, y, w, h]);
+        assert!(
+            x >= 0. && y >= 0. && x + w <= ui.width && y + h <= ui.height,
+            "{id} outside {}x{}: {:?}",
+            ui.width,
+            ui.height,
+            [x, y, w, h]
+        );
     }
     fn reachable(ui: &UiState, id: &str) {
         inside(ui, id);
         let target = node(ui, id);
         let [x, y, w, h] = target.bounds;
         let point = [x + w / 2., y + h / 2.];
-        let hit = ui.nodes.iter().rev().find(|n| {
-            n.visible && !matches!(n.action, NodeAction::None)
-                && super::super::state::contains(n.bounds, point)
-        }).unwrap();
-        assert!(target.enabled && hit.id == id, "{id} is covered by {}", hit.id);
+        let hit = ui
+            .nodes
+            .iter()
+            .rev()
+            .find(|n| {
+                n.visible
+                    && !matches!(n.action, NodeAction::None)
+                    && super::super::state::contains(n.bounds, point)
+            })
+            .unwrap();
+        assert!(
+            target.enabled && hit.id == id,
+            "{id} is covered by {}",
+            hit.id
+        );
     }
 
-
     fn disjoint(a: [f32; 4], b: [f32; 4]) -> bool {
-        a[0] + a[2] <= b[0] || b[0] + b[2] <= a[0]
-            || a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1]
+        a[0] + a[2] <= b[0] || b[0] + b[2] <= a[0] || a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1]
     }
 
     #[test]
@@ -1687,8 +1759,13 @@ mod item8_layout_tests {
         for i in 0..12 {
             let id = format!("creative/tab/minecraft:tab_{i}");
             reachable(&ui, &id);
-            assert!(matches!(&node(&ui, &id).action, NodeAction::CreativeTab(index) if *index == i));
-            assert!(disjoint(node(&ui, &id).bounds, node(&ui, "creative/search").bounds));
+            assert!(
+                matches!(&node(&ui, &id).action, NodeAction::CreativeTab(index) if *index == i)
+            );
+            assert!(disjoint(
+                node(&ui, &id).bounds,
+                node(&ui, "creative/search").bounds
+            ));
         }
         reachable(&ui, "creative/search");
         ui.creative_tab = 11;
@@ -1697,7 +1774,10 @@ mod item8_layout_tests {
         for i in 0..12 {
             let id = format!("creative/tab/minecraft:tab_{i}");
             reachable(&ui, &id);
-            assert!(disjoint(node(&ui, &id).bounds, node(&ui, "menu/background").bounds));
+            assert!(disjoint(
+                node(&ui, &id).bounds,
+                node(&ui, "menu/background").bounds
+            ));
         }
     }
 
@@ -1709,35 +1789,64 @@ mod item8_layout_tests {
         menu.slots.resize(menu.kind.slot_count(), None);
         menu.slots.fill(Some(crate::inventory::Stack::default()));
         inventory.active = Some(menu);
-        for (id, category) in ["minecraft:crafting_building_blocks", "minecraft:crafting_equipment", "minecraft:crafting_misc"].into_iter().enumerate() {
-            inventory.recipes.insert(id as i32, crate::inventory::Recipe {
-                id: id as i32,
-                display: Arc::new(json!({"result": {"type": "minecraft:empty"}})),
-                group: None,
-                category: category.into(),
-                ingredients: None,
-                flags: 0,
-                display_stacks: Vec::new(),
-                ingredient_items: None,
-            });
+        for (id, category) in [
+            "minecraft:crafting_building_blocks",
+            "minecraft:crafting_equipment",
+            "minecraft:crafting_misc",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            inventory.recipes.insert(
+                id as i32,
+                crate::inventory::Recipe {
+                    id: id as i32,
+                    display: Arc::new(json!({"result": {"type": "minecraft:empty"}})),
+                    group: None,
+                    category: category.into(),
+                    ingredients: None,
+                    flags: 0,
+                    display_stacks: Vec::new(),
+                    ingredient_items: None,
+                },
+            );
         }
         ui.screen = Screen::Menu;
         for width in [427., 320.] {
             ui.width = width;
             ui.recipe_open = true;
             ui.rebuild(&inventory, &content).unwrap();
-            for id in ["recipe/book", "recipe/search", "recipe/category/", "recipe/filter"] {
+            for id in [
+                "recipe/book",
+                "recipe/search",
+                "recipe/category/",
+                "recipe/filter",
+            ] {
                 reachable(&ui, id);
             }
-            assert!(matches!(&node(&ui, "recipe/category/").action, NodeAction::RecipeCategory(s) if s.is_empty()));
-            for category in ["minecraft:crafting_building_blocks", "minecraft:crafting_equipment", "minecraft:crafting_misc"] {
+            assert!(
+                matches!(&node(&ui, "recipe/category/").action, NodeAction::RecipeCategory(s) if s.is_empty())
+            );
+            for category in [
+                "minecraft:crafting_building_blocks",
+                "minecraft:crafting_equipment",
+                "minecraft:crafting_misc",
+            ] {
                 let id = format!("recipe/category/{category}");
                 reachable(&ui, &id);
-                assert!(matches!(&node(&ui, &id).action, NodeAction::RecipeCategory(value) if value == category));
-                assert!(disjoint(node(&ui, &id).bounds, node(&ui, "recipe/search").bounds));
+                assert!(
+                    matches!(&node(&ui, &id).action, NodeAction::RecipeCategory(value) if value == category)
+                );
+                assert!(disjoint(
+                    node(&ui, &id).bounds,
+                    node(&ui, "recipe/search").bounds
+                ));
             }
             if width == 427. {
-                assert!(disjoint(node(&ui, "recipe/search").bounds, node(&ui, "menu/background").bounds));
+                assert!(disjoint(
+                    node(&ui, "recipe/search").bounds,
+                    node(&ui, "menu/background").bounds
+                ));
                 reachable(&ui, "slot/0");
             }
             ui.recipe_open = false;

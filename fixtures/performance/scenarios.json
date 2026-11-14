@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source": "SOLARIS_NATIVE_CLIENT_SPEC_FOR_OPUS.md sections 21.2, 21.3, 23.4 (2026-10-01)",
+  "source": "KRASNOKAMEN_NATIVE_CLIENT_SPEC_FOR_OPUS.md sections 21.2, 21.3, 23.4 (2026-10-01)",
   "status": "descriptors_not_measurements",
   "execution_ready": false,
   "missing_prerequisites": [

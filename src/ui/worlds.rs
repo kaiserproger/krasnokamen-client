@@ -2,8 +2,8 @@
 //! and the "starting world" progress screen. World files are managed by
 //! `crate::singleplayer`; starting the server is a `UiCommand` for the session.
 use super::{
-    state::{NodeAction, Paint, UiCommand, UiEffects},
     Screen, UiState,
+    state::{NodeAction, Paint, UiCommand, UiEffects},
 };
 use crate::{
     protocol::Result,

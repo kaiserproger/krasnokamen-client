@@ -1,13 +1,13 @@
-use super::{extract, frame, Reader, Result, Writer, MAX_FRAME};
-use super::packet_ids::{login, configuration, play};
+use super::packet_ids::{configuration, login, play};
+use super::{MAX_FRAME, Reader, Result, Writer, extract, frame};
 use parking_lot::Mutex;
 use std::{
     io::{Read, Write},
     net::{Shutdown, TcpStream, ToSocketAddrs},
     sync::{
+        Arc,
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
-        Arc,
     },
     thread,
     time::Duration,
@@ -200,7 +200,9 @@ impl Network {
         }
         match self.incoming.try_recv() {
             Ok(event) => {
-                self.state.inbound_bytes.fetch_sub(event.queued_bytes(), Ordering::AcqRel);
+                self.state
+                    .inbound_bytes
+                    .fetch_sub(event.queued_bytes(), Ordering::AcqRel);
                 self.state.inbound_events.fetch_sub(1, Ordering::AcqRel);
                 Ok(event)
             }
@@ -224,7 +226,10 @@ impl Network {
         }
         self.outgoing.send((id, body)).map_err(|_| {
             state.outbound_backlog.fetch_sub(1, Ordering::AcqRel);
-            state.terminal_error.lock().clone()
+            state
+                .terminal_error
+                .lock()
+                .clone()
                 .unwrap_or_else(|| "outbound queue closed: network thread ended".to_string())
         })?;
         #[cfg(windows)]
@@ -352,28 +357,42 @@ impl BlockingReader {
         let control = Arc::new(socket.try_clone()?);
         let input = control.clone();
         let (send, incoming) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new().name("minecraft-read".into()).spawn(move || {
-            let mut input = input.as_ref();
-            loop {
-                let mut chunk = ReadChunk { bytes: [0; 8192], len: 0 };
-                let result = loop {
-                    match input.read(&mut chunk.bytes) {
-                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                        result => break result,
+        let worker = thread::Builder::new()
+            .name("minecraft-read".into())
+            .spawn(move || {
+                let mut input = input.as_ref();
+                loop {
+                    let mut chunk = ReadChunk {
+                        bytes: [0; 8192],
+                        len: 0,
+                    };
+                    let result = loop {
+                        match input.read(&mut chunk.bytes) {
+                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                                continue;
+                            }
+                            result => break result,
+                        }
+                    };
+                    let terminal = !matches!(result, Ok(n) if n > 0);
+                    let message = result.map(|len| {
+                        chunk.len = len;
+                        chunk
+                    });
+                    if send.send(message).is_err() {
+                        break;
                     }
-                };
-                let terminal = !matches!(result, Ok(n) if n > 0);
-                let message = result.map(|len| { chunk.len = len; chunk });
-                if send.send(message).is_err() {
-                    break;
+                    owner.unpark();
+                    if terminal {
+                        break;
+                    }
                 }
-                owner.unpark();
-                if terminal {
-                    break;
-                }
-            }
-        })?;
-        Ok(Self { incoming: Some(incoming), socket: control, worker: Some(worker) })
+            })?;
+        Ok(Self {
+            incoming: Some(incoming),
+            socket: control,
+            worker: Some(worker),
+        })
     }
 
     fn shutdown(&self) {
@@ -383,7 +402,10 @@ impl BlockingReader {
             use std::os::windows::io::AsRawSocket;
             #[link(name = "kernel32")]
             unsafe extern "system" {
-                fn CancelIoEx(socket: *mut std::ffi::c_void, overlapped: *mut std::ffi::c_void) -> i32;
+                fn CancelIoEx(
+                    socket: *mut std::ffi::c_void,
+                    overlapped: *mut std::ffi::c_void,
+                ) -> i32;
             }
             // Winsock shutdown prevents new reads but does not release a recv
             // already blocked on another thread. Cancel its pending I/O on the
@@ -405,7 +427,9 @@ impl BlockingReader {
                 buffer.extend_from_slice(&chunk.bytes[..chunk.len]);
                 Ok(())
             }
-            Ok(Ok(_)) | Err(mpsc::TryRecvError::Disconnected) => Err("server closed connection".into()),
+            Ok(Ok(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                Err("server closed connection".into())
+            }
             Ok(Err(error)) => Err(format!("server read: {error}")),
             Err(mpsc::TryRecvError::Empty) => Ok(()),
         }
@@ -468,9 +492,14 @@ fn run(
             if v["version"]["protocol"].as_i64() != Some(777) {
                 let version = &v["version"];
                 let name = version["name"].as_str().unwrap_or("unknown version");
-                let protocol = version["protocol"].as_i64()
-                    .map_or_else(|| "unknown protocol".to_owned(), |n| format!("protocol {n}"));
-                return Err(format!("Incompatible server version: {name} ({protocol}). This client supports Minecraft {} (protocol 777).", crate::singleplayer::GAME_VERSION));
+                let protocol = version["protocol"].as_i64().map_or_else(
+                    || "unknown protocol".to_owned(),
+                    |n| format!("protocol {n}"),
+                );
+                return Err(format!(
+                    "Incompatible server version: {name} ({protocol}). This client supports Minecraft {} (protocol 777).",
+                    crate::singleplayer::GAME_VERSION
+                ));
             }
             state.publish(events, Event::Status(v))?;
             wake();
@@ -599,10 +628,22 @@ fn run(
             }
             if original == Phase::Play {
                 match id {
-                    play::clientbound::KEEP_ALIVE => write(&mut socket, play::serverbound::KEEP_ALIVE, &body, compression)?,
-                    play::clientbound::PING => write(&mut socket, play::serverbound::PONG, &body, compression)?,
+                    play::clientbound::KEEP_ALIVE => write(
+                        &mut socket,
+                        play::serverbound::KEEP_ALIVE,
+                        &body,
+                        compression,
+                    )?,
+                    play::clientbound::PING => {
+                        write(&mut socket, play::serverbound::PONG, &body, compression)?
+                    }
                     play::clientbound::START_CONFIGURATION => {
-                        write(&mut socket, play::serverbound::CONFIGURATION_ACKNOWLEDGED, &[], compression)?;
+                        write(
+                            &mut socket,
+                            play::serverbound::CONFIGURATION_ACKNOWLEDGED,
+                            &[],
+                            compression,
+                        )?;
                         phase = Phase::Configuration;
                         write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(&settings), compression)?;
                         advertised_settings = Some(settings.clone());
@@ -612,7 +653,16 @@ fn run(
             }
             let terminal = matches!(
                 (original, id),
-                (Phase::Login, login::clientbound::LOGIN_DISCONNECT) | (Phase::Configuration, configuration::clientbound::DISCONNECT | configuration::clientbound::TRANSFER) | (Phase::Play, play::clientbound::DISCONNECT | play::clientbound::TRANSFER)
+                (Phase::Login, login::clientbound::LOGIN_DISCONNECT)
+                    | (
+                        Phase::Configuration,
+                        configuration::clientbound::DISCONNECT
+                            | configuration::clientbound::TRANSFER
+                    )
+                    | (
+                        Phase::Play,
+                        play::clientbound::DISCONNECT | play::clientbound::TRANSFER
+                    )
             );
             if terminal {
                 *state.urgent.lock() = Some(Event::Packet(original, id, body));
@@ -693,7 +743,11 @@ mod tests {
             let reader = BlockingReader::start(&socket, thread::current()).unwrap();
             // An idle reader neither produces timeout events nor spins on them.
             assert!(matches!(
-                reader.incoming.as_ref().unwrap().recv_timeout(Duration::from_millis(30)),
+                reader
+                    .incoming
+                    .as_ref()
+                    .unwrap()
+                    .recv_timeout(Duration::from_millis(30)),
                 Err(mpsc::RecvTimeoutError::Timeout)
             ));
             if shutdown {
@@ -701,8 +755,12 @@ mod tests {
             } else {
                 peer.shutdown(Shutdown::Write).unwrap();
             }
-            let result = reader.incoming.as_ref().unwrap()
-                .recv_timeout(Duration::from_secs(5)).unwrap();
+            let result = reader
+                .incoming
+                .as_ref()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap();
             match result {
                 Ok(chunk) => assert_eq!(chunk.len, 0),
                 Err(error) => {
@@ -711,10 +769,17 @@ mod tests {
                 }
             }
             assert!(matches!(
-                reader.incoming.as_ref().unwrap().recv_timeout(Duration::from_secs(5)),
+                reader
+                    .incoming
+                    .as_ref()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5)),
                 Err(mpsc::RecvTimeoutError::Disconnected)
             ));
-            assert_eq!(reader.try_read(&mut Vec::new()).unwrap_err(), "server closed connection");
+            assert_eq!(
+                reader.try_read(&mut Vec::new()).unwrap_err(),
+                "server closed connection"
+            );
         }
     }
 
@@ -731,8 +796,13 @@ mod tests {
             peer.write_all(fragment).unwrap();
             received += fragment.len();
             while buffer.len() < received {
-                let chunk = reader.incoming.as_ref().unwrap()
-                    .recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                let chunk = reader
+                    .incoming
+                    .as_ref()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap();
                 assert!(chunk.len > 0);
                 buffer.extend_from_slice(&chunk.bytes[..chunk.len]);
             }
@@ -740,7 +810,10 @@ mod tests {
                 assert!(extract(&mut buffer, None).unwrap().is_none());
             }
         }
-        assert_eq!(extract(&mut buffer, None).unwrap(), Some((42, vec![7; 256])));
+        assert_eq!(
+            extract(&mut buffer, None).unwrap(),
+            Some((42, vec![7; 256]))
+        );
         assert!(buffer.is_empty());
         // No consumer drains these bytes: Drop must release both recv and send.
         peer.write_all(&[0; 32768]).unwrap();
@@ -834,7 +907,9 @@ mod tests {
         ).unwrap();
         peer.join().unwrap();
         network.worker.take().unwrap().join().unwrap();
-        let Ok(Event::Error(error)) = network.try_recv() else { panic!("missing version error") };
+        let Ok(Event::Error(error)) = network.try_recv() else {
+            panic!("missing version error")
+        };
         assert!(error.contains("26.3"), "{error}");
         assert!(error.contains("1.21.4"), "{error}");
         assert!(!error.contains("{\""), "{error}");
@@ -1008,7 +1083,10 @@ mod tests {
             Phase::Play
         );
         network.set_view_distance(32);
-        assert_eq!(stages.recv_timeout(Duration::from_secs(5)).unwrap(), Phase::Play);
+        assert_eq!(
+            stages.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Phase::Play
+        );
         network.set_main_arm_right(false);
         assert_eq!(stages.recv_timeout(Duration::from_secs(5)).unwrap(), Phase::Play);
         network.set_language("ru_ru");
@@ -1063,31 +1141,54 @@ mod tests {
         };
         for index in 0..7 {
             assert_eq!(
-                network.state.publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME])).unwrap(),
+                network
+                    .state
+                    .publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME]))
+                    .unwrap(),
                 index == 0,
                 "wake only the transition from an empty queue"
             );
         }
         let bytes = network.state.inbound_bytes.load(Ordering::Acquire);
-        assert!(network.state.publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME])).unwrap_err().contains("inbound event backlog exceeded"));
+        assert!(
+            network
+                .state
+                .publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME]))
+                .unwrap_err()
+                .contains("inbound event backlog exceeded")
+        );
         assert_eq!(network.state.inbound_bytes.load(Ordering::Acquire), bytes);
         assert_eq!(network.pending_events(), 7);
         assert!(network.try_recv().is_ok());
-        assert!(network.state.publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME])).is_ok());
-        for _ in 0..7 { assert!(network.try_recv().is_ok()); }
+        assert!(
+            network
+                .state
+                .publish(&send, Event::Packet(Phase::Play, 8, vec![0; MAX_FRAME]))
+                .is_ok()
+        );
+        for _ in 0..7 {
+            assert!(network.try_recv().is_ok());
+        }
         assert_eq!(network.pending_events(), 0);
         assert_eq!(network.state.inbound_bytes.load(Ordering::Acquire), 0);
     }
 
     #[test]
     fn disconnect_and_transfer_bypass_world_backlog() {
-        for (phase, id) in [(Phase::Configuration, 2), (Phase::Configuration, 12), (Phase::Play, 32), (Phase::Play, 132)] {
+        for (phase, id) in [
+            (Phase::Configuration, 2),
+            (Phase::Configuration, 12),
+            (Phase::Play, 32),
+            (Phase::Play, 132),
+        ] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             let peer = thread::spawn(move || {
                 let (mut login, _) = listener.accept().unwrap();
                 let (mut status, _) = listener.accept().unwrap();
-                login.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                login
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
                 read_packet(&mut status);
                 read_packet(&mut status);
                 let mut response = Writer::default();
@@ -1114,8 +1215,10 @@ mod tests {
             let mut network = Network::connect(address.to_string(), "UrgentTest".into(), 8, true, "en_us", Arc::new(|| {}), None).unwrap();
             peer.join().unwrap();
             network.worker.take().unwrap().join().unwrap();
-            assert!(matches!(network.try_recv(), Ok(Event::Packet(received, packet_id, body))
-                if received == phase && packet_id == id && body == [1, 2, 3]));
+            assert!(
+                matches!(network.try_recv(), Ok(Event::Packet(received, packet_id, body))
+                if received == phase && packet_id == id && body == [1, 2, 3])
+            );
         }
     }
 }

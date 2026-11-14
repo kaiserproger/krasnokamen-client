@@ -85,8 +85,8 @@ impl Renderer {
             && env.sky_kind == SkyKind::Overworld
             && env.fog_alpha >= 1.;
         let fog_sphere = (env.fog_start < env.fog_end).then_some(env.fog_end + FOG_MARGIN);
-        let fog_cylinder = (env.render_fog_start < env.render_fog_end)
-            .then_some(env.render_fog_end + FOG_MARGIN);
+        let fog_cylinder =
+            (env.render_fog_start < env.render_fog_end).then_some(env.render_fog_end + FOG_MARGIN);
         self.fading_columns.clear();
         for (&key, chunk) in &mut self.chunks {
             if chunk.fade_duration_ms.is_none() {
@@ -137,8 +137,8 @@ impl Renderer {
                 continue;
             }
             // After the graph test: most of a large view is graph-rejected.
-            let in_frustum = self.reference_mode
-                || frustum.intersects(bounds_min + offset, bounds_max + offset);
+            let in_frustum =
+                self.reference_mode || frustum.intersects(bounds_min + offset, bounds_max + offset);
             // Frustum rejection precedes every per-frame submission: sections
             // outside the frustum take no instance slot, no indirect candidate
             // and no transparent sort. The GPU cull pass stays the backstop for
@@ -149,9 +149,7 @@ impl Renderer {
                 continue;
             }
             // Nearest point of the section bounds to the camera (the origin).
-            let nearest = Vec3::ZERO
-                .max(bounds_min + offset)
-                .min(bounds_max + offset);
+            let nearest = Vec3::ZERO.max(bounds_min + offset).min(bounds_max + offset);
             // A section wholly past either fog end (spherical or the render
             // distance cylinder) is painted pure sky by the Fancy shader, so
             // drawing it only overpaints identical sky pixels. This is the
@@ -169,8 +167,9 @@ impl Renderer {
             self.instance_data
                 .push([offset.x, offset.y, offset.z, visibility]);
             self.visible.push(Visible { key, instance });
-            let local: [f32; 3] =
-                std::array::from_fn(|axis| (scene.camera_position[axis] - chunk.origin[axis]) as f32);
+            let local: [f32; 3] = std::array::from_fn(|axis| {
+                (scene.camera_position[axis] - chunk.origin[axis]) as f32
+            });
             let vegetation = nearest.length_squared() <= VEGETATION_RANGE * VEGETATION_RANGE;
             for material in 0..2 {
                 let runs = &mut self.terrain_runs[material];
@@ -179,13 +178,21 @@ impl Renderer {
                     // Reference path: whole layers, no facing partition.
                     let range = chunk.mesh.ranges[material].clone();
                     if !range.is_empty() {
-                        runs.push(TerrainRun { key, instance, range });
+                        runs.push(TerrainRun {
+                            key,
+                            instance,
+                            range,
+                        });
                     }
                 } else {
                     chunk
                         .mesh
                         .facing_runs(material, local, FACING_SLACK, vegetation, |range| {
-                            runs.push(TerrainRun { key, instance, range })
+                            runs.push(TerrainRun {
+                                key,
+                                instance,
+                                range,
+                            })
                         });
                     if runs.len() > mesh::MAX_CHUNKS {
                         // Candidate buffers are bounded: fall back to the whole layer.
@@ -275,7 +282,8 @@ impl Renderer {
         // against world geometry. Reuse the uploaded primitive storage.
         for primitives in &mut self.first_person.transparent {
             primitives.sort_unstable_by(|a, b| {
-                let distance = |center| (Vec3::from_array(center) + presentation_origin).length_squared();
+                let distance =
+                    |center| (Vec3::from_array(center) + presentation_origin).length_squared();
                 distance(b.center)
                     .total_cmp(&distance(a.center))
                     .then_with(|| a.first.cmp(&b.first))
@@ -346,9 +354,7 @@ impl Renderer {
             0.05,
             2048.,
         );
-        let view_projection = projection
-            * hurt_camera_transform(scene)
-            * view;
+        let view_projection = projection * hurt_camera_transform(scene) * view;
         self.prepare_visibility(scene, view_projection)?;
         let env = &scene.environment;
         let features = self.graphics.features();
@@ -555,7 +561,11 @@ impl Renderer {
             ],
             moon_direction: [moon.x, moon.y, moon.z, moon_strength],
             atmosphere: [
-                if open_air { 0.7 * (1. - env.rain.clamp(0., 1.)) } else { 0. },
+                if open_air {
+                    0.7 * (1. - env.rain.clamp(0., 1.))
+                } else {
+                    0.
+                },
                 aerial,
                 f32::from(u8::from(open_air && features.water_ssr)),
                 0.,
@@ -574,7 +584,8 @@ impl Renderer {
             self.config.width as f32 / self.config.height as f32,
             0.05,
             100.,
-        ) * hurt_camera_transform(scene) * view;
+        ) * hurt_camera_transform(scene)
+            * view;
         let first_person_uniform = CameraUniform {
             view_projection: hand_projection.to_cols_array(),
             inverse_view_projection: hand_projection.inverse().to_cols_array(),
@@ -588,7 +599,9 @@ impl Renderer {
             ..uniform
         };
         self.queue.write_buffer(
-            &self.first_person_camera, 0, bytemuck::bytes_of(&first_person_uniform),
+            &self.first_person_camera,
+            0,
+            bytemuck::bytes_of(&first_person_uniform),
         );
         for cascade in 0..cascades.count as usize {
             // The shadow vertex stage reads only `shadow_projection`.
@@ -613,7 +626,8 @@ impl Renderer {
             // weather and, for the moon, its lower intensity.
             let low = 1. - (sunlight.y * 3.).clamp(0., 1.);
             let elevation = ((sunlight.y + 0.02) / 0.14).clamp(0., 1.);
-            let strength = light_strength * (1. - env.rain.clamp(0., 1.)) * elevation * (0.2 + 0.28 * low);
+            let strength =
+                light_strength * (1. - env.rain.clamp(0., 1.)) * elevation * (0.2 + 0.28 * low);
             let tint = Vec3::new(1., 0.86 - 0.3 * low, 0.62 - 0.4 * low);
             let ray_color = (tint * strength).to_array();
             self.post.update(
@@ -629,7 +643,9 @@ impl Renderer {
                     // A teleport or dimension change invalidates reprojection.
                     history_valid: self.temporal.history_valid
                         && (0..3).all(|axis| {
-                            (scene.camera_position[axis] - self.temporal.previous_camera[axis]).abs() < 32.
+                            (scene.camera_position[axis] - self.temporal.previous_camera[axis])
+                                .abs()
+                                < 32.
                         }),
                     ray_color,
                     sun_uv: [sun_ndc.x * 0.5 + 0.5, 0.5 - sun_ndc.y * 0.5],
@@ -668,8 +684,13 @@ impl Renderer {
             self.stats.shadow_terrain_indices = 0;
             // One depth pass per cascade (slot 12, then the cascade-1/2 slots).
             const CASCADE_SLOTS: [usize; graphics::MAX_CASCADES] = [12, 23, 24];
-            let shadow_mdi = !self.reference_mode && self.mdi.is_some() && self.shadow.batch.is_some();
-            for (cascade, &slot) in CASCADE_SLOTS.iter().enumerate().take(cascades.count as usize) {
+            let shadow_mdi =
+                !self.reference_mode && self.mdi.is_some() && self.shadow.batch.is_some();
+            for (cascade, &slot) in CASCADE_SLOTS
+                .iter()
+                .enumerate()
+                .take(cascades.count as usize)
+            {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Fancy sun moon directional shadow cascade"),
                     color_attachments: &[],
@@ -699,7 +720,8 @@ impl Renderer {
                         pass.set_index_buffer(self.index_arena.whole(), wgpu::IndexFormat::Uint32);
                         pass.multi_draw_indexed_indirect(
                             &batch.buffer,
-                            u64::from(range.start) * std::mem::size_of::<shadow::ShadowDraw>() as u64,
+                            u64::from(range.start)
+                                * std::mem::size_of::<shadow::ShadowDraw>() as u64,
                             range.end - range.start,
                         );
                     }
@@ -833,7 +855,12 @@ impl Renderer {
         // blended entity geometry, which must still draw over all terrain.
         // (material, terrain, dynamic geometry)
         let stages: &[(usize, bool, bool)] = if hiz {
-            &[(0, true, false), (1, true, false), (1, false, true), (2, true, true)]
+            &[
+                (0, true, false),
+                (1, true, false),
+                (1, false, true),
+                (2, true, true),
+            ]
         } else {
             &[(0, true, true), (1, true, true), (2, true, true)]
         };
@@ -1081,7 +1108,11 @@ impl Renderer {
                 pass.set_bind_group(1, &self.atlas_bind, &[]);
                 pass.set_bind_group(2, &self.shadow.bind, &[]);
                 pass.set_vertex_buffer(1, self.instances.slice(..));
-                if mdi.candidates.iter().any(|candidates| !candidates.is_empty()) {
+                if mdi
+                    .candidates
+                    .iter()
+                    .any(|candidates| !candidates.is_empty())
+                {
                     // Arenas exist only once something is resident.
                     pass.set_vertex_buffer(0, self.vertex_arena.whole());
                     pass.set_index_buffer(self.index_arena.whole(), wgpu::IndexFormat::Uint32);
@@ -1098,9 +1129,9 @@ impl Renderer {
                 self.stats.terrain_phase2_api_calls += phase2_calls;
             }
         }
-        let post_draws = self
-            .post
-            .encode(&mut encoder, &self.targets.color_view, fancy, &self.timing);
+        let post_draws =
+            self.post
+                .encode(&mut encoder, &self.targets.color_view, fancy, &self.timing);
         self.stats.draw_calls += post_draws;
         if fancy {
             self.temporal.frame = self.temporal.frame.wrapping_add(1);
@@ -1182,16 +1213,25 @@ impl Renderer {
             pass.set_bind_group(2, &self.shadow.bind, &[]);
             pass.set_vertex_buffer(0, self.first_person.vertices.slice(..));
             pass.set_vertex_buffer(1, self.instances.slice(..));
-            pass.set_index_buffer(self.first_person.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_index_buffer(
+                self.first_person.indices.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
             for &family in &self.pipelines.dynamic_order {
                 let range = self.first_person.ranges[family].clone();
                 if range.is_empty() || material::MATERIALS[family].shader.kind == 11 {
                     continue;
                 }
-                pass.set_pipeline(&self.pipelines.first_person[self.pipelines.dynamic_index[family]]);
+                pass.set_pipeline(
+                    &self.pipelines.first_person[self.pipelines.dynamic_index[family]],
+                );
                 if material::MATERIALS[family].sort {
                     for primitive in &self.first_person.transparent[family] {
-                        pass.draw_indexed(primitive.first..primitive.first + primitive.count, 0, 1..2);
+                        pass.draw_indexed(
+                            primitive.first..primitive.first + primitive.count,
+                            0,
+                            1..2,
+                        );
                         self.stats.draw_calls += 1;
                         self.stats.submitted_indices += u64::from(primitive.count);
                     }
@@ -1421,9 +1461,11 @@ mod terrain_translucency_tests {
         );
         assert!(draws[0].source == Source::Chunk([2, 0, 0]));
         assert!(draws[1].source == Source::Chunk([0, 0, 0]));
-        assert!(draws
-            .iter()
-            .all(|draw| draw.first == 12 && draw.count == 24));
+        assert!(
+            draws
+                .iter()
+                .all(|draw| draw.first == 12 && draw.count == 24)
+        );
         assert_eq!(draws.iter().map(|draw| draw.count).sum::<u32>(), 48);
         let dynamic = &renderer.transparent[renderer.transparent_ranges[0].clone()];
         assert_eq!(
@@ -1520,7 +1562,10 @@ mod terrain_translucency_tests {
         assert_eq!(renderer.stats.graph_reached_sections, 0);
         // Candidate counts need MDI hardware; the fallback path submits zero.
         let expected_candidates = u64::from(renderer.mdi.is_some());
-        assert_eq!(renderer.stats.terrain_candidates_opaque, expected_candidates);
+        assert_eq!(
+            renderer.stats.terrain_candidates_opaque,
+            expected_candidates
+        );
         assert_eq!(renderer.stats.terrain_candidates_cutout, 0);
         // Two base instance slots (null + presentation origin) plus exactly
         // the one visible section: the culled section takes no slot.
@@ -1543,10 +1588,15 @@ mod terrain_translucency_tests {
             renderer.stats.terrain_candidates_opaque,
             renderer.stats.terrain_candidates_cutout,
             renderer.instance_data.len(),
-            renderer.mdi.as_ref().map(|mdi| {
-                mdi.candidates.iter().map(Vec::len).sum::<usize>()
-            }),
-            renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>(),
+            renderer
+                .mdi
+                .as_ref()
+                .map(|mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>()),
+            renderer
+                .visible
+                .iter()
+                .map(|visible| visible.key)
+                .collect::<Vec<_>>(),
         );
         let empty_view = Mat4::from_translation(Vec3::new(10_000., 0., 0.));
         renderer.prepare_visibility(&scene, empty_view).unwrap();
@@ -1560,16 +1610,32 @@ mod terrain_translucency_tests {
             renderer.stats.terrain_candidates_opaque,
             renderer.stats.terrain_candidates_cutout,
             renderer.instance_data.len(),
-            renderer.mdi.as_ref().map(|mdi| {
-                mdi.candidates.iter().map(Vec::len).sum::<usize>()
-            }),
-            renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>(),
+            renderer
+                .mdi
+                .as_ref()
+                .map(|mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>()),
+            renderer
+                .visible
+                .iter()
+                .map(|visible| visible.key)
+                .collect::<Vec<_>>(),
         );
-        assert_eq!(restored, snapshot, "A-B-A view must restore identical submission");
-        let mut keys = renderer.visible.iter().map(|visible| visible.key).collect::<Vec<_>>();
+        assert_eq!(
+            restored, snapshot,
+            "A-B-A view must restore identical submission"
+        );
+        let mut keys = renderer
+            .visible
+            .iter()
+            .map(|visible| visible.key)
+            .collect::<Vec<_>>();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), renderer.visible.len(), "visible keys must not duplicate");
+        assert_eq!(
+            keys.len(),
+            renderer.visible.len(),
+            "visible keys must not duplicate"
+        );
     }
 
     #[test]

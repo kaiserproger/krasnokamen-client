@@ -1,7 +1,7 @@
 //! Native shell menus. Only addresses/settings are persisted, never server resources.
 use super::{
-    state::{NodeAction, Paint},
     Screen, UiState,
+    state::{NodeAction, Paint},
 };
 use crate::protocol::Result;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,12 @@ pub(super) fn load_servers() -> Vec<SavedServer> {
 pub(super) fn write_servers(path: &std::path::Path, servers: &[SavedServer]) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(servers).map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Cannot create server list directory {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Cannot create server list directory {}: {e}",
+                parent.display()
+            )
+        })?;
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, bytes)
@@ -80,10 +84,24 @@ impl UiState {
         // Packet context remains in the session log and error event. Only unwrap
         // the three actual disconnect packet envelopes, not arbitrary errors.
         let contextual = [
-            ("Login", crate::protocol::packet_ids::login::clientbound::LOGIN_DISCONNECT, "login disconnect: "),
-            ("Configuration", crate::protocol::packet_ids::configuration::clientbound::DISCONNECT, "configuration disconnect: "),
-            ("Play", crate::protocol::packet_ids::play::clientbound::DISCONNECT, "Play disconnect: "),
-        ].into_iter().find_map(|(phase, id, prefix)| {
+            (
+                "Login",
+                crate::protocol::packet_ids::login::clientbound::LOGIN_DISCONNECT,
+                "login disconnect: ",
+            ),
+            (
+                "Configuration",
+                crate::protocol::packet_ids::configuration::clientbound::DISCONNECT,
+                "configuration disconnect: ",
+            ),
+            (
+                "Play",
+                crate::protocol::packet_ids::play::clientbound::DISCONNECT,
+                "Play disconnect: ",
+            ),
+        ]
+        .into_iter()
+        .find_map(|(phase, id, prefix)| {
             let rest = reason.strip_prefix(&format!("{phase} packet 0x{id:02x} sequence "))?;
             let (sequence, payload) = rest.split_once(": ")?;
             if sequence.is_empty() || !sequence.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -91,11 +109,16 @@ impl UiState {
             }
             payload.strip_prefix(prefix)
         });
-        let component = contextual.or_else(|| [
-            "Play disconnect: ",
-            "configuration disconnect: ",
-            "login disconnect: ",
-        ].into_iter().find_map(|prefix| reason.strip_prefix(prefix)))
+        let component = contextual
+            .or_else(|| {
+                [
+                    "Play disconnect: ",
+                    "configuration disconnect: ",
+                    "login disconnect: ",
+                ]
+                .into_iter()
+                .find_map(|prefix| reason.strip_prefix(prefix))
+            })
             .and_then(|payload| serde_json::from_str::<Value>(payload).ok());
         self.title_error = Some(
             component
@@ -165,7 +188,10 @@ impl UiState {
         self.label("title/name", "Krasnokamen".into(), [cx - 150., mark_y, 300., 36.])?;
         self.label(
             "title/subtitle",
-            format!("Minecraft {} · Native client", crate::singleplayer::GAME_VERSION),
+            format!(
+                "Minecraft {} · Native client",
+                crate::singleplayer::GAME_VERSION
+            ),
             [cx - 160., mark_y + 42., 320., 12.],
         )?;
         let top = (self.height / 2. - 22.).max(mark_y + 58.).floor();
@@ -212,23 +238,49 @@ impl UiState {
         self.panel();
         let cx = self.width / 2.;
         if self.deleting_server {
-            self.label("server/delete_title", "Delete this server?".into(), [cx - 150., 45., 300., 14.])?;
-            let name = self.selected_server.and_then(|index| self.servers.get(index))
-                .map(|server| server.name.clone()).unwrap_or_default();
+            self.label(
+                "server/delete_title",
+                "Delete this server?".into(),
+                [cx - 150., 45., 300., 14.],
+            )?;
+            let name = self
+                .selected_server
+                .and_then(|index| self.servers.get(index))
+                .map(|server| server.name.clone())
+                .unwrap_or_default();
             self.label("server/delete_name", name, [cx - 150., 70., 300., 24.])?;
-            self.button("server/delete_confirm", "Delete", [cx - 154., 110., 150., 26.],
-                NodeAction::ConfirmDeleteServer, true, None)?;
-            self.button("server/delete_cancel", "Cancel", [cx + 4., 110., 150., 26.],
-                NodeAction::CancelDeleteServer, true, None)?;
-            self.label("server/delete_error", self.title_error.clone().unwrap_or_default(),
-                [cx - 150., 145., 300., 40.])?;
+            self.button(
+                "server/delete_confirm",
+                "Delete",
+                [cx - 154., 110., 150., 26.],
+                NodeAction::ConfirmDeleteServer,
+                true,
+                None,
+            )?;
+            self.button(
+                "server/delete_cancel",
+                "Cancel",
+                [cx + 4., 110., 150., 26.],
+                NodeAction::CancelDeleteServer,
+                true,
+                None,
+            )?;
+            self.label(
+                "server/delete_error",
+                self.title_error.clone().unwrap_or_default(),
+                [cx - 150., 145., 300., 40.],
+            )?;
             return Ok(());
         }
         self.frame(
             "multiplayer/panel",
             [cx - 172., 6., 344., (self.height - 12.).max(120.)],
         )?;
-        self.label("multiplayer/title", "Play Multiplayer".into(), [cx - 150., 15., 300., 12.])?;
+        self.label(
+            "multiplayer/title",
+            "Play Multiplayer".into(),
+            [cx - 150., 15., 300., 12.],
+        )?;
         let list_top = 34.;
         let buttons_y = self.height - 100.;
         let rows = (((buttons_y - 6. - list_top) / 30.).floor().max(1.)) as usize;
@@ -236,12 +288,26 @@ impl UiState {
         let start = self.page * rows;
         for index in start..(start + rows).min(self.servers.len()) {
             let server = &self.servers[index];
-            let label = format!("{}{}  —  {}", if self.selected_server == Some(index) { "> " } else { "" }, server.name, server.address);
+            let label = format!(
+                "{}{}  —  {}",
+                if self.selected_server == Some(index) {
+                    "> "
+                } else {
+                    ""
+                },
+                server.name,
+                server.address
+            );
             self.add(
                 format!("server/{index}"),
                 "button",
                 label,
-                [cx - 160., list_top + (index - start) as f32 * 30., 320., 26.],
+                [
+                    cx - 160.,
+                    list_top + (index - start) as f32 * 30.,
+                    320.,
+                    26.,
+                ],
                 true,
                 None,
                 NodeAction::SelectServer(index),
@@ -259,13 +325,32 @@ impl UiState {
                 [cx - 155., list_top + 8., 310., 35.],
             )?;
         }
-        let selected = self.selected_server.is_some_and(|index| index < self.servers.len());
+        let selected = self
+            .selected_server
+            .is_some_and(|index| index < self.servers.len());
         for (id, label, x, action) in [
-            ("multiplayer/join", "Join Server", cx - 160., NodeAction::JoinServer(self.selected_server.unwrap_or(0))),
+            (
+                "multiplayer/join",
+                "Join Server",
+                cx - 160.,
+                NodeAction::JoinServer(self.selected_server.unwrap_or(0)),
+            ),
             ("multiplayer/edit", "Edit", cx - 52., NodeAction::EditServer),
-            ("multiplayer/delete", "Delete", cx + 56., NodeAction::DeleteServer),
+            (
+                "multiplayer/delete",
+                "Delete",
+                cx + 56.,
+                NodeAction::DeleteServer,
+            ),
         ] {
-            self.button(id, label, [x, buttons_y, 104., 26.], action, selected, Some("no_server_selected"))?;
+            self.button(
+                id,
+                label,
+                [x, buttons_y, 104., 26.],
+                action,
+                selected,
+                Some("no_server_selected"),
+            )?;
         }
         self.button(
             "multiplayer/direct",
@@ -451,8 +536,19 @@ mod tests {
     fn rc1_title_subtitle_uses_target_game_version() {
         let (_, _, mut ui) = state();
         ui.title_tree().unwrap();
-        let subtitle = &ui.nodes.iter().find(|n| n.id == "title/subtitle").unwrap().label;
-        assert_eq!(subtitle, &format!("Minecraft {} · Native client", crate::singleplayer::GAME_VERSION));
+        let subtitle = &ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "title/subtitle")
+            .unwrap()
+            .label;
+        assert_eq!(
+            subtitle,
+            &format!(
+                "Minecraft {} · Native client",
+                crate::singleplayer::GAME_VERSION
+            )
+        );
     }
     #[test]
     fn rc1_saved_server_row_selects_without_connecting() {
@@ -464,9 +560,20 @@ mod tests {
         }];
         ui.transition(Screen::Multiplayer);
         ui.multiplayer_tree().unwrap();
-        let action = ui.nodes.iter().find(|n| n.id == "server/0").unwrap().action.clone();
-        ui.activate_for_test(action, &mut inventory, &content).unwrap();
-        assert_eq!(ui.screen(), Screen::Multiplayer, "a row selects, Join connects");
+        let action = ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "server/0")
+            .unwrap()
+            .action
+            .clone();
+        ui.activate_for_test(action, &mut inventory, &content)
+            .unwrap();
+        assert_eq!(
+            ui.screen(),
+            Screen::Multiplayer,
+            "a row selects, Join connects"
+        );
         for id in ["multiplayer/join", "multiplayer/edit", "multiplayer/delete"] {
             assert!(ui.nodes.iter().any(|n| n.id == id), "missing {id}");
         }
@@ -488,32 +595,70 @@ mod tests {
         }
         let (content, mut inventory, mut ui) = state();
         ui.enter_title(None, Some("Player")).unwrap();
-        ui.activate_for_test(NodeAction::AddServer, &mut inventory, &content).unwrap();
+        ui.activate_for_test(NodeAction::AddServer, &mut inventory, &content)
+            .unwrap();
         ui.fields.get_mut("title/server").unwrap().text = "old.example".into();
         ui.save_server().unwrap();
         ui.multiplayer_tree().unwrap();
-        let select = ui.nodes.iter().find(|n| n.id == "server/0").unwrap().action.clone();
-        ui.activate_for_test(select, &mut inventory, &content).unwrap();
+        let select = ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "server/0")
+            .unwrap()
+            .action
+            .clone();
+        ui.activate_for_test(select, &mut inventory, &content)
+            .unwrap();
         ui.nodes.clear();
         ui.multiplayer_tree().unwrap();
-        let edit = ui.nodes.iter().find(|n| n.id == "multiplayer/edit").expect("Edit button").action.clone();
-        ui.activate_for_test(edit, &mut inventory, &content).unwrap();
+        let edit = ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "multiplayer/edit")
+            .expect("Edit button")
+            .action
+            .clone();
+        ui.activate_for_test(edit, &mut inventory, &content)
+            .unwrap();
         ui.fields.get_mut("title/server").unwrap().text = "new.example".into();
         ui.save_server().unwrap();
         assert_eq!(load_servers().len(), 1);
         assert_eq!(load_servers()[0].address, "new.example");
         ui.nodes.clear();
         ui.multiplayer_tree().unwrap();
-        let delete = ui.nodes.iter().find(|n| n.id == "multiplayer/delete").unwrap().action.clone();
-        ui.activate_for_test(delete.clone(), &mut inventory, &content).unwrap();
-        assert_eq!(load_servers().len(), 1, "requesting Delete must not remove a server");
+        let delete = ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "multiplayer/delete")
+            .unwrap()
+            .action
+            .clone();
+        ui.activate_for_test(delete.clone(), &mut inventory, &content)
+            .unwrap();
+        assert_eq!(
+            load_servers().len(),
+            1,
+            "requesting Delete must not remove a server"
+        );
         assert!(ui.close_menu());
-        assert_eq!(load_servers().len(), 1, "cancelling confirmation must preserve the entry");
-        ui.activate_for_test(delete, &mut inventory, &content).unwrap();
+        assert_eq!(
+            load_servers().len(),
+            1,
+            "cancelling confirmation must preserve the entry"
+        );
+        ui.activate_for_test(delete, &mut inventory, &content)
+            .unwrap();
         ui.nodes.clear();
         ui.multiplayer_tree().unwrap();
-        let confirm = ui.nodes.iter().find(|n| n.id == "server/delete_confirm").unwrap().action.clone();
-        ui.activate_for_test(confirm, &mut inventory, &content).unwrap();
+        let confirm = ui
+            .nodes
+            .iter()
+            .find(|n| n.id == "server/delete_confirm")
+            .unwrap()
+            .action
+            .clone();
+        ui.activate_for_test(confirm, &mut inventory, &content)
+            .unwrap();
         assert!(load_servers().is_empty());
         assert_eq!(ui.screen(), Screen::Multiplayer);
     }
@@ -528,13 +673,33 @@ mod tests {
         ui.synchronize(&inventory, &content).unwrap();
         ui.screen = Screen::Menu;
         ui.field("anvil/name", String::new(), 50, false).unwrap();
-        ui.edit_node("anvil/name", "Name", [10., 10., 120., 20.], true).unwrap();
+        ui.edit_node("anvil/name", "Name", [10., 10., 120., 20.], true)
+            .unwrap();
         ui.focus = Some("anvil/name".into());
         assert!(ui.text_field_focused());
-        let effects = ui.execute(UiIntent::Text { text: "abcde".into() }, &mut inventory, &content).unwrap();
-        assert!(effects.commands.iter().any(|c| matches!(c, crate::ui::UiCommand::InventoryRename { text, .. } if text == "abcde")));
+        let effects = ui
+            .execute(
+                UiIntent::Text {
+                    text: "abcde".into(),
+                },
+                &mut inventory,
+                &content,
+            )
+            .unwrap();
+        assert!(effects.commands.iter().any(
+            |c| matches!(c, crate::ui::UiCommand::InventoryRename { text, .. } if text == "abcde")
+        ));
         for key in ["ArrowLeft", "Backspace", "Delete"] {
-            ui.execute(UiIntent::Key { key: key.into(), pressed: true, modifiers: Modifiers::default() }, &mut inventory, &content).unwrap();
+            ui.execute(
+                UiIntent::Key {
+                    key: key.into(),
+                    pressed: true,
+                    modifiers: Modifiers::default(),
+                },
+                &mut inventory,
+                &content,
+            )
+            .unwrap();
         }
         assert_eq!(ui.fields["anvil/name"].text, "abc");
         assert_eq!(ui.screen(), Screen::Menu);
@@ -544,12 +709,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("krasnokamen-server-write-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("servers.json");
-        let original = vec![SavedServer { name: "Keep".into(), address: "keep.example".into() }];
+        let original = vec![SavedServer {
+            name: "Keep".into(),
+            address: "keep.example".into(),
+        }];
         write_servers(&path, &original).unwrap();
         std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
         let error = write_servers(&path, &[]).unwrap_err();
         assert!(error.contains(path.to_str().unwrap()));
-        let saved: Vec<SavedServer> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let saved: Vec<SavedServer> =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].address, "keep.example");
         std::fs::remove_dir_all(dir).unwrap();
@@ -557,10 +726,15 @@ mod tests {
     #[test]
     fn rc1_edit_server_resets_old_address_selection_before_typing() {
         let (content, mut inventory, mut ui) = state();
-        ui.enter_title(Some("a-very-long-previous.example:25565"), Some("Player")).unwrap();
-        ui.servers = vec![SavedServer { name: "Short".into(), address: "é.test".into() }];
+        ui.enter_title(Some("a-very-long-previous.example:25565"), Some("Player"))
+            .unwrap();
+        ui.servers = vec![SavedServer {
+            name: "Short".into(),
+            address: "é.test".into(),
+        }];
         ui.selected_server = Some(0);
-        ui.activate_for_test(NodeAction::EditServer, &mut inventory, &content).unwrap();
+        ui.activate_for_test(NodeAction::EditServer, &mut inventory, &content)
+            .unwrap();
         let field = ui.fields.get_mut("title/server").unwrap();
         assert!(field.text.is_char_boundary(field.cursor));
         assert!(field.text.is_char_boundary(field.anchor));
@@ -571,10 +745,15 @@ mod tests {
     #[test]
     fn screenshot_feedback_enters_the_local_chat_history() {
         let (_, _, mut ui) = state();
-        ui.local_message("Saved screenshot as 2026-10-29_12.34.56.png").unwrap();
-        ui.local_message("Couldn't save screenshot: disk full").unwrap();
+        ui.local_message("Saved screenshot as 2026-10-29_12.34.56.png")
+            .unwrap();
+        ui.local_message("Couldn't save screenshot: disk full")
+            .unwrap();
         assert_eq!(ui.chat().len(), 2);
-        assert_eq!(ui.chat().back().unwrap().component["text"], "Couldn't save screenshot: disk full");
+        assert_eq!(
+            ui.chat().back().unwrap().component["text"],
+            "Couldn't save screenshot: disk full"
+        );
     }
     #[test]
     fn options_escape_returns_to_origin_and_pause_escape_resumes() {

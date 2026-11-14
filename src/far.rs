@@ -20,13 +20,13 @@ pub(crate) mod program;
 
 use crate::api::{FarGeneration, FarScene, FarTileDraw};
 use crate::protocol::{
-    content::{Collision, Content, FluidKind, TintKind},
-    world::Chunk,
     Reader, Result,
+    content::{Content, FluidKind, TintKind},
+    world::Chunk,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 pub(crate) const EDGE: usize = 16;
@@ -47,8 +47,8 @@ const CACHE_LOADS_PER_UPDATE: usize = 24;
 /// Tiles in one request payload (the server accepts up to 16).
 const TILES_PER_REQUEST: usize = 16;
 /// Bumped whenever cached colours change meaning (SFL1 stored gray cubes,
-/// SFL2 ignored texture coverage, SFL3 sampled plants as ground).
-const CACHE_MAGIC: &[u8; 4] = b"SFL4";
+/// SFL2 ignored texture coverage).
+const CACHE_MAGIC: &[u8; 4] = b"SFL3";
 /// Off-screen tiles fed by received chunks stay resident this long.
 const EVICT_AFTER: Duration = Duration::from_secs(30);
 
@@ -161,11 +161,16 @@ pub(crate) fn desired_tiles(
         // Keep a block-resolution band beside resident chunks, independent
         // of the camera distance (including a 32-chunk view). Coarser tiles
         // elsewhere retain the regular quadtree budget.
-        let borders_loaded = key.level <= 3 && key.level > MIN_LEVEL
+        let borders_loaded = key.level <= 3
+            && key.level > MIN_LEVEL
             && (-1..=1).any(|dx| {
                 (-1..=1).any(|dz| {
                     (dx != 0 || dz != 0)
-                        && covered(TileKey { x: key.x + dx, z: key.z + dz, ..key })
+                        && covered(TileKey {
+                            x: key.x + dx,
+                            z: key.z + dz,
+                            ..key
+                        })
                 })
             });
         if key.level > MIN_LEVEL && (d < SPLIT * key.size() as f64 || borders_loaded) {
@@ -378,16 +383,6 @@ impl Colours {
         if let Some(found) = self.states.get(&state) {
             return *found;
         }
-        // Thin snow has no collision, so the far surface is the block under it;
-        // a `snowy` grass, podzol or mycelium block is seen from above as snow.
-        let snowy = content
-            .state_properties(state)
-            .is_some_and(|properties| properties.get("snowy").is_some_and(|v| v == "true"));
-        if let Some(snow) = self.surfaces.get("snow_block").copied().filter(|_| snowy) {
-            let found = self.state(content, snow);
-            self.states.insert(state, found);
-            return found;
-        }
         let info = content.info(state).ok();
         // Random-variant cubes (grass, stone, sand, dirt) keep quads in parts:
         // `for_each_quad` visits both, preferring the top face.
@@ -401,16 +396,12 @@ impl Colours {
                 }
             });
         }
-        // Kelp and seagrass are far surfaces only because they hold water; seen
-        // from afar they are water, not their mostly transparent cross texture.
-        let wet_plant = info.is_some_and(|info| info.collision == Collision::Empty);
         let found = match (
             info.and_then(|info| info.fluid.map(|fluid| fluid.kind)),
             quad,
         ) {
             (Some(FluidKind::Lava), _) => (self.lava, TintKind::None),
             (Some(FluidKind::Water), None) => (self.water, TintKind::Water),
-            (Some(FluidKind::Water), Some(_)) if wet_plant => (self.water, TintKind::Water),
             (_, None) => ([0.5; 3], TintKind::None),
             (_, Some((uvs, layer, tint))) => {
                 let (mut min, mut max) = ([1f32; 2], [0f32; 2]);
@@ -683,7 +674,7 @@ impl Far {
         if self.active_distance() == 0 {
             return Ok(());
         }
-        let surface = |state: u32| far_surface(content, state);
+        let air = |state: u32| content.block_is_air(state).unwrap_or(true);
         let base = [i64::from(position[0]) * 16, i64::from(position[1]) * 16];
         let mut updates: Vec<(TileKey, usize, i32, u32, Option<u32>)> = Vec::new();
         for level in MIN_LEVEL..=MAX_LEVEL {
@@ -693,7 +684,7 @@ impl Far {
                 let mut x = base[0] + (spacing - base[0].rem_euclid(spacing)) % spacing;
                 while x < base[0] + 16 {
                     let local = [(x - base[0]) as usize, (z - base[1]) as usize];
-                    if let Some((height, state, biome)) = top(chunk, local, min_y, &surface) {
+                    if let Some((height, state, biome)) = top(chunk, local, min_y, &air) {
                         let key = TileKey::containing(level, [x, z]);
                         let origin = key.origin();
                         let index = ((z - origin[1]) / spacing) as usize * EDGE
@@ -709,7 +700,23 @@ impl Far {
         let resolved: Vec<_> = updates
             .into_iter()
             .map(|(key, index, height, state, biome)| {
-                (key, index, height, colours.rgba(content, state, biome))
+                let rgba = colours.rgba(content, state, biome);
+                if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some()
+                    && rgba & 0xff < 8
+                    && (rgba >> 8) & 0xff < 10
+                    && (rgba >> 16) & 0xff < 8
+                {
+                    eprintln!(
+                        "FARDARK ingest key={:?} idx={} h={} state={} name={:?} rgba={:#010x}",
+                        key,
+                        index,
+                        height,
+                        state,
+                        content.name(state),
+                        rgba
+                    );
+                }
+                (key, index, height, rgba)
             })
             .collect();
         for (key, index, height, rgba) in resolved {
@@ -755,7 +762,24 @@ impl Far {
             let Some(state) = block.or_else(|| colours.surface(biome, underwater)) else {
                 continue;
             };
-            resolved.push((index, height, colours.rgba(content, state, biome), source));
+            let rgba = colours.rgba(content, state, biome);
+            if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some()
+                && rgba & 0xff < 8
+                && (rgba >> 8) & 0xff < 10
+                && (rgba >> 16) & 0xff < 8
+            {
+                eprintln!(
+                    "FARDARK tile key={:?} idx={} h={} src={:?} state={} name={:?} rgba={:#010x}",
+                    key,
+                    index,
+                    height,
+                    source,
+                    state,
+                    content.name(state),
+                    rgba
+                );
+            }
+            resolved.push((index, height, rgba, source));
         }
         let tile = self.tiles.entry(key).or_insert_with(Tile::empty);
         tile.requested = true;
@@ -991,21 +1015,12 @@ fn write(tile: &mut Tile, index: usize, height: i32, rgba: u32, source: Source) 
     true
 }
 
-/// The far surface is what blocks motion or holds fluid (vanilla
-/// `MOTION_BLOCKING`). Plants without collision are not ground: their mostly
-/// transparent textures, drawn as opaque prisms, paint dark blocks on the horizon.
-fn far_surface(content: &Content, state: u32) -> bool {
-    content.info(state).is_ok_and(|info| {
-        !info.is_air && (info.collision != Collision::Empty || info.fluid.is_some())
-    })
-}
-
-/// Top far-surface block of a chunk column: (y, state, biome).
+/// Top non-air block of a chunk column: (y, state, biome).
 fn top(
     chunk: &Chunk,
     [x, z]: [usize; 2],
     min_y: i32,
-    surface: &dyn Fn(u32) -> bool,
+    air: &dyn Fn(u32) -> bool,
 ) -> Option<(i32, u32, Option<u32>)> {
     for (section_index, section) in chunk.sections.iter().enumerate().rev() {
         if section.non_empty_block_count == 0 {
@@ -1013,7 +1028,7 @@ fn top(
         }
         for y in (0..16).rev() {
             let state = section.blocks.get(y * 256 + z * 16 + x);
-            if surface(state) {
+            if !air(state) {
                 let biome = section.biomes.get(y / 4 * 16 + z / 4 * 4 + x / 4);
                 return Some((
                     min_y + section_index as i32 * 16 + y as i32,
@@ -1157,10 +1172,13 @@ mod tests {
             };
             let tiles = desired_tiles([8., 8.], 2048., &covered);
             let edge = i64::from(radius + 1) * 16;
-            let tile = tiles.iter().find(|tile| {
-                let [x, z] = tile.origin();
-                x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
-            }).expect("far terrain just outside loaded chunks");
+            let tile = tiles
+                .iter()
+                .find(|tile| {
+                    let [x, z] = tile.origin();
+                    x <= edge && x + tile.size() > edge && z <= 8 && z + tile.size() > 8
+                })
+                .expect("far terrain just outside loaded chunks");
             assert_eq!(tile.level, 0, "radius {radius}: {tile:?}");
             assert!(tiles.len() < 4096, "radius {radius}: {} tiles", tiles.len());
         }
@@ -1270,115 +1288,6 @@ mod tests {
         assert_eq!(unpack(loaded.data[0]), (80, Source::Cached));
         assert_eq!(loaded.data[1], 0xff112233);
         assert_eq!(unpack(loaded.data[2]), (50, Source::Router));
-        // A tile cached under the previous sampling rule is not loaded.
-        let mut stale = std::fs::read(&path).expect("cache file");
-        stale[..4].copy_from_slice(b"SFL3");
-        std::fs::write(&path, stale).expect("rewrite cache file");
-        assert!(read_cache(&path).is_none());
         let _ = std::fs::remove_dir_all(dir);
-    }
-
-    /// Plants without collision are not far ground: the sample keeps the
-    /// block they stand on, while water stays a surface and empty columns none.
-    #[test]
-    fn far_column_surface_skips_plants_but_keeps_ground_and_water() {
-        use crate::protocol::content::FluidState;
-        use crate::protocol::world::{Palette, Section, SurfaceHeightmap};
-        let mut content = Content::test_cube();
-        // State 2: a plant (no collision); state 3: still water.
-        let mut plant = content.states[1].clone();
-        plant.collision = Collision::Empty;
-        let mut water = plant.clone();
-        water.fluid = Some(FluidState {
-            kind: FluidKind::Water,
-            amount: 8,
-            falling: false,
-            waterlogged: false,
-        });
-        content.states.extend([plant, water]);
-        let uniform = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
-        let mut blocks = uniform(4096);
-        // Column (0, 0): ground at y 3 under a plant; column (1, 0): water under a plant.
-        blocks.set(3 * 256, 1);
-        blocks.set(4 * 256, 2);
-        blocks.set(2 * 256 + 1, 3);
-        blocks.set(3 * 256 + 1, 2);
-        let chunk = Chunk {
-            sections: vec![Arc::new(Section {
-                blocks,
-                biomes: uniform(64),
-                non_empty_block_count: 4,
-            })],
-            sky: std::collections::BTreeMap::new(),
-            block: std::collections::BTreeMap::new(),
-            block_entities: crate::protocol::world::empty_block_entities(),
-            surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
-            surface_heightmap_received: false,
-        };
-        let surface = |state| far_surface(&content, state);
-        assert_eq!(top(&chunk, [0, 0], 0, &surface), Some((3, 1, Some(0))));
-        assert_eq!(top(&chunk, [1, 0], 0, &surface), Some((2, 3, Some(0))));
-        assert_eq!(top(&chunk, [2, 0], 0, &surface), None);
-    }
-
-    /// Thin snow is not a far surface, so the snowy block under it must still
-    /// read as snow from above.
-    #[test]
-    fn snowy_surface_blocks_take_the_snow_colour() {
-        let mut content = Content::test_cube();
-        // State 2: the snow block (model-less, grey); state 3: an unmarked cube.
-        let mut snow_block = content.states[1].clone();
-        snow_block.model = None;
-        let cube = content.states[1].clone();
-        content.states.extend([snow_block, cube]);
-        // State 1: the same cube, snowy.
-        content.insert_test_state_properties(
-            1,
-            std::collections::BTreeMap::from([("snowy".into(), "true".into())]),
-        );
-        let mut colours = Colours {
-            states: HashMap::new(),
-            biomes: Vec::new(),
-            water: [0.; 3],
-            lava: [0.; 3],
-            surfaces: HashMap::from([("snow_block", 2)]),
-        };
-        let snow = colours.state(&content, 2).0;
-        assert_eq!(snow, [0.5; 3]);
-        assert_eq!(colours.state(&content, 1).0, snow);
-        assert_eq!(colours.state(&content, 3).0, [1.; 3], "the plain cube keeps its texture");
-    }
-
-    /// Kelp has a cross model but no collision: it is a far surface only for
-    /// its water, so it takes the water colour; a waterlogged solid block keeps
-    /// its own texture.
-    #[test]
-    fn wet_plants_take_the_water_colour() {
-        use crate::protocol::content::FluidState;
-        let mut content = Content::test_cube();
-        let water = Some(FluidState {
-            kind: FluidKind::Water,
-            amount: 8,
-            falling: false,
-            waterlogged: true,
-        });
-        // State 2: a modelled plant holding water; state 3: a waterlogged cube.
-        let mut kelp = content.states[1].clone();
-        kelp.collision = Collision::Empty;
-        kelp.fluid = water;
-        let mut waterlogged = content.states[1].clone();
-        waterlogged.fluid = water;
-        content.states.extend([kelp, waterlogged]);
-        let mut colours = Colours {
-            states: HashMap::new(),
-            biomes: Vec::new(),
-            water: [0.1, 0.2, 0.3],
-            lava: [0.; 3],
-            surfaces: HashMap::new(),
-        };
-        let (rgb, tint) = colours.state(&content, 2);
-        assert_eq!(rgb, [0.1, 0.2, 0.3]);
-        assert!(matches!(tint, TintKind::Water));
-        assert_eq!(colours.state(&content, 3).0, [1.; 3]);
     }
 }

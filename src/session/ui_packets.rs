@@ -2,7 +2,7 @@
 use crate::protocol::packet_ids::play::serverbound as sb;
 use crate::{
     inventory::PacketCommand,
-    protocol::{self, nbt::Nbt, Result, Writer},
+    protocol::{self, Result, Writer, nbt::Nbt},
     ui::{CommandEdit, JigsawEdit, LastSeenUpdate, StructureEdit},
 };
 

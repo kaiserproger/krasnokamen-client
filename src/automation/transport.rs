@@ -912,9 +912,22 @@ impl Transport {
                 "protocol_versions":["2025-11-25"],"unsupported_protocol_versions":["2025-06-18","2026-07-28"],
                 "authorization":"local_preshared_credential_not_oauth","control_locally_authorized":self.core.allow_control,
                 "controller":self.core.controller(),"tools":self.core.tools()});
-                let observation = self.core.shared.observation.lock().unwrap_or_else(|e| e.into_inner());
-                value["renderer"] = observation.data.get("render").cloned().unwrap_or(Value::Null);
-                value["window"] = observation.data.get("window").cloned().unwrap_or(Value::Null);
+                let observation = self
+                    .core
+                    .shared
+                    .observation
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                value["renderer"] = observation
+                    .data
+                    .get("render")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                value["window"] = observation
+                    .data
+                    .get("window")
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 Some(value)
             }
             "krasnokamen-client://instances" => Some(

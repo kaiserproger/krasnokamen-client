@@ -115,7 +115,9 @@ pub fn run(args: Args, layout: Layout) -> Result<()> {
         Some("logs") => Tab::Logs,
         _ => Tab::Play,
     };
-    let capture = args.capture_window.map(|path| Rc::new(RefCell::new(WindowCapture::new(path))));
+    let capture = args
+        .capture_window
+        .map(|path| Rc::new(RefCell::new(WindowCapture::new(path))));
     app.capture = capture.clone();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Krasnokamen Launcher")

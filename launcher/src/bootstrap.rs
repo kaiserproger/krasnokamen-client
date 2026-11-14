@@ -388,7 +388,7 @@ mod tests {
             assert_eq!(pin.sha256.len(), 64);
             assert!(pin.sha256.bytes().all(|b| b.is_ascii_hexdigit()));
             assert!(
-                pin.name.starts_with(&format!("solaris-{}-", pin.kind)),
+                pin.name.starts_with(&format!("krasnokamen-{}-", pin.kind)),
                 "{} has the wrong bundle prefix",
                 pin.name
             );

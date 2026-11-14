@@ -6,8 +6,8 @@ use crate::{
     api::{DynamicGeometry, EntityMaterial},
     inventory::Stack,
     protocol::{
-        content::{Content, TextureRegion},
         Result,
+        content::{Content, TextureRegion},
     },
 };
 use glam::Mat4;
@@ -72,20 +72,32 @@ pub(super) struct Cache {
 }
 impl Cache {
     fn activate(&mut self, content: &Content, asset: &str, kind: &str) {
-        if self.assets.get(asset).is_some_and(|layers| layers.contains_key(kind)) {
+        if self
+            .assets
+            .get(asset)
+            .is_some_and(|layers| layers.contains_key(kind))
+        {
             return;
         }
         if self.assets.len() >= 4096 {
             self.assets.clear();
         }
-        self.assets.entry(asset.into()).or_default()
+        self.assets
+            .entry(asset.into())
+            .or_default()
             .insert(kind.into(), load_asset(content, asset, kind));
     }
     fn wings_asset<'a>(&mut self, stack: &'a Stack, content: &Content) -> Result<Option<&'a str>> {
-        let Some(asset) = armor_asset(stack, 4) else { return Ok(None) };
+        let Some(asset) = armor_asset(stack, 4) else {
+            return Ok(None);
+        };
         self.activate(content, asset, "wings");
-        Ok(self.assets[asset]["wings"].as_ref().map_err(Clone::clone)?
-            .as_ref().filter(|layers| !layers.is_empty()).map(|_| asset))
+        Ok(self.assets[asset]["wings"]
+            .as_ref()
+            .map_err(Clone::clone)?
+            .as_ref()
+            .filter(|layers| !layers.is_empty())
+            .map(|_| asset))
     }
 
     pub(super) fn append_player_back(
@@ -95,7 +107,14 @@ impl Cache {
         frame: Frame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<()> {
-        let Frame { models, content, root, tick, partial, light } = frame;
+        let Frame {
+            models,
+            content,
+            root,
+            tick,
+            partial,
+            light,
+        } = frame;
         let wings = match e.equipment_value(4) {
             Some(stack) => self.wings_asset(stack, content)?,
             None => None,
@@ -111,7 +130,16 @@ impl Cache {
             return Err(format!("player back rig not activated: {key}"));
         }
         let rig = models.rig(key);
-        p::evaluate_rig(rig, e, models, content, tick, partial, root, &mut self.transforms);
+        p::evaluate_rig(
+            rig,
+            e,
+            models,
+            content,
+            tick,
+            partial,
+            root,
+            &mut self.transforms,
+        );
         let gliding = p::number(models, e, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 128 != 0;
         let living = e.source.as_ref().and_then(|s| s.living.as_ref());
         let sway = living.map_or(0., |s| {
@@ -127,15 +155,22 @@ impl Cache {
                 _ => continue,
             }
             let parent = bone.parent.map_or(root, |i| self.transforms[i]);
-            self.transforms[index] = parent
-                * super::resources::transform(bone.pivot, rotation, bone.scale);
+            self.transforms[index] =
+                parent * super::resources::transform(bone.pivot, rotation, bone.scale);
         }
         let style = |tex| p::RigStyle {
-            tex, color: [1.; 3], layer: EntityMaterial::ArmorCutoutNoCull, alpha: 1., light,
+            tex,
+            color: [1.; 3],
+            layer: EntityMaterial::ArmorCutoutNoCull,
+            alpha: 1.,
+            light,
         };
         if let Some(asset) = wings {
-            let layers = self.assets[asset]["wings"].as_ref().map_err(Clone::clone)?
-                .as_ref().ok_or("wings layer disappeared")?;
+            let layers = self.assets[asset]["wings"]
+                .as_ref()
+                .map_err(Clone::clone)?
+                .as_ref()
+                .ok_or("wings layer disappeared")?;
             let player_texture = profile.and_then(|p| p.elytra.or(p.cape));
             for layer in layers {
                 let texture = if layer.use_player_texture {
@@ -165,7 +200,8 @@ impl Cache {
             return Ok(Worn::NotWorn);
         };
         // Player back layers have their own profile-aware draw hook.
-        if e.type_name == "minecraft:player" && slot == 4
+        if e.type_name == "minecraft:player"
+            && slot == 4
             && self.wings_asset(stack, content)?.is_some()
         {
             return Ok(Worn::Omitted);
@@ -337,7 +373,8 @@ pub(super) struct WornPart {
 
 fn trim_holder<'a>(content: &'a Content, value: &'a serde_json::Value, registry: &str) -> Result<&'a serde_json::Value> {
     if let Some(id) = value.as_str() {
-        content.registry_entries(registry)?
+        content
+            .registry_entries(registry)?
             .iter()
             .find(|(name, _)| name == id)
             .map(|(_, entry)| entry)
@@ -349,22 +386,34 @@ fn trim_holder<'a>(content: &'a Content, value: &'a serde_json::Value, registry:
     }
 }
 
-fn trim_texture(content: &Content, trim: &serde_json::Value, asset: &str, kind: &str) -> Result<(TextureRegion, bool)> {
+fn trim_texture(
+    content: &Content,
+    trim: &serde_json::Value,
+    asset: &str,
+    kind: &str,
+) -> Result<(TextureRegion, bool)> {
     let material = trim_holder(content, &trim["material"], "minecraft:trim_material")?;
     let pattern = trim_holder(content, &trim["pattern"], "minecraft:trim_pattern")?;
     let material_name = material["override_armor_assets"][asset]
         .as_str()
         .or_else(|| material["asset_name"].as_str())
         .ok_or("trim material asset_name missing")?;
-    let pattern_id = pattern["asset_id"].as_str().ok_or("trim pattern asset_id missing")?;
-    let (namespace, path) = pattern_id.split_once(':').unwrap_or(("minecraft", pattern_id));
+    let pattern_id = pattern["asset_id"]
+        .as_str()
+        .ok_or("trim pattern asset_id missing")?;
+    let (namespace, path) = pattern_id
+        .split_once(':')
+        .unwrap_or(("minecraft", pattern_id));
     let name = format!("{namespace}:trims/entity/{kind}/{path}_{material_name}");
     // Network registry NBT projects byte booleans to JSON integers; inline holders use bool.
-    let decal = pattern["decal"].as_bool().or_else(|| match pattern["decal"].as_i64() {
-        Some(0) => Some(false),
-        Some(1) => Some(true),
-        _ => None,
-    }).ok_or("trim pattern decal missing or invalid")?;
+    let decal = pattern["decal"]
+        .as_bool()
+        .or_else(|| match pattern["decal"].as_i64() {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            _ => None,
+        })
+        .ok_or("trim pattern decal missing or invalid")?;
     Ok((p::texture(content, &name)?, decal))
 }
 
@@ -444,25 +493,38 @@ fn animal_overlay(species: &str, slot: usize) -> Option<(&'static str, &'static 
     Some(match (species, slot) {
         ("minecraft:horse", 6) => ("minecraft:horse_body_equipment#main", "horse_body"),
         ("minecraft:wolf", 6) => ("minecraft:wolf_body_equipment#main", "wolf_body"),
-        ("minecraft:llama" | "minecraft:trader_llama", 6) =>
-            ("minecraft:llama_body_equipment#main", "llama_body"),
-        ("minecraft:happy_ghast", 6) =>
-            ("minecraft:happy_ghast_body_equipment#main", "happy_ghast_body"),
-        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 6) =>
-            ("minecraft:nautilus_body_equipment#main", "nautilus_body"),
-        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 7) =>
-            ("minecraft:nautilus_saddle_equipment#main", "nautilus_saddle"),
+        ("minecraft:llama" | "minecraft:trader_llama", 6) => {
+            ("minecraft:llama_body_equipment#main", "llama_body")
+        }
+        ("minecraft:happy_ghast", 6) => (
+            "minecraft:happy_ghast_body_equipment#main",
+            "happy_ghast_body",
+        ),
+        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 6) => {
+            ("minecraft:nautilus_body_equipment#main", "nautilus_body")
+        }
+        ("minecraft:nautilus" | "minecraft:zombie_nautilus", 7) => (
+            "minecraft:nautilus_saddle_equipment#main",
+            "nautilus_saddle",
+        ),
         ("minecraft:horse", 7) => ("minecraft:horse_saddle_equipment#main", "horse_saddle"),
         ("minecraft:pig", 7) => ("minecraft:pig_saddle_equipment#main", "pig_saddle"),
         ("minecraft:strider", 7) => ("minecraft:strider_saddle_equipment#main", "strider_saddle"),
         ("minecraft:camel", 7) => ("minecraft:camel_saddle_equipment#main", "camel_saddle"),
-        ("minecraft:camel_husk", 7) => ("minecraft:camel_husk_saddle_equipment#main", "camel_husk_saddle"),
+        ("minecraft:camel_husk", 7) => (
+            "minecraft:camel_husk_saddle_equipment#main",
+            "camel_husk_saddle",
+        ),
         ("minecraft:donkey", 7) => ("minecraft:donkey_saddle_equipment#main", "donkey_saddle"),
         ("minecraft:mule", 7) => ("minecraft:mule_saddle_equipment#main", "mule_saddle"),
-        ("minecraft:skeleton_horse", 7) =>
-            ("minecraft:skeleton_horse_saddle_equipment#main", "skeleton_horse_saddle"),
-        ("minecraft:zombie_horse", 7) =>
-            ("minecraft:zombie_horse_saddle_equipment#main", "zombie_horse_saddle"),
+        ("minecraft:skeleton_horse", 7) => (
+            "minecraft:skeleton_horse_saddle_equipment#main",
+            "skeleton_horse_saddle",
+        ),
+        ("minecraft:zombie_horse", 7) => (
+            "minecraft:zombie_horse_saddle_equipment#main",
+            "zombie_horse_saddle",
+        ),
         _ => return None,
     })
 }
@@ -631,21 +693,48 @@ mod tests {
         use serde_json::json;
 
         let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:horse");
-        for (id, slot, asset) in [(5, "body", "test:horse_armor"), (6, "saddle", "test:horse_saddle")] {
+        for (id, slot, asset) in [
+            (5, "body", "test:horse_armor"),
+            (6, "saddle", "test:horse_saddle"),
+        ] {
             content.item_names.insert(id, format!("test:{slot}"));
-            content.insert_test_item_components(id, BTreeMap::from([(
-                "minecraft:equippable".into(), json!({"slot":slot,"asset_id":asset}),
-            )]));
+            content.insert_test_item_components(
+                id,
+                BTreeMap::from([(
+                    "minecraft:equippable".into(),
+                    json!({"slot":slot,"asset_id":asset}),
+                )]),
+            );
         }
         content.insert_test_resource("assets/test/equipment/horse_armor.json",
             br#"{"layers":{"horse_body":[{"texture":"test:armor","dyeable":{"color_when_undyed":16777215}}]}}"#);
-        content.insert_test_resource("assets/test/equipment/horse_saddle.json",
-            br#"{"layers":{"horse_saddle":[{"texture":"test:saddle"}]}}"#);
-        for (name, layer) in [("test:entity/equipment/horse_body/armor", 10), ("test:entity/equipment/horse_saddle/saddle", 11)] {
-            content.insert_test_texture(name, TextureRegion { layer, uv:[0.,0.,1.,1.], width:64, height:64 });
+        content.insert_test_resource(
+            "assets/test/equipment/horse_saddle.json",
+            br#"{"layers":{"horse_saddle":[{"texture":"test:saddle"}]}}"#,
+        );
+        for (name, layer) in [
+            ("test:entity/equipment/horse_body/armor", 10),
+            ("test:entity/equipment/horse_saddle/saddle", 11),
+        ] {
+            content.insert_test_texture(
+                name,
+                TextureRegion {
+                    layer,
+                    uv: [0., 0., 1., 1.],
+                    width: 64,
+                    height: 64,
+                },
+            );
         }
-        content.insert_test_texture("minecraft:misc/enchanted_glint_armor",
-            TextureRegion { layer: 12, uv:[0.,0.,1.,1.], width:64, height:64 });
+        content.insert_test_texture(
+            "minecraft:misc/enchanted_glint_armor",
+            TextureRegion {
+                layer: 12,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
         let mut equipment = Writer::default();
         equipment.var(4);
         for (slot, id) in [(6, 5), (7, 6)] {
@@ -655,54 +744,201 @@ mod tests {
             equipment.var(0);
             equipment.var(0);
         }
-        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&equipment.0), &content, 2).unwrap();
+        store
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&equipment.0),
+                &content,
+                2,
+            )
+            .unwrap();
         let entity = store.get(4).unwrap();
         for (slot, expected_layer) in [(6, 10), (7, 11)] {
             let mut out = DynamicGeometry::default();
-            assert!(cache.append(entity, slot, entity.equipment_value(slot).unwrap(),
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap());
+            assert!(
+                cache
+                    .append(
+                        entity,
+                        slot,
+                        entity.equipment_value(slot).unwrap(),
+                        Frame {
+                            models: &models,
+                            content: &content,
+                            root: Mat4::IDENTITY,
+                            tick: 2,
+                            partial: 0.,
+                            light: [15.; 2]
+                        },
+                        &mut out
+                    )
+                    .unwrap()
+            );
             assert!(!out.vertices.is_empty());
-            assert!(out.vertices.iter().all(|v| v.texture_layer == expected_layer));
+            assert!(
+                out.vertices
+                    .iter()
+                    .all(|v| v.texture_layer == expected_layer)
+            );
         }
         let mut dyed = entity.equipment_value(6).unwrap().clone();
         let components = Arc::make_mut(&mut dyed.components);
         components.insert("minecraft:dyed_color".into(), json!(0xff0000));
         components.insert("minecraft:enchantment_glint_override".into(), json!(true));
         let mut tinted = DynamicGeometry::default();
-        assert!(cache.append(entity, 6, &dyed,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut tinted).unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    6,
+                    &dyed,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut tinted
+                )
+                .unwrap()
+        );
         assert!(!tinted.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
-        assert!(tinted.vertices.iter().any(|v| v.texture_layer == 10 && v.color == [1., 0., 0.]));
+        assert!(
+            tinted
+                .vertices
+                .iter()
+                .any(|v| v.texture_layer == 10 && v.color == [1., 0., 0.])
+        );
         let mut invalid = entity.equipment_value(6).unwrap().clone();
-        Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
-            json!({"slot":"body","asset_id":"test:missing"}));
-        assert!(cache.append(entity, 6, &invalid,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
-        Arc::make_mut(&mut invalid.components).insert("minecraft:equippable".into(),
-            json!({"slot":"body","asset_id":"test:horse_saddle"}));
-        assert!(cache.append(entity, 6, &invalid,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
-        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
+        Arc::make_mut(&mut invalid.components).insert(
+            "minecraft:equippable".into(),
+            json!({"slot":"body","asset_id":"test:missing"}),
+        );
+        assert!(
+            cache
+                .append(
+                    entity,
+                    6,
+                    &invalid,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut DynamicGeometry::default()
+                )
+                .is_err()
+        );
+        Arc::make_mut(&mut invalid.components).insert(
+            "minecraft:equippable".into(),
+            json!({"slot":"body","asset_id":"test:horse_saddle"}),
+        );
+        assert!(
+            cache
+                .append(
+                    entity,
+                    6,
+                    &invalid,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut DynamicGeometry::default()
+                )
+                .is_err()
+        );
+        store
+            .get_mut(4)
+            .unwrap()
+            .metadata
+            .insert(0, super::super::Metadata::Bool(true));
         let baby = store.get(4).unwrap();
-        assert!(cache.append(baby, 7, baby.equipment_value(7).unwrap(),
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).is_err());
-        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(false));
+        assert!(
+            cache
+                .append(
+                    baby,
+                    7,
+                    baby.equipment_value(7).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut DynamicGeometry::default()
+                )
+                .is_err()
+        );
+        store
+            .get_mut(4)
+            .unwrap()
+            .metadata
+            .insert(0, super::super::Metadata::Bool(false));
 
         let mut stripped = Writer::default();
         stripped.var(4);
         stripped.byte(6);
         stripped.var(0);
-        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&stripped.0), &content, 3).unwrap();
+        store
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&stripped.0),
+                &content,
+                3,
+            )
+            .unwrap();
         let entity = store.get(4).unwrap();
         assert!(entity.equipment_value(6).is_none());
         let mut saddle = DynamicGeometry::default();
-        assert!(cache.append(entity, 7, entity.equipment_value(7).unwrap(),
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 3, partial: 0., light: [15.; 2] }, &mut saddle).unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    7,
+                    entity.equipment_value(7).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 3,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut saddle
+                )
+                .unwrap()
+        );
         assert!(!saddle.vertices.is_empty());
         store.get_mut(4).unwrap().type_name = "minecraft:cow".into();
         let entity = store.get(4).unwrap();
-        assert!(!cache.append(entity, 7, entity.equipment_value(7).unwrap(),
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 3, partial: 0., light: [15.; 2] }, &mut DynamicGeometry::default()).unwrap());
+        assert!(
+            !cache
+                .append(
+                    entity,
+                    7,
+                    entity.equipment_value(7).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 3,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut DynamicGeometry::default()
+                )
+                .unwrap()
+        );
     }
 
     #[test]
@@ -712,26 +948,69 @@ mod tests {
         entity.type_name = "minecraft:horse".into();
         let mut source = entity.source.take().unwrap();
         for x in [0.2, 0.4] {
-            source.living.as_mut().unwrap().tick(&models, &entity, &render_living::TickInput {
-                age: 1, position: [x, 0., 0.], yaw: 0., alive: true, passenger: false,
-                baby: false, visually_swimming: false, in_water: false, uses_y_for_walk: false,
-                rotation_changed_before_base_tick: false, is_mob: true,
-                first_passenger_is_mob: false, max_head_yaw: 75., max_body_head_yaw: 75.,
-                attack_active: false, camel_sitting: false, camel_visually_sitting: false,
-                camel_sitting_down: false, camel_pose_transition: false, camel_pose_time: 0,
-            });
+            source.living.as_mut().unwrap().tick(
+                &models,
+                &entity,
+                &render_living::TickInput {
+                    age: 1,
+                    position: [x, 0., 0.],
+                    yaw: 0.,
+                    alive: true,
+                    passenger: false,
+                    baby: false,
+                    visually_swimming: false,
+                    in_water: false,
+                    uses_y_for_walk: false,
+                    rotation_changed_before_base_tick: false,
+                    is_mob: true,
+                    first_passenger_is_mob: false,
+                    max_head_yaw: 75.,
+                    max_body_head_yaw: 75.,
+                    attack_active: false,
+                    camel_sitting: false,
+                    camel_visually_sitting: false,
+                    camel_sitting_down: false,
+                    camel_pose_transition: false,
+                    camel_pose_time: 0,
+                },
+            );
         }
         entity.source = Some(source);
-        for overlay_key in ["minecraft:horse_body_equipment#main", "minecraft:horse_saddle_equipment#main"] {
+        for overlay_key in [
+            "minecraft:horse_body_equipment#main",
+            "minecraft:horse_saddle_equipment#main",
+        ] {
             let horse = models.rig("minecraft:horse#main");
             let overlay = models.rig(overlay_key);
             let mut base_transforms = Vec::new();
             let mut overlay_transforms = Vec::new();
-            p::evaluate_rig(horse, &entity, &models, &Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut base_transforms);
-            p::evaluate_rig(overlay, &entity, &models, &Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut overlay_transforms);
+            p::evaluate_rig(
+                horse,
+                &entity,
+                &models,
+                &Content::test_cube(),
+                2,
+                1.,
+                Mat4::IDENTITY,
+                &mut base_transforms,
+            );
+            p::evaluate_rig(
+                overlay,
+                &entity,
+                &models,
+                &Content::test_cube(),
+                2,
+                1.,
+                Mat4::IDENTITY,
+                &mut overlay_transforms,
+            );
             for (index, bone) in overlay.bones.iter().enumerate() {
                 let base = horse.part_by_name[&bone.name];
-                assert_eq!(overlay_transforms[index], base_transforms[base], "joint {}", bone.name);
+                assert_eq!(
+                    overlay_transforms[index], base_transforms[base],
+                    "joint {}",
+                    bone.name
+                );
             }
         }
     }
@@ -743,20 +1022,42 @@ mod tests {
 
         let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:wolf");
         for slot in 2..=5 {
-            store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&[4, slot, 0]), &content, 3).unwrap();
+            store
+                .apply(
+                    crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                    &mut Reader::new(&[4, slot, 0]),
+                    &content,
+                    3,
+                )
+                .unwrap();
         }
         content.item_names.insert(5, "test:wolf_armor".into());
-        content.insert_test_item_components(5, BTreeMap::from([(
-            "minecraft:equippable".into(), json!({"slot":"body","asset_id":"test:wolf_armor"}),
-        )]));
-        content.insert_test_resource("assets/test/equipment/wolf_armor.json", br#"{
+        content.insert_test_item_components(
+            5,
+            BTreeMap::from([(
+                "minecraft:equippable".into(),
+                json!({"slot":"body","asset_id":"test:wolf_armor"}),
+            )]),
+        );
+        content.insert_test_resource(
+            "assets/test/equipment/wolf_armor.json",
+            br#"{
             "layers":{"wolf_body":[{"texture":"test:base"},{"texture":"test:overlay","dyeable":{}}]}
-        }"#);
-        for (name, layer) in [("test:entity/equipment/wolf_body/base", 10),
-                              ("test:entity/equipment/wolf_body/overlay", 11)] {
-            content.insert_test_texture(name, TextureRegion {
-                layer, uv: [0., 0., 1., 1.], width: 64, height: 32,
-            });
+        }"#,
+        );
+        for (name, layer) in [
+            ("test:entity/equipment/wolf_body/base", 10),
+            ("test:entity/equipment/wolf_body/overlay", 11),
+        ] {
+            content.insert_test_texture(
+                name,
+                TextureRegion {
+                    layer,
+                    uv: [0., 0., 1., 1.],
+                    width: 64,
+                    height: 32,
+                },
+            );
         }
         let mut packet = Writer::default();
         packet.var(4);
@@ -765,34 +1066,116 @@ mod tests {
         packet.var(5);
         packet.var(0);
         packet.var(0);
-        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&packet.0), &content, 4).unwrap();
+        store
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&packet.0),
+                &content,
+                4,
+            )
+            .unwrap();
         let entity = store.get(4).unwrap();
         assert_eq!(entity.equipment[6].as_ref().unwrap().id, 5);
         let rig = models.rig("minecraft:wolf#main");
         let mut transforms = Vec::new();
-        p::evaluate_rig(rig, entity, &models, &content, 4, 0., Mat4::IDENTITY, &mut transforms);
+        p::evaluate_rig(
+            rig,
+            entity,
+            &models,
+            &content,
+            4,
+            0.,
+            Mat4::IDENTITY,
+            &mut transforms,
+        );
         let mut out = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
         let mut items = crate::ui::items::ItemModels::new();
-        p::append_equipment(p::EquipmentPose { item_context: None, entity, rig, transforms: &transforms }, &mut items, &mut cache,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 4, partial: 0., light: [15.; 2] }, &mut out, &mut stats).unwrap();
+        p::append_equipment(
+            p::EquipmentPose {
+                item_context: None,
+                entity,
+                rig,
+                transforms: &transforms,
+            },
+            &mut items,
+            &mut cache,
+            Frame {
+                models: &models,
+                content: &content,
+                root: Mat4::IDENTITY,
+                tick: 4,
+                partial: 0.,
+                light: [15.; 2],
+            },
+            &mut out,
+            &mut stats,
+        )
+        .unwrap();
         assert!(out.vertices.iter().any(|vertex| vertex.texture_layer == 10));
         assert!(!out.vertices.iter().any(|vertex| vertex.texture_layer == 11));
         assert!(stats.unrendered.is_empty());
         let mut dyed = entity.equipment_value(6).unwrap().clone();
         Arc::make_mut(&mut dyed.components).insert("minecraft:dyed_color".into(), json!(0xff0000));
         let mut colored = DynamicGeometry::default();
-        assert!(cache.append(entity, 6, &dyed,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 4, partial: 0., light: [15.; 2] }, &mut colored).unwrap());
-        assert!(colored.vertices.iter().any(|v| v.texture_layer == 11 && v.color == [1., 0., 0.]));
+        assert!(
+            cache
+                .append(
+                    entity,
+                    6,
+                    &dyed,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 4,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut colored
+                )
+                .unwrap()
+        );
+        assert!(
+            colored
+                .vertices
+                .iter()
+                .any(|v| v.texture_layer == 11 && v.color == [1., 0., 0.])
+        );
 
-        store.apply(crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT, &mut Reader::new(&[4, 6, 0]), &content, 5).unwrap();
+        store
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::SET_EQUIPMENT,
+                &mut Reader::new(&[4, 6, 0]),
+                &content,
+                5,
+            )
+            .unwrap();
         let entity = store.get(4).unwrap();
         assert!(entity.equipment_value(6).is_none());
         let mut stripped = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
-        p::append_equipment(p::EquipmentPose { item_context: None, entity, rig, transforms: &transforms }, &mut items, &mut cache,
-            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 5, partial: 0., light: [15.; 2] }, &mut stripped, &mut stats).unwrap();
+        p::append_equipment(
+            p::EquipmentPose {
+                item_context: None,
+                entity,
+                rig,
+                transforms: &transforms,
+            },
+            &mut items,
+            &mut cache,
+            Frame {
+                models: &models,
+                content: &content,
+                root: Mat4::IDENTITY,
+                tick: 5,
+                partial: 0.,
+                light: [15.; 2],
+            },
+            &mut stripped,
+            &mut stats,
+        )
+        .unwrap();
         assert!(stripped.vertices.is_empty());
         assert!(stats.unrendered.is_empty());
     }
@@ -802,21 +1185,42 @@ mod tests {
         use serde_json::json;
         let (mut store, models, mut content, mut cache) = humanoid_fixture("minecraft:zombie");
         content.set_registries(BTreeMap::from([
-            ("minecraft:trim_material".into(), vec![("test:metal".into(), json!({
-                "asset_name":"gold", "override_armor_assets":{"test:cloth":"gold_darker"}
-            }))]),
-            ("minecraft:trim_pattern".into(), vec![("test:pattern".into(), json!({
-                "asset_id":"minecraft:sentry", "decal":0
-            }))]),
+            (
+                "minecraft:trim_material".into(),
+                vec![(
+                    "test:metal".into(),
+                    json!({
+                        "asset_name":"gold", "override_armor_assets":{"test:cloth":"gold_darker"}
+                    }),
+                )],
+            ),
+            (
+                "minecraft:trim_pattern".into(),
+                vec![(
+                    "test:pattern".into(),
+                    json!({
+                        "asset_id":"minecraft:sentry", "decal":0
+                    }),
+                )],
+            ),
         ]));
         for (name, layer) in [
             ("minecraft:trims/entity/humanoid/sentry_gold_darker", 10),
-            ("minecraft:trims/entity/humanoid_leggings/sentry_gold_darker", 11),
+            (
+                "minecraft:trims/entity/humanoid_leggings/sentry_gold_darker",
+                11,
+            ),
             ("minecraft:trims/entity/humanoid/sentry_gold", 12),
         ] {
-            content.insert_test_texture(name, TextureRegion {
-                layer, uv: [0., 0., 1., 1.], width: 64, height: 32,
-            });
+            content.insert_test_texture(
+                name,
+                TextureRegion {
+                    layer,
+                    uv: [0., 0., 1., 1.],
+                    width: 64,
+                    height: 32,
+                },
+            );
         }
         let entity = store.get(4).unwrap();
         for (slot, expected) in [(4, 10), (3, 11)] {
@@ -826,30 +1230,92 @@ mod tests {
                 json!({"material":"test:metal","pattern":"test:pattern"}),
             );
             let mut out = DynamicGeometry::default();
-            assert!(cache.append(entity, slot, &stack,
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap());
+            assert!(
+                cache
+                    .append(
+                        entity,
+                        slot,
+                        &stack,
+                        Frame {
+                            models: &models,
+                            content: &content,
+                            root: Mat4::IDENTITY,
+                            tick: 2,
+                            partial: 0.,
+                            light: [15.; 2]
+                        },
+                        &mut out
+                    )
+                    .unwrap()
+            );
             assert_eq!(out.vertices.len(), 8);
-            assert!(out.vertices[4..].iter().all(|v| v.texture_layer == expected));
+            assert!(
+                out.vertices[4..]
+                    .iter()
+                    .all(|v| v.texture_layer == expected)
+            );
         }
         let material = json!({"asset_name":"gold"});
         let decal = json!({"asset_id":"minecraft:sentry","decal":true});
         let mut stack = entity.equipment_value(4).unwrap().clone();
         Arc::make_mut(&mut stack.components).insert(
-            "minecraft:trim".into(), json!({"material":material,"pattern":decal}),
+            "minecraft:trim".into(),
+            json!({"material":material,"pattern":decal}),
         );
         let mut out = DynamicGeometry::default();
-        cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut out).unwrap();
-        assert_eq!(out.indices[EntityMaterial::ArmorDecalCutoutNoCull as usize].len(), 6);
+        cache
+            .append(
+                entity,
+                4,
+                &stack,
+                crate::entities::equipment::Frame {
+                    models: &models,
+                    content: &content,
+                    root: Mat4::IDENTITY,
+                    tick: 2,
+                    partial: 0.,
+                    light: [15.; 2],
+                },
+                &mut out,
+            )
+            .unwrap();
+        assert_eq!(
+            out.indices[EntityMaterial::ArmorDecalCutoutNoCull as usize].len(),
+            6
+        );
         assert!(out.vertices[4..].iter().all(|v| v.texture_layer == 12));
         let byte_decal = json!({"material":{"asset_name":"gold"},
             "pattern":{"asset_id":"minecraft:sentry","decal":1}});
-        assert!(trim_texture(&content, &byte_decal, "test:cloth", "humanoid").unwrap().1);
+        assert!(
+            trim_texture(&content, &byte_decal, "test:cloth", "humanoid")
+                .unwrap()
+                .1
+        );
         let invalid_decal = json!({"material":{"asset_name":"gold"},
             "pattern":{"asset_id":"minecraft:sentry","decal":2}});
         assert!(trim_texture(&content, &invalid_decal, "test:cloth", "humanoid").is_err());
-        store.get_mut(4).unwrap().metadata.insert(0, super::super::Metadata::Bool(true));
+        store
+            .get_mut(4)
+            .unwrap()
+            .metadata
+            .insert(0, super::super::Metadata::Bool(true));
         let mut baby_out = DynamicGeometry::default();
-        cache.append(store.get(4).unwrap(), 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut baby_out).unwrap();
+        cache
+            .append(
+                store.get(4).unwrap(),
+                4,
+                &stack,
+                crate::entities::equipment::Frame {
+                    models: &models,
+                    content: &content,
+                    root: Mat4::IDENTITY,
+                    tick: 2,
+                    partial: 0.,
+                    light: [15.; 2],
+                },
+                &mut baby_out,
+            )
+            .unwrap();
         assert_eq!(baby_out.vertices.len(), 4);
     }
 
@@ -884,7 +1350,14 @@ mod tests {
                             entity,
                             slot,
                             entity.equipment_value(slot).unwrap(),
-                            Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [3., 7.] },
+                            Frame {
+                                models: &models,
+                                content: &content,
+                                root: Mat4::IDENTITY,
+                                tick: 2,
+                                partial: 0.,
+                                light: [3., 7.]
+                            },
                             &mut out,
                         )
                         .unwrap(),
@@ -895,10 +1368,11 @@ mod tests {
                     out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
                     6
                 );
-                assert!(out
-                    .vertices
-                    .iter()
-                    .all(|v| v.texture_layer == if slot == 3 { 3 } else { 2 }));
+                assert!(
+                    out.vertices
+                        .iter()
+                        .all(|v| v.texture_layer == if slot == 3 { 3 } else { 2 })
+                );
                 store
                     .apply(
                         104,
@@ -935,15 +1409,24 @@ mod tests {
                     Some(format!("test:baby/{part}").as_str())
                 );
                 let mut out = DynamicGeometry::default();
-                assert!(cache
-                    .append(
-                        entity,
-                        slot,
-                        entity.equipment_value(slot).unwrap(),
-                        Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                        &mut out,
-                    )
-                    .unwrap());
+                assert!(
+                    cache
+                        .append(
+                            entity,
+                            slot,
+                            entity.equipment_value(slot).unwrap(),
+                            Frame {
+                                models: &models,
+                                content: &content,
+                                root: Mat4::IDENTITY,
+                                tick: 2,
+                                partial: 0.,
+                                light: [15.; 2]
+                            },
+                            &mut out,
+                        )
+                        .unwrap()
+                );
                 assert_eq!(out.vertices.len(), 4);
                 assert!(out.vertices.iter().all(|v| v.texture_layer == 4));
             }
@@ -969,12 +1452,28 @@ mod tests {
         let mut first = DynamicGeometry::default();
         let mut later = DynamicGeometry::default();
         for (tick, out) in [(0, &mut first), (120, &mut later)] {
-            cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick, partial: 0., light: [15.; 2] }, out).unwrap();
+            cache
+                .append(
+                    entity,
+                    4,
+                    &stack,
+                    crate::entities::equipment::Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick,
+                        partial: 0.,
+                        light: [15.; 2],
+                    },
+                    out,
+                )
+                .unwrap();
         }
         let indices = &first.indices[EntityMaterial::ArmorEntityGlint as usize];
         assert_eq!(indices.len(), 6);
         let a = &first.vertices[indices[0] as usize];
-        let b = &later.vertices[later.indices[EntityMaterial::ArmorEntityGlint as usize][0] as usize];
+        let b =
+            &later.vertices[later.indices[EntityMaterial::ArmorEntityGlint as usize][0] as usize];
         assert_eq!(a.texture_layer, texture.layer);
         assert_eq!(a.overlay_uv, [0.25, 0.5]);
         assert_eq!(a.overlay_tint[..2], [0.125, 0.25]);
@@ -987,7 +1486,22 @@ mod tests {
             serde_json::json!(false),
         );
         let mut disabled = DynamicGeometry::default();
-        cache.append(entity, 4, &stack, crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 0, partial: 0., light: [15.; 2] }, &mut disabled).unwrap();
+        cache
+            .append(
+                entity,
+                4,
+                &stack,
+                crate::entities::equipment::Frame {
+                    models: &models,
+                    content: &content,
+                    root: Mat4::IDENTITY,
+                    tick: 0,
+                    partial: 0.,
+                    light: [15.; 2],
+                },
+                &mut disabled,
+            )
+            .unwrap();
         assert!(disabled.indices[EntityMaterial::ArmorEntityGlint as usize].is_empty());
     }
 
@@ -1019,15 +1533,24 @@ mod tests {
             serde_json::json!(true),
         );
         let mut out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                &stack,
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    &stack,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 12);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
@@ -1046,34 +1569,80 @@ mod tests {
         let (mut store, mut models, content, mut cache) = humanoid_fixture("minecraft:zombie");
         let entity = store.get(4).unwrap();
         let mut before = DynamicGeometry::default();
-        cache.append(entity, 5, entity.equipment_value(5).unwrap(), crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut before)
+        cache
+            .append(
+                entity,
+                5,
+                entity.equipment_value(5).unwrap(),
+                crate::entities::equipment::Frame {
+                    models: &models,
+                    content: &content,
+                    root: Mat4::IDENTITY,
+                    tick: 2,
+                    partial: 0.,
+                    light: [15.; 2],
+                },
+                &mut before,
+            )
             .unwrap();
         store.get_mut(4).unwrap().transform.pitch = 45.;
         let entity = store.get(4).unwrap();
         let mut after = DynamicGeometry::default();
-        cache.append(entity, 5, entity.equipment_value(5).unwrap(), crate::entities::equipment::Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] }, &mut after)
+        cache
+            .append(
+                entity,
+                5,
+                entity.equipment_value(5).unwrap(),
+                crate::entities::equipment::Frame {
+                    models: &models,
+                    content: &content,
+                    root: Mat4::IDENTITY,
+                    tick: 2,
+                    partial: 0.,
+                    light: [15.; 2],
+                },
+                &mut after,
+            )
             .unwrap();
         assert_ne!(before.vertices[2].position, after.vertices[2].position);
         let mut fallback = DynamicGeometry::default();
-        assert!(!cache
-            .append(
-                entity,
-                3,
-                entity.equipment_value(4).unwrap(),
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                &mut fallback
-            )
-            .unwrap());
+        assert!(
+            !cache
+                .append(
+                    entity,
+                    3,
+                    entity.equipment_value(4).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut fallback
+                )
+                .unwrap()
+        );
         models.armor_models.clear();
-        assert!(!cache
-            .append(
-                entity,
-                4,
-                entity.equipment_value(4).unwrap(),
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                &mut fallback
-            )
-            .unwrap());
+        assert!(
+            !cache
+                .append(
+                    entity,
+                    4,
+                    entity.equipment_value(4).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut fallback
+                )
+                .unwrap()
+        );
         assert!(fallback.vertices.is_empty());
     }
 
@@ -1201,8 +1770,8 @@ mod tests {
     #[test]
     fn p1_received_armor_stand_equipment_emits_armor_and_clears_on_removal() {
         use super::super::{
-            resources::{Bone, BoneRole, Rig},
             Store,
+            resources::{Bone, BoneRole, Rig},
         };
         use crate::protocol::{Reader, Writer};
         use glam::Vec3;
@@ -1290,15 +1859,24 @@ mod tests {
         );
         let entity = store.get(4).unwrap();
         let mut out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                entity.equipment_value(4).unwrap(),
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    entity.equipment_value(4).unwrap(),
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 4);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),
@@ -1326,15 +1904,24 @@ mod tests {
                 use_player_texture: false,
             });
         out = DynamicGeometry::default();
-        assert!(cache
-            .append(
-                entity,
-                4,
-                &glinted,
-                Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 2, partial: 0., light: [15.; 2] },
-                &mut out
-            )
-            .unwrap());
+        assert!(
+            cache
+                .append(
+                    entity,
+                    4,
+                    &glinted,
+                    Frame {
+                        models: &models,
+                        content: &content,
+                        root: Mat4::IDENTITY,
+                        tick: 2,
+                        partial: 0.,
+                        light: [15.; 2]
+                    },
+                    &mut out
+                )
+                .unwrap()
+        );
         assert_eq!(out.vertices.len(), 12);
         assert_eq!(
             out.indices[EntityMaterial::ArmorCutoutNoCull as usize].len(),

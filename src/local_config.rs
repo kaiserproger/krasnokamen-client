@@ -170,12 +170,16 @@ pub fn client_settings_path() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os("KRASNOKAMEN_CLIENT_SETTINGS").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(explicit));
     }
-    crate::content_paths::selected_root().ok().map(|root| root.join("client-settings.json"))
+    crate::content_paths::selected_root()
+        .ok()
+        .map(|root| root.join("client-settings.json"))
 }
 
 /// Server lists always belong to the selected data root, independent of settings overrides.
 pub(crate) fn servers_path() -> Option<PathBuf> {
-    crate::content_paths::selected_root().ok().map(|root| root.join("servers.json"))
+    crate::content_paths::selected_root()
+        .ok()
+        .map(|root| root.join("servers.json"))
 }
 /// Load persisted managed settings. Missing file/keys/parse errors yield an
 /// empty map; callers fill defaults via `UiState::default_setting_value`.
@@ -244,7 +248,9 @@ pub fn save_client_settings_to(
     let Ok(text) = serde_json::to_string_pretty(&kept) else {
         return;
     };
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty())
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
         && std::fs::create_dir_all(parent).is_err()
     {
         return;
@@ -292,7 +298,11 @@ mod tests {
         }
         for case in ["explicit-root", "platform-root", "settings-override"] {
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child.args(["--exact", "local_config::tests::settings_follow_selected_data_root_and_explicit_override"])
+            child
+                .args([
+                    "--exact",
+                    "local_config::tests::settings_follow_selected_data_root_and_explicit_override",
+                ])
                 .env(CHILD, case)
                 .env("HOME", "/tmp/client-test-home")
                 .env("XDG_DATA_HOME", "/tmp/client-test-xdg")
@@ -303,7 +313,11 @@ mod tests {
                 child.env("KRASNOKAMEN_CLIENT_SETTINGS", "/tmp/custom-settings.json");
             }
             let output = child.output().unwrap();
-            assert!(output.status.success(), "{case}: {}", String::from_utf8_lossy(&output.stdout));
+            assert!(
+                output.status.success(),
+                "{case}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
     }
 
@@ -355,7 +369,10 @@ mod tests {
         assert_eq!(loaded["gamma"], serde_json::json!(0.25));
         assert_eq!(loaded.get("fullscreen"), Some(&serde_json::json!(true)));
         assert_eq!(loaded.get("vsync"), Some(&serde_json::json!(false)));
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("low")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("low"))
+        );
         assert_eq!(loaded.get("max_fps"), Some(&serde_json::json!(120)));
         assert_eq!(loaded.get("far_terrain"), Some(&serde_json::json!(768)));
         assert!(!loaded.contains_key("chat_key"));
@@ -380,14 +397,23 @@ mod tests {
         let path = dir.join("client-settings.json");
         std::fs::write(&path, r#"{"fancy_shaders":false,"volume":0.5}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("low")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("low"))
+        );
         assert!(!loaded.contains_key("fancy_shaders"));
         std::fs::write(&path, r#"{"fancy_shaders":true}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("medium")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("medium"))
+        );
         std::fs::write(&path, r#"{"fancy_shaders":false,"graphics_preset":"high"}"#).unwrap();
         let loaded = load_client_settings_from(&path);
-        assert_eq!(loaded.get("graphics_preset"), Some(&serde_json::json!("high")));
+        assert_eq!(
+            loaded.get("graphics_preset"),
+            Some(&serde_json::json!("high"))
+        );
         assert!(!loaded.contains_key("fancy_shaders"));
         let _ = std::fs::remove_dir_all(&dir);
     }

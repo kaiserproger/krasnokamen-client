@@ -334,7 +334,9 @@ mod tests {
         assert!(session.local_server.is_none());
         drop(session);
         assert_eq!(
-            std::fs::read_to_string(root.join("checkpoint")).unwrap().trim(),
+            std::fs::read_to_string(root.join("checkpoint"))
+                .unwrap()
+                .trim(),
             "done"
         );
         let _ = std::fs::remove_dir_all(root);

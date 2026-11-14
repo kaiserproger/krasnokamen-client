@@ -58,7 +58,9 @@ pub(super) fn append_charge(
     let aura = super::krasnokamen_models::authored("minecraft:creeper_charge#main")
         .ok_or("missing authored creeper charge rig")?;
     let texture = p::texture(content, "minecraft:entity/creeper/creeper_armor")?;
-    p::evaluate_rig(aura, entity, models, content, tick, partial, matrix, transforms);
+    p::evaluate_rig(
+        aura, entity, models, content, tick, partial, matrix, transforms,
+    );
     let time = (tick % 4000) as f32 + partial;
     p::emit_wrapped(
         aura,

@@ -422,6 +422,29 @@ impl FarTerrain {
         self.stats.visible_tiles = self.visible.len() as u64;
         self.stats.uploads = uploads as u64;
         self.stats.vertices = faces * 6;
+        if std::env::var_os("KRASNOKAMEN_FAR_DARK_DEBUG").is_some() {
+            let mut dark = 0u64;
+            for tile in &far.tiles {
+                for pair in tile.data.chunks_exact(2) {
+                    let (_height, source) = crate::far::unpack(pair[0]);
+                    let rgba = pair[1];
+                    if source != crate::far::Source::Missing
+                        && rgba & 0xff < 8
+                        && (rgba >> 8) & 0xff < 10
+                        && (rgba >> 16) & 0xff < 8
+                    {
+                        dark += 1;
+                    }
+                }
+            }
+            if dark > 0 {
+                eprintln!(
+                    "FARDARK frame drawable_dark_samples={} visible_tiles={}",
+                    dark,
+                    self.visible.len()
+                );
+            }
+        }
         !self.visible.is_empty()
     }
 

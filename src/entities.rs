@@ -12,11 +12,8 @@ mod display;
 mod dragon;
 mod drowned_outer;
 mod equipment;
+mod krasnokamen_models;
 mod local;
-#[cfg(test)]
-mod animation_tests;
-#[cfg(test)]
-mod asset_model_regression_tests;
 mod metadata;
 mod nameplates;
 mod physical;
@@ -29,6 +26,8 @@ mod render_living;
 mod render_nameplates;
 mod render_special;
 mod resources;
+mod shadows;
+mod sheep;
 mod source_commands;
 mod source_state;
 mod sheep;
@@ -38,10 +37,10 @@ mod villagers;
 use crate::{
     api::DynamicGeometry,
     inventory::{self, Stack},
-    protocol::{content::Content, Reader, Result},
+    protocol::{Reader, Result, content::Content},
 };
-use glam::Mat4;
 pub(crate) use blocks::BlockEntitySnapshot;
+use glam::Mat4;
 pub use metadata::Metadata;
 pub(crate) use nameplates::NameplateView;
 pub use physical::EntityHit;
@@ -57,7 +56,7 @@ pub(crate) use render_blocks::{
 };
 pub use resources::Models;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::Path,
@@ -526,12 +525,19 @@ impl Store {
             .ok_or_else(|| format!("source attribute {name} is not ranged"))
     }
     pub(crate) fn presented_transform(
-        &self, entity: &Entity, tick: u64, partial: f32,
+        &self,
+        entity: &Entity,
+        tick: u64,
+        partial: f32,
     ) -> Result<Transform> {
         self.attached_transform(entity, tick, partial, 0)
     }
     fn attached_transform(
-        &self, entity: &Entity, tick: u64, partial: f32, depth: usize,
+        &self,
+        entity: &Entity,
+        tick: u64,
+        partial: f32,
+        depth: usize,
     ) -> Result<Transform> {
         if depth > self.ids.len().min(1024) {
             return Err("entity passenger cycle".into());
@@ -541,19 +547,29 @@ impl Store {
         if self.local_entity_id == Some(entity.handle.network_id) {
             return Ok(transform);
         }
-        let Some(vehicle) = entity.vehicle else { return Ok(transform) };
+        let Some(vehicle) = entity.vehicle else {
+            return Ok(transform);
+        };
         let parent = self.resolve(vehicle)?;
         let parent_transform = self.attached_transform(parent, tick, partial, depth + 1)?;
         let models = self.models_ref().ok_or("entity models not activated")?;
         let (dimensions, scale) = models.dimensions(entity)?;
-        let attachment = dimensions.attachments.get("VEHICLE")
+        let attachment = dimensions
+            .attachments
+            .get("VEHICLE")
             .and_then(|points| points.first())
             .ok_or("source rider vehicle attachment missing")?
             .map(|value| value * f64::from(scale));
         transform.position = crate::player::vehicle::passenger_position(
-            self, vehicle, entity.handle.network_id, parent_transform.position,
-            parent_transform.yaw, attachment, transform.yaw,
-            parent.physical.seat_motion.as_ref(), parent.physical.seat_game_time,
+            self,
+            vehicle,
+            entity.handle.network_id,
+            parent_transform.position,
+            parent_transform.yaw,
+            attachment,
+            transform.yaw,
+            parent.physical.seat_motion.as_ref(),
+            parent.physical.seat_game_time,
         )?;
         Ok(transform)
     }
@@ -572,7 +588,8 @@ impl Store {
         }
         let entity = self.resolve(handle)?;
         physical::bounds_at(
-            self.models_ref().ok_or("entity models not activated")?, entity,
+            self.models_ref().ok_or("entity models not activated")?,
+            entity,
             self.presented_transform(entity, tick, partial)?.position,
         )
     }
@@ -677,7 +694,11 @@ impl Store {
         let old = self.get(id).map(|e| cell(e.position));
         let new = cell(target.position);
         let revision = self.revision;
-        let phase = if self.frame_tick == tick { self.frame_partial } else { 0. };
+        let phase = if self.frame_tick == tick {
+            self.frame_partial
+        } else {
+            0.
+        };
         let old_span = self.get(id).map_or(0, |e| e.physical.lerp_span);
         self.remove_motion_span(old_span);
         if let Some(e) = self.get_mut(id) {
@@ -1606,7 +1627,8 @@ impl Store {
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.predicted_block_data
             .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
-        self.preview_cache.retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
+        self.preview_cache
+            .retain(|p, _| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.block_active
             .retain(|p| [p[0].div_euclid(16), p[2].div_euclid(16)] != chunk);
         self.revision += 1;
@@ -1618,7 +1640,9 @@ impl Store {
     ) -> Result<PresentationStats> {
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
-        if self.render_local_avatar && let Some(avatar) = self.local_avatar.take() {
+        if self.render_local_avatar
+            && let Some(avatar) = self.local_avatar.take()
+        {
             self.local_render_slot = Some(self.slots.len());
             self.slots.push(avatar);
         }

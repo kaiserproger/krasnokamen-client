@@ -85,14 +85,20 @@ pub fn fetch_bytes(client: &Client, url: &str, check: Option<&Check>) -> Result<
         .with_context(|| format!("GET {url}"))?
         .error_for_status()
         .with_context(|| format!("GET {url}"))?;
-    let bytes = response.bytes().with_context(|| format!("reading {url}"))?.to_vec();
+    let bytes = response
+        .bytes()
+        .with_context(|| format!("reading {url}"))?
+        .to_vec();
     if let Some(check) = check {
         let got = match check {
             Check::Sha1(_) => hex(&Sha1::digest(&bytes)),
             Check::Sha256(_) => hex(&Sha256::digest(&bytes)),
         };
         if !got.eq_ignore_ascii_case(expected(check)) {
-            bail!("checksum mismatch for {url}: expected {} got {got}", expected(check));
+            bail!(
+                "checksum mismatch for {url}: expected {} got {got}",
+                expected(check)
+            );
         }
     }
     Ok(bytes)
@@ -157,7 +163,9 @@ fn attempt(client: &Client, job: &Job, rep: &Reporter, counted: &mut u64) -> Res
         let mut buffer = vec![0u8; 128 * 1024];
         loop {
             rep.check_cancel().map_err(|_| UserCancelled)?;
-            let n = response.read(&mut buffer).with_context(|| format!("reading {}", job.url))?;
+            let n = response
+                .read(&mut buffer)
+                .with_context(|| format!("reading {}", job.url))?;
             if n == 0 {
                 break;
             }
@@ -179,7 +187,8 @@ fn attempt(client: &Client, job: &Job, rep: &Reporter, counted: &mut u64) -> Res
             expected(&job.check)
         );
     }
-    fs::rename(&partial, &job.dest).with_context(|| format!("finalizing {}", job.dest.display()))?;
+    fs::rename(&partial, &job.dest)
+        .with_context(|| format!("finalizing {}", job.dest.display()))?;
     Ok(())
 }
 
@@ -196,7 +205,11 @@ pub fn download(client: &Client, job: &Job, rep: &Reporter) -> Result<()> {
                 }
                 // Keep the .partial for resume; only un-count what this try added.
                 rep.sub_done(counted);
-                rep.log(format!("retry {}/3 for {}: {error:#}", try_index + 1, job.url));
+                rep.log(format!(
+                    "retry {}/3 for {}: {error:#}",
+                    try_index + 1,
+                    job.url
+                ));
                 last = Some(error);
                 std::thread::sleep(Duration::from_millis(600 * (try_index + 1) as u64));
             }
@@ -266,7 +279,10 @@ mod tests {
                 } else {
                     ("200 OK", &body[..])
                 };
-                let head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", slice.len());
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    slice.len()
+                );
                 let _ = out.write_all(head.as_bytes());
                 let _ = out.write_all(slice);
             }

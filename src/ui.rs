@@ -18,6 +18,8 @@ mod hud_locator;
 mod hud_math;
 mod hud_view;
 mod interaction;
+#[cfg(test)]
+mod inventory_input_tests;
 pub(crate) mod item_dynamic;
 pub mod items;
 pub mod layout;
@@ -35,8 +37,6 @@ mod sample;
 mod screens;
 pub mod shaping;
 mod state;
-#[cfg(test)]
-mod inventory_input_tests;
 mod statistics;
 pub mod text;
 mod theme;
@@ -52,11 +52,12 @@ pub use hud::{
     ScoreboardState, TeamCollision, TeamParameters, TeamVisibility, TrackedWaypoint, WaypointIcon,
     WaypointId, WaypointPosition, WaypointState,
 };
-pub use packets::{
-    AdvancementState, BossBar, ChatLine, ChatReceipt, ChatVerification, MapDecoration, MapRenderView, MapState,
-};
 #[cfg(test)]
 pub(crate) use packets::MapRenderFixture;
+pub use packets::{
+    AdvancementState, BossBar, ChatLine, ChatReceipt, ChatVerification, MapDecoration,
+    MapRenderView, MapState,
+};
 use serde::{Deserialize, Serialize};
 pub use state::*;
 
@@ -287,7 +288,7 @@ pub enum UiIntent {
 /// Closed shape shared by the MCP catalog and the ordinary typed input parser.
 /// Availability and context fences belong to the UI executor, not this schema.
 pub fn intent_schema() -> serde_json::Value {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::sync::LazyLock;
     static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
         fn object(fields: Value, required: &[&str]) -> Value {

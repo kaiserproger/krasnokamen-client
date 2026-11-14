@@ -23,7 +23,10 @@ pub fn client_binary() -> Result<PathBuf> {
         }
         bail!("KRASNOKAMEN_CLIENT_BIN={} is not a file", custom.display());
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         let beside = dir.join(name);
         if beside.is_file() {
             return Ok(beside);
@@ -34,7 +37,10 @@ pub fn client_binary() -> Result<PathBuf> {
 
 fn pipe(reader: impl std::io::Read + Send + 'static, rep: Reporter) {
     std::thread::spawn(move || {
-        for line in BufReader::new(reader).lines().map_while(std::result::Result::ok) {
+        for line in BufReader::new(reader)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
             rep.log(format!("[client] {line}"));
         }
     });

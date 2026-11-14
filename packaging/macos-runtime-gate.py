@@ -40,7 +40,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
 from mcp_client import Client
 
-MANIFEST = "http://135.106.208.217:8080/static/solaris-content.json"
+MANIFEST = "http://135.106.208.217:8080/static/krasnokamen-content.json"
 TITLE = "net.minecraft.client.gui.screens.TitleScreen"
 OPTIONS = "net.minecraft.client.gui.screens.options.OptionsScreen"
 MAX_LOG = 8 * 1024 * 1024
