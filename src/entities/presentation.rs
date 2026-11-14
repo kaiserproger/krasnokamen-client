@@ -624,7 +624,7 @@ pub fn append(
     let mut frame = std::mem::take(&mut store.frame_entities);
     frame.gather(store, &models, camera, range, tick, partial);
     let local = store.local_render_slot.map(|slot| {
-        super::frame_entities::Entry::of(store, &models, slot, None, camera, range, tick, partial)
+        super::frame_entities::Entry::of(store, &models, slot, super::physical::Place::Seat(None), camera, range, tick, partial)
     });
     for entry in frame.entries.iter().chain(local.as_ref()) {
         let slot = entry.slot;

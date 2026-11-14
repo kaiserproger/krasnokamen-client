@@ -845,9 +845,12 @@ fn seat_attachment_unsupported_parent_rule_is_reported_not_drawn_at_body() {
     Arc::get_mut(store.models.as_mut().unwrap()).unwrap().schemas
         .get_mut("minecraft:armor_stand").unwrap().method_owners
         .insert("getPassengerAttachmentPoint".into(), "authored.unsupported".into());
-    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    // A rider is a candidate where its vehicle is (the seat), not where its body was received.
+    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [9.5, 201.5, -199.5]);
     assert!(geometry.vertices.is_empty());
     assert!(stats.unrendered["minecraft:villager"].starts_with("unknown_source_mount_seat:"));
+    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    assert!(geometry.vertices.is_empty() && stats.unrendered.is_empty());
 }
 #[test]
 fn animation_local_render_slot_is_restored_even_when_extraction_fails() {

@@ -6,6 +6,37 @@ use crate::{
     protocol::{content::Content, world::World, Result},
 };
 
+/// Where `Store::candidate_slots` found a candidate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Place {
+    /// A body in this spatial cell.
+    Bucket([i32; 2]),
+    /// A mounted body: its root vehicle's cell (`None`: a link of its chain is not received,
+    /// so every query considers it).
+    Seat(Option<[i32; 2]>),
+}
+
+/// The cells a candidate query visits (`Store::query_cells`): x and z within `low..=high`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Cells {
+    pub bucket: [[i32; 2]; 2],
+    pub seat: [[i32; 2]; 2],
+}
+
+impl Place {
+    /// Whether a query visiting `cells` yields an entity found here.
+    pub(crate) fn within(self, cells: &Cells) -> bool {
+        let inside = |cell: [i32; 2], [low, high]: [[i32; 2]; 2]| {
+            (low[0]..=high[0]).contains(&cell[0]) && (low[1]..=high[1]).contains(&cell[1])
+        };
+        match self {
+            Self::Bucket(cell) => inside(cell, cells.bucket),
+            Self::Seat(Some(cell)) => inside(cell, cells.seat),
+            Self::Seat(None) => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct EntityHit {
     pub handle: Handle,
@@ -238,22 +269,25 @@ impl Store {
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
         self.candidate_slots(area).map(|(_, slot)| &self.slots[slot])
     }
-    /// `candidates` as slots, each with the spatial cell it was found in (`None`: a mounted
-    /// body, considered wherever it is).
-    pub(crate) fn candidate_slots(
-        &self,
-        area: Bounds,
-    ) -> impl Iterator<Item = (Option<[i32; 2]>, usize)> {
-        let (low, high) = self.query_cells(area);
+    /// `candidates` as slots, each with where it was found.
+    pub(crate) fn candidate_slots(&self, area: Bounds) -> impl Iterator<Item = (Place, usize)> {
+        let cells = self.query_cells(area);
+        let [low, high] = cells.bucket;
         self.spatial
             .range([low[0], i32::MIN]..=[high[0], i32::MAX])
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
             .flat_map(|(cell, ids)| ids.iter().map(move |id| (*cell, *id)))
-            .filter_map(|(cell, id)| Some((Some(cell), *self.ids.get(&id)?)))
+            .filter_map(|(cell, id)| Some((Place::Bucket(cell), *self.ids.get(&id)?)))
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
-            // Mounted bodies may be received far from their seat. Their raw
-            // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| Some((None, *self.ids.get(id)?))))
+            // Mounted bodies may be received far from their seat: their raw body bucket
+            // cannot decide whether the presentation exists, their root vehicle's does.
+            .chain(self.passenger_vehicles.iter().filter_map(move |(id, vehicle)| {
+                let place = Place::Seat(self.root_cell(*vehicle));
+                if !place.within(&cells) {
+                    return None;
+                }
+                Some((place, *self.ids.get(id)?))
+            }))
             .filter(|(_, slot)| {
                 !self.slots[*slot]
                     .source
@@ -261,13 +295,30 @@ impl Store {
                     .is_some_and(|s| s.discarded || s.special.discarded)
             })
     }
-    /// The spatial cells `candidates(area)` visits: x and z each within `low..=high`.
-    pub(crate) fn query_cells(&self, area: Bounds) -> ([i32; 2], [i32; 2]) {
+    /// The spatial cells `candidates(area)` visits for bucketed entities, and for the root
+    /// vehicles of mounted bodies: twice the padding, since a seat lies within its vehicle's
+    /// box and the rider's box reaches past it (both within one padding).
+    pub(crate) fn query_cells(&self, area: Bounds) -> Cells {
         let padding = self.query_padding();
-        (
-            super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
-            super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
-        )
+        let range = |padding: f64| {
+            [
+                super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
+                super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
+            ]
+        };
+        Cells { bucket: range(padding), seat: range(2. * padding) }
+    }
+    /// Spatial cell of the root of `vehicle`'s chain (its raw received position, as bucketed);
+    /// `None` when a link is not received.
+    fn root_cell(&self, mut vehicle: Handle) -> Option<[i32; 2]> {
+        for _ in 0..self.ids.len().min(1024) + 1 {
+            let entity = self.get(vehicle.network_id).filter(|entity| entity.handle == vehicle)?;
+            match entity.vehicle {
+                Some(next) => vehicle = next,
+                None => return Some(super::cell(entity.position)),
+            }
+        }
+        None
     }
     fn root_vehicle(&self, mut id: i32) -> Result<i32> {
         for _ in 0..self.ids.len().min(1024) + 1 {
