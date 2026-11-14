@@ -29,13 +29,26 @@ pub struct Job {
     pub size: u64,
 }
 
+/// A stalled request (headers that never arrive, a body that stops) must fail
+/// while the Cancel button can still act on it. Downloads keep their `.partial`
+/// bytes and resume, so a bounded attempt cannot lose progress.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Failed attempts with no byte of progress before one file is declared dead.
+const IDLE_ATTEMPTS: usize = 3;
+/// Hard cap for a file that keeps progressing; each attempt adds its range.
+const MAX_ATTEMPTS: usize = 64;
+
 pub fn client() -> Result<Client> {
+    client_with_timeout(REQUEST_TIMEOUT)
+}
+
+fn client_with_timeout(timeout: Duration) -> Result<Client> {
     Client::builder()
         .user_agent(concat!("krasnokamen-launcher/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
         // blocking reqwest has no per-read timeout; bound each request instead
         // (an interrupted attempt resumes from its `.partial` file).
-        .timeout(Duration::from_secs(20 * 60))
+        .timeout(timeout)
         .build()
         .context("building HTTP client")
 }
@@ -122,6 +135,9 @@ impl From<Cancelled> for UserCancelled {
 /// One attempt at one file. Bytes already counted into the reporter are tracked
 /// in `counted` so a failed attempt can roll its contribution back.
 fn attempt(client: &Client, job: &Job, rep: &Reporter, counted: &mut u64) -> Result<()> {
+    // A cancel that arrived while the last attempt was in flight must not start
+    // another request.
+    rep.check_cancel().map_err(|_| UserCancelled)?;
     if let Some(parent) = job.dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -144,7 +160,10 @@ fn attempt(client: &Client, job: &Job, rep: &Reporter, counted: &mut u64) -> Res
         if have > 0 {
             request = request.header(header::RANGE, format!("bytes={have}-"));
         }
+        // `send` waits for the response headers: cancel while it is stalled is
+        // only felt here, so re-check before any bytes are consumed.
         let mut response = request.send().with_context(|| format!("GET {}", job.url))?;
+        rep.check_cancel().map_err(|_| UserCancelled)?;
         let status = response.status();
         if status == StatusCode::RANGE_NOT_SATISFIABLE {
             let _ = fs::remove_file(&partial);
@@ -192,10 +211,15 @@ fn attempt(client: &Client, job: &Job, rep: &Reporter, counted: &mut u64) -> Res
     Ok(())
 }
 
-/// Download one file with up to three attempts (resuming partial data).
+/// Download one file, resuming partial data. An attempt that bytes got through
+/// counts as progress (its range resumes), so the bounded request timeout cannot
+/// starve a large file on a slow link; three fruitless attempts end it.
 pub fn download(client: &Client, job: &Job, rep: &Reporter) -> Result<()> {
-    let mut last = None;
-    for try_index in 0..3 {
+    let mut idle = 0;
+    let mut tries = 0;
+    loop {
+        rep.check_cancel().map_err(|_| UserCancelled)?;
+        tries += 1;
         let mut counted = 0;
         match attempt(client, job, rep, &mut counted) {
             Ok(()) => return Ok(()),
@@ -205,17 +229,17 @@ pub fn download(client: &Client, job: &Job, rep: &Reporter) -> Result<()> {
                 }
                 // Keep the .partial for resume; only un-count what this try added.
                 rep.sub_done(counted);
-                rep.log(format!(
-                    "retry {}/3 for {}: {error:#}",
-                    try_index + 1,
-                    job.url
-                ));
-                last = Some(error);
-                std::thread::sleep(Duration::from_millis(600 * (try_index + 1) as u64));
+                idle = if counted > 0 { 0 } else { idle + 1 };
+                rep.log(format!("retry {tries} for {}: {error:#}", job.url));
+                if idle >= IDLE_ATTEMPTS || tries >= MAX_ATTEMPTS {
+                    return Err(error);
+                }
+                rep.check_cancel().map_err(|_| UserCancelled)?;
+                std::thread::sleep(Duration::from_millis(600 * idle.max(1) as u64));
+                rep.check_cancel().map_err(|_| UserCancelled)?;
             }
         }
     }
-    Err(last.unwrap())
 }
 
 /// Run all jobs on `threads` workers; the first failure stops the rest.
@@ -345,6 +369,56 @@ mod tests {
         let error = download(&client().unwrap(), &bad, &Reporter::new(None, false)).unwrap_err();
         assert!(error.to_string().contains("checksum mismatch"), "{error:#}");
         assert!(!dest.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Accepts the request and never answers: the response headers never arrive.
+    fn stall() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                std::thread::sleep(Duration::from_secs(30));
+                drop(stream);
+            }
+        });
+        url
+    }
+
+    /// Regression (HC-5): a headers-stalled request is bounded, not retried for
+    /// twenty minutes.
+    #[test]
+    fn stalled_headers_fail_within_the_bounded_request_timeout() {
+        let url = stall();
+        let client = client_with_timeout(Duration::from_millis(200)).unwrap();
+        let started = std::time::Instant::now();
+        let error = fetch_bytes(&client, &url, None).unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "a stalled send must fail on the request timeout, took {:?}",
+            started.elapsed()
+        );
+        assert!(format!("{error:#}").contains(&url), "{error:#}");
+    }
+
+    /// Regression (HC-5): Cancel ends a stalled attempt instead of waiting for it.
+    #[test]
+    fn cancel_ends_a_stalled_download() {
+        let url = stall();
+        let dir = temp("cancel");
+        let client = client_with_timeout(Duration::from_millis(200)).unwrap();
+        let rep = Reporter::new(None, false);
+        let job = job(url, dir.join("c.bin"), b"payload");
+        let worker = std::thread::spawn({
+            let rep = rep.clone();
+            move || download(&client, &job, &rep)
+        });
+        rep.cancel();
+        let error = worker.join().unwrap().unwrap_err();
+        assert!(
+            error.downcast_ref::<UserCancelled>().is_some(),
+            "a cancelled stalled download must report the cancel, not a retry: {error:#}"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }
