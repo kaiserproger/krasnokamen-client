@@ -445,7 +445,9 @@ mod tests {
             packet.byte(0); // no telemetry
             // 26.3 PositionedAdvancement appends x/y after the complete holder,
             // including when it has no DisplayInfo (1.0, -2.5 as exact IEEE bytes).
-            packet.0.extend_from_slice(&[0x3f, 0x80, 0, 0, 0xc0, 0x20, 0, 0]);
+            packet
+                .0
+                .extend_from_slice(&[0x3f, 0x80, 0, 0, 0xc0, 0x20, 0, 0]);
         }
         packet.var(0); // no removals
         packet.var(1); // progress for one advancement
@@ -581,10 +583,14 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         // A packet that does not show advancements raises nothing.
-        state.apply(133, &mut Reader::new(&packet(0)), &content).unwrap();
+        state
+            .apply(133, &mut Reader::new(&packet(0)), &content)
+            .unwrap();
         assert!(state.advancements["minecraft:story/mine_stone"].done);
         assert!(toasts(&mut state).is_empty());
-        state.apply(133, &mut Reader::new(&packet(1)), &content).unwrap();
+        state
+            .apply(133, &mut Reader::new(&packet(1)), &content)
+            .unwrap();
         // JDK HashMap order of the four keys (java-oracle/Order3.java):
         // smelt_iron, test:quiet (no show_toast flag), upgrade_tools, mine_stone.
         assert_eq!(

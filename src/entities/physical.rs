@@ -2,8 +2,8 @@
 //! not an approximate species list; server tags remain authoritative.
 use super::{Entity, Handle, Metadata, Models, Store};
 use crate::{
-    player::{collision, math, Bounds},
-    protocol::{content::Content, world::World, Result},
+    player::{Bounds, collision, math},
+    protocol::{Result, content::Content, world::World},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -146,7 +146,10 @@ pub(crate) fn bounds(models: &Models, e: &Entity, tick: u64, partial: f32) -> Re
 }
 pub(crate) fn bounds_at(models: &Models, e: &Entity, position: [f64; 3]) -> Result<Bounds> {
     let (dimensions, scale) = models.dimensions(e)?;
-    if matches!(e.type_name.as_str(), "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    if matches!(
+        e.type_name.as_str(),
+        "minecraft:item_frame" | "minecraft:glow_item_frame"
+    ) {
         let face = number(models, e, "DATA_DIRECTION", e.spawn_data);
         let center = super::render_special::item_frame::center(position, face)?;
         let normal = direction(face)?;
@@ -241,7 +244,11 @@ impl Store {
             .filter(|entity| entity.vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
+            .chain(
+                self.passenger_vehicles
+                    .keys()
+                    .filter_map(|id| self.get(*id)),
+            )
             .filter(|entity| {
                 !entity
                     .source
@@ -482,7 +489,12 @@ impl Store {
     /// (`EntitySelector.pushableBy`) among boxes intersecting its own, and `doPush` calls
     /// `player.push(entity)` (`Entity.push(Entity)`), which moves the player away from it.
     /// The caller applies it only while the player itself is pushable.
-    pub(crate) fn local_player_push(&self, player: Bounds, player_id: i32, tick: u64) -> Result<[f64; 2]> {
+    pub(crate) fn local_player_push(
+        &self,
+        player: Bounds,
+        player_id: i32,
+        tick: u64,
+    ) -> Result<[f64; 2]> {
         let models = self.models_ref().ok_or("entity models not activated")?;
         let root = self.root_vehicle(player_id)?;
         let x = (player.min[0] + player.max[0]) / 2.;
@@ -554,7 +566,8 @@ impl Store {
                     );
             let marker = entity.type_name == "minecraft:armor_stand"
                 && number(models, entity, "DATA_CLIENT_FLAGS", 0) & 16 != 0;
-            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area) {
+            if blocks_building && !marker && self.bounds(entity.handle, tick, 0.)?.intersects(area)
+            {
                 return Ok(false);
             }
         }
@@ -744,7 +757,9 @@ impl Store {
             if presenting
                 && e.physical.shown_tick + 1 < tick
                 && self.local_entity_id != Some(*id)
-                && e.source.as_ref().is_some_and(|source| source.living.is_some())
+                && e.source
+                    .as_ref()
+                    .is_some_and(|source| source.living.is_some())
                 && e.passenger_ids.is_empty()
                 && e.vehicle.is_none()
                 && e.physical.dragon.is_none()
@@ -780,15 +795,20 @@ impl Store {
                 .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
-            if matches!(owner(&models, e, "getPassengerAttachmentPoint"),
+            if matches!(
+                owner(&models, e, "getPassengerAttachmentPoint"),
                 "net.minecraft.world.entity.animal.equine.AbstractHorse"
-                    | "net.minecraft.world.entity.monster.Strider")
-            {
+                    | "net.minecraft.world.entity.monster.Strider"
+            ) {
                 let position = e.presented_transform(tick, 0.).position;
                 let standing = number(&models, e, "DATA_ID_FLAGS", 0) & 32 != 0;
                 crate::player::vehicle::SeatMotion::advance(
-                    &mut e.physical.seat_motion, e.handle, position, tick,
-                    e.vehicle.is_some() || e.death_tick.is_some(), standing,
+                    &mut e.physical.seat_motion,
+                    e.handle,
+                    position,
+                    tick,
+                    e.vehicle.is_some() || e.death_tick.is_some(),
+                    standing,
                 );
             }
             e.physical.peek_old = e.physical.peek;
@@ -839,9 +859,13 @@ impl Store {
                 0
             };
             self.remove_motion_span(span);
-            if self.get(*id).is_some_and(|e| e.type_name == "minecraft:falling_block") {
+            if self
+                .get(*id)
+                .is_some_and(|e| e.type_name == "minecraft:falling_block")
+            {
                 let mut colliders = std::mem::take(&mut self.falling_colliders);
-                let result = self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
+                let result =
+                    self.tick_falling_block(*id, &models, world, content, tick, &mut colliders);
                 self.falling_colliders = colliders;
                 result?;
             }
@@ -860,7 +884,10 @@ impl Store {
                     || super::display::is_display(e)
                     || matches!(
                         e.type_name.as_str(),
-                        "minecraft:shulker" | "minecraft:polar_bear" | "minecraft:ender_dragon" | "minecraft:falling_block"
+                        "minecraft:shulker"
+                            | "minecraft:polar_bear"
+                            | "minecraft:ender_dragon"
+                            | "minecraft:falling_block"
                     )
             })
         });
@@ -871,10 +898,17 @@ impl Store {
     /// Vanilla 26.3 FallingBlockEntity ticks gravity, collision and air drag on
     /// the client between the server's position updates.
     fn tick_falling_block(
-        &mut self, id: i32, models: &Models, world: &World, content: &Content,
-        tick: u64, colliders: &mut Vec<Bounds>,
+        &mut self,
+        id: i32,
+        models: &Models,
+        world: &World,
+        content: &Content,
+        tick: u64,
+        colliders: &mut Vec<Bounds>,
     ) -> Result<()> {
-        let Some(entity) = self.get(id) else { return Ok(()) };
+        let Some(entity) = self.get(id) else {
+            return Ok(());
+        };
         let mut velocity = entity.physical.falling_velocity.unwrap_or(entity.velocity);
         if !boolean(models, entity, "DATA_NO_GRAVITY", false) {
             velocity[1] -= 0.04;

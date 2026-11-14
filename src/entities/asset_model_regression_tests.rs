@@ -7,20 +7,25 @@
 //! were inspected in the locally supplied 26.3 atlas; no oracle pixels are embedded.
 //! Native/Java frame comparisons and isolated negative controls belong to Main.
 
-use super::{resources::{self, Rig}, solaris_models};
+use super::{
+    krasnokamen_models,
+    resources::{self, Rig},
+};
 use glam::{Mat4, Vec3};
 
 type Quad = [[f32; 5]; 4];
 
 fn rig(id: &str) -> &'static Rig {
-    solaris_models::authored(&format!("minecraft:{id}#main"))
+    krasnokamen_models::authored(&format!("minecraft:{id}#main"))
         .unwrap_or_else(|| panic!("missing embedded asset {id}"))
 }
 
 fn rest(rig: &Rig) -> Vec<Mat4> {
     let mut transforms = Vec::with_capacity(rig.bones.len());
     for bone in &rig.bones {
-        let parent = bone.parent.map_or(Mat4::IDENTITY, |index| transforms[index]);
+        let parent = bone
+            .parent
+            .map_or(Mat4::IDENTITY, |index| transforms[index]);
         transforms.push(parent * resources::transform(bone.pivot, bone.rotation, bone.scale));
     }
     transforms
@@ -30,28 +35,35 @@ fn bounds(rig: &Rig, transforms: &[Mat4], name: &str) -> (Vec3, Vec3) {
     let index = rig.part_by_name[name];
     let bone = &rig.bones[index];
     assert!(!bone.quads.is_empty(), "{name} must emit geometry");
-    bone.quads.iter().flatten().fold((Vec3::MAX, Vec3::MIN), |(low, high), vertex| {
-        let point = transforms[index].transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
-        (low.min(point), high.max(point))
-    })
+    bone.quads
+        .iter()
+        .flatten()
+        .fold((Vec3::MAX, Vec3::MIN), |(low, high), vertex| {
+            let point =
+                transforms[index].transform_point3(Vec3::new(vertex[0], vertex[1], vertex[2]));
+            (low.min(point), high.max(point))
+        })
 }
 
 fn face<'a>(rig: &'a Rig, name: &str, normal: Vec3) -> &'a Quad {
     let bone = &rig.bones[rig.part_by_name[name]];
-    bone.quads.iter().zip(&bone.normals)
+    bone.quads
+        .iter()
+        .zip(&bone.normals)
         .find(|(_, n)| Vec3::from_array(**n).dot(normal) > 0.99)
         .map(|(quad, _)| quad)
         .unwrap_or_else(|| panic!("{name}: missing face {normal}"))
 }
 
 fn uv_bounds(quad: &Quad) -> [f32; 4] {
-    quad.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |mut span, v| {
-        span[0] = span[0].min(v[3]);
-        span[1] = span[1].min(v[4]);
-        span[2] = span[2].max(v[3]);
-        span[3] = span[3].max(v[4]);
-        span
-    })
+    quad.iter()
+        .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |mut span, v| {
+            span[0] = span[0].min(v[3]);
+            span[1] = span[1].min(v[4]);
+            span[2] = span[2].max(v[3]);
+            span[3] = span[3].max(v[4]);
+            span
+        })
 }
 
 // Direction of increasing texture U in model space. Unlike a mirror flag check,
@@ -74,9 +86,18 @@ fn cow_family_front_and_hind_hooves_have_equal_body_setback() {
             let hind = bounds(rig, &pose, &format!("{side}_hind_leg"));
             let front_inset = front.0.z - body.0.z;
             let hind_inset = body.1.z - hind.1.z;
-            assert!(front_inset > 0., "{id}: front hoof must not project to the chest edge");
-            assert!((front_inset - hind_inset).abs() < 1e-5, "{id}: unequal leg alignment");
-            assert!((front.1.y - hind.1.y).abs() < 1e-5, "{id}: hooves share a floor");
+            assert!(
+                front_inset > 0.,
+                "{id}: front hoof must not project to the chest edge"
+            );
+            assert!(
+                (front_inset - hind_inset).abs() < 1e-5,
+                "{id}: unequal leg alignment"
+            );
+            assert!(
+                (front.1.y - hind.1.y).abs() < 1e-5,
+                "{id}: hooves share a floor"
+            );
         }
     }
 }
@@ -90,10 +111,15 @@ fn glow_squid_tentacle_front_texels_face_the_ring_center() {
         let bone = rig.part_by_name[&name];
         let front = face(rig, &name, -Vec3::Z);
         let p = |v: [f32; 5]| pose[bone].transform_point3(Vec3::new(v[0], v[1], v[2]));
-        let normal = (p(front[1]) - p(front[0])).cross(p(front[2]) - p(front[0])).normalize();
+        let normal = (p(front[1]) - p(front[0]))
+            .cross(p(front[2]) - p(front[0]))
+            .normalize();
         let pivot = pose[bone].transform_point3(Vec3::ZERO);
         let radial = Vec3::new(pivot.x, 0., pivot.z).normalize();
-        assert!(normal.dot(radial) < -0.999, "{name}: texture panel twists around the limb");
+        assert!(
+            normal.dot(radial) < -0.999,
+            "{name}: texture panel twists around the limb"
+        );
     }
 }
 
@@ -102,26 +128,35 @@ fn bed_item_uses_resource_model_halves_without_a_legacy_entity_texture() {
     use crate::protocol::content::{Content, TextureRegion};
     let mut content = Content::test_cube();
     content.item_names.insert(1, "minecraft:red_bed".into());
-    content.insert_test_resource("assets/minecraft/items/red_bed.json", br#"{
+    content.insert_test_resource(
+        "assets/minecraft/items/red_bed.json",
+        br#"{
         "model":{"type":"minecraft:composite","models":[
             {"type":"minecraft:model","model":"minecraft:block/red_bed_head"},
             {"type":"minecraft:model","model":"minecraft:block/red_bed_foot",
              "transformation":{"translation":[0,0,1]}}
         ]}
-    }"#);
+    }"#,
+    );
     // Independent cube fixtures exercise the supplied 26.3 resource graph's
     // normal-model path, not the deleted 26.1.2 special/entity-texture path.
     for (part, layer) in [("head", 5), ("foot", 6)] {
         let texture = format!("minecraft:block/red_bed_{part}_up");
-        content.insert_test_texture(&texture, TextureRegion {
-            layer, uv: [0., 0., 1., 1.], width: 16, height: 16,
-        });
+        content.insert_test_texture(
+            &texture,
+            TextureRegion {
+                layer,
+                uv: [0., 0., 1., 1.],
+                width: 16,
+                height: 16,
+            },
+        );
         let model = serde_json::json!({"textures":{"bed":texture},"elements":[{
-            "from":[0,0,0],"to":[16,9,16],"faces":{
-                "up":{"texture":"#bed"},"down":{"texture":"#bed"},
-                "north":{"texture":"#bed"},"south":{"texture":"#bed"},
-                "east":{"texture":"#bed"},"west":{"texture":"#bed"}
-            }}]});
+        "from":[0,0,0],"to":[16,9,16],"faces":{
+            "up":{"texture":"#bed"},"down":{"texture":"#bed"},
+            "north":{"texture":"#bed"},"south":{"texture":"#bed"},
+            "east":{"texture":"#bed"},"west":{"texture":"#bed"}
+        }}]});
         content.insert_test_resource(
             &format!("assets/minecraft/models/block/red_bed_{part}.json"),
             &serde_json::to_vec(&model).unwrap(),
@@ -134,10 +169,23 @@ fn bed_item_uses_resource_model_halves_without_a_legacy_entity_texture() {
     let model = items.model(&content, &stack, "gui").unwrap();
     assert_eq!(model.quads.len(), 12);
     for layer in [5, 6] {
-        assert_eq!(model.quads.iter().filter(|q| q.texture_layer == layer).count(), 6);
+        assert_eq!(
+            model
+                .quads
+                .iter()
+                .filter(|q| q.texture_layer == layer)
+                .count(),
+            6
+        );
     }
-    let (low, high) = model.quads.iter().flat_map(|q| q.positions).map(|p| p[2])
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+    let (low, high) = model
+        .quads
+        .iter()
+        .flat_map(|q| q.positions)
+        .map(|p| p[2])
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), z| {
+            (lo.min(z), hi.max(z))
+        });
     assert_eq!((low, high), (0., 2.));
 }
 
@@ -149,14 +197,20 @@ fn skeleton_and_creeper_limb_texture_handedness_is_not_interchangeable() {
             let left = face(rig, &format!("left_{limb}"), -Vec3::Z);
             let right = face(rig, &format!("right_{limb}"), -Vec3::Z);
             assert_eq!(uv_bounds(left), uv_bounds(right), "{id}: shared limb atlas");
-            assert!(texture_right(left).x * texture_right(right).x < 0., "{id}: left {limb} texture must reflect");
+            assert!(
+                texture_right(left).x * texture_right(right).x < 0.,
+                "{id}: left {limb} texture must reflect"
+            );
         }
     }
     let rig = rig("creeper");
     for end in ["front", "hind"] {
         let left = face(rig, &format!("left_{end}_leg"), -Vec3::Z);
         let right = face(rig, &format!("right_{end}_leg"), -Vec3::Z);
-        assert!(texture_right(left).x * texture_right(right).x > 0., "creeper legs repeat, not reflect");
+        assert!(
+            texture_right(left).x * texture_right(right).x > 0.,
+            "creeper legs repeat, not reflect"
+        );
     }
 }
 
@@ -168,7 +222,10 @@ fn standing_and_wall_banner_flags_retain_full_height() {
         let width = max.x - min.x;
         let height = max.y - min.y;
         assert!(width > 0., "{id}: flag must emit geometry");
-        assert!((height - 2. * width).abs() < 1e-5, "{id}: flag is truncated");
+        assert!(
+            (height - 2. * width).abs() < 1e-5,
+            "{id}: flag is truncated"
+        );
     }
 }
 
@@ -182,7 +239,10 @@ fn standing_banner_flag_covers_the_crossbar_from_the_front() {
     // projecting beyond its top or sides. Model-space +Y points down.
     assert_eq!(flag.0.y, bar.0.y, "flag and crossbar top");
     assert_eq!((flag.0.x, flag.1.x), (bar.0.x, bar.1.x), "crossbar width");
-    assert!(flag.1.z < bar.0.z, "crossbar projects in front of the cloth");
+    assert!(
+        flag.1.z < bar.0.z,
+        "crossbar projects in front of the cloth"
+    );
 }
 
 #[test]
@@ -193,9 +253,19 @@ fn double_chest_lid_top_samples_the_outer_texture_island() {
         // islands; a plain box unwrap swaps them, darkening the visible lid.
         let top = uv_bounds(face(rig, "lid", -Vec3::Y));
         let bottom = uv_bounds(face(rig, "lid", Vec3::Y));
-        assert_eq!(top[0], bottom[2], "{id}: lid top must follow underside in the atlas");
-        assert_eq!((top[1], top[3]), (bottom[1], bottom[3]), "{id}: lid island height");
-        assert!(top[2] > top[0] && bottom[2] > bottom[0], "{id}: nonempty islands");
+        assert_eq!(
+            top[0], bottom[2],
+            "{id}: lid top must follow underside in the atlas"
+        );
+        assert_eq!(
+            (top[1], top[3]),
+            (bottom[1], bottom[3]),
+            "{id}: lid island height"
+        );
+        assert!(
+            top[2] > top[0] && bottom[2] > bottom[0],
+            "{id}: nonempty islands"
+        );
     }
 }
 
@@ -207,11 +277,17 @@ fn shulker_base_uses_lower_shell_and_spiral_floor_not_lid_texels() {
             let base = uv_bounds(face(rig, "base", normal));
             let lid = uv_bounds(face(rig, "lid", normal));
             assert!(base[1] > lid[3], "{id}: base side samples lid rows");
-            assert!(base[1] >= 44. / 64. && base[3] <= 52. / 64., "{id}: base skirt island");
+            assert!(
+                base[1] >= 44. / 64. && base[3] <= 52. / 64.,
+                "{id}: base skirt island"
+            );
         }
         let floor = uv_bounds(face(rig, "base", Vec3::Y));
         assert!(floor[0] >= 32. / 64. && floor[2] <= 48. / 64.);
-        assert!(floor[1] >= 28. / 64. && floor[3] <= 44. / 64., "{id}: bottom spiral island");
+        assert!(
+            floor[1] >= 28. / 64. && floor[3] <= 44. / 64.,
+            "{id}: bottom spiral island"
+        );
         assert!(floor[2] > floor[0] && floor[3] > floor[1]);
     }
 }
@@ -241,11 +317,20 @@ fn closed_shulker_shell_encloses_its_head_and_has_matching_sides() {
     for axis in [0, 2] {
         assert!((base.0[axis] - lid.0[axis]).abs() < 1e-5);
         assert!((base.1[axis] - lid.1[axis]).abs() < 1e-5);
-        assert!(head.0[axis] > base.0[axis] && head.1[axis] < base.1[axis], "head protrudes through closed shell");
+        assert!(
+            head.0[axis] > base.0[axis] && head.1[axis] < base.1[axis],
+            "head protrudes through closed shell"
+        );
     }
     assert!(head.0.y > lid.0.y && head.1.y < base.1.y);
-    assert!(lid.1.y > base.0.y, "lid skirt must cover the base's upper fingers");
-    assert!((base.1.y - lid.0.y - (base.1.x - base.0.x)).abs() < 1e-5, "closed shell is cubic");
+    assert!(
+        lid.1.y > base.0.y,
+        "lid skirt must cover the base's upper fingers"
+    );
+    assert!(
+        (base.1.y - lid.0.y - (base.1.x - base.0.x)).abs() < 1e-5,
+        "closed shell is cubic"
+    );
 }
 
 #[test]
@@ -256,24 +341,39 @@ fn tropical_fish_both_shapes_have_two_sided_fins_and_a_trailing_tail() {
         let body = bounds(rig, &pose, "body");
         let right = bounds(rig, &pose, "right_fin");
         let left = bounds(rig, &pose, "left_fin");
-        assert!(right.0.x < body.0.x && left.1.x > body.1.x, "{id}: missing side silhouette");
+        assert!(
+            right.0.x < body.0.x && left.1.x > body.1.x,
+            "{id}: missing side silhouette"
+        );
         assert!((right.0.x + left.1.x).abs() < 1e-5, "{id}: unbalanced fins");
         for name in ["left_fin", "right_fin"] {
             let front = uv_bounds(face(rig, name, -Vec3::Z));
             let back = uv_bounds(face(rig, name, Vec3::Z));
             assert_eq!(front, back, "{id}: fin disappears from one side");
             assert!(front[0] >= 2. / 32. && front[2] <= 4. / 32.);
-            assert!(front[1] >= 12. / 32. && front[3] <= 18. / 32., "{id}: side fin atlas, not body pixels");
+            assert!(
+                front[1] >= 12. / 32. && front[3] <= 18. / 32.,
+                "{id}: side fin atlas, not body pixels"
+            );
         }
         let tail = bounds(rig, &pose, "tail");
-        assert!(tail.0.z >= body.1.z && tail.1.z > body.1.z, "{id}: tail must trail the body");
-        assert!(tail.1.x - tail.0.x < (body.1.x - body.0.x) * 0.1, "{id}: tail is a fin, not a box");
+        assert!(
+            tail.0.z >= body.1.z && tail.1.z > body.1.z,
+            "{id}: tail must trail the body"
+        );
+        assert!(
+            tail.1.x - tail.0.x < (body.1.x - body.0.x) * 0.1,
+            "{id}: tail is a fin, not a box"
+        );
     }
     let small = rig("tropical_fish");
     let large = rig("tropical_fish_large");
     let a = bounds(small, &rest(small), "body");
     let b = bounds(large, &rest(large), "body");
-    assert!(b.1.y - b.0.y > (a.1.y - a.0.y) * 1.5, "large fish must not reuse the small silhouette");
+    assert!(
+        b.1.y - b.0.y > (a.1.y - a.0.y) * 1.5,
+        "large fish must not reuse the small silhouette"
+    );
 }
 
 #[test]
@@ -284,26 +384,47 @@ fn pufferfish_inflation_changes_body_volume_and_exposes_spines() {
         let pose = rest(rig);
         let body = bounds(rig, &pose, "body");
         let size = body.1 - body.0;
-        assert!(size.cmpgt(previous).all(), "{id}: inflation must grow all three axes");
+        assert!(
+            size.cmpgt(previous).all(),
+            "{id}: inflation must grow all three axes"
+        );
         previous = size;
         assert!(bounds(rig, &pose, "right_fin").0.x < body.0.x);
         assert!(bounds(rig, &pose, "left_fin").1.x > body.1.x);
         if id == "pufferfish_small" {
             for eye in ["left_eye", "right_eye"] {
-                assert!(bounds(rig, &pose, eye).0.y < body.0.y, "deflated eyes rise above the body");
+                assert!(
+                    bounds(rig, &pose, eye).0.y < body.0.y,
+                    "deflated eyes rise above the body"
+                );
             }
             continue;
         }
         for (name, axis, positive) in [
-            ("top_front_spines", 1, false), ("bottom_front_spines", 1, true),
-            ("right_front_spines", 0, false), ("left_front_spines", 0, true),
+            ("top_front_spines", 1, false),
+            ("bottom_front_spines", 1, true),
+            ("right_front_spines", 0, false),
+            ("left_front_spines", 0, true),
         ] {
             let spine = bounds(rig, &pose, name);
-            let protrusion = if positive { spine.1[axis] - body.1[axis] } else { body.0[axis] - spine.0[axis] };
-            assert!(protrusion > size[axis] * 0.05, "{id}: {name} hidden inside body");
-            assert_eq!(uv_bounds(face(rig, name, -Vec3::Z)), uv_bounds(face(rig, name, Vec3::Z)));
+            let protrusion = if positive {
+                spine.1[axis] - body.1[axis]
+            } else {
+                body.0[axis] - spine.0[axis]
+            };
+            assert!(
+                protrusion > size[axis] * 0.05,
+                "{id}: {name} hidden inside body"
+            );
+            assert_eq!(
+                uv_bounds(face(rig, name, -Vec3::Z)),
+                uv_bounds(face(rig, name, Vec3::Z))
+            );
         }
-        assert!(!rig.part_by_name.contains_key("tail_base"), "inflated silhouette must not grow the old rear slab");
+        assert!(
+            !rig.part_by_name.contains_key("tail_base"),
+            "inflated silhouette must not grow the old rear slab"
+        );
     }
 }
 
@@ -314,13 +435,31 @@ fn ghast_bodies_are_cubic_and_sample_the_complete_face() {
         let pose = rest(rig);
         let body = bounds(rig, &pose, "body");
         let size = body.1 - body.0;
-        assert!(size.x > min_width && size.x < min_width + 0.2, "{id}: world-scale silhouette");
-        assert!((size.x - size.y).abs() < 1e-5 && (size.x - size.z).abs() < 1e-5, "{id}: slab instead of cube");
+        assert!(
+            size.x > min_width && size.x < min_width + 0.2,
+            "{id}: world-scale silhouette"
+        );
+        assert!(
+            (size.x - size.y).abs() < 1e-5 && (size.x - size.z).abs() < 1e-5,
+            "{id}: slab instead of cube"
+        );
         let face = uv_bounds(face(rig, "body", -Vec3::Z));
-        assert_eq!(face, [32. / 128., 32. / texture_height, 64. / 128., 64. / texture_height], "{id}: complete eyes/mouth face island");
+        assert_eq!(
+            face,
+            [
+                32. / 128.,
+                32. / texture_height,
+                64. / 128.,
+                64. / texture_height
+            ],
+            "{id}: complete eyes/mouth face island"
+        );
         for index in 0..9 {
             let tentacle = bounds(rig, &pose, &format!("tentacle_{index}"));
-            assert!(tentacle.0.y < body.1.y && tentacle.1.y > body.1.y, "{id}: disconnected or buried tentacle");
+            assert!(
+                tentacle.0.y < body.1.y && tentacle.1.y > body.1.y,
+                "{id}: disconnected or buried tentacle"
+            );
             assert!(tentacle.0.x >= body.0.x && tentacle.1.x <= body.1.x);
             assert!(tentacle.0.z >= body.0.z && tentacle.1.z <= body.1.z);
         }
@@ -329,7 +468,13 @@ fn ghast_bodies_are_cubic_and_sample_the_complete_face() {
 
 #[test]
 fn corrected_fish_assets_keep_all_emitted_uvs_inside_the_atlas() {
-    for id in ["pufferfish", "pufferfish_small", "pufferfish_medium", "tropical_fish", "tropical_fish_large"] {
+    for id in [
+        "pufferfish",
+        "pufferfish_small",
+        "pufferfish_medium",
+        "tropical_fish",
+        "tropical_fish_large",
+    ] {
         let rig = rig(id);
         let mut visible_faces = 0;
         for bone in &rig.bones {
@@ -340,8 +485,15 @@ fn corrected_fish_assets_keep_all_emitted_uvs_inside_the_atlas() {
                 }
                 visible_faces += 1;
                 for vertex in quad {
-                    assert!(vertex.iter().all(|v| v.is_finite()), "{id}: nonfinite vertex");
-                    assert!((0. ..=1.).contains(&vertex[3]) && (0. ..=1.).contains(&vertex[4]), "{id}/{}: out-of-atlas texel", bone.name);
+                    assert!(
+                        vertex.iter().all(|v| v.is_finite()),
+                        "{id}: nonfinite vertex"
+                    );
+                    assert!(
+                        (0. ..=1.).contains(&vertex[3]) && (0. ..=1.).contains(&vertex[4]),
+                        "{id}/{}: out-of-atlas texel",
+                        bone.name
+                    );
                 }
             }
         }
@@ -363,11 +515,20 @@ fn frog_tongue_extends_from_the_mouth_not_from_the_look_pivot() {
     let down = uv_bounds(face(rig, "tongue", Vec3::Y));
     assert_eq!(up, down, "tongue must be visible from above and below");
     assert!(up[0] >= 24. / 48. && up[2] <= 28. / 48.);
-    assert!(up[1] >= 13. / 48. && up[3] <= 20. / 48., "pink tongue island");
+    assert!(
+        up[1] >= 13. / 48. && up[3] <= 20. / 48.,
+        "pink tongue island"
+    );
     let throat = bounds(rig, &pose, "croaking_body");
     let body = bounds(rig, &pose, "body");
-    assert!(throat.0.z < body.0.z && throat.1.z <= body.1.z, "throat expands below the mouth");
-    assert_eq!(rig.bones[rig.part_by_name["croaking_body"]].parent, Some(rig.part_by_name["body"]));
+    assert!(
+        throat.0.z < body.0.z && throat.1.z <= body.1.z,
+        "throat expands below the mouth"
+    );
+    assert_eq!(
+        rig.bones[rig.part_by_name["croaking_body"]].parent,
+        Some(rig.part_by_name["body"])
+    );
 }
 
 #[test]
@@ -381,15 +542,24 @@ fn armadillo_roll_shells_are_closed_grounded_and_baby_sized() {
         let (low, high) = bounds(rig, &pose, "cube");
         let size = high - low;
         assert!((size.x - size.y).abs() < 1e-5 && (size.x - size.z).abs() < 1e-5);
-        assert!((high.y - 1.5).abs() < 1e-5, "{id}: rolling shell must rest on the feet plane");
+        assert!(
+            (high.y - 1.5).abs() < 1e-5,
+            "{id}: rolling shell must rest on the feet plane"
+        );
         for normal in [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z] {
             let span = uv_bounds(face(rig, "cube", normal));
-            assert!(span[2] > span[0] && span[3] > span[1], "{id}: missing shell face");
+            assert!(
+                span[2] > span[0] && span[3] > span[1],
+                "{id}: missing shell face"
+            );
         }
         if id == "armadillo" {
             adult_width = size.x;
         } else {
-            assert!(size.x < adult_width * 0.75, "baby must not reuse adult shell scale");
+            assert!(
+                size.x < adult_width * 0.75,
+                "baby must not reuse adult shell scale"
+            );
         }
     }
 }
@@ -408,9 +578,15 @@ fn species_layer_scales_preserve_the_feet_and_distinguish_related_mobs() {
         let (low, high) = bounds(rig, &pose, "body");
         let (reference_low, reference_high) = bounds(reference, &reference_pose, "body");
         let expected = (reference_high - reference_low) * scale;
-        assert!((high - low - expected).abs().max_element() < 1e-5, "{id}: lost species scale");
+        assert!(
+            (high - low - expected).abs().max_element() < 1e-5,
+            "{id}: lost species scale"
+        );
         let feet = pose[rig.part_by_name["layer_root"]].transform_point3(Vec3::new(0., 1.5, 0.));
-        assert!((feet - Vec3::new(0., 1.5, 0.)).length() < 1e-5, "{id}: scaling moves the floor");
+        assert!(
+            (feet - Vec3::new(0., 1.5, 0.)).length() < 1e-5,
+            "{id}: scaling moves the floor"
+        );
     }
 }
 
@@ -421,20 +597,34 @@ fn warden_has_long_arms_and_a_head_above_its_full_height_torso() {
     let body = bounds(rig, &pose, "body");
     let head_index = rig.part_by_name["head"];
     let head_front = face(rig, "head", -Vec3::Z);
-    let head_bottom = head_front.iter().map(|v| {
-        pose[head_index].transform_point3(Vec3::new(v[0], v[1], v[2])).y
-    }).fold(f32::MIN, f32::max);
+    let head_bottom = head_front
+        .iter()
+        .map(|v| {
+            pose[head_index]
+                .transform_point3(Vec3::new(v[0], v[1], v[2]))
+                .y
+        })
+        .fold(f32::MIN, f32::max);
     assert!(head_bottom < 0. && (head_bottom - body.0.y).abs() < 1e-5);
     for side in ["right", "left"] {
         let arm = bounds(rig, &pose, &format!("{side}_arm"));
         let leg = bounds(rig, &pose, &format!("{side}_leg"));
-        assert!(arm.1.y - arm.0.y > body.1.y - body.0.y, "warden arms exceed torso height");
-        assert!(arm.1.y > leg.0.y && arm.1.y < leg.1.y, "hands reach below the hips, above feet");
+        assert!(
+            arm.1.y - arm.0.y > body.1.y - body.0.y,
+            "warden arms exceed torso height"
+        );
+        assert!(
+            arm.1.y > leg.0.y && arm.1.y < leg.1.y,
+            "hands reach below the hips, above feet"
+        );
         assert!((leg.1.y - 1.5).abs() < 1e-5);
     }
     let face_uv = uv_bounds(head_front);
     assert!(face_uv[0] >= 10. / 128. && face_uv[2] <= 26. / 128.);
-    assert!(face_uv[1] >= 42. / 128. && face_uv[3] <= 58. / 128., "face must not use chest texels");
+    assert!(
+        face_uv[1] >= 42. / 128. && face_uv[3] <= 58. / 128.,
+        "face must not use chest texels"
+    );
 }
 
 #[test]
@@ -443,13 +633,22 @@ fn polar_bear_has_a_long_two_section_torso_and_grounded_paws() {
     let pose = rest(rig);
     let body = bounds(rig, &pose, "body");
     let head = bounds(rig, &pose, "head");
-    assert!(body.1.z - body.0.z > 1.8, "adult bear must not have the short cub-like torso");
-    assert!(head.0.z < body.0.z && head.1.z >= body.0.z, "head attaches at the front of the torso");
+    assert!(
+        body.1.z - body.0.z > 1.8,
+        "adult bear must not have the short cub-like torso"
+    );
+    assert!(
+        head.0.z < body.0.z && head.1.z >= body.0.z,
+        "head attaches at the front of the torso"
+    );
     for side in ["right", "left"] {
         for end in ["front", "hind"] {
             let paw = bounds(rig, &pose, &format!("{side}_{end}_leg"));
             assert!((paw.1.y - 1.5).abs() < 1e-5);
-            assert!(paw.1.z - paw.0.z > paw.1.x - paw.0.x, "long paws, not narrow posts");
+            assert!(
+                paw.1.z - paw.0.z > paw.1.x - paw.0.x,
+                "long paws, not narrow posts"
+            );
         }
     }
 }
@@ -464,13 +663,36 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
     let transforms = rest(horse);
     let (low, high) = bounds(horse, &transforms, "body");
     let size = (high - low) * 16.;
-    assert!((size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3, "body {size}");
-    assert!((low.y * 16. - 2.95).abs() < 1e-3, "back height {}", low.y * 16.);
-    for leg in ["left_front_leg", "right_front_leg", "left_hind_leg", "right_hind_leg"] {
+    assert!(
+        (size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3,
+        "body {size}"
+    );
+    assert!(
+        (low.y * 16. - 2.95).abs() < 1e-3,
+        "back height {}",
+        low.y * 16.
+    );
+    for leg in [
+        "left_front_leg",
+        "right_front_leg",
+        "left_hind_leg",
+        "right_hind_leg",
+    ] {
         let (leg_low, leg_high) = bounds(horse, &transforms, leg);
-        assert!((leg_high.y * 16. - 23.99).abs() < 1e-3, "{leg} reaches the ground");
-        assert!(((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3, "{leg} length");
+        assert!(
+            (leg_high.y * 16. - 23.99).abs() < 1e-3,
+            "{leg} reaches the ground"
+        );
+        assert!(
+            ((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3,
+            "{leg} length"
+        );
     }
     let (head_low, _) = bounds(horse, &transforms, "head");
-    assert!(head_low.z < low.z - 6. / 16., "head forward of the chest: {} vs {}", head_low.z, low.z);
+    assert!(
+        head_low.z < low.z - 6. / 16.,
+        "head forward of the chest: {} vs {}",
+        head_low.z,
+        low.z
+    );
 }

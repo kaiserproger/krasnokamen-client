@@ -34,7 +34,7 @@ class BattleItemBoundsTest(unittest.TestCase):
             with patch.object(generator.Weapon, "model", unbounded_model):
                 before = make()
             after = make()
-            saved = json.loads((PACK / f"assets/solaris_battle/models/item/iron_{name}.json").read_text())
+            saved = json.loads((PACK / f"assets/krasnokamen_battle/models/item/iron_{name}.json").read_text())
             self.assertEqual(after, saved, name + ": regenerate the checked-in model")
             self.assertEqual(len(before["elements"]), len(after["elements"]))
             for context, transform in before["display"].items():
