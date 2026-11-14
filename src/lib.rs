@@ -838,7 +838,21 @@ impl App {
                         continue;
                     }
                     match minecraft::start(&mut self.session, name, arguments) {
-                        Ok(minecraft::Outcome::Complete(value)) => {
+                        Ok(minecraft::Outcome::Complete(mut value)) => {
+                            // The renderer owns data.render in the shared observation; mirror
+                            // it into minecraft_observe so F3/drawn-index assertions read it.
+                            if name == "minecraft_observe" && value.get("render").is_none() {
+                                let render = self
+                                    .shared
+                                    .observation
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .data["render"]
+                                .clone();
+                                if !render.is_null() {
+                                    value["render"] = render;
+                                }
+                            }
                             let _ = request.reply.send(Ok(value));
                         }
                         Ok(minecraft::Outcome::Pending(task)) => {
