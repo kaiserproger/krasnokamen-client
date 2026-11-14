@@ -455,7 +455,6 @@ pub struct InventoryStore {
     received_cursor: Option<Stack>,
     drag: actions::QuickCraft,
     enabled_features: Arc<BTreeSet<String>>,
-    creative_screen: bool,
     creative_inventory_tab: bool,
     player_slot_identities: [u64; 48],
     player_auxiliary: [Option<Stack>; 2],
@@ -495,7 +494,6 @@ impl Default for InventoryStore {
             received_cursor: None,
             drag: actions::QuickCraft::default(),
             enabled_features: Arc::new(BTreeSet::new()),
-            creative_screen: false,
             creative_inventory_tab: false,
             player_slot_identities: [0; 48],
             player_auxiliary: [Some(Stack::default()), Some(Stack::default())],
@@ -518,8 +516,9 @@ impl InventoryStore {
     pub fn set_enabled_features(&mut self, features: Arc<BTreeSet<String>>) {
         self.enabled_features = features;
     }
-    pub fn set_creative_screen(&mut self, open: bool) {
-        self.creative_screen = open;
+    /// The player's open menu uses creative set-slot packets, never container clicks.
+    fn creative_screen(&self) -> bool {
+        self.screen_open && self.active.is_none() && self.game_mode == 1
     }
     pub fn set_creative_inventory_tab(&mut self, inventory_tab: bool) {
         self.creative_inventory_tab = inventory_tab;
@@ -1293,5 +1292,73 @@ mod tests {
             assert_eq!(store.cursor.as_ref().unwrap().count, expected);
             assert_eq!(store.menu().slots[slot].as_ref().unwrap().count, left);
         }
+    }
+
+    #[test]
+    fn creative_player_menu_moves_and_drops_use_set_slot_without_ui_side_state() {
+        use crate::protocol::packet_ids::play::serverbound as sb;
+        use crate::ui::{ClickMode, UiIntent};
+        let mut content = Content::test_cube();
+        content.item_names.insert(1, "test:cube".into());
+        content.insert_test_item_components(
+            1,
+            BTreeMap::from([("minecraft:max_stack_size".into(), json!(64))]),
+        );
+        let mut inventory = InventoryStore {
+            game_mode: 1,
+            cursor: Some(Stack::default()),
+            ..InventoryStore::default()
+        };
+        inventory.player.slots.fill(Some(Stack::default()));
+        inventory.player.slots[36] = Some(creative_stack(&content, 1, 3).unwrap());
+        inventory.open_inventory().unwrap();
+        for (slot, expected) in [(36, vec![0, 36, 0]), (37, vec![0, 37, 3, 1, 0, 0])] {
+            let packets = inventory
+                .execute(
+                    &UiIntent::ClickSlot {
+                        context: inventory.context(),
+                        slot,
+                        button: 0,
+                        mode: ClickMode::Pickup,
+                    },
+                    &content,
+                )
+                .unwrap();
+            assert_eq!(packets.len(), 1);
+            assert_eq!(packets[0].id, sb::SET_CREATIVE_MODE_SLOT);
+            assert_eq!(packets[0].payload.0, expected);
+        }
+        assert!(inventory.cursor.as_ref().unwrap().empty());
+        let dropped = inventory
+            .execute(
+                &UiIntent::ClickSlot {
+                    context: inventory.context(),
+                    slot: 37,
+                    button: 0,
+                    mode: ClickMode::Throw,
+                },
+                &content,
+            )
+            .unwrap();
+        assert_eq!(dropped.len(), 2);
+        assert!(dropped.iter().all(|p| p.id == sb::SET_CREATIVE_MODE_SLOT));
+        assert_eq!(dropped[0].payload.0, [255, 255, 1, 1, 0, 0]);
+        assert_eq!(dropped[1].payload.0, [0, 37, 2, 1, 0, 0]);
+        inventory.close();
+        inventory.open_inventory().unwrap();
+        assert_eq!(inventory.player.slots[37].as_ref().unwrap().count, 2);
+        inventory.game_mode = 0;
+        let packets = inventory
+            .execute(
+                &UiIntent::ClickSlot {
+                    context: inventory.context(),
+                    slot: 37,
+                    button: 0,
+                    mode: ClickMode::Pickup,
+                },
+                &content,
+            )
+            .unwrap();
+        assert!(packets.iter().all(|p| p.id != sb::SET_CREATIVE_MODE_SLOT));
     }
 }

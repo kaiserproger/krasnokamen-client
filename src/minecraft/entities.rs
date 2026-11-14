@@ -255,6 +255,15 @@ fn list_entity_value(session: &Session, entity: &Entity) -> Result<Value> {
             "cached_rig_error": rig_error
         }),
     );
+    if entity.type_name == "minecraft:falling_block" {
+        value["predicted_position"] = json!(entity.transform.position);
+        value["presented_position"] = json!(
+            entity
+                .presented_transform(session.entities.frame_tick, session.entities.frame_partial)
+                .position
+        );
+        value["presentation_tick"] = json!(session.world_tick);
+    }
     Ok(value)
 }
 fn extend(object: &mut serde_json::Map<String, Value>, value: Value) {

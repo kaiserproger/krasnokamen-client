@@ -1113,6 +1113,8 @@ impl Store {
                 if let Some(e) = self.get(target) {
                     let received_position = e.position;
                     let mut transform = e.transform;
+                    // Relative packets use the received base, never locally simulated motion.
+                    transform.position = e.position;
                     if let Some(d) = delta {
                         // Position deltas use the last received position, not
                         // a falling block's locally simulated transform.
