@@ -137,7 +137,10 @@ pub(super) enum Outcome {
     TryEmptyHand,
     /// The wire action was sent, but no local outcome could be predicted.
     ServerAuthoritative,
-    Success { swing: bool, item_interaction: bool },
+    Success {
+        swing: bool,
+        item_interaction: bool,
+    },
 }
 impl Outcome {
     pub(super) const CLIENT: Self = Self::Success {
@@ -1372,9 +1375,14 @@ impl Player {
     }
     pub(crate) fn crossbow_charge_ticks(&mut self, item: &Stack, content: &Content) -> Result<f32> {
         let mut seconds = 1.25;
-        if let Some(values) = item.component("minecraft:enchantments").and_then(Value::as_object) {
+        if let Some(values) = item
+            .component("minecraft:enchantments")
+            .and_then(Value::as_object)
+        {
             for (name, level) in values {
-                let level = level.as_i64().and_then(|value| i32::try_from(value).ok())
+                let level = level
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
                     .ok_or("invalid enchantment level")?;
                 if let Some(effect) = enchantment(content, name)?
                     .get("effects")
