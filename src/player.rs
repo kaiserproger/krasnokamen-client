@@ -31,6 +31,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 pub(crate) use use_on::EntityUseState;
+pub(crate) use use_on::{crossbow_charge_ticks, sample_gaussian, EffectSample};
 pub use use_on::{UiTrigger, UsePrediction};
 pub(crate) use visual::{camera_distance, FirstPersonFrame};
 
@@ -387,6 +388,12 @@ impl Default for Player {
     }
 }
 impl Player {
+    /// Presentation borrows the already selected action timing, including enchantment effects.
+    pub(crate) fn visual_item_use(&self) -> Option<(u8, f32, f32)> {
+        self.using.as_ref().filter(|u| u.remaining > 0).map(|u| {
+            (u.hand, (u.duration - u.remaining) as f32, u.crossbow_charge_ticks)
+        })
+    }
     pub fn main_arm_right(&self) -> bool {
         self.main_arm_right
     }
@@ -957,6 +964,7 @@ impl Player {
         resources: InteractionWorld<'_>,
         keys: &BTreeSet<String>,
         tick: u64,
+        world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
         let InteractionWorld { world, content, inventory, entities } = resources;
@@ -973,7 +981,7 @@ impl Player {
         self.sync_input(input, out);
         let previous_position = self.position;
         self.movement_blocked = None;
-        if let Err(e) = self.predict(world, content, inventory, entities, input, tick, out) {
+        if let Err(e) = self.predict(world, content, inventory, entities, input, tick, world_tick, out) {
             self.movement_blocked = Some(e);
             self.velocity = [0.; 3];
         }
@@ -981,7 +989,7 @@ impl Player {
         let owner = item_id.and_then(|id| content.item_use_owner(id, false).ok())
             .unwrap_or("interaction tick");
         if self.local_prediction(item_id, owner, |player| {
-            player.interaction_tick(resources, input, tick, out)
+            player.interaction_tick(resources, input, tick, world_tick, out)
         }).is_none() {
             self.stop_using(out)?;
             self.pending_use_release = None;

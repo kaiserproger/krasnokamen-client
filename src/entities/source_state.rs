@@ -389,6 +389,7 @@ pub(crate) fn tick(
                 && entity
                     .equipment_value(if flags & 2 != 0 { 1 } else { 0 })
                     .is_some_and(|stack| stack.component("minecraft:blocks_attacks").is_some());
+            living.prepare_item_use(models, entity, content, source.age)?;
             living.tick(
                 models,
                 entity,

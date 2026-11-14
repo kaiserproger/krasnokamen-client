@@ -80,7 +80,7 @@ pub(super) fn execute(
             | "minecraft_wait_for_play"
             | "minecraft_wait_for_state_change"
     );
-    let fence = if readonly {
+    let writer = if readonly {
         None
     } else {
         if observation
@@ -203,7 +203,7 @@ pub(super) fn execute(
             reply,
             expected_connection_epoch: connection,
             expected_dimension_epoch: dimension,
-            automation_fence: fence,
+            automation_fence: writer.as_ref().map(|writer| writer.fence.clone()),
             cancelled: Some(cancelled.clone()),
         })
         .map_err(|_| "command_queue_full")?;

@@ -842,7 +842,6 @@ mod tests {
                 ]
             }
         });
-        let mut player = crate::player::Player::new();
         let mut stack = Stack::default();
         for (level, ticks, elapsed, using_item, expected) in [
             (0, 25., 14., true, "test:pull0"),
@@ -856,7 +855,7 @@ mod tests {
                 "minecraft:enchantments".into(),
                 if level == 0 { json!({}) } else { json!({"minecraft:quick_charge": level}) },
             );
-            let charge = player.crossbow_charge_ticks(&stack, &content).unwrap();
+            let charge = crate::player::crossbow_charge_ticks(&stack, &content, &mut |_| 0.).unwrap();
             assert_eq!(charge, ticks);
             let ctx = ItemContext { using_item, crossbow_pull: elapsed / charge, ..ItemContext::default() };
             let mut nodes = Vec::new();

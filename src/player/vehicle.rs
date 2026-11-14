@@ -335,6 +335,7 @@ impl Player {
         entities: &EntityStore,
         input: HeldInput,
         tick: u64,
+        world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
         let handle = self.vehicle.ok_or("mount_handle_missing")?;
@@ -379,7 +380,7 @@ impl Player {
         if !self.vehicle_controlled {
             self.vehicle_prediction = None;
             self.pending_vehicle_correction = None;
-            let transform = e.presented_transform(tick, 1.);
+            let transform = e.presented_transform(world_tick, 1.);
             self.position = self.mount_seat_position(
                 entities,
                 handle,
@@ -399,7 +400,7 @@ impl Player {
             .unwrap_or_else(|| VehiclePrediction::received(e));
         v.reconcile(e);
         let result = (|| {
-            let received_bounds = entities.bounds(handle, tick, 1.)?;
+            let received_bounds = entities.bounds(handle, world_tick, 1.)?;
             let mut bounds =
                 received_bounds.moved(std::array::from_fn(|i| v.position[i] - e.position[i]));
             let no_gravity = boolean(entities, handle, "DATA_NO_GRAVITY", false)?;
@@ -423,7 +424,7 @@ impl Player {
                         world,
                         content,
                         entities,
-                        tick,
+                        world_tick,
                         bounds.moved(delta),
                         &mut self.colliders,
                     )?;
@@ -488,7 +489,7 @@ impl Player {
                     world,
                     content,
                     entities,
-                    tick,
+                    world_tick,
                     bounds.expanded(wanted),
                     &mut self.colliders,
                 )?;
@@ -496,7 +497,7 @@ impl Player {
                     bounds.expanded(wanted),
                     self.entity_id,
                     Some(handle),
-                    tick,
+                    world_tick,
                     v.position,
                     world,
                     content,
@@ -550,7 +551,7 @@ impl Player {
                     world,
                     content,
                     entities,
-                    tick,
+                    world_tick,
                     bounds.expanded(wanted),
                     Some(context),
                     &mut self.colliders,
@@ -559,7 +560,7 @@ impl Player {
                     bounds.expanded(wanted),
                     self.entity_id,
                     Some(handle),
-                    tick,
+                    world_tick,
                     v.position,
                     world,
                     content,
@@ -747,7 +748,7 @@ impl Player {
                         }
                         Kind::Horse => {
                             v.velocity[1] =
-                                f64::from(jump * power) + mount_jump_boost(e, content, tick)?;
+                                f64::from(jump * power) + mount_jump_boost(e, content, world_tick)?;
                             if travel[2] > 0. {
                                 let a = f64::from(v.yaw * 0.017453292);
                                 v.velocity[0] += f64::from(-0.4 * math::sin(a) * power);
@@ -828,7 +829,7 @@ impl Player {
                     world,
                     content,
                     entities,
-                    tick,
+                    world_tick,
                     area,
                     Some(collision::Context {
                         bottom: v.position[1],
@@ -845,7 +846,7 @@ impl Player {
                     area,
                     self.entity_id,
                     Some(handle),
-                    tick,
+                    world_tick,
                     v.position,
                     world,
                     content,
@@ -912,7 +913,7 @@ impl Player {
                         world,
                         content,
                         entities,
-                        tick,
+                        world_tick,
                         probe,
                         Some(collision::Context {
                             bottom: v.position[1],
@@ -926,7 +927,7 @@ impl Player {
                         probe,
                         self.entity_id,
                         Some(handle),
-                        tick,
+                        world_tick,
                         v.position,
                         world,
                         content,

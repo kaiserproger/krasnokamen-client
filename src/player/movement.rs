@@ -61,6 +61,7 @@ impl Player {
         entities: &EntityStore,
         input: HeldInput,
         tick: u64,
+        world_tick: u64,
         out: &mut Vec<PacketCommand>,
     ) -> Result<()> {
         let tick_start_position = self.position;
@@ -76,9 +77,9 @@ impl Player {
         }
         if let Some(vehicle) = entities.vehicle_of(self.entity_id) {
             self.vehicle = Some(vehicle);
-            self.predict_vehicle(world, content, inventory, entities, input, tick, out)?;
+            self.predict_vehicle(world, content, inventory, entities, input, tick, world_tick, out)?;
             self.inside_blocks(world, content, inventory, input, tick_start_position)?;
-            self.update_auto_spin(world, content, inventory, entities, input, tick, spin_start)?;
+            self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
             self.update_eye_environment(world, content)?;
             return Ok(());
         }
@@ -178,7 +179,7 @@ impl Player {
         if self.gliding && (self.grounded || env.water > 0. || !self.can_glide(inventory, tick)) {
             self.gliding = false;
         }
-        self.choose_pose(world, content, inventory, entities, input, tick)?;
+        self.choose_pose(world, content, inventory, entities, input, world_tick)?;
         if self.velocity[0] * self.velocity[0] + self.velocity[2] * self.velocity[2] < 9e-6 {
             self.velocity[0] = 0.;
             self.velocity[2] = 0.;
@@ -292,7 +293,7 @@ impl Player {
                 drag = 0.96;
             }
             self.add_relative(movement, acceleration);
-            self.move_player(world, content, entities, input, inventory, tick, movement)?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if self.horizontal_collision && env.climbable {
                 self.velocity[1] = 0.2;
             }
@@ -306,12 +307,12 @@ impl Player {
                 inventory,
                 entities,
                 input,
-                tick,
+                world_tick,
                 travel_start_y,
             )?;
         } else if env.lava > 0. && !flight {
             self.add_relative(movement, 0.02);
-            self.move_player(world, content, entities, input, inventory, tick, movement)?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if env.lava <= 0.4 {
                 self.velocity[0] *= 0.5;
                 self.velocity[1] *= f64::from(0.8f32);
@@ -329,12 +330,12 @@ impl Player {
                 inventory,
                 entities,
                 input,
-                tick,
+                world_tick,
                 travel_start_y,
             )?;
         } else if self.gliding {
             self.glide(gravity);
-            self.move_player(world, content, entities, input, inventory, tick, movement)?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
         } else {
             let friction = if self.grounded {
                 content.info(env.below_state)?.friction
@@ -360,7 +361,7 @@ impl Player {
                 }
                 self.fall_distance = 0.;
             }
-            self.move_player(world, content, entities, input, inventory, tick, movement)?;
+            self.move_player(world, content, entities, input, inventory, world_tick, movement)?;
             if (self.horizontal_collision || input.has(4))
                 && (env.climbable || (env.powder && can_walk_powder(inventory, content)))
             {
@@ -394,7 +395,7 @@ impl Player {
         if !input.has(5) {
             self.accumulate_steps(world, content, tick_start_position)?;
         }
-        self.update_auto_spin(world, content, inventory, entities, input, tick, spin_start)?;
+        self.update_auto_spin(world, content, inventory, entities, input, world_tick, spin_start)?;
         Ok(())
     }
     fn update_auto_spin(
