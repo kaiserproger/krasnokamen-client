@@ -79,6 +79,17 @@ pub(super) fn binding_stale(models: &Models, e: &Entity, game_time: i64) -> bool
         .is_some_and(|binding| binding.anger != anger(models, e, game_time))
 }
 
+fn renderer_scale(e: &Entity, models: &Models, partial: f32) -> f32 {
+    match e.type_name.as_str() {
+        "minecraft:giant" => 6.,
+        "minecraft:wither" => {
+            let remaining = number(models, e, "DATA_ID_INV").unwrap_or(0);
+            2. - if remaining > 0 { (remaining as f32 - partial) / 220. * 0.5 } else { 0. }
+        }
+        _ => 1.,
+    }
+}
+
 fn scale_cube_model(matrix: Mat4, feet: Vec3, size: Option<i32>) -> Mat4 {
     let size = size.unwrap_or(1).max(1) as f32;
     Mat4::from_translation(feet)
@@ -263,6 +274,22 @@ pub(super) fn material(
         &family.rig
     }
     .clone();
+    match e.type_name.as_str() {
+        "minecraft:pufferfish" => {
+            rig = match number(models, e, "PUFF_STATE").unwrap_or(0) {
+                0 => "minecraft:pufferfish_small#main",
+                1 => "minecraft:pufferfish_medium#main",
+                _ => "minecraft:pufferfish#main",
+            }.into();
+        }
+        "minecraft:tropical_fish" => {
+            // Pattern.packedId stores Base in the low byte (the exported enum facts).
+            if number(models, e, "DATA_ID_TYPE_VARIANT").unwrap_or(0) & 255 == 1 {
+                rig = "minecraft:tropical_fish_large#main".into();
+            }
+        }
+        _ => {}
+    }
     let mut selected = if e.type_name == "minecraft:ender_dragon" {
         family
             .materials
@@ -272,6 +299,12 @@ pub(super) fn material(
     } else {
         family.texture.clone()
     };
+    if e.type_name == "minecraft:tropical_fish" {
+        let key = if number(models, e, "DATA_ID_TYPE_VARIANT").unwrap_or(0) & 255 == 1 {
+            "LARGE_TEXTURE"
+        } else { "SMALL_TEXTURE" };
+        selected = family.materials.get(key).and_then(Value::as_str).map(str::to_owned);
+    }
     if let Some(data) = variant(store, models, e) {
         let model = data["model"].as_str();
         if let Some(model) = model && model != "normal" && model != "temperate" {
@@ -494,6 +527,48 @@ fn append_experience_orb(
     Ok(true)
 }
 
+/// Shared post-draw layer: special renderers and ordinary rigs obey the same fire flag.
+fn append_entity_fire(
+    entity: &Entity,
+    models: &Models,
+    content: &Content,
+    origin: [f64; 3],
+    camera_yaw: f32,
+    tick: u64,
+    partial: f32,
+    out: &mut DynamicGeometry,
+) -> Result<()> {
+    let flags = number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
+    if flags & 1 == 0 || flags & 32 != 0 || entity.type_name == "minecraft:falling_block" {
+        return Ok(());
+    }
+    let (dimensions, scale) = models.dimensions(entity)?;
+    let position = entity.presented_transform(tick, partial).position;
+    let center = Vec3::from_array(std::array::from_fn(|i| (position[i] - origin[i]) as f32));
+    let facing = Mat4::from_rotation_y((180. - camera_yaw).to_radians());
+    let width = dimensions.width * scale * 1.4;
+    let height = dimensions.height * scale;
+    let textures = [texture(content, "block/fire_0")?, texture(content, "block/fire_1")?];
+    let mut y = 0.;
+    let mut half = width * 0.5;
+    let mut row = 0;
+    while y < height && half > 0.001 {
+        let tex = textures[row % 2];
+        let [u0, v0, u1, v1] = tex.uv;
+        let z = width * 0.5 + 0.02 + row as f32 * 0.001;
+        let positions = [
+            Vec3::new(-half, y, z), Vec3::new(half, y, z),
+            Vec3::new(half, y + width, z), Vec3::new(-half, y + width, z),
+        ].map(|p| (center + facing.transform_vector3(p)).to_array());
+        emit(positions, [[u0, v1], [u1, v1], [u1, v0], [u0, v0]], [1.; 3],
+            tex.layer, EntityMaterial::EntityFire, 1., [15., 15.], out)?;
+        y += width * 0.45;
+        half *= 0.9;
+        row += 1;
+    }
+    Ok(())
+}
+
 pub fn append(
     store: &mut Store,
     frame: super::EntityRenderFrame<'_>,
@@ -501,7 +576,7 @@ pub fn append(
 ) -> Result<PresentationStats> {
     let super::EntityRenderFrame {
         content, origin, camera, camera_rotation, radius, tick, partial, game_time,
-        clock_environment, light: light_source, bed_direction,
+        clock_environment, maps, tint_source, light: light_source, bed_direction,
     } = frame;
     if !radius.is_finite() || radius <= 0. || radius > 4096. {
         return Err("entity presentation radius bound".into());
@@ -564,6 +639,7 @@ pub fn append(
         if entity.type_name == "minecraft:experience_orb" {
             match append_experience_orb(entity, &models, content, OrbFrame { origin, camera_rotation, tick, partial, light_source }, out) {
                 Ok(true) => {
+                    append_entity_fire(entity, &models, content, origin, camera_rotation[0], tick, partial, out)?;
                     stats.animated += 1;
                     stats.submitted += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
@@ -573,29 +649,28 @@ pub fn append(
             }
             continue;
         }
-        let clock_context = if matches!(entity.type_name.as_str(), "minecraft:item" | "minecraft:item_frame" | "minecraft:glow_item_frame") {
-            let stack = match value(&models, entity, "DATA_ITEM") {
-                Some(Metadata::Item(stack)) => Some(stack),
-                _ => None,
-            };
-            match store.special_render_cache.clock_context(
-                entity, stack, content, entity.presented_transform(tick, partial).position,
-                clock_environment,
-            ) {
-                Ok(context) => context,
-                Err(reason) => {
-                    stats.unrendered.insert(entity.type_name.clone(), format!("clock context: {reason}"));
-                    continue;
-                }
+        let item = value(&models, entity, "DATA_ITEM")
+            .or_else(|| value(&models, entity, "DATA_ITEM_STACK_ID"));
+        let stack = match item { Some(Metadata::Item(stack)) => Some(stack), _ => None };
+        let stacks = [stack.or_else(|| entity.equipment_value(0)),
+            entity.equipment_value(1), entity.equipment_value(5)];
+        let clock_context = match store.special_render_cache.item_context(
+            entity, stacks, content, entity.presented_transform(tick, partial).position, clock_environment,
+        ) {
+            Ok(context) => context,
+            Err(reason) => {
+                stats.unrendered.insert(entity.type_name.clone(), format!("item context: {reason}"));
+                continue;
             }
-        } else {
-            None
         };
         let start = out.vertices.len();
         match super::render_special::append(store, slot, &models, content, origin,
-            tick, partial, clock_context.as_ref(), light_source, out) {
+            tick, partial, clock_context.as_ref(), maps, light_source, tint_source, out) {
             Ok(super::render_special::Handled::Unhandled) => {}
-            Ok(super::render_special::Handled::Rendered | super::render_special::Handled::NoGeometry) => {
+            Ok(handled @ (super::render_special::Handled::Rendered | super::render_special::Handled::NoGeometry)) => {
+                if matches!(handled, super::render_special::Handled::Rendered) {
+                    append_entity_fire(&store.slots[slot], &models, content, origin, camera_rotation[0], tick, partial, out)?;
+                }
                 if out.vertices.len() > start {
                     stats.submitted += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
@@ -660,49 +735,8 @@ pub fn append(
         };
         draw_entity(entity, &models, content, EntityDrawFrame { origin, tick, partial, light, parent: None },
             &mut draw_store, out, &mut stats)?;
-        let flags = number(&models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0);
-        if flags & 1 != 0
-            && flags & 32 == 0
-            && entity.binding.as_ref().is_some_and(Result::is_ok)
-        {
-            let position = entity.presented_transform(tick, partial).position;
-            let center = Vec3::new(
-                (position[0] - origin[0]) as f32,
-                (position[1] - origin[1]) as f32,
-                (position[2] - origin[2]) as f32,
-            );
-            let facing = Mat4::from_rotation_y((180. - camera_rotation[0]).to_radians());
-            let width = dimensions.width * scale * 1.4;
-            let height = dimensions.height * scale;
-            let textures = [texture(content, "block/fire_0")?, texture(content, "block/fire_1")?];
-            let mut y = 0.;
-            let mut half = width * 0.5;
-            let mut row = 0;
-            while y < height && half > 0.001 {
-                let tex = textures[row % 2];
-                let [u0, v0, u1, v1] = tex.uv;
-                let z = width * 0.5 + 0.02 + row as f32 * 0.001;
-                let positions = [
-                    Vec3::new(-half, y, z),
-                    Vec3::new(half, y, z),
-                    Vec3::new(half, y + width, z),
-                    Vec3::new(-half, y + width, z),
-                ]
-                .map(|p| (center + facing.transform_vector3(p)).to_array());
-                emit(
-                    positions,
-                    [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
-                    [1.; 3],
-                    tex.layer,
-                    EntityMaterial::EntityFire,
-                    1.,
-                    [15., 15.],
-                    out,
-                )?;
-                y += width * 0.45;
-                half *= 0.9;
-                row += 1;
-            }
+        if entity.binding.as_ref().is_some_and(Result::is_ok) {
+            append_entity_fire(entity, &models, content, origin, camera_rotation[0], tick, partial, out)?;
         }
         if out.vertices.len() > start {
             stats.submitted += 1;
@@ -800,9 +834,10 @@ pub(super) fn draw_entity(
                         * Mat4::from_scale(Vec3::new(-1., -1., 1.))
                         * Mat4::from_translation(Vec3::new(0., -1.501, 0.));
                 }
-                if entity.type_name == "minecraft:giant" {
+                let renderer_scale = renderer_scale(entity, models, partial);
+                if renderer_scale != 1. {
                     matrix = Mat4::from_translation(relative)
-                        * Mat4::from_scale(Vec3::splat(6.))
+                        * Mat4::from_scale(Vec3::splat(renderer_scale))
                         * Mat4::from_translation(-relative)
                         * matrix;
                 }
@@ -872,15 +907,7 @@ pub(super) fn draw_entity(
                 if let Some(parent) = parent { matrix = parent * matrix; }
                 let invisible =
                     number(models, entity, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 32 != 0;
-                evaluate_rig(
-                    rig,
-                    entity,
-                    models,
-                    tick,
-                    partial,
-                    matrix,
-                    store.transforms,
-                );
+                evaluate_rig(rig, entity, models, content, tick, partial, matrix, store.transforms);
                 if !invisible {
                     emit_rig_parts(
                         rig,
@@ -891,6 +918,7 @@ pub(super) fn draw_entity(
                         entity.type_name == "minecraft:end_crystal"
                             && value(models, entity, "DATA_SHOW_BOTTOM")
                                 .and_then(Metadata::boolean) == Some(false),
+                        Some((entity, models, tick, partial)),
                         out,
                     )?;
                     super::villagers::append(
@@ -976,7 +1004,7 @@ pub(super) fn draw_entity(
                     }
                 }
                 append_equipment(
-                    EquipmentPose { entity, rig, transforms: store.transforms },
+                    EquipmentPose { entity, rig, transforms: store.transforms, item_context: store.clock_context },
                     store.items,
                     store.equipment_cache,
                     super::equipment::Frame { models, content, root: matrix, tick, partial, light },
@@ -1054,14 +1082,14 @@ pub(super) fn draw_entity(
                     if entity.type_name == "minecraft:slime" {
                         let shell = super::solaris_models::authored("minecraft:slime_outer#main")
                             .ok_or("missing authored slime outer rig")?;
-                        evaluate_rig(shell, entity, models, tick, partial, matrix, store.transforms);
+                        evaluate_rig(shell, entity, models, content, tick, partial, matrix, store.transforms);
                         emit_rig(shell, store.transforms, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer: EntityMaterial::EntityTranslucent, alpha: 1., light }, out)?;
                     }
                     if entity.type_name == "minecraft:breeze" {
                         let wind = super::solaris_models::authored("minecraft:breeze_wind#main")
                             .ok_or("missing authored breeze wind rig")?;
                         let texture = texture(content, "minecraft:entity/breeze/breeze_wind")?;
-                        evaluate_rig(wind, entity, models, tick, partial, matrix, store.transforms);
+                        evaluate_rig(wind, entity, models, content, tick, partial, matrix, store.transforms);
                         let scroll = ((tick % 2000) as f32 + partial) * 0.01;
                         emit_wrapped(wind, store.transforms, WrappedStyle {
                             tex: texture, scroll: [scroll, 0.], color: [1.; 3],
@@ -1097,10 +1125,223 @@ pub(super) fn draw_entity(
     Ok(())
 }
 
+/// Equipment slots are logical hands; rigs and display transforms are anatomical sides.
+fn left_main_arm(models: &Models, e: &Entity) -> bool {
+    number(models, e, "DATA_PLAYER_MAIN_HAND").map_or_else(
+        || number(models, e, "DATA_MOB_FLAGS_ID").unwrap_or(0) & 2 != 0,
+        |arm| arm == 0,
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArmAction { Item, Block, Bow, CrossbowCharge, CrossbowHold, Trident, Spear, Spyglass, Horn, Brush }
+
+fn use_action(content: &Content, stack: &Stack) -> ArmAction {
+    // Presentation-model overrides never change an item's behavior.
+    match content.item_names.get(&stack.id).map(String::as_str) {
+        Some("minecraft:bow") => return ArmAction::Bow,
+        Some("minecraft:crossbow") => return ArmAction::CrossbowCharge,
+        Some("minecraft:trident") => return ArmAction::Trident,
+        Some("minecraft:spyglass") => return ArmAction::Spyglass,
+        Some("minecraft:goat_horn") => return ArmAction::Horn,
+        Some("minecraft:brush") => return ArmAction::Brush,
+        _ => {}
+    }
+    // Item subclasses own their animations; plain Item checks consumable before blocking/kinetic.
+    if let Some(consumable) = stack.component("minecraft:consumable") {
+        return match consumable["animation"].as_str().unwrap_or("eat") {
+            "block" => ArmAction::Block, "bow" => ArmAction::Bow,
+            "crossbow" => ArmAction::CrossbowCharge, "trident" => ArmAction::Trident,
+            "spyglass" => ArmAction::Spyglass, "toot_horn" => ArmAction::Horn,
+            "brush" => ArmAction::Brush, "spear" => ArmAction::Spear,
+            _ => ArmAction::Item,
+        };
+    }
+    if stack.component("minecraft:blocks_attacks").is_some() {
+        return ArmAction::Block;
+    }
+    if stack.component("minecraft:kinetic_weapon").is_some() {
+        return ArmAction::Spear;
+    }
+    ArmAction::Item
+}
+
+/// Independent angular fits to local HumanoidModel/AnimationUtils observations.
+/// Eating/drinking retains ITEM, as AvatarRenderer does; aimed actions use both arms.
+fn equipped_arm_rotations(
+    e: &Entity, models: &Models, content: &Content, head: Vec3,
+    gait: [f32; 2], age: f32, partial: f32,
+) -> [Vec3; 2] {
+    let mut arms = gait.map(|x| Vec3::new(x, 0., 0.));
+    let main = usize::from(left_main_arm(models, e));
+    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+    let charging = boolean(models, e, "IS_CHARGING_CROSSBOW")
+        || boolean(models, e, "DATA_IS_CHARGING_CROSSBOW");
+    let using = flags & 1 != 0 || charging;
+    let active = usize::from(flags & 2 != 0);
+    let mut two_handed = None;
+    for hand in 0..2 {
+        let arm = main ^ hand;
+        let Some(stack) = e.equipment_value(hand).filter(|s| !s.empty()) else { continue };
+        arms[arm].x = arms[arm].x * 0.5 - 18_f32.to_radians();
+        let action = if using && active == hand {
+            use_action(content, stack)
+        } else if content.item_names.get(&stack.id).is_some_and(|n| n == "minecraft:crossbow")
+            && stack.component("minecraft:charged_projectiles")
+                .and_then(Value::as_array).is_some_and(|p| !p.is_empty())
+            && e.animation.is_none()
+        {
+            ArmAction::CrossbowHold
+        } else { ArmAction::Item };
+        let side = if arm == 0 { 1. } else { -1. };
+        match action {
+            ArmAction::Item => {}
+            ArmAction::Block => {
+                arms[arm].x = gait[arm] * 0.5 - 54_f32.to_radians()
+                    + head.x.clamp(-80_f32.to_radians(), 25_f32.to_radians());
+                arms[arm].y = -side * 30_f32.to_radians()
+                    + head.y.clamp(-30_f32.to_radians(), 30_f32.to_radians());
+            }
+            ArmAction::Trident => arms[arm].x = gait[arm] * 0.5 - std::f32::consts::PI,
+            ArmAction::Spear => {
+                let ticks = e.source.as_ref().and_then(|s| s.living.as_ref())
+                    .map_or(0., |s| s.item_use_ticks(partial));
+                let delay = stack.component("minecraft:kinetic_weapon")
+                    .and_then(|k| k["delay_ticks"].as_f64()).unwrap_or(0.) as f32;
+                let raised = if ticks <= 0. { 0. } else if delay == 0. { 1. }
+                    else { (ticks / delay).clamp(0., 1.) };
+                arms[arm].x = (head.x - 45_f32.to_radians() - raised * 30_f32.to_radians())
+                    .clamp(-120_f32.to_radians(), 30_f32.to_radians());
+                arms[arm].y = (head.y - side * 6_f32.to_radians())
+                    .clamp(-60_f32.to_radians(), 60_f32.to_radians());
+            }
+            ArmAction::Spyglass => {
+                arms[arm].x = (head.x - 110_f32.to_radians()
+                    - if number(models, e, "DATA_POSE") == Some(5) { 15_f32.to_radians() } else { 0. })
+                    .clamp(-2.4, 3.3);
+                arms[arm].y = head.y - side * 15_f32.to_radians();
+            }
+            ArmAction::Horn => {
+                arms[arm].x = head.x.clamp(-1.2, 1.2) - 85_f32.to_radians();
+                arms[arm].y = head.y - side * 30_f32.to_radians();
+            }
+            ArmAction::Brush => arms[arm].x = gait[arm] * 0.5 - 36_f32.to_radians(),
+            action => {
+                if two_handed.is_none() || using && active == hand {
+                    two_handed = Some((arm, action));
+                }
+            }
+        }
+    }
+    if let Some((hold, action)) = two_handed {
+        let other = hold ^ 1;
+        let side = if hold == 0 { 1. } else { -1. };
+        match action {
+            ArmAction::Bow => {
+                arms[hold] = Vec3::new(head.x - std::f32::consts::FRAC_PI_2, head.y - side * 0.1, 0.);
+                arms[other] = Vec3::new(head.x - std::f32::consts::FRAC_PI_2, head.y + side * 0.5, 0.);
+            }
+            ArmAction::CrossbowHold => {
+                arms[hold] = Vec3::new(head.x - 84_f32.to_radians(), head.y - side * 0.3, 0.);
+                arms[other] = Vec3::new(head.x - 86_f32.to_radians(), head.y + side * 0.6, 0.);
+            }
+            ArmAction::CrossbowCharge => {
+                let progress = e.source.as_ref().and_then(|s| s.living.as_ref())
+                    .map_or(0., |s| s.crossbow_pull(partial));
+                arms[hold] = Vec3::new(-56_f32.to_radians(), -side * 0.8, 0.);
+                arms[other] = Vec3::new(-(56. + 34. * progress).to_radians(), side * (0.4 + 0.45 * progress), 0.);
+            }
+            _ => {}
+        }
+    }
+    if number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0) {
+        let wave = (age * 0.65).cos() * 14_f32.to_radians();
+        arms = [Vec3::new(wave, 0., 135_f32.to_radians()), Vec3::new(wave, 0., -135_f32.to_radians())];
+    }
+    arms
+}
+
+/// Procedural rigs have named anatomical parts even when no humanoid roles apply.
+/// Preserve authored pivots, scales and yaw (notably the squid texture orientation).
+fn procedural_part(
+    bone: &resources::Bone, e: &Entity, models: &Models, age: f32, moving: f32,
+    rotation: &mut Vec3, pivot: &mut Vec3,
+) {
+    let name = bone.name.as_str();
+    let water = e.source.as_ref().and_then(|s| s.living.as_ref()).is_some_and(|s| s.in_water);
+    let numbered = |prefix: &str| name.strip_prefix(prefix).and_then(|n| n.parse::<usize>().ok());
+    match e.type_name.as_str() {
+        "minecraft:cod" | "minecraft:tropical_fish" if matches!(name, "tail" | "tail_fin") => {
+            rotation.y += (age * 0.6).sin() * if water { -0.45 } else { -0.65 };
+        }
+        "minecraft:salmon" if matches!(name, "body_rear" | "body_back" | "tail") => {
+            rotation.y += (age * if water { 0.6 } else { 1. }).sin()
+                * if water { -0.25 } else { -0.33 };
+        }
+        "minecraft:pufferfish" if matches!(name, "right_fin" | "left_fin" | "right_blue_fin" | "left_blue_fin") => {
+            let side = if name.starts_with("right") { 1. } else { -1. };
+            rotation.z += side * (-0.2 + (age * 0.2).sin() * 0.4);
+        }
+        "minecraft:squid" | "minecraft:glow_squid" if numbered("tentacle").is_some() => {
+            rotation.x += if water { ((age * 0.12).sin() * 0.5 + 0.5).powi(2) * 1.2 } else { 0. };
+        }
+        "minecraft:ghast" | "minecraft:happy_ghast" if numbered("tentacle_").is_some() || numbered("tentacle").is_some() => {
+            let index = numbered("tentacle_").or_else(|| numbered("tentacle")).unwrap();
+            rotation.x += 0.4 + (age * 0.3 + index as f32).sin() * 0.2;
+        }
+        "minecraft:blaze" if numbered("stick").is_some() => {
+            let index = numbered("stick").unwrap();
+            let turn = age * match index / 4 { 0 => -0.3, 1 => 0.1, _ => -0.16 };
+            let rest = Vec3::new(bone.pivot.x, 0., bone.pivot.z);
+            let orbit = Mat4::from_rotation_y(turn).transform_vector3(rest);
+            pivot.x = orbit.x;
+            pivot.z = orbit.z;
+            pivot.y += (age * 0.25 + index as f32 * 0.5).cos() / 16.;
+        }
+        "minecraft:guardian" | "minecraft:elder_guardian" => {
+            if let Some(index) = numbered("spike") {
+                let extended = !boolean(models, e, "DATA_ID_MOVING");
+                *pivot *= (if extended { 1. } else { 0.5 }) + (age * 1.5 + index as f32).cos() * 0.01;
+            } else if matches!(name, "tail" | "tail_tip" | "tail0" | "tail1" | "tail2") {
+                let speed = if boolean(models, e, "DATA_ID_MOVING") { 0.4 } else { 0.1 };
+                rotation.y += (age * speed).sin() * if name == "tail" || name == "tail0" { 0.16 } else { 0.32 };
+            }
+        }
+        "minecraft:dolphin" if moving > 1e-4 || e.velocity.iter().any(|v| v.abs() > 1e-4) => {
+            match name {
+                "body" => rotation.x -= 0.05 + (age * 0.3).cos() * 0.05,
+                "tail" => rotation.x -= (age * 0.3).cos() * 0.1,
+                "fluke_left" | "fluke_right" | "tail_fin" => rotation.x -= (age * 0.3).cos() * 0.2,
+                _ => {}
+            }
+        }
+        "minecraft:nautilus" | "minecraft:zombie_nautilus" => {
+            if name == "root" { pivot.y += (age * 0.2).sin() * 0.03; }
+            if name == "body" || name.ends_with("mouth") || numbered("arm").is_some() {
+                rotation.x += (age * 0.2).sin() * (0.1 + moving * 0.2);
+            }
+        }
+        "minecraft:silverfish" | "minecraft:endermite" => {
+            let index = numbered("segment").or_else(|| match name {
+                "head" => Some(0), "body" => Some(1), "tail" => Some(2),
+                "layer0" => Some(2), "layer1" => Some(4), "layer2" => Some(1), _ => None,
+            });
+            if let Some(i) = index {
+                let strength = (i as f32 - 2.).abs();
+                let wave = age * 0.9 + i as f32 * 0.47;
+                rotation.y += wave.cos() * (1. + strength) * 0.03;
+                pivot.x += wave.sin() * strength * 0.02;
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn evaluate_rig(
     rig: &Rig,
     e: &Entity,
     models: &Models,
+    content: &Content,
     tick: u64,
     partial: f32,
     root: Mat4,
@@ -1126,8 +1367,11 @@ pub(super) fn evaluate_rig(
     let body_yaw = living.map_or(t.yaw, |state| state.body(partial));
     let head_yaw = living.map_or(t.head_yaw, |state| state.head(partial));
     let crouch = number(models, e, "DATA_POSE") == Some(5);
-    let flags = number(models, e, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
-    let using = flags & 1 != 0;
+    let head = Vec3::new(t.pitch.to_radians(),
+        ((head_yaw - body_yaw + 180.).rem_euclid(360.) - 180.).clamp(-85., 85.).to_radians(), 0.);
+    let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
+    let arms = equipped_arm_rotations(e, models, content, head,
+        [(phase + std::f32::consts::PI).cos() * amplitude, phase.cos() * amplitude], age, partial);
     let attack = e
         .animation
         .map(|(_, start)| (tick.saturating_sub(start) as f32 + partial) / 6.)
@@ -1148,10 +1392,14 @@ pub(super) fn evaluate_rig(
     } else {
         1.
     };
-    let wing_flap = ((tick as f32 + partial) * 0.3).sin() * 0.3 * wing_beat;
+    let wave = (age * 0.3).sin();
+    let wing_flap = if super::render_living::folds_wings(&e.type_name) {
+        (wave + 1.) * 0.7 * wing_beat
+    } else { wave * 0.3 };
     for bone in &rig.bones {
         let mut rotation = bone.rotation;
         let mut pivot = bone.pivot;
+        let mut scale = bone.scale;
         match bone.role {
             BoneRole::Head => {
                 let (look_yaw, look_pitch, weight) = e.physical.motion.look(partial);
@@ -1174,19 +1422,18 @@ pub(super) fn evaluate_rig(
             BoneRole::LeftLeg => {
                 rotation.x += (phase + std::f32::consts::PI).cos() * 1.4 * amplitude * leg_swing
             }
-            BoneRole::RightArm => {
-                rotation.x += (phase + std::f32::consts::PI).cos() * amplitude;
-                if using && flags & 2 == 0 {
-                    rotation.x = -1.35;
+            BoneRole::RightArm | BoneRole::LeftArm => {
+                let arm = usize::from(bone.role == BoneRole::LeftArm);
+                rotation += arms[arm];
+                if number(models, e, "DATA_SPELL_CASTING_ID").is_some_and(|spell| spell != 0) {
+                    rotation = arms[arm];
+                    pivot.z = 0.;
                 }
-                if let Some(a) = attack {
+                let attack_hand = e.animation.map_or(0, |(action, _)| usize::from(action == 3));
+                if (usize::from(left_main_arm(models, e)) ^ attack_hand) == arm
+                    && let Some(a) = attack
+                {
                     rotation.x -= (a * std::f32::consts::PI).sin() * 1.2;
-                }
-            }
-            BoneRole::LeftArm => {
-                rotation.x += phase.cos() * amplitude;
-                if using && flags & 2 != 0 {
-                    rotation.x = -1.35;
                 }
             }
             BoneRole::WingNegativeX => rotation.z += wing_flap,
@@ -1198,18 +1445,29 @@ pub(super) fn evaluate_rig(
             }
             BoneRole::Nose | BoneRole::CrossedArms | BoneRole::Fixed => {}
         }
-        if zombie_arms && matches!(bone.role, BoneRole::RightArm | BoneRole::LeftArm) {
-            // Oracle observation: arms extend forward. Idle bob and the
-            // steeper aggressive pose are Solaris-authored choices.
+        if zombie_arms_raised && matches!(bone.role, BoneRole::RightArm | BoneRole::LeftArm) {
+            // Observed vanilla idle silhouette is 80 degrees forward, not horizontal.
             rotation = Vec3::ZERO;
-            if zombie_arms_raised {
-                let side = if matches!(bone.role, BoneRole::RightArm) { 1. } else { -1. };
-                let bob = ((tick as f32 + partial) * 0.08).sin() * 0.03 * side;
-                rotation.x = if aggressive { -2.1 } else { -std::f32::consts::FRAC_PI_2 } + bob;
-            }
+            let side = if matches!(bone.role, BoneRole::RightArm) { 1. } else { -1. };
+            let bob = (age * 0.07).sin() * 0.05 * side;
+            rotation.x = if aggressive { -120_f32.to_radians() } else { -80_f32.to_radians() } + bob;
+            rotation.y = -side * 0.1;
+            rotation.z = side * ((age * 0.09).cos() + 1.) * 0.05;
             if let Some(a) = attack {
-                rotation.x -= (a * std::f32::consts::PI).sin() * 0.8;
+                let swing = (a * std::f32::consts::PI).sin();
+                let recover = ((1. - (1. - a).powi(2)) * std::f32::consts::PI).sin();
+                rotation.x += swing * 1.1 - recover * 0.35;
+                rotation.y += side * swing * 0.6;
             }
+        }
+        if e.type_name == "minecraft:drowned" && aggressive
+            && matches!(bone.role, BoneRole::RightArm | BoneRole::LeftArm)
+            && (bone.role == BoneRole::LeftArm) == left_main_arm(models, e)
+            && e.equipment_value(0).and_then(|s| content.item_names.get(&s.id))
+                .is_some_and(|name| name == "minecraft:trident")
+        {
+            rotation.x = rotation.x * 0.5 - std::f32::consts::PI;
+            rotation.y = 0.;
         }
         if matches!(e.type_name.as_str(), "minecraft:spider" | "minecraft:cave_spider") {
             // Solaris-authored alternating leg swing, driven by received
@@ -1277,6 +1535,10 @@ pub(super) fn evaluate_rig(
                 rotation = Vec3::from_array(*r) * std::f32::consts::PI / 180.;
             }
         }
+        procedural_part(bone, e, models, age, amplitude, &mut rotation, &mut pivot);
+        if let Some(state) = living {
+            state.apply_part(models, e, bone, age, partial, &mut pivot, &mut rotation, &mut scale);
+        }
         let parent = bone.parent.map(|i| out[i]).unwrap_or(root);
         if e.type_name == "minecraft:end_crystal"
             && matches!(bone.name.as_str(), "glass_outer" | "glass_inner" | "core")
@@ -1294,9 +1556,9 @@ pub(super) fn evaluate_rig(
                 _ => turn * tilt * tilt * turn * tilt * turn,
             };
             out.push(parent * Mat4::from_translation(pivot) * rotation
-                * Mat4::from_scale(bone.scale));
+                * Mat4::from_scale(scale));
         } else {
-            out.push(parent * resources::transform(pivot, rotation, bone.scale));
+            out.push(parent * resources::transform(pivot, rotation, scale));
         }
     }
 }
@@ -1314,7 +1576,7 @@ pub(super) fn emit_rig(
     style: RigStyle,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
-    emit_rig_parts(rig, transforms, style, None, false, out)
+    emit_rig_parts(rig, transforms, style, None, false, None, out)
 }
 
 /// A texture layer that repeats within its own atlas rectangle (breeze wind, energy
@@ -1353,6 +1615,7 @@ fn emit_rig_parts(
     style: RigStyle,
     stand_flags: Option<i32>,
     hide_crystal_base: bool,
+    entity: Option<(&Entity, &Models, u64, f32)>,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
     let RigStyle { tex, color, layer, alpha, light } = style;
@@ -1366,6 +1629,13 @@ fn emit_rig_parts(
         color
     };
     for (bone, matrix) in rig.bones.iter().zip(transforms) {
+        if entity.is_some_and(|(e, models, tick, partial)| {
+            let age = e.source.as_ref().map_or(tick as f32, |s| s.age as f32) + partial;
+            e.source.as_ref().and_then(|s| s.living.as_ref())
+                .is_some_and(|s| !s.part_visible(models, e, &bone.name, age))
+        }) {
+            continue;
+        }
         if hide_crystal_base && bone.name == "base" {
             continue;
         }
@@ -1460,7 +1730,7 @@ pub(super) fn append_baked(
                 RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
             }),
             q.alpha,
-            light,
+            q.light_with_emission(light),
             out,
         )?;
     }
@@ -1569,7 +1839,7 @@ pub(super) fn append_block_quads(
                 RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
             }),
             quad.alpha,
-            light,
+            quad.light_with_emission(light),
             out,
         ));
     });
@@ -1612,6 +1882,7 @@ pub(super) struct EquipmentPose<'a> {
     pub entity: &'a Entity,
     pub rig: &'a Rig,
     pub transforms: &'a [Mat4],
+    pub item_context: Option<&'a crate::ui::items::ItemContext>,
 }
 
 pub(super) fn append_equipment(
@@ -1622,8 +1893,8 @@ pub(super) fn append_equipment(
     out: &mut DynamicGeometry,
     stats: &mut PresentationStats,
 ) -> Result<()> {
-    let EquipmentPose { entity: e, rig, transforms } = pose;
-    let super::equipment::Frame { models, content, tick, light, .. } = frame;
+    let EquipmentPose { entity: e, rig, transforms, item_context } = pose;
+    let super::equipment::Frame { models, content, partial, light, .. } = frame;
     for slot in [4, 3, 2, 5, 0, 1, 6, 7] {
         let Some(stack) = e.equipment_value(slot) else {
             continue;
@@ -1664,7 +1935,7 @@ pub(super) fn append_equipment(
                 };
                 let state = crate::ui::items::ItemContext {
                     display: "ground".into(),
-                    ..Default::default()
+                    ..item_context.cloned().unwrap_or_default()
                 };
                 match items.model_with(content, stack, &state) {
                     Ok(model) => {
@@ -1684,9 +1955,9 @@ pub(super) fn append_equipment(
             }
             continue;
         }
+        let anatomical_hand = slot ^ usize::from(left_main_arm(models, e));
         let target = match slot {
-            0 => BoneRole::RightArm,
-            1 => BoneRole::LeftArm,
+            0 | 1 => if anatomical_hand == 0 { BoneRole::RightArm } else { BoneRole::LeftArm },
             5 => BoneRole::Head,
             _ => {
                 stats.unrendered.insert(
@@ -1709,9 +1980,9 @@ pub(super) fn append_equipment(
             continue;
         };
         let _ = bone;
-        let context = if slot == 0 {
+        let context = if slot < 2 && anatomical_hand == 0 {
             "thirdperson_righthand"
-        } else if slot == 1 {
+        } else if slot < 2 {
             "thirdperson_lefthand"
         } else {
             "head"
@@ -1720,20 +1991,23 @@ pub(super) fn append_equipment(
         let state = crate::ui::items::ItemContext {
             display: context.into(),
             using_item: flags & 1 != 0 && ((flags & 2 != 0) == (slot == 1)),
-            use_ticks: tick.saturating_sub(e.observed_tick) as f32,
-            ..Default::default()
+            use_ticks: e.source.as_ref().and_then(|s| s.living.as_ref())
+                .map_or(0., |s| s.item_use_ticks(partial)),
+            crossbow_pull: e.source.as_ref().and_then(|s| s.living.as_ref())
+                .map_or(0., |s| s.crossbow_pull(partial)),
+            ..item_context.cloned().unwrap_or_default()
         };
         match items.model_with(content, stack, &state) {
             Ok(model) => {
                 let bone = if e.type_name == "minecraft:vex" && slot < 2 {
-                    let side = if slot == 0 { 0.046875 } else { -0.046875 };
+                    let side = if anatomical_hand == 0 { 0.046875 } else { -0.046875 };
                     *matrix
                         * Mat4::from_scale(Vec3::splat(0.55))
                         * Mat4::from_translation(Vec3::new(side, -0.15625, 0.078125))
                 } else {
                     *matrix
                 };
-                let attachment = held_item_attachment(bone, slot);
+                let attachment = held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
                 append_baked_stack(model, attachment * item_matrix(model, context), light, content, stack, out)?;
             }
             Err(reason) => {
@@ -2019,6 +2293,7 @@ pub fn special_item(
                 shade_direction: None,
                 gui_light_side: false,
                 ambient_occlusion: false,
+                light_emission: 0,
                 layer: RenderLayer::Cutout,
                 entity_material: matches!(kind, "banner" | "shield" | "bed" | "chest" | "decorated_pot").then_some(EntityMaterial::EntitySolid),
                 alpha: 1.,
@@ -2047,6 +2322,7 @@ pub fn special_item(
                         shade_direction: None,
                         gui_light_side: false,
                         ambient_occlusion: false,
+                        light_emission: 0,
                         layer: RenderLayer::Translucent,
                         entity_material: Some(EntityMaterial::BannerPattern),
                         alpha: 1.,
@@ -2091,6 +2367,7 @@ pub fn special_item(
                     shade_direction: None,
                     gui_light_side: false,
                     ambient_occlusion: false,
+                    light_emission: 0,
                     layer: RenderLayer::Cutout,
                     entity_material: Some(EntityMaterial::EntitySolid),
                     alpha: 1.,
@@ -2189,7 +2466,7 @@ mod tests {
         };
         let render = |store: &mut Store, time| {
             let mut out = DynamicGeometry::default();
-            let stats = append(store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: time, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut out).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: time, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut out).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(!out.vertices.is_empty());
             let layer = out.vertices[0].texture_layer;
@@ -2239,7 +2516,7 @@ mod tests {
         for (flags, burning) in [(0, false), (1, true), (32, false), (33, false), (0, false)] {
             store.slots[0].metadata.insert(0, Metadata::Byte(flags));
             let mut geometry = DynamicGeometry::default();
-            append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             let fire: Vec<_> = geometry.vertices.iter()
                 .filter(|v| v.texture_layer == 42 || v.texture_layer == 43).collect();
             assert_eq!(!fire.is_empty(), burning, "flags {flags}");
@@ -2270,10 +2547,10 @@ mod tests {
             entity.metadata.insert(18, Metadata::Byte(4));
             let rig = super::super::solaris_models::authored(key).unwrap();
             let mut standing = Vec::new();
-            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut standing);
+            evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut standing);
             entity.metadata.insert(18, Metadata::Byte(5));
             let mut sitting = Vec::new();
-            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut sitting);
+            evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut sitting);
             for name in ["body", "left_hind_leg", "right_hind_leg", "tail"] {
                 let i = rig.bones.iter().position(|bone| bone.name == name).unwrap();
                 assert_ne!(standing[i].to_cols_array(), sitting[i].to_cols_array(), "{key} {name}");
@@ -2282,7 +2559,7 @@ mod tests {
             assert_eq!(standing[head].to_cols_array(), sitting[head].to_cols_array(), "{key} head");
             entity.metadata.insert(18, Metadata::Byte(4));
             let mut restored = Vec::new();
-            evaluate_rig(rig, &entity, &models, 0, 0., Mat4::IDENTITY, &mut restored);
+            evaluate_rig(rig, &entity, &models, &crate::protocol::content::Content::test_cube(), 0, 0., Mat4::IDENTITY, &mut restored);
             assert_eq!(standing.iter().map(|m| m.to_cols_array()).collect::<Vec<_>>(),
                 restored.iter().map(|m| m.to_cols_array()).collect::<Vec<_>>(), "{key}");
         }
@@ -2532,7 +2809,7 @@ mod tests {
         for (value, u, v) in [(1, 0., 0.), (7, 0.5, 0.), (2477, 0.5, 0.5)] {
             store.slots[0].metadata.insert(8, Metadata::Int(value));
             let mut geometry = DynamicGeometry::default();
-            let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1, "{:?}", stats.unrendered);
             assert!(stats.unrendered.is_empty());
             assert_eq!(geometry.vertices.len(), 4);
@@ -2545,18 +2822,18 @@ mod tests {
             assert!((vertex.uv[0] - u).abs() < 1e-5 && (vertex.uv[1] - v - 0.25).abs() < 1e-5);
         }
         let mut rotated = DynamicGeometry::default();
-        let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut rotated).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut rotated).unwrap();
         assert_eq!(stats.submitted, 1);
         assert!(rotated.vertices.iter().all(|p| p.position[0].abs() < 1e-5));
         assert!((rotated.vertices[0].position[2].abs() - 0.15).abs() < 1e-5);
         let mut pitched = DynamicGeometry::default();
-        append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 30.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut pitched).unwrap();
+        append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [90., 30.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([10., 2.])), bed_direction: &|_| None }, &mut pitched).unwrap();
         let expected_normal = glam::Quat::from_euler(
             glam::EulerRot::YXZ, 90f32.to_radians(), -30f32.to_radians(), 0.,
         ) * Vec3::Y;
         assert!(pitched.vertices.iter().all(|p| Vec3::from_array(p.normal).dot(expected_normal) > 0.999));
         let mut geometry = DynamicGeometry::default();
-        let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(None), bed_direction: &|_| None }, &mut geometry).unwrap();
+        let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [180., 0.], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(None), bed_direction: &|_| None }, &mut geometry).unwrap();
         assert_eq!(stats.lighting_pending, 1);
         assert!(geometry.vertices.is_empty());
     }
@@ -2592,7 +2869,7 @@ mod tests {
             store.slots[0].spawn_data = direction;
             let mut geometry = DynamicGeometry::default();
             let samples = std::cell::RefCell::new(Vec::new());
-            let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &content, origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|point| { samples.borrow_mut().push(point); Ok(Some([15., 0.])) }, bed_direction: &|_| None }, &mut geometry).unwrap();
             assert_eq!(stats.submitted, 1);
             assert!(stats.unrendered.is_empty());
             assert_eq!(samples.borrow().len(), 16);
@@ -2640,7 +2917,7 @@ mod tests {
         store.slots.push(entity);
         let render = |store: &mut Store| {
             let mut geometry = DynamicGeometry::default();
-            let stats = append(store, crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+            let stats = append(store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
             assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
             geometry.vertices.iter().map(|v| v.position[1]).collect::<Vec<_>>()
         };
@@ -2681,7 +2958,7 @@ mod tests {
                 for invisible in [false, true] {
                     store.slots[0].metadata.insert(0, Metadata::Byte(if invisible { 32 } else { 0 }));
                     let mut geometry = DynamicGeometry::default();
-                    let stats = append(&mut store, crate::entities::EntityRenderFrame { content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
+                    let stats = append(&mut store, crate::entities::EntityRenderFrame { maps: crate::ui::MapRenderView::empty(), tint_source: &|_, _| Ok([1.; 3]), content: &Content::test_cube(), origin: [0.; 3], camera: [0.; 3], camera_rotation: [0.; 2], radius: 32., tick: 0, partial: 0., game_time: 0, clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None }, &mut geometry).unwrap();
                     assert!(stats.unrendered.is_empty(), "{kind}: {:?}", stats.unrendered);
                     let cutout = &geometry.indices[EntityMaterial::EntityCutout as usize];
                     let translucent = &geometry.indices[EntityMaterial::EntityTranslucent as usize];

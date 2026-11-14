@@ -1048,7 +1048,7 @@ impl Player {
         };
         let duration = self.use_duration(item, content)?;
         let crossbow_charge_ticks = if content.item_names.get(&item.id).map(String::as_str) == Some("minecraft:crossbow") {
-            self.crossbow_charge_ticks(item, content)?
+            crossbow_charge_ticks(item, content, &mut |kind| match kind { EffectSample::Uniform => f64::from(self.random_float()), EffectSample::Gaussian => self.random_gaussian() })?
         } else {
             0.
         };

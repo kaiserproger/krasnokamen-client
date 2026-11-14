@@ -31,6 +31,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 pub(crate) use use_on::EntityUseState;
+pub(crate) use use_on::{crossbow_charge_ticks, sample_gaussian, EffectSample};
 pub use use_on::{UiTrigger, UsePrediction};
 pub(crate) use visual::{camera_distance, FirstPersonFrame};
 
@@ -387,6 +388,12 @@ impl Default for Player {
     }
 }
 impl Player {
+    /// Presentation borrows the already selected action timing, including enchantment effects.
+    pub(crate) fn visual_item_use(&self) -> Option<(u8, f32, f32)> {
+        self.using.as_ref().filter(|u| u.remaining > 0).map(|u| {
+            (u.hand, (u.duration - u.remaining) as f32, u.crossbow_charge_ticks)
+        })
+    }
     pub fn main_arm_right(&self) -> bool {
         self.main_arm_right
     }

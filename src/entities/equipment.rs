@@ -111,7 +111,7 @@ impl Cache {
             return Err(format!("player back rig not activated: {key}"));
         }
         let rig = models.rig(key);
-        p::evaluate_rig(rig, e, models, tick, partial, root, &mut self.transforms);
+        p::evaluate_rig(rig, e, models, content, tick, partial, root, &mut self.transforms);
         let gliding = p::number(models, e, "DATA_SHARED_FLAGS_ID").unwrap_or(0) & 128 != 0;
         let living = e.source.as_ref().and_then(|s| s.living.as_ref());
         let sway = living.map_or(0., |s| {
@@ -174,6 +174,10 @@ impl Cache {
         let baby = !stand && p::boolean(models, e, "DATA_BABY_ID");
         let overlay = animal_overlay(&e.type_name, slot);
         let animal = overlay.is_some();
+        // WolfArmorLayer and the received-item branch of LlamaDecorLayer omit babies.
+        if baby && overlay.is_some_and(|(_, kind)| matches!(kind, "wolf_body" | "llama_body")) {
+            return Ok(true);
+        }
         if animal && baby {
             return Err("baby animal equipment overlay is not available".into());
         }
@@ -210,7 +214,7 @@ impl Cache {
             // Equipment without this layer type is also omitted by HumanoidArmorLayer.
             return Ok(true);
         };
-        p::evaluate_rig(rig, e, models, tick, partial, root, &mut self.transforms);
+        p::evaluate_rig(rig, e, models, content, tick, partial, root, &mut self.transforms);
         let dyed = stack
             .component("minecraft:dyed_color")
             .and_then(serde_json::Value::as_i64)
@@ -644,8 +648,8 @@ mod tests {
             let overlay = models.rig(overlay_key);
             let mut base_transforms = Vec::new();
             let mut overlay_transforms = Vec::new();
-            p::evaluate_rig(horse, &entity, &models, 2, 1., Mat4::IDENTITY, &mut base_transforms);
-            p::evaluate_rig(overlay, &entity, &models, 2, 1., Mat4::IDENTITY, &mut overlay_transforms);
+            p::evaluate_rig(horse, &entity, &models, &Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut base_transforms);
+            p::evaluate_rig(overlay, &entity, &models, &Content::test_cube(), 2, 1., Mat4::IDENTITY, &mut overlay_transforms);
             for (index, bone) in overlay.bones.iter().enumerate() {
                 let base = horse.part_by_name[&bone.name];
                 assert_eq!(overlay_transforms[index], base_transforms[base], "joint {}", bone.name);
@@ -687,11 +691,11 @@ mod tests {
         assert_eq!(entity.equipment[6].as_ref().unwrap().id, 5);
         let rig = models.rig("minecraft:wolf#main");
         let mut transforms = Vec::new();
-        p::evaluate_rig(rig, entity, &models, 4, 0., Mat4::IDENTITY, &mut transforms);
+        p::evaluate_rig(rig, entity, &models, &content, 4, 0., Mat4::IDENTITY, &mut transforms);
         let mut out = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
         let mut items = crate::ui::items::ItemModels::new();
-        p::append_equipment(p::EquipmentPose { entity, rig, transforms: &transforms }, &mut items, &mut cache,
+        p::append_equipment(p::EquipmentPose { item_context: None, entity, rig, transforms: &transforms }, &mut items, &mut cache,
             Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 4, partial: 0., light: [15.; 2] }, &mut out, &mut stats).unwrap();
         assert!(out.vertices.iter().any(|vertex| vertex.texture_layer == 10));
         assert!(!out.vertices.iter().any(|vertex| vertex.texture_layer == 11));
@@ -708,7 +712,7 @@ mod tests {
         assert!(entity.equipment_value(6).is_none());
         let mut stripped = DynamicGeometry::default();
         let mut stats = p::PresentationStats::default();
-        p::append_equipment(p::EquipmentPose { entity, rig, transforms: &transforms }, &mut items, &mut cache,
+        p::append_equipment(p::EquipmentPose { item_context: None, entity, rig, transforms: &transforms }, &mut items, &mut cache,
             Frame { models: &models, content: &content, root: Mat4::IDENTITY, tick: 5, partial: 0., light: [15.; 2] }, &mut stripped, &mut stats).unwrap();
         assert!(stripped.vertices.is_empty());
         assert!(stats.unrendered.is_empty());

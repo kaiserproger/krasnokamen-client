@@ -282,6 +282,13 @@ pub(crate) struct State {
     wings_old: f32,
     swell: i32,
     swell_old: i32,
+    use_item: Option<(usize, crate::inventory::Stack)>,
+    use_start: i32,
+    use_age: i32,
+    charge_duration: Option<Result<f32>>,
+    effect_gaussian: Option<f64>,
+    local_item_use: Option<(f32, f32)>,
+    pub in_water: bool,
     pub modern: Modern,
     pub avatar: Avatar,
     random: Rc<RefCell<JavaRandom>>,
@@ -316,6 +323,13 @@ impl State {
             wings_old: 0.,
             swell: 0,
             swell_old: 0,
+            use_item: None,
+            use_start: 0,
+            use_age: 0,
+            charge_duration: None,
+            effect_gaussian: None,
+            local_item_use: None,
+            in_water: false,
             modern,
             avatar: Avatar::default(),
             random,
@@ -355,6 +369,230 @@ impl State {
         };
         self.swell = (self.swell + direction).clamp(0, CREEPER_FUSE);
     }
+    /// Independent pose curves driven solely by the existing Source action timers.
+    pub fn apply_part(
+        &self, models: &Models, entity: &Entity, bone: &super::super::resources::Bone,
+        age: f32, partial: f32, pivot: &mut glam::Vec3, rotation: &mut glam::Vec3,
+        scale: &mut glam::Vec3,
+    ) {
+        if matches!(&self.modern, Modern::None) { return; }
+        let name = bone.name.as_str();
+        let top = bone.parent == Some(0);
+        let baby = p::boolean(models, entity, "DATA_BABY_ID");
+        let unit = (if baby { 0.5 } else { 1. }) / 16.;
+        let seconds = |timer: Timer| timer.millis(age).map(|t| t.max(0) as f32 / 1000.);
+        let pulse = |timer: Timer, duration: f32| seconds(timer).map_or(0., |s| {
+            if s < duration { (s / duration * std::f32::consts::PI).sin() } else { 0. }
+        });
+        let cycle = |timer: Timer, duration: f32| seconds(timer).map_or(0., |s| {
+            (s.rem_euclid(duration) / duration * std::f32::consts::PI).sin()
+        });
+        use super::super::resources::BoneRole;
+        let leg = matches!(bone.role, BoneRole::LeftLeg | BoneRole::RightLeg);
+        let arm = matches!(bone.role, BoneRole::LeftArm | BoneRole::RightArm);
+        match &self.modern {
+            Modern::Bat { rest, .. } => {
+                if rest.started() {
+                    if name == "root" { rotation.z += std::f32::consts::PI; pivot.y += 2.; }
+                    if name.contains("wing") {
+                        let side = if name.starts_with("right") { 1. } else { -1. };
+                        rotation.y = side * 1.3;
+                        rotation.z = side * 0.15;
+                    }
+                } else if name.contains("wing") {
+                    let side = if name.starts_with("right") { 1. } else { -1. };
+                    rotation.y = side * (age * std::f32::consts::TAU / 10.).cos() * 0.9;
+                    rotation.z = bone.rotation.z;
+                }
+            }
+            Modern::Armadillo { roll_up, roll_out, peek, .. } => {
+                let tuck = match p::number(models, entity, "ARMADILLO_STATE").unwrap_or(0) {
+                    1 => seconds(*roll_up).map_or(0., |s| (s / 0.5).clamp(0., 1.)),
+                    2 => 1.,
+                    3 => seconds(*roll_out).map_or(1., |s| 1. - (s / 1.5).clamp(0., 1.)),
+                    _ => 0.,
+                };
+                if name == "head" { rotation.x -= tuck * 1.2 - pulse(*peek, 2.5) * 0.5; pivot.z += tuck * 2. * unit; }
+                else if leg { rotation.x = bone.rotation.x + tuck * 1.4; }
+                else if name == "tail" { rotation.x -= tuck * 1.2; }
+            }
+            Modern::Camel { sit, sit_pose, sit_up, dash, idle, .. } => {
+                let down = if sit_pose.started() { 1. } else { seconds(*sit).map_or(0., |s| (s / 2.).clamp(0., 1.)) };
+                let down = if sit_up.started() { seconds(*sit_up).map_or(0., |s| 1. - (s / 2.6).clamp(0., 1.)) } else { down };
+                if top { pivot.y += down * 9. * unit; }
+                if leg { rotation.x = bone.rotation.x - down * 1.5; }
+                if name == "body" && dash.started() { rotation.x += 5_f32.to_radians(); }
+                if name == "head" { rotation.x -= pulse(*dash, 0.5) * 0.4; }
+                if name == "tail" { rotation.y += pulse(*idle, 4.) * (age * 0.4).sin() * 0.15; }
+            }
+            Modern::Frog { jump, croak, tongue, swim_idle } => {
+                if name == "body" { rotation.x -= pulse(*jump, 0.5) * 0.4; }
+                if leg { rotation.x -= pulse(*jump, 0.5); }
+                if name == "head" { rotation.x -= pulse(*tongue, 0.5); }
+                if name == "tongue" { scale.z *= 0.05 + pulse(*tongue, 0.5) * 2.; }
+                if name == "croaking_body" { let p = pulse(*croak, 3.); scale.y *= 1. + p; scale.z *= 1. + p * 0.3; }
+                if name == "body" && swim_idle.started() { rotation.x += (age * 0.1).sin() * 0.08; }
+            }
+            Modern::Warden { roar, sniff, emerge, dig, attack, sonic } => {
+                let pose = p::number(models, entity, "DATA_POSE").unwrap_or(0);
+                if name == "root" {
+                    if pose == 13 { pivot.y += seconds(*emerge).map_or(0., |s| (1. - s / 6.7).clamp(0., 1.)) * 32. * unit; }
+                    if pose == 14 { pivot.y += seconds(*dig).map_or(0., |s| (s / 5.).clamp(0., 1.)) * 32. * unit; }
+                }
+                if name == "head" { rotation.x -= pulse(*roar, 4.2) * 0.6 + pulse(*sonic, 3.) * 0.6; rotation.x += pulse(*sniff, 4.16) * 0.4; }
+                if arm {
+                    rotation.x -= pulse(*attack, 1. / 3.) * 2.4;
+                    let side = if name.starts_with("right") { 1. } else { -1. };
+                    rotation.z += side * (pulse(*roar, 4.2) + pulse(*sonic, 3.)) * 0.5;
+                }
+            }
+            Modern::Rabbit { hop, head_tilt, jump_ticks, jump_duration, .. } => {
+                let hop = if *jump_duration > 0 {
+                    (((*jump_ticks as f32 + partial) / *jump_duration as f32).clamp(0., 1.) * std::f32::consts::PI).sin()
+                } else { pulse(*hop, 0.75) };
+                if leg { rotation.x = bone.rotation.x + if name.contains("hind") { hop * 0.9 } else { -hop * 0.7 }; }
+                if name == "head" { rotation.z += pulse(*head_tilt, 4.) * 0.3; }
+                if name == "body" { rotation.x -= hop * 0.2; }
+            }
+            Modern::Axolotl(axolotl) => {
+                use super::modern::AxolotlAnimation;
+                let dead = if baby { if axolotl.animation(AxolotlAnimation::PlayDead).started() { 1. } else { 0. } }
+                    else { axolotl.playing_dead.factor(partial) };
+                if name == "root" { rotation.z -= dead * 0.3; }
+                if name == "body" { rotation.x -= dead * 0.25; }
+                if name == "tail" { rotation.y += (age * 0.2).sin() * (1. - dead) * 0.4; }
+                if name.ends_with("gills") { rotation.x += (age * 0.15).sin() * 0.15 * (1. - dead); }
+                if leg { rotation.x = bone.rotation.x + (1. - dead) * (age * 0.3).sin() * self.walk.speed(partial); }
+            }
+            Modern::Fox(fox) => {
+                if name == "head" { rotation.z += fox.head_roll(partial); }
+                if top { pivot.y += fox.crouch(partial) * unit; }
+            }
+            Modern::Sniffer { happy, scent, sniff, dig, rise } => {
+                if name == "head" || name == "snout" {
+                    rotation.x += pulse(*dig, 8.) * 0.8 + cycle(*sniff, 8.) * 0.3 - pulse(*scent, 1.) * 0.5 - pulse(*rise, 3.) * 0.3;
+                    rotation.y += cycle(*happy, 2.) * (age * 0.4).sin() * 0.3;
+                }
+                if name == "body" { rotation.x += pulse(*dig, 8.) * 0.15; }
+            }
+            Modern::Breeze { shoot, inhale, long_jump, slide, slide_back, .. } => {
+                if name == "root" {
+                    pivot.y += pulse(*inhale, 2.) * 10. * unit - pulse(*long_jump, 0.5) * 11. * unit;
+                    let sliding = seconds(*slide).map_or(0., |s| (s / 0.2).clamp(0., 1.));
+                    let returning = seconds(*slide_back).map_or(0., |s| 1. - (s / 0.1).clamp(0., 1.));
+                    pivot.z -= (sliding + returning) * 6. * unit;
+                }
+                if name == "head" { rotation.x -= pulse(*shoot, 1.125) * 12.5_f32.to_radians(); }
+            }
+            Modern::CopperGolem { idle, interactions, .. } => {
+                if name == "head" { rotation.y += pulse(*idle, 3.5) * 0.6; }
+                if let Some((index, timer)) = interactions.iter().enumerate().find(|(_, timer)| timer.started()) {
+                    let progress = seconds(*timer).unwrap_or(0.).rem_euclid(3.) / 3.;
+                    let reach = (progress * std::f32::consts::PI).sin();
+                    if arm { rotation.x -= reach * if index < 2 { 1.3 } else { 0.9 }; }
+                    if name == "head" && index % 2 == 1 { rotation.y += (progress * std::f32::consts::TAU).sin() * 0.25; }
+                }
+            }
+            Modern::Creaking { attack, invulnerable, death, .. } => {
+                if arm { rotation.x -= pulse(*attack, 0.7083) * 1.7; }
+                if name == "root" {
+                    rotation.z += pulse(*invulnerable, 0.2917) * (age * 2.).sin() * 0.1;
+                    if death.started() { pivot.y += seconds(*death).unwrap_or(0.).min(2.25) * unit; }
+                }
+            }
+            Modern::None => {}
+        }
+    }
+
+    pub fn part_visible(&self, models: &Models, entity: &Entity, name: &str, age: f32) -> bool {
+        match &self.modern {
+            Modern::Frog { tongue, croak, .. } => match name {
+                "tongue" => tongue.millis(age).is_some_and(|t| (1..500).contains(&t)),
+                "croaking_body" => croak.millis(age).is_some_and(|t| (0..3000).contains(&t)),
+                _ => true,
+            },
+            Modern::Armadillo { peek, roll_up, .. } => {
+                let state = p::number(models, entity, "ARMADILLO_STATE").unwrap_or(0);
+                let closed = state == 2 || state == 1 && roll_up.millis(age).is_some_and(|t| t >= 400);
+                match name {
+                    "cube" => closed,
+                    "body" | "tail" | "left_hind_leg" | "right_hind_leg" | "left_front_leg" | "right_front_leg" => !closed,
+                    "head" | "left_ear" | "right_ear" => !closed || peek.millis(age).is_some_and(|t| (400..1400).contains(&t)),
+                    _ => true,
+                }
+            }
+            _ => true,
+        }
+    }
+
+    pub fn set_local_item_use(&mut self, action: Option<(f32, f32)>) {
+        self.local_item_use = action;
+    }
+    /// Resolve stochastic enchantment effects once per received use/stack activation.
+    /// The local avatar borrows the duration its actual interaction owner already chose.
+    pub fn prepare_item_use(
+        &mut self, models: &Models, entity: &Entity,
+        content: &crate::protocol::content::Content, age: i32,
+    ) -> Result<()> {
+        self.update_item_use(models, entity, age);
+        if let Some((_, duration)) = self.local_item_use {
+            self.charge_duration = (duration > 0.).then_some(Ok(duration));
+            return Ok(());
+        }
+        let Some((_, stack)) = &self.use_item else { return Ok(()) };
+        if content.item_names.get(&stack.id).is_none_or(|name| name != "minecraft:crossbow") {
+            return Ok(());
+        }
+        if self.charge_duration.is_none() {
+            let mut random = self.random.borrow_mut();
+            let gaussian = &mut self.effect_gaussian;
+            self.charge_duration = Some(crate::player::crossbow_charge_ticks(stack, content, &mut |kind| {
+                match kind {
+                    crate::player::EffectSample::Uniform => f64::from(random.next_float()),
+                    crate::player::EffectSample::Gaussian =>
+                        crate::player::sample_gaussian(gaussian, &mut || random.next_double()),
+                }
+            }));
+        }
+        self.charge_duration.as_ref().unwrap().as_ref().map(|_| ()).map_err(Clone::clone)
+    }
+    pub fn crossbow_pull(&self, partial: f32) -> f32 {
+        self.charge_duration.as_ref().and_then(|r| r.as_ref().ok())
+            .map_or(0., |duration| (self.item_use_ticks(partial) / duration).clamp(0., 1.))
+    }
+
+    /// Active-use time belongs to the action, not the last movement packet.
+    pub fn item_use_ticks(&self, partial: f32) -> f32 {
+        if let Some((ticks, _)) = self.local_item_use { return ticks + partial; }
+        self.use_item.as_ref().map_or(0., |_| {
+            (self.use_age - self.use_start).max(0) as f32 + partial
+        })
+    }
+    fn update_item_use(&mut self, models: &Models, entity: &Entity, age: i32) {
+        let flags = p::number(models, entity, "DATA_LIVING_ENTITY_FLAGS").unwrap_or(0);
+        let charging = p::boolean(models, entity, "IS_CHARGING_CROSSBOW")
+            || p::boolean(models, entity, "DATA_IS_CHARGING_CROSSBOW");
+        let hand = usize::from(flags & 2 != 0);
+        let active = (flags & 1 != 0 || charging)
+            .then(|| entity.equipment_value(hand))
+            .flatten()
+            .filter(|stack| !stack.empty());
+        match active {
+            Some(stack) => {
+                if self.use_item.as_ref().is_none_or(|(old_hand, old)| *old_hand != hand || old.id != stack.id) {
+                    self.use_start = age;
+                }
+                if self.use_item.as_ref().is_none_or(|(old_hand, old)| {
+                    *old_hand != hand || !old.same_item(stack)
+                }) {
+                    self.use_item = Some((hand, stack.clone()));
+                    self.charge_duration = None;
+                }
+            }
+            None => { self.use_item = None; self.charge_duration = None; }
+        }
+        self.use_age = age;
+    }
     pub fn body(&self, partial: f32) -> f32 {
         self.body_yaw_old + partial * wrap(self.body_yaw - self.body_yaw_old)
     }
@@ -375,6 +613,7 @@ impl State {
         changed: &[bool; 256],
         age: i32,
     ) {
+        self.update_item_use(models, entity, age);
         let received = |name| {
             models
                 .accessor(&entity.type_name, name)
@@ -497,6 +736,8 @@ impl State {
         self.hurt_time = 10;
     }
     pub fn tick(&mut self, models: &Models, entity: &Entity, input: &TickInput) {
+        self.update_item_use(models, entity, input.age);
+        self.in_water = input.in_water;
         let delta = std::array::from_fn::<_, 3, _>(|i| input.position[i] - self.position_old[i]);
         self.body_yaw_old = self.body_yaw;
         self.head_yaw_old = self.head_yaw;
@@ -859,9 +1100,9 @@ impl State {
 const CREEPER_FUSE: i32 = 30;
 /// Mobs that walk with folded wings and flap only in midair (minecraft.wiki: chickens
 /// "flap their wings when they are in midair"; parrots flap to fly and slow their falls).
-/// Other winged mobs fly and keep beating.
+/// BeeModel also folds its wings on the ground; bat hanging is owned by Modern::Bat.
 pub(crate) fn folds_wings(kind: &str) -> bool {
-    matches!(kind, "minecraft:chicken" | "minecraft:parrot")
+    matches!(kind, "minecraft:chicken" | "minecraft:parrot" | "minecraft:bee")
 }
 pub(crate) fn wrap(angle: f32) -> f32 {
     let angle = angle % 360.;
