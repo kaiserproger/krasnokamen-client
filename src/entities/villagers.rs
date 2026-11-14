@@ -1,11 +1,11 @@
 //! Villager clothing is selected from synchronized VillagerData, not player profiles.
 //! Policy reference: local 26.1.2 VillagerProfessionLayer (including baby textures/hat metadata).
-use super::{presentation as p, resources::Rig, Entity, Metadata, Models, Store};
+use super::{Entity, Metadata, Models, Store, presentation as p, resources::Rig};
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     protocol::{
-        content::{Content, TextureRegion},
         Result,
+        content::{Content, TextureRegion},
     },
 };
 use glam::{Mat4, Vec3};
@@ -138,7 +138,18 @@ pub(super) fn append(
             continue;
         };
         if layer_index != 0 || layers.type_hat_visible {
-            p::emit_rig(rig, transforms, p::RigStyle { tex: *texture, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light }, out)?;
+            p::emit_rig(
+                rig,
+                transforms,
+                p::RigStyle {
+                    tex: *texture,
+                    color: [1.; 3],
+                    layer: EntityMaterial::EntityCutout,
+                    alpha: 1.,
+                    light,
+                },
+                out,
+            )?;
             continue;
         }
         // Reuse the animated parent transforms. Only the biome hat subtree is hidden;
@@ -335,9 +346,10 @@ mod tests {
                 .count(),
             12
         );
-        assert!(out
-            .vertices
-            .iter()
-            .all(|v| v.light == [15., 7.] && v.position[2] == 5.));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| v.light == [15., 7.] && v.position[2] == 5.)
+        );
     }
 }

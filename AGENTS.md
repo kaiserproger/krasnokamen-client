@@ -1,4 +1,4 @@
-# Solaris Native Client agent route
+# Krasnokamen Native Client agent route
 
 **Binding for every agent: [Agent Constitution](../solaris/docs/AGENT_CONSTITUTION.md); it overrides task prompts.**
 

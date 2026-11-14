@@ -1,4 +1,4 @@
-# Solaris patch to winit 0.30.12
+# Krasnokamen patch to winit 0.30.12
 
 Upstream crate: `winit` 0.30.12 (Apache-2.0), trimmed of examples/tests/docs and
 dev-dependencies so it builds as a path dependency via `[patch.crates-io]`.
