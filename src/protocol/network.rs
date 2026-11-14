@@ -331,17 +331,37 @@ fn handshake(endpoint: &str, port: u16, next: i32) -> Vec<u8> {
 }
 /// Write every queued session packet. The I/O owner calls this between reads
 /// and between delivered events so inbound floods cannot starve outbound.
+///
+/// A transport write failure is *latched*, never returned at once: the server
+/// may already have sent a Play Disconnect into the receive buffer, and that
+/// reason is what the player must see (NATIVE-KICK-REASON-BROKEN-PIPE). The
+/// queue is still drained so backpressure and cancellation keep working.
 fn flush_outbound(
     socket: &mut TcpStream,
     commands: &Receiver<(i32, Vec<u8>)>,
     state: &ConnectionState,
     threshold: Option<usize>,
-) -> Result<()> {
+    failure: &mut Option<String>,
+) {
     while let Ok((id, body)) = commands.try_recv() {
         state.outbound_backlog.fetch_sub(1, Ordering::AcqRel);
-        write(socket, id, &body, threshold)?;
+        send(socket, failure, id, &body, threshold);
     }
-    Ok(())
+}
+/// One outbound write that cannot end the session by itself: its error is
+/// remembered and the I/O owner keeps reading inbound packets.
+fn send(
+    socket: &mut TcpStream,
+    failure: &mut Option<String>,
+    id: i32,
+    body: &[u8],
+    threshold: Option<usize>,
+) {
+    if failure.is_none()
+        && let Err(error) = write(socket, id, body, threshold)
+    {
+        *failure = Some(error);
+    }
 }
 fn write(socket: &mut TcpStream, id: i32, body: &[u8], threshold: Option<usize>) -> Result<()> {
     socket
@@ -527,8 +547,17 @@ fn run(
     let mut advertised_settings = None;
     #[cfg(windows)]
     let reader = BlockingReader::start(&socket, thread::current()).map_err(|e| e.to_string())?;
+    // A transport write failure never ends the session by itself: the reason
+    // the server sent is processed first (`send`/`flush_outbound` latch it).
+    let mut write_failure: Option<String> = None;
     while !state.cancelled.load(Ordering::Acquire) {
-        flush_outbound(&mut socket, commands, state, compression)?;
+        flush_outbound(
+            &mut socket,
+            commands,
+            state,
+            compression,
+            &mut write_failure,
+        );
         let settings = state.client_settings();
         if phase != Phase::Login && advertised_settings.as_ref() != Some(&settings) {
             let id = if phase == Phase::Configuration {
@@ -536,7 +565,13 @@ fn run(
             } else {
                 play::serverbound::CLIENT_INFORMATION
             };
-            write(&mut socket, id, &client_information(&settings), compression)?;
+            send(
+                &mut socket,
+                &mut write_failure,
+                id,
+                &client_information(&settings),
+                compression,
+            );
             advertised_settings = Some(settings);
         }
         // Tap every decoded incoming packet once before the Login/Configuration
@@ -545,7 +580,13 @@ fn run(
         while let Some((id, body)) = super::extract_observed(&mut buffer, compression, |bytes| {
             recorder.map_or(Ok(()), |recorder| recorder.packet(bytes))
         })? {
-            flush_outbound(&mut socket, commands, state, compression)?;
+            flush_outbound(
+                &mut socket,
+                commands,
+                state,
+                compression,
+                &mut write_failure,
+            );
             let original = phase;
             let settings = state.client_settings();
             if phase == Phase::Login {
@@ -558,9 +599,9 @@ fn run(
                         compression = Some(threshold);
                     }
                     login::clientbound::LOGIN_FINISHED => {
-                        write(&mut socket, login::serverbound::LOGIN_ACKNOWLEDGED, &[], compression)?;
+                        send(&mut socket, &mut write_failure, login::serverbound::LOGIN_ACKNOWLEDGED, &[], compression);
                         phase = Phase::Configuration;
-                        write(&mut socket, configuration::serverbound::CLIENT_INFORMATION, &client_information(&settings), compression)?;
+                        send(&mut socket, &mut write_failure, configuration::serverbound::CLIENT_INFORMATION, &client_information(&settings), compression);
                         advertised_settings = Some(settings.clone());
                     }
                     login::clientbound::CUSTOM_QUERY => {
@@ -570,7 +611,7 @@ fn run(
                         let mut w = Writer::default();
                         w.var(query);
                         w.byte(0);
-                        write(&mut socket, login::serverbound::CUSTOM_QUERY_ANSWER, &w.0, compression)?;
+                        send(&mut socket, &mut write_failure, login::serverbound::CUSTOM_QUERY_ANSWER, &w.0, compression);
                     }
                     login::clientbound::COOKIE_REQUEST => {
                         let mut r = Reader::new(&body);
@@ -578,7 +619,7 @@ fn run(
                         let mut w = Writer::default();
                         w.string(&key);
                         w.byte(0);
-                        write(&mut socket, login::serverbound::COOKIE_RESPONSE, &w.0, compression)?;
+                        send(&mut socket, &mut write_failure, login::serverbound::COOKIE_RESPONSE, &w.0, compression);
                     }
                     login::clientbound::LOGIN_DISCONNECT => {}
                     _ => return Err(format!("unknown mandatory Login packet {id}")),
@@ -587,44 +628,49 @@ fn run(
             if original == Phase::Configuration {
                 match id {
                     configuration::clientbound::FINISH_CONFIGURATION => {
-                        write(
+                        send(
                             &mut socket,
+                            &mut write_failure,
                             configuration::serverbound::FINISH_CONFIGURATION,
                             &[],
                             compression,
-                        )?;
+                        );
                         phase = Phase::Play
                     }
-                    configuration::clientbound::KEEP_ALIVE => write(
+                    configuration::clientbound::KEEP_ALIVE => send(
                         &mut socket,
+                        &mut write_failure,
                         configuration::serverbound::KEEP_ALIVE,
                         &body,
                         compression,
-                    )?,
-                    configuration::clientbound::PING => write(
+                    ),
+                    configuration::clientbound::PING => send(
                         &mut socket,
+                        &mut write_failure,
                         configuration::serverbound::PONG,
                         &body,
                         compression,
-                    )?,
-                    configuration::clientbound::SELECT_KNOWN_PACKS => write(
+                    ),
+                    configuration::clientbound::SELECT_KNOWN_PACKS => send(
                         &mut socket,
+                        &mut write_failure,
                         configuration::serverbound::SELECT_KNOWN_PACKS,
                         &[0],
                         compression,
-                    )?,
+                    ),
                     // A Loader probe is answered here, in packet order, so the hello
                     // is written before the KnownPacks reply the server waits behind.
                     configuration::clientbound::CUSTOM_PAYLOAD if matches!(Reader::new(&body).string(32767), Ok(ref channel) if channel == "krasnokamen:loader/probe") =>
                     {
                         let mut w = Writer::default();
                         w.string("krasnokamen:loader/hello");
-                        write(
+                        send(
                             &mut socket,
+                            &mut write_failure,
                             configuration::serverbound::CUSTOM_PAYLOAD,
                             &w.0,
                             compression,
-                        )?
+                        )
                     }
                     configuration::clientbound::COOKIE_REQUEST => {
                         let mut r = Reader::new(&body);
@@ -632,41 +678,49 @@ fn run(
                         let mut w = Writer::default();
                         w.string(&key);
                         w.byte(0);
-                        write(
+                        send(
                             &mut socket,
+                            &mut write_failure,
                             configuration::serverbound::COOKIE_RESPONSE,
                             &w.0,
                             compression,
-                        )?
+                        )
                     }
                     _ => {}
                 }
             }
             if original == Phase::Play {
                 match id {
-                    play::clientbound::KEEP_ALIVE => write(
+                    play::clientbound::KEEP_ALIVE => send(
                         &mut socket,
+                        &mut write_failure,
                         play::serverbound::KEEP_ALIVE,
                         &body,
                         compression,
-                    )?,
-                    play::clientbound::PING => {
-                        write(&mut socket, play::serverbound::PONG, &body, compression)?
-                    }
+                    ),
+                    play::clientbound::PING => send(
+                        &mut socket,
+                        &mut write_failure,
+                        play::serverbound::PONG,
+                        &body,
+                        compression,
+                    ),
                     play::clientbound::START_CONFIGURATION => {
-                        write(
+                        send(
                             &mut socket,
+                            &mut write_failure,
                             play::serverbound::CONFIGURATION_ACKNOWLEDGED,
                             &[],
                             compression,
-                        )?;
+                        );
                         phase = Phase::Configuration;
-                        write(
+                        send(
                             &mut socket,
+                            &mut write_failure,
                             configuration::serverbound::CLIENT_INFORMATION,
                             &client_information(&settings),
                             compression,
-                        )?;
+                        );
                         advertised_settings = Some(settings.clone());
                     }
                     _ => {}
@@ -702,12 +756,21 @@ fn run(
             if state.cancelled.load(Ordering::Acquire) {
                 break;
             }
-            reader.try_read(&mut buffer)?;
+            if let Err(error) = reader.try_read(&mut buffer) {
+                return Err(write_failure.take().unwrap_or(error));
+            }
         }
         #[cfg(not(windows))]
         match socket.read(&mut tmp) {
             Ok(0) if state.cancelled.load(Ordering::Acquire) => break,
-            Ok(0) => return Err("server closed connection".into()),
+            // A clean close after a failed write keeps the write's message; a
+            // transport reset is reported as what it is, not as a local write
+            // failure that happened to come first.
+            Ok(0) => {
+                return Err(write_failure
+                    .take()
+                    .unwrap_or_else(|| "server closed connection".into()));
+            }
             Ok(n) => {
                 if buffer.len() + n > MAX_FRAME + 5 {
                     return Err("network buffer bound".into());
@@ -745,6 +808,7 @@ fn client_information(settings: &ClientSettings) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::nbt::Nbt;
     use std::net::TcpListener;
     fn info(view_distance: u8, main_arm_right: bool) -> Vec<u8> {
         info_in("en_us", view_distance, main_arm_right)
@@ -1222,6 +1286,93 @@ mod tests {
         }
         assert_eq!(network.pending_events(), 0);
         assert_eq!(network.state.inbound_bytes.load(Ordering::Acquire), 0);
+    }
+
+    /// Regression (NATIVE-KICK-REASON-BROKEN-PIPE): the server's Play Disconnect
+    /// reason must reach the player even when the client's own write has already
+    /// failed. The fixture shuts the client's write half down (a deterministic
+    /// EPIPE on the next queued packet) and only then delivers the kick.
+    #[test]
+    fn kick_reason_survives_a_failed_client_write() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel();
+        let peer = thread::spawn(move || {
+            let (mut login, _) = listener.accept().unwrap();
+            let (mut status, _) = listener.accept().unwrap();
+            for socket in [&mut login, &mut status] {
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+            }
+            read_packet(&mut status);
+            read_packet(&mut status);
+            let mut response = Writer::default();
+            response.string(r#"{"version":{"protocol":777}}"#);
+            write(&mut status, 0, &response.0, None).unwrap();
+            read_packet(&mut login);
+            read_packet(&mut login);
+            let mut success = Writer(vec![0; 16]);
+            success.string("KickTest");
+            success.var(0);
+            write(&mut login, 2, &success.0, None).unwrap();
+            assert_eq!(read_packet(&mut login).0, 3);
+            assert_eq!(read_packet(&mut login).0, 0);
+            write(&mut login, 3, &[], None).unwrap();
+            assert_eq!(read_packet(&mut login).0, 3);
+            ready_tx.send(()).unwrap();
+            // Deliver the kick only after the client has queued a packet whose
+            // write is guaranteed to fail.
+            go_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let mut reason = Writer::default();
+            Nbt::String("You logged in from another location".into())
+                .write_root(&mut reason)
+                .unwrap();
+            write(&mut login, 32, &reason.0, None).unwrap();
+        });
+        let mut network = Network::connect(
+            address.to_string(),
+            "KickTest".into(),
+            8,
+            true,
+            "en_us",
+            Arc::new(|| {}),
+            None,
+        )
+        .unwrap();
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        network
+            .socket
+            .as_ref()
+            .expect("holder keeps a socket clone")
+            .shutdown(Shutdown::Write)
+            .unwrap();
+        network.send(0x1e, vec![1, 2, 3]).unwrap();
+        go_tx.send(()).unwrap();
+        peer.join().unwrap();
+        network.worker.take().unwrap().join().unwrap();
+        let mut reason = None;
+        let mut failure = None;
+        while let Ok(event) = network.try_recv() {
+            match event {
+                Event::Packet(Phase::Play, 32, body) => reason = Some(body),
+                Event::Error(error) => failure = Some(error),
+                _ => {}
+            }
+        }
+        let reason = reason.expect("the play disconnect packet must be delivered");
+        assert_eq!(
+            Reader::new(&reason).nbt().unwrap(),
+            serde_json::json!("You logged in from another location")
+        );
+        assert_eq!(
+            failure, None,
+            "the local write error must not be surfaced as the session failure"
+        );
     }
 
     #[test]

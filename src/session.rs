@@ -1494,8 +1494,12 @@ impl Session {
         self.animate_ui();
         if self.presentation && self.phase == "play" && self.player.pose_known {
             self.local_partial = partial.clamp(0., 1.);
+            // Vanilla LevelExtractor passes `!TickRateManager.isEntityFrozen(entity)`
+            // to DeltaTracker.getGameTimeDeltaPartialTick, which is 1.0 while the
+            // world is frozen: a frozen entity is drawn at its current tick, not
+            // the previous one (a tp or a stepped falling block must not lag).
             self.presentation_partial = if self.server_frozen {
-                0.
+                1.
             } else {
                 self.local_partial
             };
@@ -1940,6 +1944,123 @@ mod cpu_hotpath_tests {
         assert_eq!(session.world_tick, 0);
         assert_eq!(session.environment.game_time(), world_time);
         assert!((session.scene.camera_position[0] - session.player.position[0]).abs() < 0.1);
+    }
+
+    /// Regression (NATIVE-FROZEN-FALLING-DRAWN-LATE, NATIVE-FREEZE-CAMERA): vanilla
+    /// draws a frozen entity at partial tick 1 — its current position — so a
+    /// stepped falling block and a teleported entity must not lag a tick while
+    /// `/tick freeze` holds the world clock.
+    #[test]
+    fn frozen_world_presents_entities_at_their_current_tick() {
+        let mut session = super::mining_start_tests::session();
+        session.presentation = true;
+        let mut content = Content::test_cube();
+        content.entity_names.insert(90, "test:soldier".into());
+        let schema = serde_json::from_value(json!({
+            "protocol_id": 1, "width": 0.6, "height": 1.95, "eye_height": 1.62,
+            "fire_immune": false, "class": "net.minecraft.world.entity.LivingEntity",
+            "dimension_constants": {}, "enum_ids": {}, "enum_numbers": {},
+            "hierarchy": ["net.minecraft.world.entity.Entity", "net.minecraft.world.entity.LivingEntity"],
+            "method_owners": {"isPickable": "net.minecraft.world.entity.LivingEntity"},
+            "dimensions": {"width": 0.6, "height": 1.95, "eye_height": 1.62,
+                "fixed": false, "attachments": {}},
+            "default_attributes": {"minecraft:scale": {"id": 0, "value": 1.0}}, "accessors": {}
+        }))
+        .unwrap();
+        session.entities.models = Some(Arc::new(crate::entities::Models {
+            rigs: BTreeMap::new(),
+            schemas: [("test:soldier".into(), schema)].into_iter().collect(),
+            families: BTreeMap::new(),
+            builtin_variants: BTreeMap::new(),
+            simple_particles: Vec::new(),
+            default_skins: Vec::new(),
+            poses: BTreeMap::from([(0, "STANDING".into())]),
+            attributes: BTreeMap::new(),
+            attribute_ids: BTreeMap::new(),
+            digest: String::new(),
+            armor_models: BTreeMap::new(),
+            motion: serde_json::from_value(json!({
+                "test:soldier": {
+                    "class": "net.minecraft.world.entity.LivingEntity", "is_mob": true,
+                    "walk_uses_y": "never", "methods": {},
+                    "body_rule": "standard", "walk_rule": "standard",
+                    "head_rule": {"kind": "fixed", "value": 75.0},
+                    "body_head_rule": {"kind": "fixed", "value": 75.0}
+                }
+            }))
+            .unwrap(),
+        }));
+        let mut add = crate::protocol::Writer::default();
+        add.var(42);
+        add.0.extend([0u8; 16]);
+        add.var(90);
+        for coordinate in [6.5, 4., 4.5] {
+            add.f64(coordinate);
+        }
+        add.0.extend([0u8; 5]);
+        session
+            .entities
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::ADD_ENTITY,
+                &mut crate::protocol::Reader::new(&add.0),
+                &content,
+                1,
+            )
+            .unwrap();
+        let mut move_to = crate::protocol::Writer::default();
+        move_to.var(42);
+        move_to.var(0);
+        for delta in [4096_i16, 0, 0] {
+            move_to.0.extend(delta.to_be_bytes());
+        }
+        session
+            .entities
+            .apply(
+                crate::protocol::packet_ids::play::clientbound::MOVE_ENTITY_POS,
+                &mut crate::protocol::Reader::new(&move_to.0),
+                &content,
+                1,
+            )
+            .unwrap();
+        // The received move left a previous->current pair: 6.5 -> 7.5, and the
+        // living lerp spreads it over several ticks, so partial 0 still shows
+        // the previous tick while partial 1 already shows one stepped tick.
+        let entity = session.entities.get(42).unwrap();
+        assert_eq!(entity.transform.position[0], 7.5);
+        let previous_tick = entity.presented_transform(0, 0.).position[0];
+        let stepped_tick = entity.presented_transform(0, 1.).position[0];
+        assert_eq!(previous_tick, 6.5);
+        assert!(
+            stepped_tick > previous_tick,
+            "one stepped tick must advance the received move: {stepped_tick}"
+        );
+
+        session.server_frozen = true;
+        session.step_ticks = 0;
+        session.prepare_frame(0.).expect("frozen frame prepares");
+        assert_eq!(
+            session.presentation_partial, 1.,
+            "a frozen world's DeltaTracker partial tick is 1, not 0"
+        );
+        let shown = session
+            .entities
+            .get(42)
+            .unwrap()
+            .presented_transform(session.world_tick, session.presentation_partial)
+            .position[0];
+        assert!(
+            (shown - stepped_tick).abs() < 1e-9,
+            "frozen entity must be drawn at the stepped tick {stepped_tick}, got {shown}"
+        );
+        assert!(
+            (shown - previous_tick).abs() > 1e-9,
+            "frozen entity must not stay on the previous tick"
+        );
+
+        // The live path still follows the frame's partial tick.
+        session.server_frozen = false;
+        session.prepare_frame(0.25).expect("live frame prepares");
+        assert_eq!(session.presentation_partial, 0.25);
     }
 
     #[test]
