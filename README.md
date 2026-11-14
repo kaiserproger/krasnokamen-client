@@ -187,7 +187,7 @@ krasnokamen-client --help
 cargo build --release          # builds krasnokamen-client and krasnokamen-launcher into target/release/
 ```
 
-`rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses OpenGL/X11/Wayland on Linux and the system graphics stack on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
+`rust-toolchain.toml` pins Rust 1.95.0. The client links ALSA on Linux and Core Audio on macOS; the launcher uses wgpu with Vulkan/X11/Wayland on Linux, Direct3D 12 or Vulkan on Windows, and Metal on macOS. On the shared dev host the build is wrapped as described in [PLAYING.md](PLAYING.md).
 
 CI (`.github/workflows/release.yml`) builds Linux and Windows archives plus an ad-hoc-signed Apple Silicon `Krasnokamen.app` zip on every `v*` tag, attaches checksums, and asserts that no `.jar` or `assets/` directory is in the package.
 

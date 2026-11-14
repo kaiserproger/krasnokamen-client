@@ -1,5 +1,14 @@
 # Open validation issues
 
+## CLIENT-LAUNCHER-BACKEND — rc.5 OpenGL dependency (verification pending)
+
+The rc.5 Windows launcher imports `OPENGL32.dll`; the Linux/Windows launcher
+used eframe's OpenGL renderer. The launcher now builds with wgpu's native
+backends, and the Windows release dependency check rejects an OpenGL import
+in the launcher. This does not establish the cause of the reported work
+computer startup failure: its OS and exact error remain unknown. A successful
+startup on that computer and packaged macOS runtime verification remain open.
+
 ## CLIENT-LINT-001 — inherited strict Clippy debt (open, quarantined)
 
 The 2026-10-28 protocol-777 cutover and the known-green full-suite baseline

@@ -1505,12 +1505,6 @@ impl eframe::App for App {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.finish_exit();
-    }
-
-    #[cfg(target_os = "macos")]
     fn on_exit(&mut self) {
         self.finish_exit();
     }

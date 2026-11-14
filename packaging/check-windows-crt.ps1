@@ -20,6 +20,13 @@ function Assert-NoDynamicVCRuntime {
     }
 }
 
+function Assert-LauncherNoOpenGL {
+    param([string]$Executable, [string[]]$Dump)
+    if ($Dump | Where-Object { $_ -match '^\s*OPENGL32\.dll\s*$' }) {
+        throw "${Executable} imports OPENGL32.dll instead of the native wgpu backend"
+    }
+}
+
 if ($LoadOnly) { return }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -36,5 +43,8 @@ foreach ($name in @('krasnokamen-launcher.exe', 'krasnokamen-client.exe', 'krasn
     $dump = & $dumpbin.FullName /dependents $exe 2>&1
     if ($LASTEXITCODE -ne 0) { throw "dumpbin failed for ${exe}: $dump" }
     Assert-NoDynamicVCRuntime -Executable $exe -Dump $dump
+    if ($name -eq 'krasnokamen-launcher.exe') {
+        Assert-LauncherNoOpenGL -Executable $exe -Dump $dump
+    }
     Write-Host "Verified VC runtime imports: $exe"
 }

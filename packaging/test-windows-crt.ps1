@@ -20,4 +20,11 @@ Expect-Rejected -Dump @('    KERNEL32.dll', '    MSVCP140_ATOMIC_WAIT.dll')
 Expect-Rejected -Dump @('    KERNEL32.dll', '    VCRUNTIME140D.dll')
 Expect-Rejected -Dump @('    KERNEL32.dll', '    CONCRT140.dll')
 Expect-Rejected -Dump @('dumpbin did not produce dependency output')
+Assert-LauncherNoOpenGL -Executable 'fixture.exe' -Dump @('    KERNEL32.dll')
+try {
+    Assert-LauncherNoOpenGL -Executable 'fixture.exe' -Dump @('    KERNEL32.dll', '    opengl32.dll')
+    throw 'OpenGL import was not rejected'
+} catch {
+    if ($_.Exception.Message -eq 'OpenGL import was not rejected') { throw }
+}
 Write-Host 'Windows CRT dependency gate regression cases passed'
