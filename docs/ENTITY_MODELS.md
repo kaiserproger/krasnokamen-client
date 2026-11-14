@@ -1,12 +1,12 @@
-# Solaris entity models
+# Krasnokamen entity models
 
 Entity and block-entity geometry is shipped inside the client binary
-(`assets/solaris/models/entity/<id>.json`, embedded by `build.rs`, baked by
-`src/entities/solaris_models.rs`). Most geometry is authored by Solaris; the
+(`assets/krasnokamen/models/entity/<id>.json`, embedded by `build.rs`, baked by
+`src/entities/krasnokamen_models.rs`). Most geometry is authored by Krasnokamen; the
 third-party battle armor conversions are identified in
 `assets/battle_video/ATTRIBUTION.md`. Entity metadata (protocol ids, dimensions, metadata accessors,
-texture/variant selection, head/body turn limits) is the Solaris-owned data table
-`assets/solaris/entities/entity-facts.json`, embedded via `include_str!` in
+texture/variant selection, head/body turn limits) is the Krasnokamen-owned data table
+`assets/krasnokamen/entities/entity-facts.json`, embedded via `include_str!` in
 `src/entities/resources.rs`. Nothing is read from `dist/entities` any more.
 
 Vanilla-family models are UV-compatible with vanilla entity textures, which the player supplies
@@ -39,8 +39,8 @@ Adult horse body armor and saddles use separate independently authored overlay r
 received equippable asset's `horse_body` and `horse_saddle` texture layers. Overlay joints
 follow the corresponding authored horse bones; unsupported species and missing resources stay
 explicitly unrendered. The candidate's native equip/strip replay and movement remain unverified.
-The optional battle resource pack includes `solaris_battle:holy` and
-`solaris_battle:iron_plate` equipment assets mapped to converted Armor of the
+The optional battle resource pack includes `krasnokamen_battle:holy` and
+`krasnokamen_battle:iron_plate` equipment assets mapped to converted Armor of the
 Ages rigs for adult humanoid armor slots.
 The source and license are recorded in `assets/battle_video/ATTRIBUTION.md`.
 These rigs and their rest-pose decorative elements require graphical validation;
@@ -70,7 +70,7 @@ Chat partly obscures these views; movement, natural equipment interaction and ma
 visual parity remain unverified.
 Placed standing and wall banners use the banner block-entity renderer in the native scene,
 including received base colors and pattern layers; their flag animation uses world time.
-The banner rigs are independent approximations authored from local texture images, Solaris
+The banner rigs are independent approximations authored from local texture images, Krasnokamen
 renderer/schema and native screenshots; patterned banners and matched-vanilla parity are
 not established by those screenshots.
 Standing and wall banner flags share the full 20×40 texel box unwrap; their poles and bars
@@ -81,7 +81,7 @@ predate the 26.3 integration and do not prove the integrated renderer.
 Bell bodies are centered within their block before the received swing animation is applied.
 Placed shulker boxes and decorated pots use their block-entity renderers in the native scene,
 including shulker lid progress and received pot sherd selection. Pot rigs are independent
-approximations authored from local texture images, Solaris renderer/schema and native
+approximations authored from local texture images, Krasnokamen renderer/schema and native
 screenshots. A 26.3 native scene showed an angler pattern on a placed pot and a blank
 control; other patterns, orientations, open animation and matched-vanilla parity remain
 unverified.
@@ -121,7 +121,7 @@ their pose (`creeper_charge`), also while invisible. Primed TNT and falling bloc
 received block model (TNT flashes white and swells in its last ticks); lightning bolts draw
 independently authored seeded jagged geometry while the strike flashes; leashed mobs draw a
 sagging brown rope from the neck to the holder's hand or knot. Sizes, rates and colours of these
-effects are Solaris approximations of the minecraft.wiki descriptions, not game constants.
+effects are Krasnokamen approximations of the minecraft.wiki descriptions, not game constants.
 
 ## File format (schema 1)
 
@@ -144,7 +144,7 @@ effects are Solaris approximations of the minecraft.wiki descriptions, not game 
   entity's right. `pivot` is relative to the parent bone; cube `origin` relative to its bone;
   rotations are degrees (Z, then Y, then X).
 * `texture.path` is relative to `assets/minecraft/textures/` for vanilla-family models;
-  battle armor paths are relative to the battle pack's `assets/solaris_battle/textures/`.
+  battle armor paths are relative to the battle pack's `assets/krasnokamen_battle/textures/`.
   `size` must equal the PNG size. Runtime texture choice for variants (colour, profession,
   baby, tamed...) stays with the family/variant code and only needs the same layout.
 * Cubes use the classic box unwrap (`uv` + size `w x h x d`); `mirror` mirrors the cube about its
@@ -164,7 +164,7 @@ effects are Solaris approximations of the minecraft.wiki descriptions, not game 
 
 The renderer asks for rigs by key (`minecraft:cow#renderer_main`, `minecraft:cow_baby#main`,
 `minecraft:oak_chest_boat#renderer/model`, `minecraft:zombie#layer3/modelSet/head`...).
-`solaris_models::model_id` maps a key to a model id (file stem): qualifiers are dropped, wood
+`krasnokamen_models::model_id` maps a key to a model id (file stem): qualifiers are dropped, wood
 variants collapse (`boat`, `chest_boat`, `raft`, `chest_raft`, every `*_minecart` -> `minecart`),
 armor-layer slots map to `armor_<slot>` / `armor_baby_<slot>`, with species-specific baby
 shells where body pivots differ.
@@ -198,7 +198,7 @@ positions are fitted to the Java oracle screenshots: the golem is 43 authored
 model units tall, with its head on the shoulder line and its arms ending 3.5
 units above the feet; the child's nose covers the lowest two face rows.
 These are our reconstruction parameters, not extracted Mojang model constants.
-Tests in `solaris_models/tests.rs` pin that authored reconstruction.
+Tests in `krasnokamen_models/tests.rs` pin that authored reconstruction.
 
 ### Labels and shadows
 
@@ -233,10 +233,10 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
 
 * `python3 tools/entity_models.py fmt|check|preview` - canonical formatting, validation
   (schema, UV bounds, texture existence/size, unique bones, roles, texel coverage) and a textured
-  four-view + UV-map preview using the vanilla PNG (`SOLARIS_TEXTURES` overrides the texture root).
-* `cargo test --lib solaris_models` - geometry winding/unwrap/mirror tests, key resolution, and a
+  four-view + UV-map preview using the vanilla PNG (`KRASNOKAMEN_TEXTURES` overrides the texture root).
+* `cargo test --lib krasnokamen_models` - geometry winding/unwrap/mirror tests, key resolution, and a
   sanity test over every shipped model (UVs inside the declared texture, roles/bones valid, and -
-  when vanilla textures are available under `SOLARIS_CLIENT_RESOURCE_ROOT` or `dist/resources` -
+  when vanilla textures are available under `KRASNOKAMEN_CLIENT_RESOURCE_ROOT` or `dist/resources` -
   the texture exists with the declared size).
 
 ## Coverage and known limits
@@ -258,7 +258,7 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   (undercoat tinted body once sheared).
   Tamed cats and wolves render their age-specific collar texture, dyed from received collar
   metadata (red when the server leaves it at the vanilla default); untamed pets omit it.
-  Received sitting flags select Solaris-authored sitting poses for adult and baby cats and
+  Received sitting flags select Krasnokamen-authored sitting poses for adult and baby cats and
   wolves; red-collar static standing/sitting views were exercised. Transition animation
   and matched-vanilla poses remain unverified.
   The allay head's faces sample explicit rectangles of the runtime texture; the front one
@@ -304,7 +304,7 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   hump. Sitting lowers the back by 19 pixels onto the received sitting seat and tucks the
   folded front legs under the chest. `camel_back_and_saddle_carry_the_received_standing_and_sitting_seat`
   checks both contacts. Two native-client scenes showed a remote rider seated on a saddled
-  camel. Solaris core never sends camel sitting poses, so sitting is checked only by the test.
+  camel. Krasnokamen core never sends camel sitting poses, so sitting is checked only by the test.
   Matched-vanilla appearance remains unverified.
   Allay, vex, baby bee, ghastling, rabbit, fox, panda, hoglin, zoglin, strider, guardian, elder
   guardian, cod, salmon and axolotl rigs (with their babies where listed) and the vindicator's
@@ -378,11 +378,11 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
 * Received text displays use the client font renderer and display snapshot for orientation,
   interpolation, text style and background. A server-generated settlement house label was
   visually checked; other display styles and animation are not established by that frame.
-* Entity metadata is Solaris-owned data: `assets/solaris/entities/entity-facts.json` (embedded in
+* Entity metadata is Krasnokamen-owned data: `assets/krasnokamen/entities/entity-facts.json` (embedded in
   the binary; protocol ids, dimensions, metadata accessors, texture/variant selection, head/body
   turn limits, armor shell keys, motion rules). Pure tables, no meshes/UV/animation keyframes;
   the launcher needs no JDK and nothing is derived from the client jar for entities.
-* Spider legs use a Solaris-authored alternating swing driven by received displacement;
+* Spider legs use a Krasnokamen-authored alternating swing driven by received displacement;
   they ease back to their authored resting pose when movement stops. The adult spider rig
   now uses single sloped leg bars rather than added vertical feet, based on a Java
   capture. A post-build native screenshot was inspected, but movement phase was not
