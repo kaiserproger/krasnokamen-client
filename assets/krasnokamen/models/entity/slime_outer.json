@@ -1,38 +1,12 @@
 {
   "schema": 1,
   "id": "slime_outer",
-  "texture": {
-    "path": "entity/slime/slime.png",
-    "size": [
-      64,
-      32
-    ]
-  },
+  "texture": {"path": "entity/slime/slime.png", "size": [64, 32]},
   "bones": [
     {
-      "name": "outer",
-      "pivot": [
-        0,
-        20,
-        0
-      ],
+      "name": "cube",
       "cubes": [
-        {
-          "origin": [
-            -4,
-            -4,
-            -4
-          ],
-          "size": [
-            8,
-            8,
-            8
-          ],
-          "uv": [
-            0,
-            0
-          ]
-        }
+        {"origin": [-4, 16, -4], "size": [8, 8, 8], "uv": [0, 0]}
       ]
     }
   ]

@@ -487,10 +487,12 @@ pub(super) fn material(
         anger: anger(models, e, game_time),
     })
 }
-// All four Solaris-authored boat/raft rigs share a hull bottom at model Y=18
-// pixels. Anchor that surface to the received entity position, not to water.
-fn boat_root(position: Vec3, yaw: f32) -> Mat4 {
-    Mat4::from_translation(position + Vec3::new(0., 18. / 16., 0.))
+// The vanilla 26.3 hulls hang their underside at model Y=6 px (boat and chest boat,
+// `boat/poplar#main` bottom 3..6) and Y=5.9 px (bamboo raft, `boat/bamboo#main`
+// bottom -2.1..5.9). Anchor that surface to the received entity position, not to water.
+fn boat_root(position: Vec3, yaw: f32, raft: bool) -> Mat4 {
+    let underside = if raft { 5.9 } else { 6. };
+    Mat4::from_translation(position + Vec3::new(0., underside / 16., 0.))
         * Mat4::from_rotation_y((180. - yaw).to_radians())
         * Mat4::from_scale(Vec3::new(-1., -1., 1.))
         * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2)
@@ -634,12 +636,16 @@ fn append_experience_orb(
 }
 
 /// Shared post-draw layer: special renderers and ordinary rigs obey the same fire flag.
+///
+/// Vanilla `FlameFeatureRenderer.prepare` scales the pose by `bbWidth * 1.4` and stacks
+/// 1.4-unit quads from `yTop = bbHeight / scale` down to the feet, stepping 0.45 per band
+/// with the half width shrinking by 0.9, the z offset starting at `0.3 - (int)yTop * 0.02`
+/// and stepping by -0.03, and the sprite alternating every two bands.
 fn append_entity_fire(
     entity: &Entity,
     models: &Models,
     content: &Content,
     origin: [f64; 3],
-    camera_yaw: f32,
     transform: super::Transform,
     out: &mut DynamicGeometry,
 ) -> Result<()> {
@@ -650,30 +656,31 @@ fn append_entity_fire(
     let (dimensions, scale) = models.dimensions(entity)?;
     let position = transform.position;
     let center = Vec3::from_array(std::array::from_fn(|i| (position[i] - origin[i]) as f32));
-    let facing = Mat4::from_rotation_y((180. - camera_yaw).to_radians());
-    let width = dimensions.width * scale * 1.4;
-    let height = dimensions.height * scale;
+    // Vanilla rotates the bands with the entity state, not towards the camera.
+    let rotation = Mat4::from_rotation_y((180. - transform.yaw).to_radians());
+    let unit = dimensions.width * scale * 1.4;
     let textures = [
         texture(content, "block/fire_0")?,
         texture(content, "block/fire_1")?,
     ];
-    let mut y = 0.;
-    let mut half = width * 0.5;
-    let mut row = 0;
-    while y < height && half > 0.001 {
-        let tex = textures[row % 2];
+    let mut y_top = dimensions.height * scale / unit;
+    let mut y_bottom = 0.;
+    let mut half = 0.5;
+    let mut z = 0.3 - (y_top as i32) as f32 * 0.02;
+    let mut band = 0;
+    while y_top > 0. {
+        let tex = textures[(band / 2) % 2];
         let [u0, v0, u1, v1] = tex.uv;
-        let z = width * 0.5 + 0.02 + row as f32 * 0.001;
         let positions = [
-            Vec3::new(-half, y, z),
-            Vec3::new(half, y, z),
-            Vec3::new(half, y + width, z),
-            Vec3::new(-half, y + width, z),
+            Vec3::new(-half, -y_bottom, z),
+            Vec3::new(half, -y_bottom, z),
+            Vec3::new(half, 1.4 - y_bottom, z),
+            Vec3::new(-half, 1.4 - y_bottom, z),
         ]
-        .map(|p| (center + facing.transform_vector3(p)).to_array());
+        .map(|p| (center + rotation.transform_vector3(p * unit)).to_array());
         emit(
             positions,
-            [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+            [[u1, v1], [u0, v1], [u0, v0], [u1, v0]],
             [1.; 3],
             tex.layer,
             EntityMaterial::EntityFire,
@@ -681,9 +688,11 @@ fn append_entity_fire(
             [15., 15.],
             out,
         )?;
-        y += width * 0.45;
+        y_top -= 0.45;
+        y_bottom -= 0.45;
         half *= 0.9;
-        row += 1;
+        z -= 0.03;
+        band += 1;
     }
     Ok(())
 }
@@ -788,15 +797,7 @@ pub fn append(
                 out,
             ) {
                 Ok(true) => {
-                    append_entity_fire(
-                        entity,
-                        &models,
-                        content,
-                        origin,
-                        camera_rotation[0],
-                        transform,
-                        out,
-                    )?;
+                    append_entity_fire(entity, &models, content, origin, transform, out)?;
                     stats.animated += 1;
                     stats.submitted += 1;
                     store.slots[slot].submitted_revision = Some(store.revision);
@@ -870,7 +871,6 @@ pub fn append(
                         &models,
                         content,
                         origin,
-                        camera_rotation[0],
                         transform,
                         out,
                     )?;
@@ -967,7 +967,6 @@ pub fn append(
                         &models,
                         content,
                         origin,
-                        camera_rotation[0],
                         transform,
                         out,
                     )?;
@@ -1015,15 +1014,7 @@ pub fn append(
             &mut stats,
         )?;
         if entity.binding.as_ref().is_some_and(Result::is_ok) {
-            append_entity_fire(
-                entity,
-                &models,
-                content,
-                origin,
-                camera_rotation[0],
-                transform,
-                out,
-            )?;
+            append_entity_fire(entity, &models, content, origin, transform, out)?;
         }
         if out.vertices.len() > start {
             stats.submitted += 1;
@@ -1074,7 +1065,7 @@ pub(super) fn root_matrix(
             t.pitch,
             entity.type_name == "minecraft:trident",
         ),
-        RootStyle::Boat => boat_root(relative, t.yaw),
+        RootStyle::Boat => boat_root(relative, t.yaw, entity.type_name.ends_with("_raft")),
         RootStyle::Minecart => {
             Mat4::from_translation(relative + Vec3::new(0., 0.375, 0.))
                 * Mat4::from_rotation_y((180. - t.yaw).to_radians())
@@ -3724,9 +3715,140 @@ mod tests {
                 burning
             );
             if burning {
+                // Two bands per sprite: a two-band entity (the pig) draws fire_0 only.
                 assert!(fire.iter().any(|v| v.texture_layer == 42));
-                assert!(fire.iter().any(|v| v.texture_layer == 43));
                 assert!(fire.iter().all(|v| v.light == [15., 15.]));
+            }
+        }
+    }
+
+    /// Vanilla `FlameFeatureRenderer.prepare` numbers: scale `bbWidth * 1.4`, quads 1.4
+    /// scaled units tall, 0.45 apart in y, half width * 0.9 per band, z from
+    /// `0.3 - (int)yTop * 0.02` stepping -0.03, two bands per sprite.
+    #[test]
+    fn fire_bands_follow_the_vanilla_flame_feature_numbers() {
+        let (mut models, mut entity) = fixture();
+        models
+            .schemas
+            .get_mut("minecraft:pig")
+            .unwrap()
+            .accessors
+            .insert("DATA_SHARED_FLAGS_ID".into(), [0, 0]);
+        entity.binding = Some(Ok(Binding {
+            rig: "minecraft:pig#renderer_main".into(),
+            texture: TextureRegion {
+                uv: [0., 0., 1., 1.],
+                layer: 1,
+                width: 64,
+                height: 32,
+            },
+            style: RootStyle::Living,
+            layers: None,
+            anger: None,
+        }));
+        let id = entity.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(std::sync::Arc::new(models));
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.slots.push(entity);
+        let mut content = Content::test_cube();
+        for (name, layer) in [
+            ("minecraft:block/fire_0", 42),
+            ("minecraft:block/fire_1", 43),
+        ] {
+            content.insert_test_texture(
+                name,
+                TextureRegion {
+                    uv: [0., 0., 1., 1.],
+                    layer,
+                    width: 16,
+                    height: 16,
+                },
+            );
+        }
+        let (dimensions, _) = store
+            .models
+            .as_deref()
+            .unwrap()
+            .dimensions(&store.slots[0])
+            .unwrap();
+        let unit = dimensions.width * 1.4;
+        let y_top = dimensions.height / unit;
+        let bands = (y_top / 0.45).ceil() as usize;
+        for (flags, burning) in [(0, false), (1, true)] {
+            store.slots[0].metadata.insert(0, Metadata::Byte(flags));
+            let mut geometry = DynamicGeometry::default();
+            append(
+                &mut store,
+                crate::entities::EntityRenderFrame {
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|_, _| Ok([1.; 3]),
+                    content: &content,
+                    origin: [0.; 3],
+                    camera: [0.; 3],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 0,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    light: &|_| Ok(Some([15., 0.])),
+                    bed_direction: &|_| None,
+                },
+                &mut geometry,
+            )
+            .unwrap();
+            let quads: Vec<_> = geometry
+                .vertices
+                .chunks(4)
+                .filter(|quad| quad[0].texture_layer == 42 || quad[0].texture_layer == 43)
+                .collect();
+            if !burning {
+                assert!(quads.is_empty());
+                continue;
+            }
+            assert_eq!(quads.len(), bands.max(1), "band count");
+            let mut half = 0.5;
+            for (band, quad) in quads.iter().enumerate() {
+                let bottom = -(-(band as f32) * 0.45);
+                let z = 0.3 - (y_top as i32) as f32 * 0.02 - band as f32 * 0.03;
+                let xs: Vec<f32> = quad.iter().map(|v| v.position[0]).collect();
+                let ys: Vec<f32> = quad.iter().map(|v| v.position[1]).collect();
+                let zs: Vec<f32> = quad.iter().map(|v| v.position[2]).collect();
+                let width = xs.iter().cloned().fold(f32::MIN, f32::max)
+                    - xs.iter().cloned().fold(f32::MAX, f32::min);
+                let height = ys.iter().cloned().fold(f32::MIN, f32::max)
+                    - ys.iter().cloned().fold(f32::MAX, f32::min);
+                assert!(
+                    (width - 2. * half * unit).abs() < 0.001,
+                    "band {band} width {width} vs {}",
+                    2. * half * unit
+                );
+                assert!(
+                    (height - 1.4 * unit).abs() < 0.001,
+                    "band {band} height {height} vs {}",
+                    1.4 * unit
+                );
+                assert!(
+                    (ys.iter().cloned().fold(f32::MAX, f32::min) - bottom * unit).abs() < 0.001,
+                    "band {band} bottom {} vs {}",
+                    ys.iter().cloned().fold(f32::MAX, f32::min),
+                    bottom * unit
+                );
+                // The 180 degree root rotation of the fixture entity mirrors z.
+                assert!(
+                    (zs[0].abs() - z.abs() * unit).abs() < 0.001,
+                    "band {band} z {} vs {}",
+                    zs[0],
+                    z * unit
+                );
+                half *= 0.9;
+            }
+            // Two bands per sprite, as in vanilla.
+            for band in 0..quads.len() {
+                let expected = if (band / 2) % 2 == 0 { 42 } else { 43 };
+                assert_eq!(quads[band][0].texture_layer, expected, "band {band} sprite");
             }
         }
     }
@@ -3771,7 +3893,9 @@ mod tests {
                 Mat4::IDENTITY,
                 &mut sitting,
             );
-            for name in ["body", "left_hind_leg", "right_hind_leg", "tail"] {
+            // Body and legs carry the sit. The vanilla cat's two-cube tail
+            // (`tail1`/`tail2`) is not part of the sit rule, so it is not asserted.
+            for name in ["body", "left_hind_leg", "right_hind_leg"] {
                 let i = rig.bones.iter().position(|bone| bone.name == name).unwrap();
                 assert_ne!(
                     standing[i].to_cols_array(),
@@ -3929,9 +4053,25 @@ mod tests {
             "../../assets/krasnokamen/models/entity/allay.json"
         ))
         .unwrap();
-        let head = model.bones.iter().find(|bone| bone.name == "head").unwrap();
+        // The vanilla layer nests every part under the layer root, so the head is
+        // found through the tree, not in the top-level bone list.
+        fn find<'a>(
+            bones: &'a [super::super::krasnokamen_models::BoneSpec],
+            name: &str,
+        ) -> Option<&'a super::super::krasnokamen_models::BoneSpec> {
+            bones.iter().find_map(|bone| {
+                (bone.name == name)
+                    .then_some(bone)
+                    .or_else(|| find(&bone.bones, name))
+            })
+        }
+        let head = find(&model.bones, "head").expect("allay head bone");
         let cube = &head.cubes[0];
-        let [u0, v0, u1, v1] = cube.faces[&Face::Front];
+        let [u0, v0, u1, v1] = cube.faces.get(&Face::Front).copied().unwrap_or_else(|| {
+            let [u, v] = cube.uv;
+            let [w, h, d] = cube.size;
+            [u + d, v + d, u + d + w, v + d + h]
+        });
         // Pixel centers independently observed in the runtime allay texture.
         for (u, v) in [(6.5, 7.5), (8.5, 7.5), (6.5, 8.5), (8.5, 8.5)] {
             assert!(u0 < u && u < u1 && v0 < v && v < v1);
@@ -4336,7 +4476,7 @@ mod tests {
                     matrices.push(
                         bone.parent
                             .map(|i| matrices[i])
-                            .unwrap_or_else(|| boat_root(position, yaw))
+                            .unwrap_or_else(|| boat_root(position, yaw, key.contains("_raft")))
                             * resources::transform(bone.pivot, bone.rotation, bone.scale),
                     );
                 }
@@ -4355,14 +4495,20 @@ mod tests {
                     },
                 );
                 assert!((min_y - position.y).abs() < 1e-4, "{key}: {min_y}");
+                // Vanilla hull floors are 3 px thick (`boat/poplar#main` bottom
+                // y 3..6) and the bamboo raft's double deck is 8 px
+                // (`boat/bamboo#main` bottom y -2.1..5.9).
+                let floor = if key.contains("_raft") { 8. } else { 3. };
                 assert!(
-                    (max_y - position.y - 2. / 16.).abs() < 1e-4,
+                    (max_y - position.y - floor / 16.).abs() < 1e-4,
                     "{key}: {max_y}"
                 );
                 if key.contains("_boat#") {
-                    for name in ["left_wall", "right_wall", "bow", "stern"] {
+                    // Vanilla hull walls (`left`, `right`, `front`, `back`) span
+                    // y -3..3, so their lower edge meets the floor's upper face.
+                    for name in ["left", "right", "front", "back"] {
                         let index = rig.bones.iter().position(|bone| bone.name == name).unwrap();
-                        let wall_min = rig.bones[index]
+                        let wall_low = rig.bones[index]
                             .quads
                             .iter()
                             .flatten()
@@ -4373,8 +4519,8 @@ mod tests {
                             })
                             .fold(f32::INFINITY, f32::min);
                         assert!(
-                            (wall_min - max_y).abs() < 1e-4,
-                            "{key} {name}: {wall_min} vs {max_y}"
+                            (wall_low - max_y).abs() < 1e-4,
+                            "{key} {name}: {wall_low} vs {max_y}"
                         );
                     }
                 }

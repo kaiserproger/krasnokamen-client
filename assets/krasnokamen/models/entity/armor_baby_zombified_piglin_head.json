@@ -1,83 +1,52 @@
 {
   "schema": 1,
   "id": "armor_baby_zombified_piglin_head",
-  "texture": {
-    "path": "entity/equipment/humanoid_baby/iron.png",
-    "size": [
-      64,
-      64
-    ]
-  },
+  "texture": {"path": "entity/equipment/humanoid_baby/iron.png", "size": [64, 64]},
   "roles": {
-    "head": [
-      "head"
-    ]
+    "head": ["head"]
   },
   "bones": [
     {
-      "name": "head",
-      "pivot": [
-        0,
-        13,
-        0
-      ],
+      "name": "head", "pivot": [0, 15, 0],
       "cubes": [
+        {"origin": [-4.5, -7, -4.5], "size": [9, 8, 8], "uv": [0, 0], "inflate": 0.7}
+      ],
+      "bones": [
         {
-          "origin": [
-            -5,
-            -6,
-            -3.5
-          ],
-          "size": [
-            10,
-            9,
-            7
-          ],
-          "uv": [
-            0,
-            0
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              8,
-              0,
-              18,
-              7
-            ],
-            "down": [
-              16,
-              0,
-              26,
-              7
-            ],
-            "right": [
-              0,
-              8,
-              7,
-              17
-            ],
-            "front": [
-              8,
-              8,
-              18,
-              17
-            ],
-            "left": [
-              16,
-              8,
-              23,
-              17
-            ],
-            "back": [
-              24,
-              8,
-              34,
-              17
-            ]
-          }
+          "name": "hat"
         }
       ]
+    },
+    {
+      "name": "right_arm", "pivot": [-4, 15, 0]
+    },
+    {
+      "name": "inner_body", "pivot": [0, 18, 0]
+    },
+    {
+      "name": "left_leg", "pivot": [1.5, 20, 0.5],
+      "bones": [
+        {
+          "name": "right_foot"
+        }
+      ]
+    },
+    {
+      "name": "left_arm", "pivot": [4, 15, 0]
+    },
+    {
+      "name": "right_leg", "pivot": [-1.5, 20, 0.5],
+      "bones": [
+        {
+          "name": "left_foot"
+        }
+      ]
+    },
+    {
+      "name": "waist", "pivot": [0, 19, 0]
+    },
+    {
+      "name": "body", "pivot": [0, 18, 0]
     }
   ]
 }

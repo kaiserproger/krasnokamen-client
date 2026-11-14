@@ -4,9 +4,9 @@
   "texture": {"path": "entity/boat/oak.png", "size": [128, 64]},
   "bones": [
     {
-      "name": "patch", "pivot": [0, 20, 0],
+      "name": "water_patch", "pivot": [0, -3, 1], "rotation": [90, 0, 0],
       "cubes": [
-        {"origin": [-8, 0, -14], "size": [16, 1, 28], "uv": [0, 35]}
+        {"origin": [-14, -9, -3], "size": [28, 16, 3], "uv": [0, 0]}
       ]
     }
   ]

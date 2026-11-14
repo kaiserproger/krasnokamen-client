@@ -787,14 +787,16 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         (vex["head"].1 - vex["head"].0).max_element() < 7. * px,
         "vex head is small"
     );
+    // Vanilla's bee legs are three two-legged fans (`front_legs`, `middle_legs`,
+    // `back_legs`), not six per-side leg bones.
     let bee = rest_bounds("minecraft:bee_baby#main");
     assert_eq!(
         names(&bee)
             .iter()
-            .filter(|name| name.ends_with("_leg"))
+            .filter(|name| name.ends_with("_legs"))
             .count(),
-        6,
-        "baby bee legs"
+        3,
+        "baby bee leg fans"
     );
     assert!(
         bee.contains_key("stinger")
@@ -813,10 +815,18 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
 
     for key in ["minecraft:rabbit#main", "minecraft:rabbit_baby#main"] {
         let rabbit = rest_bounds(key);
-        let leg = rabbit["right_hind_leg"].1.y - rabbit["right_hind_leg"].0.y;
+        // Vanilla hangs the rabbit's haunch geometry on `right_haunch` below the
+        // pivot-only `right_hind_leg`, and a baby torso carries a rotated copy on
+        // `body_r1`, so the fold is measured against every torso bone.
+        let leg = rabbit["right_haunch"].1.y - rabbit["right_haunch"].0.y;
+        let torso = rabbit
+            .iter()
+            .filter(|(name, _)| name.starts_with("body"))
+            .map(|(_, (low, high))| high.y - low.y)
+            .fold(0.0_f32, f32::max);
         assert!(
-            leg < rabbit["body"].1.y - rabbit["body"].0.y,
-            "{key}: haunches fold below the body, not deer legs"
+            leg < torso,
+            "{key}: haunches fold below the body ({leg} vs {torso}), not deer legs"
         );
     }
     let fox = overall_size(&rest_bounds("minecraft:fox#main"));
@@ -841,10 +851,18 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
                 && boar.contains_key("right_ear"),
             "{key}"
         );
-        for tusk in ["left_tusk", "right_tusk"] {
+        // Vanilla paints the tusks on the 14x6x19 head cube; there is no separate
+        // tusk bone, so the head must carry the tusk texels itself. The baby rigs
+        // still carry their own tusk bones until they are re-authored.
+        if !key.contains("_baby") {
             assert!(
-                protrusion(boar[tusk], boar["head"]) > px,
-                "{key}: {tusk} sticks out of the head"
+                !boar.contains_key("left_tusk") && !boar.contains_key("right_tusk"),
+                "{key}: tusks are head texels, not extra bones"
+            );
+            let head = boar["head"];
+            assert!(
+                head.1.y - head.0.y > 5. * px && head.1.z - head.0.z > 15. * px,
+                "{key}: long head that carries the tusk texels"
             );
         }
     }
@@ -853,21 +871,30 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         assert_eq!(
             names(&strider)
                 .iter()
-                .filter(|name| name.starts_with("leg"))
+                .filter(|name| name.ends_with("_leg") || name.starts_with("leg"))
                 .count(),
             2,
             "{key}: two legs"
         );
-        let head = strider["head"].1 - strider["head"].0;
+        // Vanilla's strider head is part of the body cube (no head bone) and its
+        // bristles are flat fans; the deep 16x14x16 body is the silhouette.
+        let body = strider["body"];
         assert!(
-            head.z > 0.8 * head.x && names(&strider).iter().any(|name| name.contains("bristle")),
+            body.1.z - body.0.z > 0.95 * (body.1.x - body.0.x)
+                && names(&strider).iter().any(|name| name.contains("bristle")),
             "{key}: deep body with bristles"
         );
     }
 
     for key in ["minecraft:guardian#main", "minecraft:elder_guardian#main"] {
+        // Vanilla's guardian torso bone is `head`; the three-cube tail is
+        // `tail0`..`tail2` and the twelve spikes ring the torso.
         let guardian = rest_bounds(key);
-        let body = guardian["body"];
+        let body = guardian["head"];
+        assert!(
+            !guardian.contains_key("body") && !guardian.contains_key("tail"),
+            "{key}: vanilla names the torso head and the tail tail0..tail2"
+        );
         let spikes: Vec<f32> = guardian
             .iter()
             .filter(|(name, _)| name.starts_with("spike"))
@@ -884,14 +911,24 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         let fish = rest_bounds(key);
         let size = overall_size(&fish);
         assert!(size.z > 2.4 * size.y, "{key}: long swimming body: {size}");
-        assert!(
+        // Vanilla's cod fans are `top_fin`/`tail_fin`; the salmon keeps its own
+        // authored names (`dorsal`, `tail`) until its layer is re-authored.
+        let fins: [&str; 3] = if key.starts_with("minecraft:cod") {
+            ["left_fin", "right_fin", "top_fin"]
+        } else {
             ["left_fin", "right_fin", "dorsal"]
-                .iter()
-                .all(|fin| fish.contains_key(*fin)),
+        };
+        assert!(
+            fins.iter().all(|fin| fish.contains_key(*fin)),
             "{key}: fins"
         );
+        let tail = if key.starts_with("minecraft:cod") {
+            "tail_fin"
+        } else {
+            "tail"
+        };
         assert!(
-            fish["head"].0.z < fish["tail"].0.z,
+            fish["head"].0.z < fish[tail].0.z,
             "{key}: head leads, tail trails"
         );
     }
@@ -902,9 +939,19 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
             axolotl["top_gills"].0.y < head.0.y,
             "{key}: top gills rise above the head"
         );
+        // Vanilla hangs each side gill as a flat fan off a head side; the baby model
+        // mirrors the two names, so only the shared shape and both-sides facts hold.
+        let (right, left) = (axolotl["right_gills"], axolotl["left_gills"]);
+        for (gill, span) in [("right_gills", right), ("left_gills", left)] {
+            assert!(
+                (span.1.z - span.0.z).abs() < 0.01 && span.1.x - span.0.x > 0.1,
+                "{key}: {gill} is a flat fan"
+            );
+        }
         assert!(
-            axolotl["right_gills"].0.x < head.0.x && axolotl["left_gills"].1.x > head.1.x,
-            "{key}: side gills"
+            ((right.0.x + right.1.x) - (left.0.x + left.1.x)).abs() > 0.1
+                && (right.1.x >= head.1.x - 0.01 || left.1.x >= head.1.x - 0.01),
+            "{key}: gill fans sit on both sides of the head"
         );
     }
     let vindicator = embedded("vindicator");
@@ -916,18 +963,25 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
             "{leg} samples the teal trousers"
         );
     }
+    // Vanilla `vindicator#main`: torso cube uv (16,20) and coat skirt uv (0,38);
+    // the old rig swapped those rows with the trouser and sleeve regions.
+    assert_eq!(
+        front_face(&cube("body")[0]),
+        [22., 26., 30., 38.],
+        "torso samples the coat front"
+    );
+    let skirt = front_face(&cube("body")[1]);
     assert!(
-        front_face(&cube("body")[0])[1] >= 46.,
-        "torso samples the buttoned coat"
+        skirt[1] >= 44. && skirt[3] <= 64.,
+        "coat skirt samples the lower coat rows"
     );
     for arm in ["right_arm", "left_arm"] {
-        for sleeve in &cube(arm)[..2] {
-            let [u0, v0, _, v1] = front_face(sleeve);
-            assert!(
-                u0 >= 44. && (46. ..62.).contains(&v0) && v1 <= 62.,
-                "{arm} samples the dark coat sleeve"
-            );
-        }
+        // Vanilla arms are one 4x12x4 cube at uv (40,46).
+        let [u0, v0, _, v1] = front_face(&cube(arm)[0]);
+        assert!(
+            u0 >= 44. && (46. ..62.).contains(&v0) && v1 <= 62.,
+            "{arm} samples the dark coat sleeve"
+        );
     }
 }
 
@@ -1254,98 +1308,548 @@ fn entity_selection_coverage_wither_skull_material_tracks_received_dangerous_fla
     }
 }
 
+// --- 26.3 baby humanoid facts --------------------------------------------------------
+//
+// Local jar (`javap`/vineflower on net.minecraft.client.model.geom.LayerDefinitions,
+// HumanoidModel, BabyZombieModel, BabyZombieVillagerModel, BabyPiglinModel, ModelPart):
+// * ZOMBIE_BABY, HUSK_BABY and DROWNED_BABY bake BabyZombieModel.createBodyLayer(NONE);
+//   DROWNED_BABY_OUTER_LAYER bakes the same mesh with CubeDeformation(0.25).
+// * PIGLIN_BABY and ZOMBIFIED_PIGLIN_BABY bake BabyPiglinModel.createBodyLayer().
+// * ZOMBIE_VILLAGER_BABY bakes BabyZombieVillagerModel.createBodyLayer().
+// * Every humanoid baby armour set (zombie/husk/drowned/zombie_villager) is
+//   HumanoidModel.createBabyArmorMeshSet(BABY_INNER, BABY_OUTER, PartPose.ZERO); the piglin
+//   one is AbstractPiglinModel.createBabyArmorMeshSet(0.7, 0.7, (0.5, -0.5, 0)) which
+//   delegates to the same mesh. The `.map(...)` lambdas only pick the 64x64 texture size.
+//   BABY_OUTER_ARMOR_DEFORMATION = (-0.1, 0.5, 0.3), BABY_INNER_ARMOR_DEFORMATION =
+//   (-0.1, 0.3, 0.3); the waist and leg cubes extend that by -0.1.
+//
+// `CubeDeformation` grows every face: a cube drawn at `origin - d, size + 2d`. The client rig
+// format carries the same growth either baked into `origin`/`size` (humanoid family) or as
+// `inflate` (piglins, whose deformation is uniform). `face_dims`/`face_deform` report that
+// growth per face so the texel-density assertion stays exact.
+
+fn face_dims(face: Face, size: [f32; 3]) -> (f32, f32) {
+    match face {
+        Face::Up | Face::Down => (size[0], size[2]),
+        Face::Front | Face::Back => (size[0], size[1]),
+        Face::Right | Face::Left => (size[2], size[1]),
+    }
+}
+
+fn face_deform(face: Face, deform: [f32; 3]) -> (f32, f32) {
+    match face {
+        Face::Up | Face::Down => (deform[0], deform[2]),
+        Face::Front | Face::Back => (deform[0], deform[1]),
+        Face::Right | Face::Left => (deform[2], deform[1]),
+    }
+}
+
+/// `HumanoidModel.createBabyArmorMesh` box unwrap, before any deformation.
+fn unwrap_rects(uv: [f32; 2], size: [f32; 3]) -> [(Face, [f32; 4]); 6] {
+    let [u, v] = uv;
+    let [w, h, d] = size;
+    [
+        (Face::Up, [u + d, v, u + d + w, v + d]),
+        (Face::Down, [u + d + w, v, u + d + 2. * w, v + d]),
+        (Face::Right, [u, v + d, u + d, v + d + h]),
+        (Face::Front, [u + d, v + d, u + d + w, v + d + h]),
+        (Face::Left, [u + d + w, v + d, u + 2. * d + w, v + d + h]),
+        (
+            Face::Back,
+            [u + 2. * d + w, v + d, u + 2. * d + 2. * w, v + d + h],
+        ),
+    ]
+}
+
+/// One baby armour cube exactly as the jar authors it, plus the deformation its slot receives.
+struct VanillaArmorPart {
+    bone: &'static str,
+    pivot: [f32; 3],
+    origin: [f32; 3],
+    size: [f32; 3],
+    uv: [f32; 2],
+    deform: [f32; 3],
+    mirror: bool,
+}
+
+fn vanilla_baby_armor(family: &str) -> Vec<VanillaArmorPart> {
+    let piglin = matches!(family, "piglin" | "zombified_piglin");
+    let outer = if piglin {
+        [0.7, 0.7, 0.7]
+    } else {
+        [-0.1, 0.5, 0.3]
+    };
+    // Waist and legs carry `deformation.extend(-0.1F)`.
+    let inner = if piglin {
+        [0.6, 0.6, 0.6]
+    } else {
+        [-0.2, 0.2, 0.2]
+    };
+    // BABY_PIGLIN_ARMOR_ARM_OFFSET = (0.5, -0.5, 0).
+    let (arm_x, arm_y) = if piglin { (4., 15.) } else { (3.5, 15.5) };
+    vec![
+        VanillaArmorPart {
+            bone: "head",
+            pivot: [0., 15., 0.],
+            origin: [-4.5, -7., -4.5],
+            size: [9., 8., 8.],
+            uv: [0., 0.],
+            deform: outer,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "body",
+            pivot: [0., 18., 0.],
+            origin: [-3., -3., -1.5],
+            size: [6., 5., 3.],
+            uv: [0., 17.],
+            deform: outer,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "waist",
+            pivot: [0., 19., 0.],
+            origin: [-3., -1.2, -1.49],
+            size: [5.9, 2., 2.9],
+            uv: [0., 36.],
+            deform: inner,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "right_arm",
+            pivot: [-arm_x, arm_y, 0.],
+            origin: [-1., 0., -1.53],
+            size: [2., 5., 3.],
+            uv: [30., 25.],
+            deform: outer,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "left_arm",
+            pivot: [arm_x, arm_y, 0.],
+            origin: [-1., 0., -1.53],
+            size: [2., 5., 3.],
+            uv: [30., 17.],
+            deform: outer,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "right_leg",
+            pivot: [-1.5, 20., 0.5],
+            origin: [-1., -0.2, -2.],
+            size: [3., 4., 3.],
+            uv: [18., 17.],
+            deform: inner,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "left_leg",
+            pivot: [1.5, 20., 0.5],
+            origin: [-2., -0.2, -2.],
+            size: [3., 4., 3.],
+            uv: [18., 24.],
+            deform: inner,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "right_foot",
+            pivot: [0., 0., 0.],
+            origin: [-2., 2.9, -2.],
+            size: [3., 1., 3.],
+            uv: [0., 25.],
+            deform: outer,
+            mirror: false,
+        },
+        VanillaArmorPart {
+            bone: "left_foot",
+            pivot: [0., 0., 0.],
+            origin: [-1., 2.9, -2.],
+            size: [3., 1., 3.],
+            uv: [0., 29.],
+            deform: outer,
+            mirror: true,
+        },
+    ]
+}
+
+/// `BABY_ARMOR_PARTS_PER_SLOT` for the humanoid baby mesh.
+fn vanilla_armor_slot_parts(slot: &str) -> &'static [&'static str] {
+    match slot {
+        "head" => &["head"],
+        "chest" => &["body", "left_arm", "right_arm"],
+        "legs" => &["left_leg", "right_leg", "waist"],
+        "feet" => &["left_foot", "right_foot"],
+        _ => unreachable!(),
+    }
+}
+
+fn drawn_cube(cube: &CubeSpec) -> ([f32; 3], [f32; 3]) {
+    let origin = std::array::from_fn(|axis| cube.origin[axis] - cube.inflate);
+    let size = std::array::from_fn(|axis| cube.size[axis] + 2. * cube.inflate);
+    (origin, size)
+}
+
+fn bone_names(bones: &[BoneSpec]) -> Vec<String> {
+    fn walk(bones: &[BoneSpec], out: &mut Vec<String>) {
+        for bone in bones {
+            out.push(bone.name.clone());
+            walk(&bone.bones, out);
+        }
+    }
+    let mut names = Vec::new();
+    walk(bones, &mut names);
+    names.sort();
+    names
+}
+
 #[test]
-fn baby_zombie_head_and_helmet_follow_the_matched_control_height() {
+fn baby_humanoid_heads_sit_on_the_vanilla_child_joints() {
+    // BabyZombieModel.createBodyLayer: a 6x6x6 head at y=15.25 plus a 0.25-grown overlay box;
+    // HumanoidModel.createBabyArmorMesh: a 9x8x8 helmet at y=15 grown by (-0.1, 0.5, 0.3).
     let helmet = embedded("armor_baby_zombie_head");
-    // The clean paired 26.3 control fits a six-unit child head below the
-    // adult-sized head's old joint; armor uses the same joint, not an offset shell.
-    assert_eq!(extent(&helmet, "head", 1), (8.5, 14.5));
-    assert_eq!(extent(&helmet, "head", 0), (-3., 3.));
-    for name in ["zombie_baby", "husk_baby"] {
-        let head = embedded(name);
-        assert_eq!(extent(&head, "head", 1), (8.5, 14.5));
-        assert_eq!(extent(&head, "head", 0), (-3., 3.));
-        assert_eq!(head.bones[0].pivot, helmet.bones[0].pivot);
+    let bone = spec_bone(&helmet.bones, "head").unwrap();
+    assert_eq!(bone.pivot, [0., 15., 0.]);
+    let (origin, size) = drawn_cube(&bone.cubes[0]);
+    assert_eq!(origin, [-4.4, -7.5, -4.8]);
+    assert_eq!(size, [8.8, 9., 8.6]);
+    // Every family's helmet spans its own baby head (and overlay or snout) on all three axes.
+    for (family, head_model, helmet_model) in [
+        ("zombie", "zombie_baby", "armor_baby_zombie_head"),
+        ("husk", "husk_baby", "armor_baby_zombie_head"),
+        ("drowned", "drowned_baby", "armor_baby_drowned_head"),
+        (
+            "zombie_villager",
+            "zombie_villager_baby",
+            "armor_baby_zombie_villager_head",
+        ),
+        ("piglin", "piglin_baby", "armor_baby_piglin_head"),
+        (
+            "zombified_piglin",
+            "zombified_piglin_baby",
+            "armor_baby_zombified_piglin_head",
+        ),
+    ] {
+        let model = embedded(head_model);
+        let helmet_model = embedded(helmet_model);
+        let helmet_bone = spec_bone(&helmet_model.bones, "head").unwrap();
+        let (helmet_origin, helmet_size) = drawn_cube(&helmet_bone.cubes[0]);
+        let head = spec_bone(&model.bones, "head").unwrap();
+        for cube in &head.cubes {
+            let (cube_origin, cube_size) = drawn_cube(cube);
+            for axis in 0..3 {
+                let low = head.pivot[axis] + cube_origin[axis];
+                let high = low + cube_size[axis];
+                let shell_low = helmet_bone.pivot[axis] + helmet_origin[axis];
+                let shell_high = shell_low + helmet_size[axis];
+                assert!(
+                    shell_low <= low + 1e-4 && shell_high >= high - 1e-4,
+                    "{family}: helmet axis {axis} [{shell_low}, {shell_high}] does not span the head [{low}, {high}]"
+                );
+            }
+        }
     }
-    assert_eq!(helmet.bones[0].cubes[0].inflate, 0.75);
 }
 
 #[test]
-fn baby_zombie_and_shared_husk_armor_keep_child_body_proportions() {
-    for name in ["zombie_baby", "husk_baby"] {
-        let model = embedded(name);
-        for (part, pivot, origin, size) in [
-            ("body", [0., 16., 0.], [-2., 0., -1.], [4., 4., 2.]),
-            ("right_arm", [-3., 17., 0.], [-1., -1., -1.], [2., 4., 2.]),
-            ("left_arm", [3., 17., 0.], [-1., -1., -1.], [2., 4., 2.]),
-            ("right_leg", [-1., 20., 0.], [-1., 0., -1.], [2., 4., 2.]),
-            ("left_leg", [1., 20., 0.], [-1., 0., -1.], [2., 4., 2.]),
+fn baby_humanoid_bodies_match_the_vanilla_child_meshes() {
+    let zombie = |name: &str| {
+        vec![
+            (
+                "body",
+                [0., 17.5, 0.],
+                [-2., -2.5, -1.],
+                [4., 5., 2.],
+                [16., 16.],
+                0.,
+            ),
+            (
+                "head",
+                [0., 15.25, 0.],
+                [-3., -6.25, -3.],
+                [6., 6., 6.],
+                [3., 3.],
+                0.,
+            ),
+            (
+                "right_arm",
+                [-3., 15.5, 0.],
+                [-1., -0.5, -1.],
+                [2., 5., 2.],
+                [36., 16.],
+                0.,
+            ),
+            (
+                "left_arm",
+                [3., 15.5, 0.],
+                [-1., -0.5, -1.],
+                [2., 5., 2.],
+                [28., 16.],
+                0.,
+            ),
+            (
+                "right_leg",
+                [-1., 20., 0.],
+                [-1., 0., -1.],
+                [2., 4., 2.],
+                [8., 16.],
+                0.,
+            ),
+            (
+                "left_leg",
+                [1., 20., 0.],
+                [-1., 0., -1.],
+                [2., 4., 2.],
+                [0., 16.],
+                0.,
+            ),
+        ]
+        .into_iter()
+        .map(|(bone, pivot, origin, size, uv, inflate)| {
+            (name.to_string(), bone, pivot, origin, size, uv, inflate)
+        })
+        .collect::<Vec<_>>()
+    };
+    let mut rows: Vec<(String, &str, [f32; 3], [f32; 3], [f32; 3], [f32; 2], f32)> = Vec::new();
+    for name in ["zombie_baby", "husk_baby", "drowned_baby"] {
+        rows.extend(zombie(name));
+    }
+    rows.push((
+        "drowned_outer_baby".into(),
+        "head",
+        [0., 15.25, 0.],
+        [-3., -6.15, -3.],
+        [6., 6., 6.],
+        [35., 3.],
+        0.25,
+    ));
+    for family in ["piglin_baby", "zombified_piglin_baby"] {
+        for (bone, pivot, origin, size, uv) in [
+            (
+                "body",
+                [0., 18., -0.5],
+                [-3., -3., -1.],
+                [6., 5., 3.],
+                [0., 13.],
+            ),
+            (
+                "head",
+                [0., 15., 0.],
+                [-4.5, -6., -3.5],
+                [9., 6., 7.],
+                [0., 0.],
+            ),
+            (
+                "left_arm",
+                [4., 15., 0.],
+                [-1., 0., -1.5],
+                [2., 5., 3.],
+                [28., 13.],
+            ),
+            (
+                "right_arm",
+                [-4., 15., 0.],
+                [-1., 0., -1.5],
+                [2., 5., 3.],
+                [10., 30.],
+            ),
+            (
+                "right_leg",
+                [-1.5, 20., 0.],
+                [-1.5, 0., -1.5],
+                [3., 4., 3.],
+                [22., 23.],
+            ),
+            (
+                "left_leg",
+                [1.5, 20., 0.],
+                [-1.5, 0., -1.5],
+                [3., 4., 3.],
+                [10., 23.],
+            ),
         ] {
-            let bone = model.bones.iter().find(|bone| bone.name == part).unwrap();
-            assert_eq!(bone.pivot, pivot, "{name} {part}");
-            assert_eq!(bone.cubes[0].origin, origin, "{name} {part}");
-            assert_eq!(bone.cubes[0].size, size, "{name} {part}");
+            rows.push((family.into(), bone, pivot, origin, size, uv, 0.));
         }
+        // BabyPiglinModel's snout is a second head cube at texOffs(21, 30).
+        rows.push((
+            family.into(),
+            "head",
+            [0., 15., 0.],
+            [-1.5, -3., -4.5],
+            [3., 3., 1.],
+            [21., 30.],
+            0.,
+        ));
     }
-    let chest = embedded("armor_baby_zombie_chest");
-    for bone in &chest.bones {
-        assert_eq!(
-            bone.cubes[0].inflate, 0.5,
-            "outer shell follows the child scale"
-        );
-        if bone.name.ends_with("_arm") {
-            // The child equipment atlas has opaque shoulder rows above the forearm
-            // rows; the arm front samples a 1:1 (2x4) texel region of that area.
-            assert_eq!(bone.cubes[0].faces[&Face::Front], [28., 20., 30., 24.]);
-        }
+    for (bone, pivot, origin, size, uv) in [
+        (
+            "body",
+            [0., 18.75, 0.],
+            [-2., -2.75, -1.5],
+            [4., 5., 3.],
+            [0., 15.],
+        ),
+        (
+            "head",
+            [0., 16., 0.],
+            [-4., -8., -3.5],
+            [8., 8., 7.],
+            [0., 0.],
+        ),
+        (
+            "hat",
+            [0., -4., 0.],
+            [-4., -4., -3.5],
+            [8., 8., 7.],
+            [0., 31.],
+        ),
+        (
+            "hat_rim",
+            [0., -4.5, 0.],
+            [-7., -0.5, -6.],
+            [14., 1., 12.],
+            [0., 46.],
+        ),
+        (
+            "nose",
+            [0., -1., -4.],
+            [-1., -1., -0.5],
+            [2., 2., 1.],
+            [23., 0.],
+        ),
+        (
+            "right_arm",
+            [-3., 15.5, 0.],
+            [-1., -0.5, -1.],
+            [2., 5., 2.],
+            [24., 15.],
+        ),
+        (
+            "left_arm",
+            [3., 15.5, 0.],
+            [-1., -0.5, -1.],
+            [2., 5., 2.],
+            [16., 15.],
+        ),
+        (
+            "right_leg",
+            [-1., 21.5, 0.],
+            [-1., -0.5, -1.],
+            [2., 3., 2.],
+            [8., 23.],
+        ),
+        (
+            "left_leg",
+            [1., 21.5, 0.],
+            [-1., -0.5, -1.],
+            [2., 3., 2.],
+            [0., 23.],
+        ),
+    ] {
+        let inflate = match bone {
+            "hat" => 0.3,
+            "body" => 0.,
+            _ => 0.,
+        };
+        rows.push((
+            "zombie_villager_baby".into(),
+            bone,
+            pivot,
+            origin,
+            size,
+            uv,
+            inflate,
+        ));
+    }
+    for (family, bone, pivot, origin, size, uv, inflate) in rows {
+        let model = embedded(&family);
+        let Some(spec) = spec_bone(&model.bones, bone) else {
+            panic!("{family} has no {bone} bone");
+        };
+        assert_eq!(spec.pivot, pivot, "{family} {bone} joint");
+        let cube = spec
+            .cubes
+            .iter()
+            .find(|cube| cube.size == size && cube.origin == origin && cube.uv == uv);
+        let cube = cube.unwrap_or_else(|| panic!("{family} {bone}: no {origin:?}/{size:?} cube"));
+        assert_eq!(cube.inflate, inflate, "{family} {bone} growth");
+    }
+    // BabyZombieVillagerModel's robe is a second, deeper body box grown by 0.1.
+    let villager = embedded("zombie_villager_baby");
+    let body = spec_bone(&villager.bones, "body").unwrap();
+    assert_eq!(body.cubes.len(), 2);
+    assert_eq!(body.cubes[1].size, [4., 6., 3.]);
+    assert_eq!(body.cubes[1].uv, [16., 22.]);
+    assert_eq!(body.cubes[1].inflate, 0.1);
+    // The zombified piglin shares BabyPiglinModel's mesh, ears included.
+    let zombified = embedded("zombified_piglin_baby");
+    let ear = spec_bone(&zombified.bones, "right_ear_r1").unwrap();
+    assert_eq!(ear.pivot, [-1., 1.75, 0.]);
+    assert_eq!(ear.rotation, [0., 0., 35.]);
+    assert_eq!(ear.cubes[0].uv, [18., 13.]);
+    // Drowned outer layer: BabyDrownedModel.createBodyLayer(CubeDeformation(0.25)).
+    let outer = embedded("drowned_outer_baby");
+    for bone in [
+        "body",
+        "head",
+        "right_arm",
+        "left_arm",
+        "right_leg",
+        "left_leg",
+    ] {
+        let cubes = &spec_bone(&outer.bones, bone).unwrap().cubes;
+        assert_eq!(cubes[0].inflate, 0.25, "drowned outer {bone}");
     }
 }
 
 #[test]
-fn baby_zombie_and_husk_chest_shoulders_use_covered_atlas_region() {
-    let reference = embedded("armor_baby_piglin_chest");
-    let zombie = embedded("armor_baby_zombie_chest");
-    for part in ["right_arm", "left_arm"] {
-        let cube = &zombie
-            .bones
-            .iter()
-            .find(|bone| bone.name == part)
-            .unwrap()
-            .cubes[0];
-        let reference_cube = &reference
-            .bones
-            .iter()
-            .find(|bone| bone.name == part)
-            .unwrap()
-            .cubes[0];
-        // The family-shared baby equipment atlas has opaque armor in the region
-        // already used by the piglin cap; the former zombie region is transparent.
-        // Origins match; each rect stays 1:1 with its own arm cube's top face.
-        let up = |cube: &CubeSpec| {
-            face_rects(cube)
+fn baby_chestplate_shoulder_caps_sample_opaque_vanilla_atlas_texels() {
+    // N1: the arm shell's top face used to sample transparent atlas rows, so every baby
+    // chestplate had see-through shoulders. 26.3 `createBabyArmorMesh` puts right_arm at
+    // texOffs(30, 25) and left_arm at texOffs(30, 17); both cap rows are opaque in the
+    // supplied humanoid_baby atlas.
+    let caps = [
+        ("right_arm", [33., 25., 35., 28.]),
+        ("left_arm", [33., 17., 35., 20.]),
+    ];
+    for family in [
+        "zombie",
+        "drowned",
+        "zombie_villager",
+        "piglin",
+        "zombified_piglin",
+    ] {
+        let chest = embedded(&format!("armor_baby_{family}_chest"));
+        for (part, rect) in caps {
+            let bone = spec_bone(&chest.bones, part).unwrap();
+            let up = face_rects(&bone.cubes[0])
                 .into_iter()
                 .find(|(face, _)| *face == Face::Up)
                 .unwrap()
-                .1
-        };
-        let (zu, pu) = (up(cube), up(reference_cube));
-        assert_eq!(zu[..2], pu[..2], "{part} shoulder cap atlas origin");
-        assert_eq!(
-            [zu[2] - zu[0], zu[3] - zu[1]],
-            [cube.size[0], cube.size[2]],
-            "{part} 1:1 cap"
-        );
-        assert_eq!(
-            [pu[2] - pu[0], pu[3] - pu[1]],
-            [reference_cube.size[0], reference_cube.size[2]],
-            "piglin 1:1 cap"
-        );
+                .1;
+            assert_eq!(up, rect, "{family} {part} shoulder cap rect");
+        }
     }
+    // Husk shares the zombie layer, so its caps are the same rows.
     for kind in ["zombie", "husk"] {
         assert_eq!(
             model_id(&format!("minecraft:{kind}#layer3/babyModelSet/chest")),
             "armor_baby_zombie_chest"
         );
+    }
+    let Some(root) = texture_root() else {
+        eprintln!("vanilla textures not available: shoulder cap opacity check skipped");
+        return;
+    };
+    let (width, _, opaque) = png_opaque(&root.join("entity/equipment/humanoid_baby/iron.png"));
+    for (part, [u0, v0, u1, v1]) in caps {
+        for v in v0 as usize..v1 as usize {
+            for u in u0 as usize..u1 as usize {
+                assert!(
+                    opaque[v * width + u],
+                    "{part} cap texel ({u}, {v}) is transparent"
+                );
+            }
+        }
     }
 }
 
@@ -1409,6 +1913,9 @@ fn cow_and_mooshroom_front_legs_match_vanilla_quadruped() {
 
 #[test]
 fn baby_leggings_stay_visible_above_boots_in_every_family() {
+    // 26.3 chest shell: body box (-3, -3, -1.5) 6x5x3 at y=18. Feet shell: the boot cube
+    // hangs at y+2.9 under its leg joint at y=20. Model +Y points down, so in front view the
+    // visible leggings band is the boot's top edge minus the chestplate's bottom edge.
     for kind in [
         "drowned",
         "husk",
@@ -1423,19 +1930,18 @@ fn baby_leggings_stay_visible_above_boots_in_every_family() {
         let feet = embedded(&model_id(&format!(
             "minecraft:{kind}#layer3/babyModelSet/feet"
         )));
-        // Model +Y points down. In front view the chest shell covers the torso down to
-        // its bottom edge, so the leggings band a viewer can see is the boot shell's
-        // top edge minus the chest shell's bottom edge.
-        let cb = chest.bones.iter().find(|b| b.name == "body").unwrap();
-        let cc = &cb.cubes[0];
-        let chest_bottom = cb.pivot[1] + cc.origin[1] + cc.size[1] + cc.inflate;
-        for side in ["right_leg", "left_leg"] {
-            let fb = feet.bones.iter().find(|b| b.name == side).unwrap();
-            let fc = &fb.cubes[0];
-            let boot_top = fb.pivot[1] + fc.origin[1] - fc.inflate;
+        let body = spec_bone(&chest.bones, "body").unwrap();
+        let body_cube = &body.cubes[0];
+        let chest_bottom =
+            body.pivot[1] + body_cube.origin[1] + body_cube.size[1] + body_cube.inflate;
+        for (leg, foot) in [("right_leg", "left_foot"), ("left_leg", "right_foot")] {
+            let leg_bone = spec_bone(&feet.bones, leg).unwrap();
+            let foot_bone = spec_bone(&feet.bones, foot).unwrap();
+            let boot = &foot_bone.cubes[0];
+            let boot_top = leg_bone.pivot[1] + foot_bone.pivot[1] + boot.origin[1] - boot.inflate;
             assert!(
                 boot_top - chest_bottom >= 1.,
-                "{kind} {side}: leggings band only {} px above the boots",
+                "{kind} {leg}: leggings band only {} px above the boots",
                 boot_top - chest_bottom
             );
         }
@@ -1443,34 +1949,98 @@ fn baby_leggings_stay_visible_above_boots_in_every_family() {
 }
 
 #[test]
-fn baby_armor_shell_faces_sample_texels_1_to_1() {
-    let dims = |face: Face, [w, h, d]: [f32; 3]| match face {
-        Face::Up | Face::Down => (w, d),
-        Face::Front | Face::Back => (w, h),
-        Face::Right | Face::Left => (d, h),
-    };
-    for kind in [
-        "drowned",
-        "husk",
-        "piglin",
+fn baby_armor_shells_match_the_vanilla_baby_armor_meshes() {
+    // N6: the shells used to be fitted to the authored (1.3-1.75x oversized) baby bodies, so
+    // their faces resampled the atlas. Every shipped shell cube is now the jar's authored box,
+    // grown by exactly the slot's BABY_*_ARMOR_DEFORMATION, at the jar's texOffs and joint;
+    // the only texel-density difference left is that deformation.
+    let vanilla_bones = [
+        "body",
+        "hat",
+        "head",
+        "inner_body",
+        "left_arm",
+        "left_foot",
+        "left_leg",
+        "right_arm",
+        "right_foot",
+        "right_leg",
+        "waist",
+    ];
+    for family in [
         "zombie",
+        "drowned",
         "zombie_villager",
+        "piglin",
         "zombified_piglin",
     ] {
-        for part in ["head", "chest", "legs", "feet"] {
-            let id = model_id(&format!("minecraft:{kind}#layer3/babyModelSet/{part}")).into_owned();
-            let model = embedded(&id);
-            for bone in &model.bones {
-                for cube in &bone.cubes {
-                    for (face, rect) in face_rects(cube) {
-                        let (fw, fh) = dims(face, cube.size);
-                        assert_eq!(
-                            [(rect[2] - rect[0]).abs(), (rect[3] - rect[1]).abs()],
-                            [fw, fh],
-                            "{id} bone {} face {face:?}",
-                            bone.name
-                        );
-                    }
+        let parts = vanilla_baby_armor(family);
+        for slot in ["head", "chest", "legs", "feet"] {
+            let rig = embedded(&format!("armor_baby_{family}_{slot}"));
+            // `retainPartsAndChildren`/`retainExactParts` keep every vanilla bone; only the
+            // slot's parts carry cubes.
+            assert_eq!(
+                bone_names(&rig.bones),
+                vanilla_bones,
+                "{family} {slot} bones"
+            );
+            for bone in &rig.bones {
+                let drawn = vanilla_armor_slot_parts(slot).contains(&bone.name.as_str());
+                let has_cubes = !bone.cubes.is_empty();
+                assert_eq!(has_cubes, drawn, "{family} {slot}: {} cubes", bone.name);
+            }
+            for part in vanilla_armor_slot_parts(slot) {
+                let expected = parts
+                    .iter()
+                    .find(|entry| entry.bone == *part)
+                    .expect("slot part exists in the jar mesh");
+                let bone = spec_bone(&rig.bones, part).unwrap();
+                assert_eq!(bone.pivot, expected.pivot, "{family} {slot} {part} joint");
+                let cube = &bone.cubes[0];
+                assert_eq!(cube.uv, expected.uv, "{family} {slot} {part} texOffs");
+                assert_eq!(
+                    cube.mirror, expected.mirror,
+                    "{family} {slot} {part} mirror"
+                );
+                let (origin, size) = drawn_cube(cube);
+                for axis in 0..3 {
+                    assert!(
+                        (origin[axis] - (expected.origin[axis] - expected.deform[axis])).abs()
+                            < 1e-4,
+                        "{family} {slot} {part}: drawn origin {origin:?} is not the jar box minus its deformation"
+                    );
+                    assert!(
+                        (size[axis] - (expected.size[axis] + 2. * expected.deform[axis])).abs()
+                            < 1e-4,
+                        "{family} {slot} {part}: drawn size {size:?} is not the jar box plus its deformation"
+                    );
+                }
+                for (face, rect) in face_rects(cube) {
+                    // Mirroring flips which u a corner samples, not the rect extent.
+                    let vanilla = unwrap_rects(expected.uv, expected.size)
+                        .into_iter()
+                        .find(|(other, _)| *other == face)
+                        .unwrap()
+                        .1;
+                    let (wanted, got) = (
+                        [
+                            (vanilla[2] - vanilla[0]).abs(),
+                            (vanilla[3] - vanilla[1]).abs(),
+                        ],
+                        [(rect[2] - rect[0]).abs(), (rect[3] - rect[1]).abs()],
+                    );
+                    // The waist and leg boxes are authored with fractional sizes (5.9, 2.9).
+                    assert!(
+                        (got[0] - wanted[0]).abs() < 1e-3 && (got[1] - wanted[1]).abs() < 1e-3,
+                        "{family} {slot} {part} {face:?} unwrap: rect {got:?} is not the jar's {wanted:?}"
+                    );
+                    let (face_w, face_h) = face_dims(face, size);
+                    let (deform_w, deform_h) = face_deform(face, expected.deform);
+                    assert!(
+                        (face_w - (got[0] + 2. * deform_w)).abs() < 1e-4
+                            && (face_h - (got[1] + 2. * deform_h)).abs() < 1e-4,
+                        "{family} {slot} {part} {face:?}: drawn {face_w}x{face_h} is not the {got:?} rect plus the vanilla deformation"
+                    );
                 }
             }
         }
@@ -1740,4 +2310,39 @@ fn warm_nautilus_shell_and_face_follow_both_matched_views() {
         }
     }
     assert_eq!(shell.bones[2].cubes[0].size, [0., 8., 6.]);
+}
+
+/// Vanilla wears `armor_stand_small#*` on a small armour stand and `armor_stand#*` on a
+/// normal one; the small stand keys must resolve to their own rigs, not the adult shells.
+#[test]
+fn small_armor_stands_resolve_to_their_own_layers() {
+    for (qualifier, slot) in [
+        ("helmet", "head"),
+        ("chestplate", "chest"),
+        ("leggings", "legs"),
+        ("boots", "feet"),
+    ] {
+        let small = format!("minecraft:armor_stand_small#{qualifier}");
+        assert_eq!(
+            model_id(&small),
+            format!("armor_stand_small_{slot}"),
+            "{small}"
+        );
+        let adult = format!("minecraft:armor_stand#{qualifier}");
+        assert_eq!(
+            model_id(&adult),
+            format!("armor_{slot}"),
+            "{adult} wears the shared shell"
+        );
+    }
+    for family in [
+        "drowned",
+        "piglin",
+        "zombie",
+        "zombie_villager",
+        "zombified_piglin",
+    ] {
+        let key = format!("minecraft:{family}#layer3/babyModelSet/head");
+        assert_eq!(model_id(&key), format!("armor_baby_{family}_head"), "{key}");
+    }
 }

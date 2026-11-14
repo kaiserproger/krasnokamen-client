@@ -380,19 +380,24 @@ fn tropical_fish_both_shapes_have_two_sided_fins_and_a_trailing_tail() {
 
 #[test]
 fn pufferfish_inflation_changes_body_volume_and_exposes_spines() {
-    let mut previous = Vec3::ZERO;
-    for id in ["pufferfish_small", "pufferfish_medium", "pufferfish"] {
+    // PUFF_STATE selects three vanilla layers: `pufferfish_small#main` (3x2x3 body),
+    // `pufferfish_medium#main` (5x5x5) and `pufferfish_big#main` (8x8x8). The small
+    // and medium rigs are quad-exact against the 26.3 dump; the big layer samples
+    // outside its 32x32 atlas (`top_back_fin` front face [31,18,39,19]), so the big
+    // state keeps its authored rig and its own spine names until that policy is decided.
+    for (id, expected) in [
+        ("pufferfish_small", [3., 2., 3.]),
+        ("pufferfish_medium", [5., 5., 5.]),
+        ("pufferfish", [8., 8., 8.]),
+    ] {
         let rig = rig(id);
         let pose = rest(rig);
         let body = bounds(rig, &pose, "body");
-        let size = body.1 - body.0;
+        let actual = (body.1 - body.0) * 16.;
         assert!(
-            size.cmpgt(previous).all(),
-            "{id}: inflation must grow all three axes"
+            (actual - Vec3::from_array(expected)).abs().max_element() < 0.05,
+            "{id}: body {actual}"
         );
-        previous = size;
-        assert!(bounds(rig, &pose, "right_fin").0.x < body.0.x);
-        assert!(bounds(rig, &pose, "left_fin").1.x > body.1.x);
         if id == "pufferfish_small" {
             for eye in ["left_eye", "right_eye"] {
                 assert!(
@@ -400,28 +405,49 @@ fn pufferfish_inflation_changes_body_volume_and_exposes_spines() {
                     "deflated eyes rise above the body"
                 );
             }
+            for fin in ["right_fin", "left_fin", "back_fin"] {
+                assert!(rig.part_by_name.contains_key(fin), "deflated {fin}");
+            }
             continue;
         }
-        for (name, axis, positive) in [
-            ("top_front_spines", 1, false),
-            ("bottom_front_spines", 1, true),
-            ("right_front_spines", 0, false),
-            ("left_front_spines", 0, true),
-        ] {
+        let spines: [(&str, usize, bool); 4] = if id == "pufferfish_medium" {
+            [
+                ("top_front_fin", 1, false),
+                ("bottom_front_fin", 1, true),
+                ("right_front_fin", 0, false),
+                ("left_front_fin", 0, true),
+            ]
+        } else {
+            [
+                ("top_front_spines", 1, false),
+                ("bottom_front_spines", 1, true),
+                ("right_front_spines", 0, false),
+                ("left_front_spines", 0, true),
+            ]
+        };
+        let size = body.1 - body.0;
+        for (name, axis, positive) in spines {
             let spine = bounds(rig, &pose, name);
             let protrusion = if positive {
                 spine.1[axis] - body.1[axis]
             } else {
                 body.0[axis] - spine.0[axis]
-            };
+            } * 16.;
             assert!(
-                protrusion > size[axis] * 0.05,
+                protrusion > size[axis] * 16. * 0.05,
                 "{id}: {name} hidden inside body"
             );
-            assert_eq!(
-                uv_bounds(face(rig, name, -Vec3::Z)),
-                uv_bounds(face(rig, name, Vec3::Z))
+            // Vanilla's inflated fins are thin plates sampled from one strip of the
+            // 32x32 atlas, so the two sides are not mirrored texels.
+            assert!(
+                rig.bones[rig.part_by_name[name]].quads.len() >= 2,
+                "{id}: {name} is a plate"
             );
+        }
+        if id == "pufferfish_medium" {
+            for blue in ["left_blue_fin", "right_blue_fin"] {
+                assert!(rig.part_by_name.contains_key(blue), "inflated {blue}");
+            }
         }
         assert!(
             !rig.part_by_name.contains_key("tail_base"),
@@ -584,11 +610,20 @@ fn species_layer_scales_preserve_the_feet_and_distinguish_related_mobs() {
             (high - low - expected).abs().max_element() < 1e-5,
             "{id}: lost species scale"
         );
-        let feet = pose[rig.part_by_name["layer_root"]].transform_point3(Vec3::new(0., 1.5, 0.));
-        assert!(
-            (feet - Vec3::new(0., 1.5, 0.)).length() < 1e-5,
-            "{id}: scaling moves the floor"
-        );
+        // The 26.3 layers fold the species scale into the top bones (the dump has no
+        // `layer_root`), so the check is that the hooves stay on the 24 px model floor.
+        // Spider legs are `leg0`..`leg7` and have no per-side name, so the floor check
+        // uses whichever humanoid or quadruped leg bone the rig carries.
+        if let Some(leg) = ["right_hind_leg", "right_leg"]
+            .into_iter()
+            .find(|name| rig.part_by_name.contains_key(*name))
+        {
+            let (_, foot_high) = bounds(rig, &pose, leg);
+            assert!(
+                (foot_high.y * 16. - 24.).abs() < 0.05,
+                "{id}: scaling moves the floor"
+            );
+        }
     }
 }
 
@@ -655,10 +690,12 @@ fn polar_bear_has_a_long_two_section_torso_and_grounded_paws() {
     }
 }
 
-/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos"): the adult horse rig follows
-/// the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a 10 x 10 x 22 body
-/// (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs, and the head carried
-/// forward of the chest on a neck raised 30 degrees. The pre-fix rig had a 10 x 10 x 10 body.
+/// BV-HORSE (owner 2026-11-13: horses "look like small rhinos") + MODEL-OPUS-11: the adult
+/// horse rig follows the 26.3 equine layer (`AbstractEquineModel.createBodyMesh`, javap): a
+/// 10 x 10 x 22 body (inflated 0.05) whose back is 21 px above the hooves, four 11-px legs,
+/// and the head carried forward of the chest on a neck raised 30 degrees. The 26.1 mesh
+/// transformer (translate -2.4016, scale 1.1) is folded into the top bones the way the client
+/// applies no per-entity scale, so every number below carries the 1.1 factor.
 #[test]
 fn adult_horse_rig_has_vanilla_equine_proportions() {
     let horse = rig("horse");
@@ -666,11 +703,11 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
     let (low, high) = bounds(horse, &transforms, "body");
     let size = (high - low) * 16.;
     assert!(
-        (size - Vec3::new(10.1, 10.1, 22.1)).abs().max_element() < 1e-3,
+        (size - Vec3::new(11.11, 11.11, 24.31)).abs().max_element() < 1e-2,
         "body {size}"
     );
     assert!(
-        (low.y * 16. - 2.95).abs() < 1e-3,
+        (low.y * 16. - 0.84).abs() < 1e-2,
         "back height {}",
         low.y * 16.
     );
@@ -682,11 +719,11 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
     ] {
         let (leg_low, leg_high) = bounds(horse, &transforms, leg);
         assert!(
-            (leg_high.y * 16. - 23.99).abs() < 1e-3,
+            (leg_high.y * 16. - 23.99).abs() < 1e-2,
             "{leg} reaches the ground"
         );
         assert!(
-            ((leg_high.y - leg_low.y) * 16. - 11.).abs() < 1e-3,
+            ((leg_high.y - leg_low.y) * 16. - 12.1).abs() < 1e-2,
             "{leg} length"
         );
     }
@@ -697,4 +734,452 @@ fn adult_horse_rig_has_vanilla_equine_proportions() {
         head_low.z,
         low.z
     );
+}
+
+/// Pixel-space rest bounds of one authored bone: (low, high) in 1/16-block units.
+fn rest_px(rig: &Rig, transforms: &[Mat4], name: &str) -> ([f32; 3], [f32; 3]) {
+    let (low, high) = bounds(rig, transforms, name);
+    (
+        [low.x * 16., low.y * 16., low.z * 16.],
+        [high.x * 16., high.y * 16., high.z * 16.],
+    )
+}
+
+fn assert_px(actual: ([f32; 3], [f32; 3]), expected: ([f32; 3], [f32; 3]), what: &str) {
+    for axis in 0..3 {
+        assert!(
+            (actual.0[axis] - expected.0[axis]).abs() < 0.05
+                && (actual.1[axis] - expected.1[axis]).abs() < 0.05,
+            "{what}: {:?}..{:?} != {:?}..{:?}",
+            actual.0,
+            actual.1,
+            expected.0,
+            expected.1
+        );
+    }
+}
+
+// MODEL-OPUS-2: vanilla's pig is a 10x16x8 horizontal torso whose head sits on the
+// body line with a 4x3x1 snout; the invented ears and three-cube tail are gone.
+#[test]
+fn pig_is_the_vanilla_horizontal_torso_with_a_grounded_head_and_short_legs() {
+    let pig = rig("pig");
+    let transforms = rest(pig);
+    let parts: Vec<&str> = pig
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        parts,
+        [
+            "head",
+            "body",
+            "right_hind_leg",
+            "left_hind_leg",
+            "right_front_leg",
+            "left_front_leg"
+        ],
+        "vanilla pig has head, body and four legs only"
+    );
+    assert_px(
+        rest_px(pig, &transforms, "body"),
+        ([-5., 10., -8.], [5., 18., 8.]),
+        "pig body",
+    );
+    assert_px(
+        rest_px(pig, &transforms, "head"),
+        ([-4., 8., -15.], [4., 16., -6.]),
+        "pig head and snout",
+    );
+    for (leg, z) in [("right_front_leg", -7.), ("right_hind_leg", 5.)] {
+        assert_px(
+            rest_px(pig, &transforms, leg),
+            ([-5., 18., z], [-1., 24., z + 4.]),
+            leg,
+        );
+    }
+}
+
+// MODEL-OPUS-5: the face lives on the inner cube and the translucent shell is a
+// separate rig, so a plain green box never covers the eyes and mouth.
+#[test]
+fn slime_face_parts_sit_on_the_inner_cube_under_a_separate_shell() {
+    let inner = rig("slime");
+    let transforms = rest(inner);
+    let names: Vec<&str> = inner
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(names, ["right_eye", "mouth", "left_eye", "cube"]);
+    assert_px(
+        rest_px(inner, &transforms, "right_eye"),
+        ([-3.25, 18., -3.5], [-1.25, 20., -1.5]),
+        "slime right eye",
+    );
+    assert_px(
+        rest_px(inner, &transforms, "left_eye"),
+        ([1.25, 18., -3.5], [3.25, 20., -1.5]),
+        "slime left eye",
+    );
+    assert_px(
+        rest_px(inner, &transforms, "mouth"),
+        ([0., 21., -3.5], [1., 22., -2.5]),
+        "slime mouth",
+    );
+    let shell = rig("slime_outer");
+    let shell_transforms = rest(shell);
+    assert_px(
+        rest_px(shell, &shell_transforms, "cube"),
+        ([-4., 16., -4.], [4., 24., 4.]),
+        "slime shell",
+    );
+}
+
+// MODEL-OPUS-N2: the magma cube's eyes are the front texels of the eight one-pixel
+// layers plus the inside cube; there is no split eye bone and nothing sits low.
+#[test]
+fn magma_cube_eyes_stay_on_the_vanilla_one_pixel_layers() {
+    let cube = rig("magma_cube");
+    let transforms = rest(cube);
+    let mut layers = 0;
+    for bone in &cube.bones {
+        assert!(
+            !bone.name.contains("eye"),
+            "split eye bone {} is not vanilla",
+            bone.name
+        );
+        if bone.name.starts_with("cube") {
+            layers += 1;
+        }
+    }
+    assert_eq!(layers, 8, "vanilla magma cube has eight 8x1x8 layers");
+    assert_px(
+        rest_px(cube, &transforms, "cube0"),
+        ([-4., 16., -4.], [4., 17., 4.]),
+        "lowest layer",
+    );
+    assert_px(
+        rest_px(cube, &transforms, "cube7"),
+        ([-4., 23., -4.], [4., 24., 4.]),
+        "highest layer",
+    );
+    assert_px(
+        rest_px(cube, &transforms, "inside_cube"),
+        ([-2., 18., -2.], [2., 22., 2.]),
+        "inside cube",
+    );
+}
+
+// MODEL-OPUS-9: axolotl gill fans are flat planes on the head's top and both sides,
+// and the tail is a vertical fin rather than a box.
+#[test]
+fn axolotl_gill_fans_and_tail_are_flat_vanilla_planes() {
+    let axolotl = rig("axolotl");
+    let transforms = rest(axolotl);
+    for (name, expected) in [
+        ("top_gills", ([-4., 13.5, -5.], [4., 16.5, -5.])),
+        ("right_gills", ([4., 14.5, -5.], [7., 21.5, -5.])),
+        ("left_gills", ([-7., 14.5, -5.], [-4., 21.5, -5.])),
+        ("tail", ([0., 16.5, 6.], [0., 21.5, 18.])),
+    ] {
+        assert_px(rest_px(axolotl, &transforms, name), expected, name);
+    }
+}
+
+// MODEL-OPUS-10: hoglin horns/ears/mane, strider bristles and the bee's legs and
+// stinger are the signature parts those rigs used to lose.
+#[test]
+fn hoglin_strider_and_bee_keep_their_signature_parts() {
+    let hoglin = rig("hoglin");
+    let transforms = rest(hoglin);
+    assert_px(
+        rest_px(hoglin, &transforms, "right_horn"),
+        ([-8., 4.64, -27.25], [-6., 13.24, -17.54]),
+        "hoglin horn",
+    );
+    assert_px(
+        rest_px(hoglin, &transforms, "left_ear"),
+        ([6., 0.99, -17.33], [11.24, 7.02, -11.22]),
+        "hoglin ear",
+    );
+    assert_px(
+        rest_px(hoglin, &transforms, "mane"),
+        ([0., -7., -16.], [0., 3., 3.]),
+        "hoglin mane",
+    );
+    let strider = rig("strider");
+    let transforms = rest(strider);
+    assert_px(
+        rest_px(strider, &transforms, "body"),
+        ([-8., -5., -8.], [8., 9., 8.]),
+        "strider body depth",
+    );
+    assert_px(
+        rest_px(strider, &transforms, "right_top_bristle"),
+        ([-15.71, -4., -8.], [-8., 5.19, 8.]),
+        "strider bristle",
+    );
+    let bee = rig("bee");
+    let transforms = rest(bee);
+    assert_px(
+        rest_px(bee, &transforms, "front_legs"),
+        ([-3.5, 22., -2.], [3.5, 24., -2.]),
+        "bee legs",
+    );
+    assert_px(
+        rest_px(bee, &transforms, "stinger"),
+        ([0., 18., 5.], [0., 19., 7.]),
+        "bee stinger",
+    );
+}
+
+// MODEL-OPUS-11: the rabbit's crouched 8x6x10 torso, the fox's 6x11x6 body, the
+// panda's 19x26x13 torso and the vex's plane wings against the old deer/boxy rigs.
+#[test]
+fn rabbit_fox_panda_and_vex_shapes_match_the_vanilla_proportions() {
+    let rabbit = rig("rabbit");
+    let transforms = rest(rabbit);
+    assert_px(
+        rest_px(rabbit, &transforms, "body"),
+        ([-4., 14.01, -4.31], [4., 23.38, 7.22]),
+        "rabbit body",
+    );
+    assert_px(
+        rest_px(rabbit, &transforms, "right_ear"),
+        ([-2.5, 7., -2.48], [-0.5, 12., -1.48]),
+        "rabbit ear",
+    );
+    let fox = rig("fox");
+    let transforms = rest(fox);
+    assert_px(
+        rest_px(fox, &transforms, "body"),
+        ([-3., 13.5, -2.], [3., 19.5, 9.]),
+        "fox body",
+    );
+    let panda = rig("panda");
+    let transforms = rest(panda);
+    assert_px(
+        rest_px(panda, &transforms, "body"),
+        ([-9.5, 3.5, -13.], [9.5, 16.5, 13.]),
+        "panda body",
+    );
+    assert_px(
+        rest_px(panda, &transforms, "head"),
+        ([-8.5, 3.5, -23.], [8.5, 16.5, -12.]),
+        "panda head",
+    );
+    let vex = rig("vex");
+    let transforms = rest(vex);
+    assert_px(
+        rest_px(vex, &transforms, "right_wing"),
+        ([-0.5, 18.5, 1.], [-0.5, 23.5, 9.]),
+        "vex wing plane",
+    );
+}
+
+// Boat parity (owner round 5): the four hull rigs were invented boxes; the vanilla
+// 26.3 layers are `boat/poplar#main`, `chest_boat/poplar#main`,
+// `boat/bamboo#main` and `chest_boat/bamboo#main`, and the water patch is the
+// `boat#water_patch` mask mesh drawn with the water-mask material.
+#[test]
+fn boat_and_raft_hulls_match_the_vanilla_26_3_layers() {
+    let boat = rig("boat");
+    let transforms = rest(boat);
+    let names: Vec<&str> = boat
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "bottom",
+            "left_paddle",
+            "right_paddle",
+            "left",
+            "back",
+            "front",
+            "right"
+        ],
+        "vanilla boat parts"
+    );
+    assert_px(
+        rest_px(boat, &transforms, "bottom"),
+        ([-14., 3., -8.], [14., 6., 8.]),
+        "boat floor",
+    );
+    for (wall, expected) in [
+        ("left", ([-14., -3., 8.], [14., 3., 10.])),
+        ("right", ([-14., -3., -10.], [14., 3., -8.])),
+        ("front", ([14., -3., -8.], [16., 3., 8.])),
+        ("back", ([-16., -3., -9.], [-14., 3., 9.])),
+    ] {
+        assert_px(rest_px(boat, &transforms, wall), expected, wall);
+    }
+    // Both paddles mount on the same side and mirror by rotation, as in vanilla.
+    for (paddle, z) in [("left_paddle", (4., 24.)), ("right_paddle", (-24., -4.))] {
+        assert_px(
+            rest_px(boat, &transforms, paddle),
+            ([1.43, -8.14, z.0], [3.98, -2.06, z.1]),
+            paddle,
+        );
+    }
+
+    let raft = rig("raft");
+    let transforms = rest(raft);
+    let raft_names: Vec<&str> = raft
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        raft_names,
+        ["bottom", "left_paddle", "right_paddle"],
+        "the bamboo raft is its double-deck hull and two paddles, no walls"
+    );
+    assert_px(
+        rest_px(raft, &transforms, "bottom"),
+        ([-14., -2.1, -10.], [14., 5.9, 10.]),
+        "raft deck",
+    );
+
+    let chest = rig("chest_boat");
+    let transforms = rest(chest);
+    for (part, expected) in [
+        ("chest_bottom", ([-14., -5., -6.], [-2., 3., 6.])),
+        ("chest_lid", ([-14., -9., -6.], [-2., -5., 6.])),
+        ("chest_lock", ([-2., -6., -1.], [-1., -2., 1.])),
+    ] {
+        assert_px(rest_px(chest, &transforms, part), expected, part);
+    }
+    assert!(
+        !chest.part_by_name.contains_key("chest"),
+        "vanilla splits the chest into bottom, lid and lock"
+    );
+
+    let patch = rig("boat_water_patch");
+    let transforms = rest(patch);
+    let patch_names: Vec<&str> = patch
+        .bones
+        .iter()
+        .map(|b| b.name.as_str())
+        .filter(|n| *n != "root")
+        .collect();
+    assert_eq!(
+        patch_names,
+        ["water_patch"],
+        "the water patch is one mask mesh in the hull frame"
+    );
+    assert_px(
+        rest_px(patch, &transforms, "water_patch"),
+        ([-14., -3., -8.], [14., 0., 8.]),
+        "water patch",
+    );
+}
+
+// MODEL-OPUS-N8/N10: the remaining mirror and hat differences against the 26.3 layers.
+#[test]
+fn cow_horn_cube_and_humanoid_hat_follow_the_26_3_layers() {
+    fn find<'a>(
+        bones: &'a [super::krasnokamen_models::BoneSpec],
+        name: &str,
+    ) -> Option<&'a super::krasnokamen_models::BoneSpec> {
+        bones.iter().find_map(|bone| {
+            (bone.name == name)
+                .then_some(bone)
+                .or_else(|| find(&bone.bones, name))
+        })
+    }
+    // `cow#main`: four head cubes (skull, snout and two horns) and the outer horn
+    // samples the right horn island unflipped; the old rig mirrored it.
+    let cow = super::krasnokamen_models::ModelFile::parse(include_str!(
+        "../../assets/krasnokamen/models/entity/cow.json"
+    ))
+    .unwrap();
+    let head = find(&cow.bones, "head").expect("cow head bone");
+    assert_eq!(
+        head.cubes.len(),
+        4,
+        "vanilla cow head: skull, snout, two horns"
+    );
+    assert!(
+        !head.cubes[3].mirror,
+        "the vanilla outer horn cube is not mirrored"
+    );
+    // The vanilla humanoid layer keeps a `hat` cube; on skeleton and stray skins it
+    // samples only transparent texels, which is why the audit called it minor.
+    for id in ["skeleton", "stray"] {
+        let rig = rig(id);
+        assert!(
+            rig.part_by_name.contains_key("hat"),
+            "{id}: vanilla hat cube"
+        );
+    }
+}
+
+// MODEL-OPUS-N8: left/right mirror flags now come from the 26.3 layers. Each tuple is
+// (rig, bone, expected mirror flags per cube) as the dump bakes them; the pre-fix rigs
+// carried the opposite flags on these cubes.
+#[test]
+fn left_side_mirror_flags_follow_the_26_3_layers() {
+    fn find<'a>(
+        bones: &'a [super::krasnokamen_models::BoneSpec],
+        name: &str,
+    ) -> Option<&'a super::krasnokamen_models::BoneSpec> {
+        bones.iter().find_map(|bone| {
+            (bone.name == name)
+                .then_some(bone)
+                .or_else(|| find(&bone.bones, name))
+        })
+    }
+    let cases: [(&str, &str, &[bool], &str); 6] = [
+        (
+            "cat",
+            "left_hind_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/cat.json"),
+        ),
+        (
+            "cat",
+            "left_front_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/cat.json"),
+        ),
+        (
+            "chicken",
+            "left_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/chicken.json"),
+        ),
+        (
+            "chicken",
+            "left_wing",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/chicken.json"),
+        ),
+        (
+            "wolf",
+            "left_hind_leg",
+            &[false],
+            include_str!("../../assets/krasnokamen/models/entity/wolf.json"),
+        ),
+        (
+            "wolf",
+            "right_hind_leg",
+            &[true],
+            include_str!("../../assets/krasnokamen/models/entity/wolf.json"),
+        ),
+    ];
+    for (rig, bone, expected, source) in cases {
+        let model = super::krasnokamen_models::ModelFile::parse(source).unwrap();
+        let spec = find(&model.bones, bone).unwrap_or_else(|| panic!("{rig}: {bone}"));
+        let flags: Vec<bool> = spec.cubes.iter().map(|cube| cube.mirror).collect();
+        assert_eq!(flags, expected, "{rig}: {bone} mirror flags");
+    }
 }

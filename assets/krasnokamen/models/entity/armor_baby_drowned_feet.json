@@ -1,152 +1,56 @@
 {
   "schema": 1,
   "id": "armor_baby_drowned_feet",
-  "texture": {
-    "path": "entity/equipment/humanoid_baby/iron.png",
-    "size": [
-      64,
-      64
-    ]
-  },
+  "texture": {"path": "entity/equipment/humanoid_baby/iron.png", "size": [64, 64]},
   "roles": {
-    "right_leg": [
-      "right_leg"
-    ],
-    "left_leg": [
-      "left_leg"
-    ]
+    "right_leg": ["right_leg"],
+    "left_leg": ["left_leg"]
   },
   "bones": [
     {
-      "name": "right_leg",
-      "pivot": [
-        -2,
-        18,
-        0
-      ],
-      "cubes": [
+      "name": "right_leg", "pivot": [-1.5, 20, 0.5],
+      "bones": [
         {
-          "origin": [
-            -1.75,
-            3.0,
-            -2
-          ],
-          "size": [
-            3.5,
-            3.0,
-            4
-          ],
-          "uv": [
-            0,
-            25
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              3,
-              25,
-              6.5,
-              29
-            ],
-            "down": [
-              6,
-              25,
-              9.5,
-              29
-            ],
-            "right": [
-              0,
-              28,
-              4,
-              31.0
-            ],
-            "front": [
-              3,
-              28,
-              6.5,
-              31.0
-            ],
-            "left": [
-              6,
-              28,
-              10,
-              31.0
-            ],
-            "back": [
-              9,
-              28,
-              12.5,
-              31.0
-            ]
-          }
+          "name": "left_foot",
+          "cubes": [
+            {"origin": [-0.9, 2.4, -2.3], "size": [2.8, 2, 3.6], "uv": [0, 29], "faces": {"up": [3, 29, 6, 32], "down": [6, 29, 9, 32], "right": [0, 32, 3, 33], "front": [3, 32, 6, 33], "left": [6, 32, 9, 33], "back": [9, 32, 12, 33]}, "mirror": true}
+          ]
         }
       ]
     },
     {
-      "name": "left_leg",
-      "pivot": [
-        2,
-        18,
-        0
-      ],
-      "cubes": [
+      "name": "left_leg", "pivot": [1.5, 20, 0.5],
+      "bones": [
         {
-          "origin": [
-            -1.75,
-            3.0,
-            -2
-          ],
-          "size": [
-            3.5,
-            3.0,
-            4
-          ],
-          "uv": [
-            0,
-            25
-          ],
-          "inflate": 1.0,
-          "faces": {
-            "up": [
-              3,
-              25,
-              6.5,
-              29
-            ],
-            "down": [
-              6,
-              25,
-              9.5,
-              29
-            ],
-            "right": [
-              0,
-              28,
-              4,
-              31.0
-            ],
-            "front": [
-              3,
-              28,
-              6.5,
-              31.0
-            ],
-            "left": [
-              6,
-              28,
-              10,
-              31.0
-            ],
-            "back": [
-              9,
-              28,
-              12.5,
-              31.0
-            ]
-          },
-          "mirror": true
+          "name": "right_foot",
+          "cubes": [
+            {"origin": [-1.9, 2.4, -2.3], "size": [2.8, 2, 3.6], "uv": [0, 25], "faces": {"up": [3, 25, 6, 28], "down": [6, 25, 9, 28], "right": [0, 28, 3, 29], "front": [3, 28, 6, 29], "left": [6, 28, 9, 29], "back": [9, 28, 12, 29]}}
+          ]
         }
       ]
+    },
+    {
+      "name": "head", "pivot": [0, 15, 0],
+      "bones": [
+        {
+          "name": "hat"
+        }
+      ]
+    },
+    {
+      "name": "right_arm", "pivot": [-3.5, 15.5, 0]
+    },
+    {
+      "name": "inner_body", "pivot": [0, 18, 0]
+    },
+    {
+      "name": "left_arm", "pivot": [3.5, 15.5, 0]
+    },
+    {
+      "name": "waist", "pivot": [0, 19, 0]
+    },
+    {
+      "name": "body", "pivot": [0, 18, 0]
     }
   ]
 }

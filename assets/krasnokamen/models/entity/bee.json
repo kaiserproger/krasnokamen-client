@@ -1,238 +1,70 @@
 {
   "schema": 1,
   "id": "bee",
-  "texture": {
-    "path": "entity/bee/bee.png",
-    "size": [
-      64,
-      64
-    ]
-  },
+  "texture": {"path": "entity/bee/bee.png", "size": [64, 64]},
   "roles": {
-    "head": [
-      "head"
-    ],
-    "wing_negative_x": [
-      "right_wing"
-    ],
-    "wing_positive_x": [
-      "left_wing"
-    ],
-    "right_leg": [
-      "right_leg"
-    ],
-    "left_leg": [
-      "left_leg"
-    ]
+    "wing_negative_x": ["right_wing"],
+    "wing_positive_x": ["left_wing"]
   },
   "bones": [
     {
-      "name": "head",
-      "pivot": [
-        0,
-        19,
-        -5
-      ],
-      "cubes": [
+      "name": "bone", "pivot": [0, 19, 0],
+      "bones": [
         {
-          "origin": [
-            -3.5,
-            -4,
-            -5
+          "name": "body",
+          "cubes": [
+            {"origin": [-3.5, -4, -5], "size": [7, 7, 10], "uv": [0, 0]}
           ],
-          "size": [
-            7,
-            7,
-            10
-          ],
-          "uv": [
-            0,
-            0
+          "bones": [
+            {
+              "name": "right_antenna", "pivot": [0, -2, -5],
+              "cubes": [
+                {"origin": [-2.5, -2, -3], "size": [1, 2, 3], "uv": [2, 3]}
+              ]
+            },
+            {
+              "name": "stinger",
+              "cubes": [
+                {"origin": [0, -1, 5], "size": [0, 1, 2], "uv": [26, 7]}
+              ]
+            },
+            {
+              "name": "left_antenna", "pivot": [0, -2, -5],
+              "cubes": [
+                {"origin": [1.5, -2, -3], "size": [1, 2, 3], "uv": [2, 0]}
+              ]
+            }
           ]
-        }
-      ]
-    },
-    {
-      "name": "body",
-      "pivot": [
-        0,
-        19,
-        0
-      ],
-      "cubes": [
+        },
         {
-          "origin": [
-            -2,
-            0,
-            4
-          ],
-          "size": [
-            1,
-            1,
-            2
-          ],
-          "uv": [
-            26,
-            7
+          "name": "left_wing", "pivot": [1.5, -4, -3], "rotation": [0, 15, 0],
+          "cubes": [
+            {"origin": [0, 0, 0], "size": [9, 0, 6], "uv": [0, 18], "inflate": 0.001, "mirror": true}
           ]
-        }
-      ]
-    },
-    {
-      "name": "antenna_left",
-      "pivot": [
-        2,
-        15,
-        -8
-      ],
-      "cubes": [
+        },
         {
-          "origin": [
-            -0.5,
-            0,
-            -1.5
-          ],
-          "size": [
-            1,
-            2,
-            3
-          ],
-          "uv": [
-            2,
-            0
+          "name": "right_wing", "pivot": [-1.5, -4, -3], "rotation": [0, -15, 0],
+          "cubes": [
+            {"origin": [-9, 0, 0], "size": [9, 0, 6], "uv": [0, 18], "inflate": 0.001}
           ]
-        }
-      ]
-    },
-    {
-      "name": "antenna_right",
-      "pivot": [
-        -2,
-        15,
-        -8
-      ],
-      "cubes": [
+        },
         {
-          "origin": [
-            -0.5,
-            0,
-            -1.5
-          ],
-          "size": [
-            1,
-            2,
-            3
-          ],
-          "uv": [
-            2,
-            3
+          "name": "front_legs", "pivot": [1.5, 3, -2],
+          "cubes": [
+            {"origin": [-5, 0, 0], "size": [7, 2, 0], "uv": [26, 1]}
           ]
-        }
-      ]
-    },
-    {
-      "name": "left_wing",
-      "pivot": [
-        4,
-        16,
-        0
-      ],
-      "cubes": [
+        },
         {
-          "origin": [
-            0,
-            0,
-            -3
-          ],
-          "size": [
-            9,
-            1,
-            6
-          ],
-          "uv": [
-            0,
-            18
-          ],
-          "mirror": true
-        }
-      ]
-    },
-    {
-      "name": "right_wing",
-      "pivot": [
-        -4,
-        16,
-        0
-      ],
-      "cubes": [
-        {
-          "origin": [
-            -9,
-            0,
-            -3
-          ],
-          "size": [
-            9,
-            1,
-            6
-          ],
-          "uv": [
-            0,
-            18
+          "name": "middle_legs", "pivot": [1.5, 3, 0],
+          "cubes": [
+            {"origin": [-5, 0, 0], "size": [7, 2, 0], "uv": [26, 3]}
           ]
-        }
-      ]
-    },
-    {
-      "name": "right_leg",
-      "pivot": [
-        -3,
-        20,
-        0
-      ],
-      "cubes": [
+        },
         {
-          "origin": [
-            -1.5,
-            0,
-            -1
-          ],
-          "size": [
-            3,
-            2,
-            1
-          ],
-          "uv": [
-            26,
-            1
+          "name": "back_legs", "pivot": [1.5, 3, 2],
+          "cubes": [
+            {"origin": [-5, 0, 0], "size": [7, 2, 0], "uv": [26, 5]}
           ]
-        }
-      ]
-    },
-    {
-      "name": "left_leg",
-      "pivot": [
-        3,
-        20,
-        0
-      ],
-      "cubes": [
-        {
-          "origin": [
-            -1.5,
-            0,
-            -1
-          ],
-          "size": [
-            3,
-            2,
-            1
-          ],
-          "uv": [
-            26,
-            3
-          ],
-          "mirror": true
         }
       ]
     }
