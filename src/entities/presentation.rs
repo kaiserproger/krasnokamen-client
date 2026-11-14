@@ -623,14 +623,14 @@ pub fn append(
         min: camera.map(|value| value - f64::from(radius)),
         max: camera.map(|value| value + f64::from(radius)),
     };
-    let mut visible = std::mem::take(&mut store.visible_slots);
+    let mut visible = std::mem::take(&mut store.visible_ids);
     visible.clear();
-    visible.extend(store.candidate_slots(area));
+    visible.extend(store.candidates(area).map(|entity| entity.handle.network_id));
     for index in 0..visible.len() + usize::from(store.local_render_slot.is_some()) {
         let slot = if index == visible.len() {
             store.local_render_slot.unwrap()
         } else {
-            visible[index]
+            store.ids[&visible[index]]
         };
         store.slots[slot].physical.shown_tick = tick;
         let entity = &store.slots[slot];
@@ -797,7 +797,7 @@ pub fn append(
         }
     }
     visible.clear();
-    store.visible_slots = visible;
+    store.visible_ids = visible;
     stats.vertices = out.vertices.len();
     Ok(stats)
 }

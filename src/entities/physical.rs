@@ -236,10 +236,6 @@ impl Store {
         Ok(())
     }
     pub(crate) fn candidates(&self, area: Bounds) -> impl Iterator<Item = &Entity> {
-        self.candidate_slots(area).map(|slot| &self.slots[slot])
-    }
-    /// Slots of `candidates`: the frame keeps these, not network ids it would look up again.
-    pub(crate) fn candidate_slots(&self, area: Bounds) -> impl Iterator<Item = usize> {
         let padding = self.query_padding();
         let low = super::cell([area.min[0] - padding, 0., area.min[2] - padding]);
         let high = super::cell([area.max[0] + padding, 0., area.max[2] + padding]);
@@ -247,13 +243,13 @@ impl Store {
             .range([low[0], i32::MIN]..=[high[0], i32::MAX])
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
             .flat_map(|(_, ids)| ids.iter())
-            .filter_map(|id| self.ids.get(id).copied())
-            .filter(|slot| self.slots[*slot].vehicle.is_none())
+            .filter_map(|id| self.get(*id))
+            .filter(|entity| entity.vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
-            .chain(self.passenger_vehicles.keys().filter_map(|id| self.ids.get(id).copied()))
-            .filter(|slot| {
-                !self.slots[*slot]
+            .chain(self.passenger_vehicles.keys().filter_map(|id| self.get(*id)))
+            .filter(|entity| {
+                !entity
                     .source
                     .as_ref()
                     .is_some_and(|s| s.discarded || s.special.discarded)
