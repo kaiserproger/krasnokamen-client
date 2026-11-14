@@ -1016,3 +1016,43 @@ fn boat_and_raft_hulls_match_the_vanilla_26_3_layers() {
         "water patch",
     );
 }
+
+// MODEL-OPUS-N8/N10: the remaining mirror and hat differences against the 26.3 layers.
+#[test]
+fn cow_horn_cube_and_humanoid_hat_follow_the_26_3_layers() {
+    fn find<'a>(
+        bones: &'a [super::krasnokamen_models::BoneSpec],
+        name: &str,
+    ) -> Option<&'a super::krasnokamen_models::BoneSpec> {
+        bones.iter().find_map(|bone| {
+            (bone.name == name)
+                .then_some(bone)
+                .or_else(|| find(&bone.bones, name))
+        })
+    }
+    // `cow#main`: four head cubes (skull, snout and two horns) and the outer horn
+    // samples the right horn island unflipped; the old rig mirrored it.
+    let cow = super::krasnokamen_models::ModelFile::parse(include_str!(
+        "../../assets/krasnokamen/models/entity/cow.json"
+    ))
+    .unwrap();
+    let head = find(&cow.bones, "head").expect("cow head bone");
+    assert_eq!(
+        head.cubes.len(),
+        4,
+        "vanilla cow head: skull, snout, two horns"
+    );
+    assert!(
+        !head.cubes[3].mirror,
+        "the vanilla outer horn cube is not mirrored"
+    );
+    // The vanilla humanoid layer keeps a `hat` cube; on skeleton and stray skins it
+    // samples only transparent texels, which is why the audit called it minor.
+    for id in ["skeleton", "stray"] {
+        let rig = rig(id);
+        assert!(
+            rig.part_by_name.contains_key("hat"),
+            "{id}: vanilla hat cube"
+        );
+    }
+}
