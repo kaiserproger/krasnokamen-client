@@ -42,6 +42,15 @@ fn accumulate(rgba:&[u8],width:usize,height:usize,sum:&mut [u32]) {
     }}}
 }
 
+fn presentation_metadata(scene:&crate::api::Scene,entity_extract_ms:f64)->serde_json::Value {
+    serde_json::json!({
+        "crowd_instances":scene.crowd.instances.len(),
+        "crowd_fallback":scene.entity_presentation.crowd_fallback,
+        "entity_extraction":scene.entity_presentation,
+        "cpu_entity_extract_ms":entity_extract_ms,
+    })
+}
+
 pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     let (mut recording,mut camera,mut output,mut data)=(None,None,None,None);
     let (mut start,mut end)=(None,None);
@@ -85,6 +94,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
     let mut replay=Player::open(&recording,true)?;
     let mut renderer=pollster::block_on(Renderer::new_offscreen(width*2,height*2,artifacts.into()))?;
     replay.set_crowd_instancing(renderer.crowd_supported());
+    replay.session.enable_scene_profile(true);
     // Medium is the non-temporal HDR/shadows preset: TAA and its projection
     // jitter/history are off by construction, regardless of persisted settings.
     renderer.set_graphics_preset(GraphicsPreset::Medium);
@@ -102,6 +112,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
         let base=begin+frame_time(index,60);
         sum.fill(0);
         let mut sample_ticks=[None;16];
+        let mut entity_extract_ms=0.;
         for sample in 0..samples {
             // 180 degree shutter: sample only the first half of this frame.
             let time=base+frame_time(u64::from(sample),120*samples);
@@ -116,6 +127,9 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
             renderer.replay_rgba(replay.session.scene(),&observation,&readback,&mut pixels)?;
             replay.session.release_uploaded_terrain(renderer.drain_uploaded_meshes());
             replay.session.far_generated(renderer.far_gpu_generation(),renderer.drain_far_generated());
+            if let Some([_,entities,_])=replay.session.take_scene_profile() {
+                entity_extract_ms+=entities;
+            }
             accumulate(&pixels,width as usize,height as usize,&mut sum);
             sample_ticks[sample as usize]=replay.last_tick;
         }
@@ -125,6 +139,7 @@ pub(crate) fn cli(mut args:impl Iterator<Item=String>)->Result<(),String> {
         writeln!(metadata,"{}",serde_json::json!({"frame":index,"replay_time":base.as_secs_f64(),
             "last_applied_tick":replay.last_tick,"wall_ns":replay.last_wall_ns,"sample_ticks":&sample_ticks[..samples as usize],
             "camera":replay.session.replay_pose(),"cpu_state_sha256":replay.frame_hash(),
+            "presentation":presentation_metadata(replay.session.scene(),entity_extract_ms),
             "rgba_sha256":format!("{:x}",Sha256::digest(&frame)),"supersampling":2,"motion_samples":samples,"taa":false}))
             .map_err(|e|format!("write replay frame metadata: {e}"))?;
         index+=1;
@@ -146,5 +161,22 @@ mod tests {
         assert_eq!(sum,vec![40,44,48,52,72,76,80,84]);
         accumulate(&input,2,1,&mut sum);
         assert_eq!(sum,vec![80,88,96,104,144,152,160,168]);
+    }
+    #[test]
+    fn presentation_metadata_preserves_current_counts_reasons_and_extraction_time() {
+        let mut scene=crate::api::Scene::default();
+        scene.crowd.instances.resize(3,Default::default());
+        scene.entity_presentation.known=9;
+        scene.entity_presentation.eligible=5;
+        scene.entity_presentation.crowd=3;
+        scene.entity_presentation.crowd_fallback.entry("minecraft:husk")
+            .or_default().insert("invisible",2);
+        let metadata=presentation_metadata(&scene,12.5);
+        assert_eq!(metadata["crowd_instances"],3);
+        assert_eq!(metadata["crowd_fallback"]["minecraft:husk"]["invisible"],2);
+        assert_eq!(metadata["entity_extraction"]["known"],9);
+        assert_eq!(metadata["entity_extraction"]["eligible"],5);
+        assert_eq!(metadata["entity_extraction"]["crowd"],3);
+        assert_eq!(metadata["cpu_entity_extract_ms"],12.5);
     }
 }

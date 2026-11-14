@@ -216,8 +216,9 @@ subframes sample the first half-frame (180-degree shutter) and average the
 **display-encoded RGBA**, not linear HDR; this is intentionally documented, not
 claimed physically exact blur. CPU mesh jobs finish through an event-driven
 completion barrier before capture; mesh residency exhaustion/timeout is an
-error. Replay terrain has no upload-dependent fade-in. Raw padded GPU rows are
-stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
+error. Replay terrain uses explicit zero-duration upload admission, so it has no
+upload-dependent fade-in; an unknown fade policy is not drawable. Raw padded GPU
+rows are stripped before 2x reduction and fed directly to ffmpeg stdin as tight RGBA.
 
 The exporter negotiates the C1 crowd-instancing path from the offscreen
 renderer and retains that choice across backward seeks. Recording itself
@@ -239,6 +240,21 @@ RGBA SHA-256 hashes, SSAA/motion settings and TAA-off status. With motion blur,
 retains all sample labels. Join telemetry by tick, not encoding time. A failed
 export can leave a partial MP4/sidecar: only a successful process exit makes a
 complete shot. Outputs are never intentionally overwritten.
+
+Each frame also contains `presentation`:
+
+- `crowd_instances`: prepared instances supplied to the crowd renderer, **not**
+  a GPU-visible count or proof that every recorded soldier is in camera range.
+- `crowd_fallback`: the existing CPU-path counts by crowd kind and reason.
+- `entity_extraction`: the session's existing presentation statistics, including
+  known/eligible/submitted entities and unrendered reasons.
+- `cpu_entity_extract_ms`: measured CPU extraction time accumulated across that
+  frame's shutter samples and replay advancement. The first frame includes
+  extraction while seeking from the take's beginning; this is not GPU time.
+
+Counts/reasons describe the final shutter sample, like the camera pose. Camera
+range and received tracking data still bound extraction; these counters do not
+expand the view or recover unrecorded entities.
 
 ## Focused checks and provenance
 

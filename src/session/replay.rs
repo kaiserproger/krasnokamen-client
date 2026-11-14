@@ -100,8 +100,9 @@ impl Session {
         self.refresh_scene_mode(true)?;
         // Cinematic output is world-only, not UI or first-person overlays.
         self.scene.overlay = Default::default();
-        // Mesh upload latency must not turn a cut-in into a terrain fade-in.
-        for chunk in self.scene.chunks.values_mut() { chunk.fade_duration_ms = None; }
+        // Zero admits the uploaded mesh immediately; None is an unknown policy
+        // that the renderer must reject, not a request to disable fading.
+        for chunk in self.scene.chunks.values_mut() { chunk.fade_duration_ms = Some(0); }
         Ok(())
     }
     /// CPU-side presentation fingerprint, not a promise of cross-GPU bit identity.
