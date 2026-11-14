@@ -14,7 +14,12 @@ pub(super) fn append(
     let (name, variant) = if let Some(Metadata::InlinePaintingVariant(variant)) =
         p::value(models, e, "DATA_PAINTING_VARIANT_ID")
     {
-        (variant["asset_id"].as_str().ok_or("painting asset unavailable")?, variant)
+        (
+            variant["asset_id"]
+                .as_str()
+                .ok_or("painting asset unavailable")?,
+            variant,
+        )
     } else {
         let id = p::number(models, e, "DATA_PAINTING_VARIANT_ID").unwrap_or(0);
         let registry = "minecraft:painting_variant";
@@ -51,7 +56,10 @@ pub(super) fn append(
         Some(value) => value.int().ok_or("painting direction metadata invalid")?,
         None => e.spawn_data,
     };
-    let anchor = store.presented_transform(e, tick, partial)?.position.map(f64::floor);
+    let anchor = store
+        .presented_transform(e, tick, partial)?
+        .position
+        .map(f64::floor);
     let (center, rotation) = painting_placement(anchor, direction, width, height)?;
     let root = translation(center, origin) * Mat4::from_rotation_y(rotation);
     let mut lights = [[0.; 2]; 256];
@@ -243,17 +251,42 @@ mod tests {
     #[test]
     fn painting_anchor_orientation_and_segment_lighting() {
         let cases = [
-            (2, [0., 0., -1.], [10., 21., 30.96875], [[9., 20., 30.], [10., 21., 30.]]),
-            (3, [0., 0., 1.], [11., 21., 30.03125], [[11., 20., 30.], [10., 21., 30.]]),
-            (4, [-1., 0., 0.], [10.96875, 21., 31.], [[10., 20., 31.], [10., 21., 30.]]),
-            (5, [1., 0., 0.], [10.03125, 21., 30.], [[10., 20., 29.], [10., 21., 30.]]),
+            (
+                2,
+                [0., 0., -1.],
+                [10., 21., 30.96875],
+                [[9., 20., 30.], [10., 21., 30.]],
+            ),
+            (
+                3,
+                [0., 0., 1.],
+                [11., 21., 30.03125],
+                [[11., 20., 30.], [10., 21., 30.]],
+            ),
+            (
+                4,
+                [-1., 0., 0.],
+                [10.96875, 21., 31.],
+                [[10., 20., 31.], [10., 21., 30.]],
+            ),
+            (
+                5,
+                [1., 0., 0.],
+                [10.03125, 21., 30.],
+                [[10., 20., 29.], [10., 21., 30.]],
+            ),
         ];
         for (direction, outward, expected_center, expected_light) in cases {
-            let (center, rotation) =
-                painting_placement([10., 20., 30.], direction, 2, 2).unwrap();
+            let (center, rotation) = painting_placement([10., 20., 30.], direction, 2, 2).unwrap();
             assert_eq!(center, expected_center);
-            assert_eq!(painting_light_position(center, direction, 2, 2, 0, 0), expected_light[0]);
-            assert_eq!(painting_light_position(center, direction, 2, 2, 1, 1), expected_light[1]);
+            assert_eq!(
+                painting_light_position(center, direction, 2, 2, 0, 0),
+                expected_light[0]
+            );
+            assert_eq!(
+                painting_light_position(center, direction, 2, 2, 1, 1),
+                expected_light[1]
+            );
             let face = Mat4::from_rotation_y(rotation).transform_vector3(Vec3::NEG_Z);
             let expected = Vec3::from_array(outward);
             assert!((face - expected).length() < 0.00001);
@@ -264,8 +297,8 @@ mod tests {
                 center[2] - f64::from(outward[2]) * 0.03125,
             ];
             let normal_axis = if outward[0] != 0. { 0 } else { 2 };
-            let boundary = [10., 20., 30.][normal_axis]
-                + if outward[normal_axis] < 0. { 1. } else { 0. };
+            let boundary =
+                [10., 20., 30.][normal_axis] + if outward[normal_axis] < 0. { 1. } else { 0. };
             assert_eq!(back[normal_axis], boundary);
         }
     }
@@ -273,9 +306,18 @@ mod tests {
     #[test]
     fn painting_even_offsets_are_independent() {
         let anchor = [-4., 7., -9.];
-        assert_eq!(painting_placement(anchor, 2, 1, 1).unwrap().0, [-3.5, 7.5, -8.03125]);
-        assert_eq!(painting_placement(anchor, 2, 4, 3).unwrap().0, [-4., 7.5, -8.03125]);
-        assert_eq!(painting_placement(anchor, 2, 3, 4).unwrap().0, [-3.5, 8., -8.03125]);
+        assert_eq!(
+            painting_placement(anchor, 2, 1, 1).unwrap().0,
+            [-3.5, 7.5, -8.03125]
+        );
+        assert_eq!(
+            painting_placement(anchor, 2, 4, 3).unwrap().0,
+            [-4., 7.5, -8.03125]
+        );
+        assert_eq!(
+            painting_placement(anchor, 2, 3, 4).unwrap().0,
+            [-3.5, 8., -8.03125]
+        );
         assert_eq!(
             painting_light_position([-3.5, 8., -8.03125], 2, 3, 4, 0, 0),
             [-5., 6., -9.]
