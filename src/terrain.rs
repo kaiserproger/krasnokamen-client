@@ -1,18 +1,19 @@
 use crate::{
     api::{ChunkDraw, DynamicGeometry},
     protocol::{
+        Result,
         content::Content,
         world::{Chunk, Neighborhood, World},
-        Result,
     },
 };
 use glam::Mat4;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
+        Arc, Condvar, Mutex, PoisonError, Weak,
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc, Condvar, Mutex, PoisonError, Weak,
+        mpsc,
     },
     thread,
     time::Instant,
@@ -34,7 +35,9 @@ const QUEUED_PER_WORKER: usize = 8;
 /// Half the hardware threads: the rest serve the session, the renderer, the
 /// network and audio threads and, in singleplayer, the local server.
 fn worker_count() -> usize {
-    thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(2, 8)
+    thread::available_parallelism()
+        .map_or(2, |n| n.get() / 2)
+        .clamp(2, 8)
 }
 // A 65×65 view may contain up to 24 nonempty vertical sections per column.
 pub(crate) const MAX_SECTIONS: usize = 131072;
@@ -109,7 +112,10 @@ impl<T> JobQueue<T> {
             if state.1 {
                 return None;
             }
-            state = self.ready.wait(state).unwrap_or_else(PoisonError::into_inner);
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     fn close(&self) {
@@ -639,7 +645,11 @@ impl Terrain {
         }
         self.camera = Some(camera);
         let mut changed = self.sync_view(world, camera, render_distance, draws)?;
-        while let Some(completion) = self.replay_completion.take().or_else(|| self.receive.try_recv().ok()) {
+        while let Some(completion) = self
+            .replay_completion
+            .take()
+            .or_else(|| self.receive.try_recv().ok())
+        {
             self.in_flight -= 1;
             self.has_pending = true;
             if let Some(section) = self.sections.get_mut(&completion.key) {
@@ -692,7 +702,8 @@ impl Terrain {
                 },
             );
             if replaced.is_none() {
-                self.coverage_dirty.insert([completion.key[0], completion.key[2]]);
+                self.coverage_dirty
+                    .insert([completion.key[0], completion.key[2]]);
             }
             changed = true;
         }
@@ -706,18 +717,27 @@ impl Terrain {
     /// Offline export only. Preserve the completion for the ordinary update
     /// path; do not simulate another tick while waiting for worker output.
     pub(crate) fn wait_replay_completion(
-        &mut self, replay: bool, timeout: std::time::Duration,
+        &mut self,
+        replay: bool,
+        timeout: std::time::Duration,
     ) -> Result<bool> {
-        if !replay { return Err("terrain blocking completion is forbidden in live mode".into()); }
-        if self.replay_completion.is_some() { return Ok(true); }
+        if !replay {
+            return Err("terrain blocking completion is forbidden in live mode".into());
+        }
+        if self.replay_completion.is_some() {
+            return Ok(true);
+        }
         if self.in_flight == 0 {
             if !self.pending.is_empty() {
                 return Err("replay terrain cannot finish within CPU mesh residency budget".into());
             }
             return Ok(false);
         }
-        self.replay_completion = Some(self.receive.recv_timeout(timeout)
-            .map_err(|e| format!("replay terrain completion: {e}"))?);
+        self.replay_completion = Some(
+            self.receive
+                .recv_timeout(timeout)
+                .map_err(|e| format!("replay terrain completion: {e}"))?,
+        );
         Ok(true)
     }
     /// Score every eligible section once and queue the best `free` jobs.
@@ -852,12 +872,20 @@ impl Terrain {
         tint: crate::protocol::models::TintKind,
         position: [i32; 3],
     ) -> Result<[f32; 3]> {
-        let catalog = self.catalog.as_deref().ok_or("terrain_resources_not_activated")?;
+        let catalog = self
+            .catalog
+            .as_deref()
+            .ok_or("terrain_resources_not_activated")?;
         let rules = self.rules.ok_or("source_terrain_render_rules_not_set")?;
         let center = [position[0].div_euclid(16), position[2].div_euclid(16)];
-        mesher::sample_tint(&world.snapshot(center), catalog, tint, position, rules.biome_blend_radius)
+        mesher::sample_tint(
+            &world.snapshot(center),
+            catalog,
+            tint,
+            position,
+            rules.biome_blend_radius,
+        )
     }
-
 
     pub fn append_moving_block(
         &self,
@@ -917,7 +945,11 @@ impl Terrain {
         self.catalog.is_some()
             && self.rules.is_some()
             && (0..27).all(|i| {
-                let key = [center[0] + i % 3 - 1, center[1] + i / 3 % 3 - 1, center[2] + i / 9 - 1];
+                let key = [
+                    center[0] + i % 3 - 1,
+                    center[1] + i / 3 % 3 - 1,
+                    center[2] + i / 9 - 1,
+                ];
                 self.sections
                     .get(&key)
                     .is_none_or(|section| !self.pending.contains(&key) && section.running.is_none())

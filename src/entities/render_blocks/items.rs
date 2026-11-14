@@ -62,12 +62,14 @@ pub(super) fn vault(
     Ok(BlockRenderStatus::Rendered)
 }
 
-pub(super) fn spawner_entity<'a>(
-    e: &'a BlockEntity,
-    c: &Content,
-) -> Result<Option<&'a Value>> {
+pub(super) fn spawner_entity<'a>(e: &'a BlockEntity, c: &Content) -> Result<Option<&'a Value>> {
     let trial = e.type_name == "minecraft:trial_spawner";
-    if trial && !matches!(prop(e, c, "trial_spawner_state"), Some("waiting_for_players" | "active")) {
+    if trial
+        && !matches!(
+            prop(e, c, "trial_spawner_state"),
+            Some("waiting_for_players" | "active")
+        )
+    {
         return Ok(None);
     }
     let entity = &e.data_value()[if trial { "spawn_data" } else { "SpawnData" }]["entity"];
@@ -88,7 +90,11 @@ pub(super) fn spawner(
     entity_painter: &mut EntityPainter<'_>,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
-    let BlockPose { root, partial, light } = pose;
+    let BlockPose {
+        root,
+        partial,
+        light,
+    } = pose;
     let Some(entity) = spawner_entity(e, c)? else {
         return Ok(BlockRenderStatus::SourceHidden);
     };
@@ -97,8 +103,9 @@ pub(super) fn spawner(
         return Err(format!("unknown spawner display entity: {name}"));
     }
     let s = &e.animation.source;
-    let spin = (s.previous_spawn_spin
-        + (s.spawn_spin - s.previous_spawn_spin) * f64::from(partial)) as f32 * 10.;
+    let spin = (s.previous_spawn_spin + (s.spawn_spin - s.previous_spawn_spin) * f64::from(partial))
+        as f32
+        * 10.;
     let matrix = root
         * Mat4::from_translation(Vec3::new(0.5, 0.4, 0.5))
         * Mat4::from_rotation_y(spin.to_radians())
@@ -201,4 +208,3 @@ pub(super) fn display(
     }
     Ok(BlockRenderStatus::Rendered)
 }
-

@@ -1,8 +1,8 @@
 //! Source-derived controlled mounts. Minecarts and non-controlling passengers use received
 //! entity interpolation; they are never run through a guessed boat/horse simulator.
-use crate::protocol::packet_ids::play::serverbound as sb;
 use super::*;
 use crate::entities::Metadata;
+use crate::protocol::packet_ids::play::serverbound as sb;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
@@ -36,25 +36,47 @@ pub(crate) struct SeatMotion {
 impl Default for SeatMotion {
     fn default() -> Self {
         Self {
-            handle: Handle { network_id: 0, generation: 0 }, position: [0.; 3], tick: 0,
-            walk_speed: 0., walk_position: 0., stand: 0., stand_old: 0.,
+            handle: Handle {
+                network_id: 0,
+                generation: 0,
+            },
+            position: [0.; 3],
+            tick: 0,
+            walk_speed: 0.,
+            walk_position: 0.,
+            stand: 0.,
+            stand_old: 0.,
         }
     }
 }
 impl SeatMotion {
     pub(crate) fn advance(
-        previous: &mut Option<Self>, handle: Handle, position: [f64; 3], tick: u64,
-        stopped: bool, standing: bool,
+        previous: &mut Option<Self>,
+        handle: Handle,
+        position: [f64; 3],
+        tick: u64,
+        stopped: bool,
+        standing: bool,
     ) -> &Self {
-        if previous.as_ref().is_none_or(|motion| motion.handle != handle) {
+        if previous
+            .as_ref()
+            .is_none_or(|motion| motion.handle != handle)
+        {
             *previous = Some(Self {
-                handle, position, tick, walk_speed: 0., walk_position: 0., stand: 0., stand_old: 0.,
+                handle,
+                position,
+                tick,
+                walk_speed: 0.,
+                walk_position: 0.,
+                stand: 0.,
+                stand_old: 0.,
             });
         }
         let motion = previous.as_mut().unwrap();
         if motion.tick != tick {
             let distance = ((position[0] - motion.position[0]).powi(2)
-                + (position[2] - motion.position[2]).powi(2)).sqrt() as f32;
+                + (position[2] - motion.position[2]).powi(2))
+            .sqrt() as f32;
             if stopped {
                 motion.walk_speed = 0.;
                 motion.walk_position = 0.;
@@ -415,8 +437,13 @@ impl Player {
         }
         if self.sprinting != self.sent_sprinting {
             self.entity_command(
-                if self.sprinting { PlayerCommand::StartSprinting } else { PlayerCommand::StopSprinting },
-                0, out,
+                if self.sprinting {
+                    PlayerCommand::StartSprinting
+                } else {
+                    PlayerCommand::StopSprinting
+                },
+                0,
+                out,
             );
             self.sent_sprinting = self.sprinting;
         }
@@ -1070,17 +1097,35 @@ impl Player {
         let game_time = self.world_game_time.ok_or("world_time_not_received")?;
         let standing = integer(entities, handle, "DATA_ID_FLAGS", 0)? & 32 != 0;
         SeatMotion::advance(
-            &mut self.vehicle_seat_motion, handle, position, tick,
-            entity.vehicle.is_some() || entity.death_tick.is_some(), standing,
+            &mut self.vehicle_seat_motion,
+            handle,
+            position,
+            tick,
+            entity.vehicle.is_some() || entity.death_tick.is_some(),
+            standing,
         );
         // Avatar's current dimensions carry the received scale; riding pose is standing.
-        let player = models.schemas.get("minecraft:player").ok_or("source_player_schema_missing")?;
-        let attachment = player.dimensions.attachments.get("VEHICLE")
-            .and_then(|points| points.first()).ok_or("source_player_vehicle_attachment_missing")?
+        let player = models
+            .schemas
+            .get("minecraft:player")
+            .ok_or("source_player_schema_missing")?;
+        let attachment = player
+            .dimensions
+            .attachments
+            .get("VEHICLE")
+            .and_then(|points| points.first())
+            .ok_or("source_player_vehicle_attachment_missing")?
             .map(|value| value * self.attribute("minecraft:scale"));
         passenger_position(
-            entities, handle, self.entity_id, position, yaw, attachment, self.yaw,
-            self.vehicle_seat_motion.as_ref(), game_time,
+            entities,
+            handle,
+            self.entity_id,
+            position,
+            yaw,
+            attachment,
+            self.yaw,
+            self.vehicle_seat_motion.as_ref(),
+            game_time,
         )
     }
 
@@ -1222,38 +1267,72 @@ fn mount_controlled(
         && holds_steer)
 }
 /// Shared source attachment owner for predicted players and received remote riders.
-#[expect(clippy::too_many_arguments, reason = "Vehicle and rider attachment transforms share one source rule")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Vehicle and rider attachment transforms share one source rule"
+)]
 pub(crate) fn passenger_position(
-    entities: &EntityStore, handle: Handle, passenger: i32, position: [f64; 3], yaw: f32,
-    rider_attachment: [f64; 3], rider_yaw: f32, motion: Option<&SeatMotion>, game_time: i64,
+    entities: &EntityStore,
+    handle: Handle,
+    passenger: i32,
+    position: [f64; 3],
+    yaw: f32,
+    rider_attachment: [f64; 3],
+    rider_yaw: f32,
+    motion: Option<&SeatMotion>,
+    game_time: i64,
 ) -> Result<[f64; 3]> {
     if position.iter().any(|value| !value.is_finite()) || !yaw.is_finite() {
         return Err("invalid vehicle attachment transform".into());
     }
     let entity = entities.resolve(handle)?;
     let models = entities.models_ref().ok_or("entity_models_not_activated")?;
-    let schema = models.schemas.get(&entity.type_name).ok_or("missing_mount_schema")?;
-    let index = entity.passenger_ids.iter().position(|id| *id == passenger)
+    let schema = models
+        .schemas
+        .get(&entity.type_name)
+        .ok_or("missing_mount_schema")?;
+    let index = entity
+        .passenger_ids
+        .iter()
+        .position(|id| *id == passenger)
         .ok_or("mount_passenger_not_received")?;
     let (dimensions, scale) = models.dimensions(entity)?;
-    let mut point = dimensions.attachments.get("PASSENGER")
+    let mut point = dimensions
+        .attachments
+        .get("PASSENGER")
         .and_then(|points| points.get(index.min(points.len().saturating_sub(1))))
         .ok_or("source_mount_passenger_attachment_missing")?
         .map(|value| value * f64::from(scale));
     let height = dimensions.height * scale;
-    match schema.method_owners.get("getPassengerAttachmentPoint").map(String::as_str) {
+    match schema
+        .method_owners
+        .get("getPassengerAttachmentPoint")
+        .map(String::as_str)
+    {
         Some("net.minecraft.world.entity.vehicle.boat.AbstractBoat") => {
-            let chest = schema.hierarchy.iter().any(|name| {
-                name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat"
-            });
-            let raft = matches!(schema.class.as_str(),
+            let chest = schema
+                .hierarchy
+                .iter()
+                .any(|name| name == "net.minecraft.world.entity.vehicle.boat.AbstractChestBoat");
+            let raft = matches!(
+                schema.class.as_str(),
                 "net.minecraft.world.entity.vehicle.boat.Raft"
-                    | "net.minecraft.world.entity.vehicle.boat.ChestRaft");
+                    | "net.minecraft.world.entity.vehicle.boat.ChestRaft"
+            );
             point = [
-                0., f64::from(if raft { height * 0.8888889 } else { height / 3. }),
+                0.,
+                f64::from(if raft {
+                    height * 0.8888889
+                } else {
+                    height / 3.
+                }),
                 f64::from(if entity.passenger_ids.len() > 1 {
                     if index == 0 { 0.2f32 } else { -0.6 }
-                } else if chest { 0.15 } else { 0. }),
+                } else if chest {
+                    0.15
+                } else {
+                    0.
+                }),
             ];
         }
         Some("net.minecraft.world.entity.animal.equine.AbstractHorse") => {
@@ -1263,21 +1342,35 @@ pub(crate) fn passenger_position(
         }
         Some("net.minecraft.world.entity.animal.camel.Camel") => {
             let pose_time = match entities.metadata(handle, "LAST_POSE_CHANGE_TICK")? {
-                Some(Metadata::Long(value)) => value.parse::<i64>().map_err(|_| "invalid_camel_pose_time")?,
+                Some(Metadata::Long(value)) => value
+                    .parse::<i64>()
+                    .map_err(|_| "invalid_camel_pose_time")?,
                 None => 0,
                 _ => return Err("invalid_camel_pose_metadata".into()),
             };
             point = [
                 0.,
-                f64::from(camel_seat_height(height, index == 0, pose_time < 0,
-                    game_time.saturating_sub(pose_time.saturating_abs()))),
-                f64::from(if entity.passenger_ids.len() > 1 && index != 0 { -0.7f32 } else { 0.5 }),
+                f64::from(camel_seat_height(
+                    height,
+                    index == 0,
+                    pose_time < 0,
+                    game_time.saturating_sub(pose_time.saturating_abs()),
+                )),
+                f64::from(if entity.passenger_ids.len() > 1 && index != 0 {
+                    -0.7f32
+                } else {
+                    0.5
+                }),
             ];
         }
         Some("net.minecraft.world.entity.monster.Strider") => {
             let motion = motion.ok_or("source_strider_seat_motion_missing")?;
             let phase = motion.walk_position
-                * if boolean(entities, handle, "DATA_BABY_ID", false)? { 3. } else { 1. };
+                * if boolean(entities, handle, "DATA_BABY_ID", false)? {
+                    3.
+                } else {
+                    1.
+                };
             point[1] += f64::from(
                 0.12 * math::cos(f64::from(phase * 1.5)) * 2. * motion.walk_speed.min(0.25),
             );
@@ -1293,7 +1386,9 @@ pub(crate) fn passenger_position(
     }
     let point = rotate_seat(point, yaw);
     let attachment = rotate_seat(rider_attachment, rider_yaw);
-    Ok(std::array::from_fn(|axis| position[axis] + point[axis] - attachment[axis]))
+    Ok(std::array::from_fn(|axis| {
+        position[axis] + point[axis] - attachment[axis]
+    }))
 }
 
 fn rotate_seat(point: [f64; 3], yaw: f32) -> [f64; 3] {
