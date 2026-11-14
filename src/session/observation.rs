@@ -832,7 +832,9 @@ impl Session {
                         .map(|(sky, block)| [f32::from(sky), f32::from(block)]))
                 };
                 let item_time_at = |point| self.environment.item_time_attributes(world, point);
-                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.client_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), light: &sample_light, bed_direction: &|position| {
+                let terrain = self.terrain.as_ref().ok_or("entity tint terrain unavailable")?;
+                let tint_source = |tint, position| terrain.sample_tint(world, tint, position);
+                self.scene.entity_presentation = self.entities.append_geometry(crate::entities::EntityRenderFrame { content, origin: self.scene.origin, camera: self.scene.camera_position, camera_rotation: [self.scene.yaw, self.scene.pitch], radius: self.render_distance as f32 * 16., tick: self.client_tick, partial: self.presentation_partial, game_time: self.environment.game_time(), clock_environment: Some((&item_context, &item_time_at)), maps: self.ui.as_ref().ok_or("entity map UI state unavailable")?.map_render_view(), tint_source: &tint_source, light: &sample_light, bed_direction: &|position| {
                     let state = world.block(position)?;
                     if !content.name(state)?.ends_with("_bed") {
                         return None;
@@ -867,6 +869,9 @@ impl Session {
                         scoping: self.player.is_scoping(content),
                         // Match the filtering preference sent by client_information.
                         text_filtering: false,
+                        operator_overlay_visible: self.player.game_mode == 3
+                            || (self.player.game_mode == 1
+                                && self.player.permission_level.is_some_and(|level| level >= 2)),
                         game_time: self.environment.game_time(),
                         partial: self.presentation_partial,
                         sample_light: &sample_light,

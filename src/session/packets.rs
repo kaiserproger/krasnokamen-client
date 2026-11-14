@@ -312,6 +312,18 @@ impl Session {
                 handled = true;
             }
         }
+        if id == cb::ENTITY_EVENT {
+            // 26.3 ClientboundEntityEventPacket: raw int entity ID + byte.
+            // LocalPlayer.handleEntityEvent maps 24..28 to permission levels 0..4.
+            // The entity owner above still receives every animation/status event.
+            let mut event = Reader::new(r.bytes);
+            let entity = event.i32()?;
+            let status = event.u8()?;
+            event.done()?;
+            if entity == self.player.entity_id && (24..=28).contains(&status) {
+                self.player.permission_level = Some(status - 24);
+            }
+        }
         if handled {
             if id == cb::BLOCK_CHANGED_ACK {
                 self.reconcile_ack(Reader::new(r.bytes).var()?)?;
@@ -340,6 +352,7 @@ impl Session {
             cb::DISCONNECT => return Err(format!("Play disconnect: {}", r.nbt()?)),
             cb::LOGIN => {
                 self.player.entity_id = r.i32()?;
+                self.player.permission_level = None;
                 self.entities.own_id = Some(self.player.entity_id);
                 r.bool()?;
                 for _ in 0..r.count(64)? {
@@ -1120,7 +1133,7 @@ mod tests {
         assert_eq!(session.item_spawn.as_ref().unwrap().pos, [-31, 70, 42]);
     }
 
-    fn session_with_received_cube(position: [i32; 3]) -> Session {
+    pub(super) fn session_with_received_cube(position: [i32; 3]) -> Session {
         let mut session = Session::new_mode("received-prediction-test".into(), false);
         let mut content = Content::test_cube();
         for state in [0, 1] {
@@ -2189,3 +2202,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "map_effect_packet_tests.rs"]
+mod map_effect_packet_tests;

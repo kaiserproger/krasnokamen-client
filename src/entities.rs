@@ -75,7 +75,9 @@ pub struct EntityRenderFrame<'a> {
     pub partial: f32,
     pub game_time: i64,
     pub clock_environment: Option<ClockEnvironment<'a>>,
+    pub maps: crate::ui::MapRenderView<'a>,
     pub light: &'a dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
+    pub tint_source: &'a dyn Fn(crate::protocol::models::TintKind, [i32; 3]) -> Result<[f32; 3]>,
     pub bed_direction: &'a dyn Fn([i32; 3]) -> Option<[i32; 2]>,
 }
 
