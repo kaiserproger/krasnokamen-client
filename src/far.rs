@@ -709,7 +709,18 @@ impl Far {
         let resolved: Vec<_> = updates
             .into_iter()
             .map(|(key, index, height, state, biome)| {
-                (key, index, height, colours.rgba(content, state, biome))
+                let rgba = colours.rgba(content, state, biome);
+                if std::env::var_os("SOLARIS_FAR_DARK_DEBUG").is_some()
+                    && rgba & 0xff < 8
+                    && (rgba >> 8) & 0xff < 10
+                    && (rgba >> 16) & 0xff < 8
+                {
+                    eprintln!(
+                        "FARDARK ingest key={:?} idx={} h={} state={} name={:?} rgba={:#010x}",
+                        key, index, height, state, content.name(state), rgba
+                    );
+                }
+                (key, index, height, rgba)
             })
             .collect();
         for (key, index, height, rgba) in resolved {
@@ -755,7 +766,18 @@ impl Far {
             let Some(state) = block.or_else(|| colours.surface(biome, underwater)) else {
                 continue;
             };
-            resolved.push((index, height, colours.rgba(content, state, biome), source));
+            let rgba = colours.rgba(content, state, biome);
+            if std::env::var_os("SOLARIS_FAR_DARK_DEBUG").is_some()
+                && rgba & 0xff < 8
+                && (rgba >> 8) & 0xff < 10
+                && (rgba >> 16) & 0xff < 8
+            {
+                eprintln!(
+                    "FARDARK tile key={:?} idx={} h={} src={:?} state={} name={:?} rgba={:#010x}",
+                    key, index, height, source, state, content.name(state), rgba
+                );
+            }
+            resolved.push((index, height, rgba, source));
         }
         let tile = self.tiles.entry(key).or_insert_with(Tile::empty);
         tile.requested = true;
