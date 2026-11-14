@@ -98,6 +98,7 @@ impl Session {
     }
     pub(crate) fn replay_seek_phase(&mut self, phase: Option<SeekPhase>) -> Result<()> {
         if !self.replaying { return Err("replay seek requested during live play".into()); }
+        if phase.is_some() { self.entities.forget_frames(); }
         self.replay_seek = phase.map(|phase| SeekState {
             phase,
             atlas_tick: self.replay_seek.as_ref().map_or(self.world_tick, |state| state.atlas_tick),

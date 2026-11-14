@@ -214,13 +214,73 @@ pub(crate) fn on_metadata(models: &Models, entity: &mut Entity, changed: &[bool;
     let Some(mut source) = entity.source.take() else {
         return;
     };
+    // A waiting entity's received data arrives at the age a ticked one would have
+    // (`absorb_wait` adds the waited ticks at its next tick).
+    let age = source.age.wrapping_add(entity.physical.waited as i32);
     if let Some(living) = source.living.as_mut() {
-        living.on_metadata(models, entity, changed, source.age);
+        living.on_metadata(models, entity, changed, age);
     }
-    source
-        .special
-        .on_metadata(models, entity, changed, source.age);
+    source.special.on_metadata(models, entity, changed, age);
     entity.source = Some(source);
+}
+/// The Source part of the absorb-wait contract (`Store::absorb_wait`, which also steps the
+/// interpolation, peek and stand): the ticks `entity` waited count as elapsed. Its age, its
+/// active item use (resolved as its next tick would, `prepare_item_use`) and the countdowns its
+/// ticks run down (`EntityUseState` timers, the stand counter) catch up in one step, so
+/// age-stamped timers (item use, timelines) and interaction predictions read what a mob ticked
+/// all along has.
+pub(crate) fn absorb_wait(
+    entity: &mut Entity,
+    models: &Models,
+    content: &Content,
+    waited: u32,
+) -> Result<()> {
+    if waited == 0 {
+        return Ok(());
+    }
+    let Some(mut source) = entity.source.take() else {
+        return Ok(());
+    };
+    // `tick` ages a discarded entity too, and runs nothing else for it; nor for one whose
+    // blocks were not received at its latest tick (`pending_world`).
+    source.age = source.age.wrapping_add(waited as i32);
+    let result = (|| {
+        if source.discarded || source.special.discarded || source.pending_world {
+            return Ok(());
+        }
+        if let Some(living) = source.living.as_mut() {
+            living.prepare_item_use(models, entity, content, source.age)?;
+        }
+        let steps = i32::try_from(waited).unwrap_or(i32::MAX);
+        let state = &mut source.use_state;
+        for timer in [
+            &mut state.age_lock_particle_timer,
+            &mut state.forced_age_timer,
+            &mut state.in_love,
+        ] {
+            if *timer > 0 {
+                *timer = timer.saturating_sub(steps).max(0);
+            }
+        }
+        if state.stand_counter > 0 {
+            if state.stand_counter > steps {
+                state.stand_counter -= steps;
+            } else {
+                state.stand_counter = 0;
+                clear_standing(models, entity);
+            }
+        }
+        Ok(())
+    })();
+    entity.source = Some(source);
+    result
+}
+/// The stand counter ran out: the predicted flags drop the standing bit (`tick`, `absorb_wait`).
+fn clear_standing(models: &Models, entity: &mut Entity) {
+    if let Some(index) = models.accessor(&entity.type_name, "DATA_ID_FLAGS") {
+        let flags = p::number(models, entity, "DATA_ID_FLAGS").unwrap_or(0) & !32;
+        entity.predicted_metadata.insert(index, Metadata::Byte(flags as i8));
+    }
 }
 /// The block cells `water_contact` reads for `bounds`: `x, y, z` from `low` up to, not
 /// including, `high`.
@@ -379,12 +439,7 @@ pub(crate) fn tick(
         if state.stand_counter > 0 {
             state.stand_counter -= 1;
             if state.stand_counter == 0 {
-                if let Some(index) = models.accessor(&entity.type_name, "DATA_ID_FLAGS") {
-                    let flags = p::number(models, entity, "DATA_ID_FLAGS").unwrap_or(0) & !32;
-                    entity
-                        .predicted_metadata
-                        .insert(index, Metadata::Byte(flags as i8));
-                }
+                clear_standing(models, entity);
             }
         }
         // Furnace fuel, tadpole age and allay duplication cooldown only advance on the server.

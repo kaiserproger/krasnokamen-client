@@ -1,8 +1,9 @@
 //! Vanilla 26.3 entity draw distance: the gate `EntityRenderer.shouldRender` applies before
 //! frustum culling (`Entity.shouldRender(camX, camY, camZ)` → `shouldRenderAtSqrDistance`
-//! and its overrides). An entity it rejects is not drawn: no body, shadow or nameplate. It
-//! still ticks, as the vanilla client ticks every entity. Bytecode:
-//! receipts/BvItemCache/javap-26.3-entity-distance.txt.
+//! and its overrides). An entity it rejects is not drawn: no body, shadow or nameplate. The
+//! vanilla client still ticks it; here, while frames draw entities, a mob it rejects waits like
+//! one outside the frame's radius and catches up when drawn again (`tick_presentation`,
+//! docs/ENTITY_PRESENTATION.md). Bytecode: receipts/BvItemCache/javap-26.3-entity-distance.txt.
 
 use super::{Entity, metadata::Metadata, resources::Models};
 
@@ -193,6 +194,45 @@ mod tests {
                 clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None,
             }, &mut geometry).unwrap();
             assert_eq!(stats.eligible == 1, drawn, "view scale {scale}: {} eligible", stats.eligible);
+        }
+    }
+
+    /// A mob the frame's radius reaches but its vanilla distance rejects is not drawn, so the
+    /// next tick it waits like a mob outside the radius; once drawn it ticks again.
+    #[test]
+    fn mob_past_its_vanilla_distance_waits() {
+        let (models, entity) = super::super::animation_tests::fixture();
+        let size = {
+            let b = super::super::physical::bounds_at(&models, &entity, entity.transform.position).unwrap();
+            ((b.max[0] - b.min[0]) + (b.max[1] - b.min[1]) + (b.max[2] - b.min[2])) / 3.
+        };
+        let id = entity.handle.network_id;
+        let mut store = super::super::Store::new();
+        store.models = Some(Arc::new(models));
+        store.ids.insert(id, 0);
+        store.spatial.entry([0, 0]).or_default().insert(id);
+        store.physical_active.insert(id);
+        let position = entity.transform.position;
+        store.slots.push(entity);
+        assert!(store.slots[0].source.as_ref().unwrap().living.is_some(), "the fixture is a mob");
+        let content = Content::test_cube();
+        let world = crate::protocol::world::World::new(0, 384);
+        let distance = (size * 64. * 0.2 + 32.) / 2.;
+        assert!(size * 64. * 0.2 < distance && distance < 32. && distance < size * 64.);
+        let age = |store: &super::super::Store| store.slots[0].source.as_ref().unwrap().age;
+        for (tick, scale, drawn) in [(5, 0.2, false), (7, 1., true)] {
+            store.set_view_scale(scale);
+            let before = age(&store);
+            let mut geometry = crate::api::DynamicGeometry::default();
+            let stats = super::super::presentation::append(&mut store, crate::entities::EntityRenderFrame {
+                maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|_, _| Ok([1.; 3]),
+                content: &content, origin: [0.; 3], camera: [position[0] + distance, position[1], position[2]],
+                camera_rotation: [0.; 2], radius: 32., tick, partial: 0., game_time: 0,
+                clock_environment: None, light: &|_| Ok(Some([15., 0.])), bed_direction: &|_| None,
+            }, &mut geometry).unwrap();
+            assert_eq!(stats.eligible == 1, drawn);
+            store.tick_presentation(tick + 1, false, &world, &content, 0).unwrap();
+            assert_eq!(age(&store) != before, drawn, "view scale {scale}: drawn {drawn}");
         }
     }
 }

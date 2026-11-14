@@ -985,7 +985,7 @@ impl App {
             self.next_tick = now + interval;
         }
         let mut advanced = 0;
-        while now >= self.next_tick && advanced < 4 {
+        while now >= self.next_tick && advanced < entities::MAX_TICKS_WITHOUT_FRAME {
             let tick_start = Instant::now();
             changed |= self.session.tick_after_events(events_drained && advanced == 0);
             self.tick_cpu_ms += tick_start.elapsed().as_secs_f64() * 1000.;

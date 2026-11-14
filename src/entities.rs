@@ -186,10 +186,10 @@ impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
     /// passenger attachments through `Store::presented_transform`.
     pub fn presented_transform(&self, _tick: u64, partial: f32) -> Transform {
-        // Ticks a mob waited outside the camera's box count as elapsed (`tick_presentation`),
-        // so it is drawn and new motion starts where a mob ticked all along would be.
+        // Ticks a mob waited undrawn count as elapsed (`tick_presentation`), so it is drawn and
+        // new motion starts where a mob ticked all along would be.
         let elapsed = (f64::from(self.physical.lerp_progress)
-            + f64::from(self.physical.waited)
+            + f64::from(self.physical.lerp_waited())
             + if self.physical.frozen {
                 0.
             } else {
@@ -221,6 +221,12 @@ impl Entity {
         }
         self.previous.interpolate(self.transform, factor)
     }
+    /// Ticks this mob waited undrawn since its last tick (`Store::tick_presentation`): evidence
+    /// channels sampling tick state (`capture_gait_frame`, `entity_motion`) report it, since a
+    /// waiting mob's tick state holds where it stopped.
+    pub(crate) fn waited_ticks(&self) -> u32 {
+        self.physical.waited
+    }
     fn move_to(
         &mut self,
         target: Transform,
@@ -246,7 +252,7 @@ impl Entity {
         self.on_ground = ground;
         self.observed_tick = tick;
         self.physical.lerp_progress = if snap { self.physical.lerp_duration } else { 0 };
-        self.physical.waited = 0;
+        self.physical.lerp_start_waited = self.physical.waited;
         self.physical.lerp_phase = if snap { 0. } else { phase.clamp(0., 0.999) };
     }
 }
@@ -263,6 +269,10 @@ pub struct BlockEntity {
     pub event: Option<(u8, u8, u64)>,
     pub(crate) animation: blocks::BlockAnimation,
 }
+/// Ticks the session owner runs per turn before it draws again (`lib.rs`): ticks up to this many
+/// after the latest frame still belong to drawing frames, so the mobs that frame did not draw
+/// wait (`Store::tick_presentation`); later ticks have no frames and every entity ticks.
+pub(crate) const MAX_TICKS_WITHOUT_FRAME: u64 = 4;
 #[derive(Default)]
 pub struct Store {
     slots: Vec<Entity>,
@@ -296,6 +306,10 @@ pub struct Store {
     /// interpolation from the pose already on screen instead of snapping.
     pub(crate) frame_partial: f32,
     pub(crate) frame_tick: u64,
+    /// Entity ticks `tick_presentation` ran and waited since the store began (evidence:
+    /// copied into each frame's `PresentationStats`).
+    pub(crate) ticked_ticks: u64,
+    pub(crate) waiting_ticks: u64,
     /// Local player eye for idle head look-at; `None` disables it.
     pub(crate) look_target: Option<[f32; 3]>,
     /// Vanilla `Entity.viewScale` of the frames being drawn (`view_range::view_scale`).
@@ -345,6 +359,11 @@ impl Store {
     /// Vanilla `Entity.setViewScale` for the frames that follow (`view_range::view_scale`).
     pub fn set_view_scale(&mut self, scale: f64) {
         self.view_scale = ViewScale(scale);
+    }
+    /// A seek discards presentation history: no frame has drawn since, so every entity ticks
+    /// until the next frame (`tick_presentation`).
+    pub(crate) fn forget_frames(&mut self) {
+        self.frame_tick = 0;
     }
     pub fn set_text_renderer(&mut self, text: Rc<crate::ui::render::TextRenderer>) {
         self.nameplate_cache = render_nameplates::Cache::default();

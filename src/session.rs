@@ -1259,6 +1259,7 @@ impl Session {
                 "position": transform.position,
                 "walk_position": living.walk.position(self.presentation_partial),
                 "walk_speed": living.walk.speed(self.presentation_partial),
+                "waited": entity.waited_ticks(),
             }))
         }).collect())
     }

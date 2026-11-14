@@ -2192,8 +2192,8 @@ fn mob_store() -> (Store, i32) {
 }
 
 /// While frames draw entities, a mob outside the camera's box waits (its animation does not
-/// advance) and on entering the box is drawn where a mob ticked all along is; without frames
-/// it ticks as before.
+/// advance) and, drawn again, absorbs the wait first: it is as old as, and drawn where, a mob
+/// ticked all along is; without frames it ticks as before.
 #[test]
 fn offscreen_mob_waits_and_catches_up_on_entry() {
     let world = crate::protocol::world::World::new(0, 384);
@@ -2218,14 +2218,148 @@ fn offscreen_mob_waits_and_catches_up_on_entry() {
     assert_eq!(age(&hidden, id), start, "an off-screen mob waits");
     assert_eq!(age(&seen, id), start + 2);
     assert_eq!(age(&headless, id), start + 2, "without frames every mob ticks");
+    let models = hidden.models.clone().unwrap();
+    hidden.mark_shown(0, 12, &models, &content).unwrap();
+    assert_eq!(age(&hidden, id), start + 2, "drawn by the frame at 12, it absorbed its wait first");
+    let at = |store: &Store, partial| store.get(id).unwrap().presented_transform(12, partial).position;
+    assert_eq!(at(&hidden, 0.5), at(&seen, 0.5), "and is drawn where it would have been");
     for store in [&mut seen, &mut hidden] {
         store.frame_tick = 12;
         store.slots[0].physical.shown_tick = 12;
         store.tick_presentation(13, false, &world, &content, 0).unwrap();
     }
-    let at = |store: &Store| store.get(id).unwrap().presented_transform(13, 0.).position;
-    assert_eq!(at(&hidden), at(&seen), "on entry it is drawn where it would have been");
-    assert_eq!(at(&seen), [3., 0., 0.]);
+    assert_eq!(age(&hidden, id), age(&seen, id));
+    assert_eq!(at(&hidden, 0.), at(&seen, 0.), "on entry it is drawn where it would have been");
+    assert_eq!(at(&seen, 0.), [3., 0., 0.]);
+}
+
+/// Below 20 fps several ticks run between frames: a mob the latest frame did not draw waits
+/// through each of them while a drawn one ticks, up to `MAX_TICKS_WITHOUT_FRAME` ticks after that
+/// frame; past it no frame is drawing and every mob ticks, absorbing its wait.
+#[test]
+fn mobs_wait_by_the_latest_frame_through_ticks_without_frames() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let age = |store: &Store| store.slots[0].source.as_ref().unwrap().age;
+    let (mut seen, _) = mob_store();
+    let (mut hidden, _) = mob_store();
+    let start = age(&seen);
+    for store in [&mut seen, &mut hidden] {
+        store.frame_tick = 10;
+    }
+    seen.slots[0].physical.shown_tick = 10;
+    let bound = crate::entities::MAX_TICKS_WITHOUT_FRAME;
+    for tick in 11..=10 + bound {
+        for store in [&mut seen, &mut hidden] {
+            store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        }
+    }
+    let ticks = bound as i32;
+    assert_eq!(age(&seen), start + ticks, "drawn by the latest frame: it ticks every tick");
+    assert_eq!(age(&hidden), start, "not drawn: it waits every tick until the next frame");
+    assert_eq!((seen.ticked_ticks, seen.waiting_ticks), (bound, 0));
+    assert_eq!((hidden.ticked_ticks, hidden.waiting_ticks), (0, bound));
+    hidden.tick_presentation(11 + bound, false, &world, &content, 0).unwrap();
+    assert_eq!(age(&hidden), start + ticks + 1, "no frame for longer: it absorbs its wait and ticks");
+    assert_eq!(hidden.slots[0].physical.waited, 0);
+}
+
+/// A store with the fixture mob (41) and an unmounted second one (42) that can carry it.
+fn pair_store() -> Store {
+    let (mut models, rider) = fixture();
+    let (_, mut vehicle) = fixture();
+    let schema = models.schemas.get_mut("minecraft:pig").unwrap();
+    schema.method_owners.insert("getPassengerAttachmentPoint".into(),
+        "net.minecraft.world.entity.Entity".into());
+    schema.dimensions.attachments.insert("PASSENGER".into(), vec![[0., 1., 0.]]);
+    schema.dimensions.attachments.insert("VEHICLE".into(), vec![[0.; 3]]);
+    vehicle.handle.network_id = 42;
+    vehicle.uuid = "00000000-0000-0000-0000-000000000042".into();
+    let mut store = Store::new();
+    store.models = Some(Arc::new(models));
+    for entity in [rider, vehicle] {
+        let id = entity.handle.network_id;
+        store.ids.insert(id, store.slots.len());
+        store.spatial.entry(cell(entity.position)).or_default().insert(id);
+        store.physical_active.insert(id);
+        store.slots.push(entity);
+    }
+    store
+}
+
+fn pair_ages(store: &Store) -> [i32; 2] {
+    [0, 1].map(|slot| store.slots[slot].source.as_ref().unwrap().age)
+}
+
+/// A vehicle and its passenger wait or tick as one: neither drawn, both wait; either drawn
+/// (`Store::mark_shown`), both absorb their wait and tick, since the rider is drawn where its
+/// vehicle's interpolation is.
+#[test]
+fn mounted_pair_waits_and_ticks_as_one() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let mut store = pair_store();
+    let models = store.models.clone().unwrap();
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &content, 0).unwrap();
+    assert!(store.slots[0].vehicle.is_some() && store.slots[1].passenger_ids == [41]);
+    let start = pair_ages(&store);
+    store.frame_tick = 10;
+    store.tick_presentation(11, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), start, "a pair the frame did not draw waits");
+    // The first draw absorbs the tick both waited.
+    for (tick, drawn, gained) in [(13, 0, 2), (15, 1, 1)] {
+        let before = pair_ages(&store);
+        store.frame_tick = tick - 1;
+        store.mark_shown(drawn, tick - 1, &models, &content).unwrap();
+        store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        assert_eq!(pair_ages(&store), before.map(|age| age + gained), "slot {drawn} drawn: both tick");
+    }
+}
+
+/// A mount after the frame joins a drawn rider to an undrawn vehicle: the new chain ticks as
+/// one. A dismount after a frame that drew the pair leaves both drawn; later each waits alone.
+#[test]
+fn mount_and_dismount_after_a_frame_keep_chains_whole() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let mut store = pair_store();
+    let models = store.models.clone().unwrap();
+    store.frame_tick = 10;
+    store.mark_shown(0, 10, &models, &content).unwrap();
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &content, 0).unwrap();
+    let start = pair_ages(&store);
+    store.tick_presentation(11, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), start.map(|age| age + 1), "the rider was drawn: its new vehicle ticks too");
+    store.frame_tick = 11;
+    store.mark_shown(1, 11, &models, &content).unwrap();
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 0]), &content, 0).unwrap();
+    assert!(store.slots[0].vehicle.is_none() && store.slots[1].passenger_ids.is_empty());
+    store.tick_presentation(12, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), start.map(|age| age + 2), "both were drawn as one chain");
+    store.frame_tick = 12;
+    store.mark_shown(0, 12, &models, &content).unwrap();
+    store.tick_presentation(13, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), [start[0] + 3, start[1] + 2], "dismounted, the undrawn one waits alone");
+}
+
+/// A passenger that is no mob (a display) never waits; drawing it draws its chain, so the mob
+/// carrying it ticks too.
+#[test]
+fn non_living_passenger_ticks_and_draws_its_vehicle() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let mut store = pair_store();
+    let models = store.models.clone().unwrap();
+    store.slots[0].source.as_mut().unwrap().living = None;
+    store.apply(cb::SET_PASSENGERS, &mut Reader::new(&[42, 1, 41]), &content, 0).unwrap();
+    let start = pair_ages(&store);
+    store.frame_tick = 10;
+    store.tick_presentation(11, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), [start[0] + 1, start[1]], "undrawn: the passenger ticks, its mob waits");
+    store.frame_tick = 11;
+    store.mark_shown(0, 11, &models, &content).unwrap();
+    store.tick_presentation(12, false, &world, &content, 0).unwrap();
+    assert_eq!(pair_ages(&store), [start[0] + 2, start[1] + 2], "the passenger drawn: its mob absorbs and ticks");
 }
 
 /// `observation` pages entities in network-id order whatever order they arrived in (the id map
@@ -2257,8 +2391,8 @@ fn observation_pages_in_network_id_order() {
 }
 
 /// The camera jumps (a respawn) to a mob that waited outside its box while updates carried it
-/// 120 blocks: the first frame draws it where a mob ticked all along is, not where it stopped,
-/// and its motion span (which pads every spatial query) stays one update long.
+/// 120 blocks: the first frame draws it where, and as old as, a mob ticked all along is, not
+/// where it stopped, and its motion span (which pads every spatial query) stays one update long.
 #[test]
 fn waiting_mob_carried_far_is_drawn_fresh_when_the_camera_jumps_to_it() {
     let world = crate::protocol::world::World::new(0, 384);
@@ -2282,4 +2416,165 @@ fn waiting_mob_carried_far_is_drawn_fresh_when_the_camera_jumps_to_it() {
     assert!(at(&seen)[0] > 121., "{:?}", at(&seen));
     assert_eq!(hidden.motion_spans, seen.motion_spans);
     assert!(hidden.query_padding() <= 4., "padding {}", hidden.query_padding());
+    let models = hidden.models.clone().unwrap();
+    hidden.mark_shown(0, 130, &models, &content).unwrap();
+    let age = |store: &Store| store.slots[0].source.as_ref().unwrap().age;
+    assert_eq!(age(&hidden), age(&seen), "updates while it waited keep the waited ticks");
+    assert_eq!(at(&hidden), at(&seen), "absorbing the wait moves nothing");
+}
+
+/// Received air around the origin (chunks -1..=0 in x and z, y 0..16): a mob there ticks fully
+/// (`source_state::tick` stops early while its blocks are not received).
+fn air_world() -> crate::protocol::world::World {
+    use crate::protocol::world::{Chunk, Palette, Section, SurfaceHeightmap, World};
+    let palette = |size| Palette { bits: 0, values: vec![0], words: Vec::new(), size };
+    let mut world = World::new(0, 16);
+    for position in [[-1, -1], [-1, 0], [0, -1], [0, 0]] {
+        world.insert(position, Chunk {
+            sections: vec![Arc::new(Section {
+                blocks: palette(4096), biomes: palette(64), non_empty_block_count: 0,
+            })],
+            sky: BTreeMap::new(), block: BTreeMap::new(),
+            block_entities: crate::protocol::world::empty_block_entities(),
+            surface_heightmap: Arc::new(SurfaceHeightmap::new(16).unwrap()),
+            surface_heightmap_received: false,
+        }).unwrap();
+    }
+    world
+}
+
+/// The countdowns behind interaction predictions (`EntityUseState`) hold while a mob waits;
+/// drawn again, it runs them down by the ticks it waited, as a ticked mob did.
+#[test]
+fn waiting_mob_countdowns_match_a_ticked_mob_when_drawn() {
+    let world = air_world();
+    let content = Content::test_cube();
+    let (mut seen, _) = mob_store();
+    let (mut hidden, _) = mob_store();
+    for store in [&mut seen, &mut hidden] {
+        let state = &mut store.slots[0].source.as_mut().unwrap().use_state;
+        (state.in_love, state.forced_age_timer, state.age_lock_particle_timer, state.stand_counter) =
+            (30, 5, 2, 3);
+    }
+    for tick in 11..=18 {
+        for (store, shown) in [(&mut seen, true), (&mut hidden, false)] {
+            store.frame_tick = tick - 1;
+            if shown {
+                store.slots[0].physical.shown_tick = tick - 1;
+            }
+            store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        }
+    }
+    let timers = |store: &Store| {
+        let state = &store.slots[0].source.as_ref().unwrap().use_state;
+        (state.in_love, state.forced_age_timer, state.age_lock_particle_timer, state.stand_counter)
+    };
+    assert_eq!(timers(&hidden), (30, 5, 2, 3), "they hold while it waits");
+    let models = hidden.models.clone().unwrap();
+    hidden.mark_shown(0, 18, &models, &content).unwrap();
+    assert_eq!(timers(&seen), (22, 0, 0, 0));
+    assert_eq!(timers(&hidden), timers(&seen), "drawn, it ran them down by the 8 ticks it waited");
+}
+
+/// A mob that starts charging a crossbow while it waits is, drawn again, as far into the charge
+/// as a ticked mob: its use is stamped at the age a ticked mob had, and its use time catches up.
+#[test]
+fn crossbow_charge_started_while_waiting_matches_a_ticked_mob() {
+    let world = air_world();
+    let crossbow_store = || {
+        let (models, mut e, mut content) = action_fixture("minecraft:pillager");
+        content.item_names.insert(1, "minecraft:crossbow".into());
+        e.equipment[0] = Some(action_stack(1, json!({})));
+        let id = e.handle.network_id;
+        let mut store = Store::new();
+        store.models = Some(Arc::new(models));
+        store.ids.insert(id, 0);
+        store.physical_active.insert(id);
+        store.slots.push(e);
+        (store, content)
+    };
+    let (mut seen, content) = crossbow_store();
+    let (mut hidden, _) = crossbow_store();
+    let models = seen.models.clone().unwrap();
+    let mut changed = [false; 256];
+    changed[8] = true;
+    for tick in 11..=20 {
+        if tick == 13 {
+            // It starts charging between ticks 12 and 13.
+            for store in [&mut seen, &mut hidden] {
+                store.slots[0].metadata.insert(8, Metadata::Byte(1));
+                source_state::on_metadata(&models, &mut store.slots[0], &changed);
+            }
+        }
+        for (store, shown) in [(&mut seen, true), (&mut hidden, false)] {
+            store.frame_tick = tick - 1;
+            if shown {
+                store.slots[0].physical.shown_tick = tick - 1;
+            }
+            store.tick_presentation(tick, false, &world, &content, 0).unwrap();
+        }
+    }
+    hidden.mark_shown(0, 20, &models, &content).unwrap();
+    let charge = |store: &Store| {
+        let living = store.slots[0].source.as_ref().unwrap().living.as_ref().unwrap();
+        (living.item_use_ticks(0.), living.crossbow_pull(0.))
+    };
+    let (seen_ticks, seen_pull) = charge(&seen);
+    assert_eq!(seen_ticks, 8.);
+    assert!((seen_pull - 8. / 25.).abs() < 1e-6, "pull {seen_pull}");
+    assert_eq!(charge(&hidden), (8., seen_pull), "not restarted on entry");
+}
+
+/// One position sync carries a waiting mob 100 blocks: its motion span (padding every spatial
+/// query) is released when its interpolation would have ended, not when it is next drawn.
+#[test]
+fn waiting_mob_releases_its_motion_span_when_its_interpolation_ends() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let (mut hidden, id) = mob_store();
+    hidden.frame_tick = 10;
+    let mut target = hidden.get(id).unwrap().transform;
+    target.position[0] += 100.;
+    hidden.move_entity(id, target, None, true, 11, false);
+    assert!(hidden.query_padding() >= 100., "padding {}", hidden.query_padding());
+    let duration = u64::from(hidden.slots[0].physical.lerp_duration);
+    for tick in 11..11 + duration {
+        hidden.tick_presentation(tick, false, &world, &content, 0).unwrap();
+    }
+    assert_eq!(hidden.slots[0].physical.waited, duration as u32, "it waited throughout");
+    assert!(hidden.motion_spans.is_empty(), "{:?}", hidden.motion_spans);
+}
+
+/// The draw set has no frustum: a mob within its draw distance behind the camera, as in front
+/// of it, is drawn (marked) by the frame and ticks; past the frame's radius it waits.
+#[test]
+fn mob_behind_the_camera_within_range_ticks() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let age = |store: &Store| store.slots[0].source.as_ref().unwrap().age;
+    for (camera, ticks) in [([3., 1., 10.], 1), ([3., 1., -10.], 1), ([3., 1., 60.], 0)] {
+        let (mut store, id) = mob_store();
+        store.spatial.entry(cell(store.slots[0].position)).or_default().insert(id);
+        let start = age(&store);
+        seat_attachment_frame(&mut store, 10, 0., camera);
+        store.tick_presentation(11, false, &world, &content, 0).unwrap();
+        assert_eq!(age(&store), start + ticks, "camera at {camera:?}");
+    }
+}
+
+/// A camera away from the local body (spectating, a set camera) does not stop the mobs the body
+/// can reach: undrawn, a mob within 16 blocks of the body ticks; one farther waits.
+#[test]
+fn undrawn_mob_near_the_local_body_ticks() {
+    let world = crate::protocol::world::World::new(0, 384);
+    let content = Content::test_cube();
+    let age = |store: &Store| store.slots[0].source.as_ref().unwrap().age;
+    for (eye, ticks) in [([3., 1.6, 15.], 1), ([3., 1.6, 17.], 0)] {
+        let (mut store, _) = mob_store();
+        store.set_look_target(Some(eye));
+        store.frame_tick = 10;
+        let start = age(&store);
+        store.tick_presentation(11, false, &world, &content, 0).unwrap();
+        assert_eq!(age(&store), start + ticks, "body eye at {eye:?}");
+    }
 }

@@ -55,6 +55,10 @@ pub struct PresentationStats {
     /// Entities of crowd kinds left on the CPU path, per kind and reason.
     pub crowd_fallback: BTreeMap<&'static str, BTreeMap<&'static str, usize>>,
     pub unrendered: BTreeMap<String, String>,
+    /// Entity ticks run and waited by `Store::tick_presentation` since the store began
+    /// (a waiting entity only interpolates; see `tick_presentation`).
+    pub ticked: u64,
+    pub waited: u64,
 }
 pub(super) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
     models.entity_accessor(e, name).and_then(|i| e.metadata_value(i))
@@ -613,6 +617,8 @@ pub fn append(
     let mut stats = PresentationStats {
         state_revision: store.revision.to_string(),
         known: store.len(),
+        ticked: store.ticked_ticks,
+        waited: store.waiting_ticks,
         ..Default::default()
     };
     store.frame_partial = partial.clamp(0., 1.);
@@ -628,18 +634,21 @@ pub fn append(
     });
     for entry in frame.entries.iter().chain(local.as_ref()) {
         let slot = entry.slot;
-        store.slots[slot].physical.shown_tick = tick;
         let entity = &store.slots[slot];
         let transform = match &entry.transform {
             Ok(transform) => *transform,
             Err(reason) => {
                 stats.unrendered.insert(entity.type_name.clone(), reason.clone());
+                store.mark_shown(slot, tick, &models, content)?;
                 continue;
             }
         };
         if entry.distance_squared > range * range || !entry.within {
+            // Not drawn (past the radius or its vanilla distance): a mob waits next tick.
             continue;
         }
+        store.mark_shown(slot, tick, &models, content)?;
+        let entity = &store.slots[slot];
         stats.eligible += 1;
         // Text displays are world text drawn by the nameplate pass.
         if matches!(
