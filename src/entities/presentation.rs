@@ -1695,6 +1695,21 @@ pub(super) fn draw_entity(
                     .unrendered
                     .insert(format!("{}:charge", entity.type_name), reason);
             }
+            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+            if entity.type_name == "minecraft:creeper"
+                && let Err(reason) = super::creeper::append_charge(
+                    entity,
+                    models,
+                    content,
+                    (tick, partial, matrix),
+                    store.transforms,
+                    out,
+                )
+            {
+                stats
+                    .unrendered
+                    .insert(format!("{}:charge", entity.type_name), reason);
+            }
         }
         Err(reason) => {
             if !append_item_entity(entity, models, store, content, frame, out, stats)? {
