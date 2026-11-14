@@ -437,8 +437,8 @@ impl Player {
 mod p1_helmet_tests {
     use super::*;
     use crate::protocol::{
-        world::{Chunk, Palette, Section, SurfaceHeightmap},
         Reader,
+        world::{Chunk, Palette, Section, SurfaceHeightmap},
     };
     use serde_json::json;
 
@@ -482,8 +482,19 @@ mod p1_helmet_tests {
         inventory.player.slots[36] = Some(stack);
         let mut player = Player::new();
         player.position = [12.5, 64., -8.25];
-        let result = player.air_result(AirUse { hand: 0, target: None }, &World::new(0, 16), &content,
-            &inventory, &EntityStore::new(), 9).unwrap();
+        let result = player
+            .air_result(
+                AirUse {
+                    hand: 0,
+                    target: None,
+                },
+                &World::new(0, 16),
+                &content,
+                &inventory,
+                &EntityStore::new(),
+                9,
+            )
+            .unwrap();
         assert_eq!(result, Outcome::CONSUME);
         assert!(player.using.is_some());
         match player.take_use_prediction() {
@@ -491,7 +502,9 @@ mod p1_helmet_tests {
                 assert_eq!(sound.event, "minecraft:item.goat_horn.sound.0");
                 assert_eq!(sound.category, crate::audio::SoundCategory::Records);
                 assert_eq!(sound.volume, 16.);
-                assert!(matches!(sound.source, crate::audio::SoundOrigin::LocalPlayer { position: p } if p == [12.5, 64., -8.25]));
+                assert!(
+                    matches!(sound.source, crate::audio::SoundOrigin::LocalPlayer { position: p } if p == [12.5, 64., -8.25])
+                );
             }
             other => panic!("expected local horn sound, got {other:?}"),
         }
@@ -558,7 +571,17 @@ mod p1_helmet_tests {
             let mut player = Player::new();
             assert_eq!(
                 player
-                    .air_result(AirUse { hand: 0, target: None }, &world, &content, &inventory, &entities, 0)
+                    .air_result(
+                        AirUse {
+                            hand: 0,
+                            target: None
+                        },
+                        &world,
+                        &content,
+                        &inventory,
+                        &entities,
+                        0
+                    )
                     .unwrap(),
                 expected,
             );
@@ -595,7 +618,14 @@ mod p1_helmet_tests {
                     }
                     assert_eq!(
                         player
-                            .air_result(AirUse { hand, target: None }, &world, &content, &inventory, &entities, 0)
+                            .air_result(
+                                AirUse { hand, target: None },
+                                &world,
+                                &content,
+                                &inventory,
+                                &entities,
+                                0
+                            )
                             .unwrap(),
                         Outcome::CLIENT,
                     );
@@ -657,7 +687,12 @@ mod p1_helmet_tests {
                 .execute(
                     InteractionIntent::Use { hand },
                     &context,
-                    InteractionWorld { world: &world, content: &content, inventory: &inventory, entities: &entities },
+                    InteractionWorld {
+                        world: &world,
+                        content: &content,
+                        inventory: &inventory,
+                        entities: &entities,
+                    },
                     0,
                     &mut packets,
                 )

@@ -19,17 +19,16 @@ mod surfaces;
 #[path = "render_blocks/village_tests.rs"]
 mod village_tests;
 use super::{
-    blocks,
+    BlockEntity, Models, blocks,
     presentation::{emit_rig, texture},
     resources::{self, Rig},
-    BlockEntity, Models,
 };
 use crate::{
     api::{DynamicGeometry, EntityMaterial},
     protocol::{
+        Result,
         content::{Content, TextureRegion},
         world::World,
-        Result,
     },
     ui::render::TextRenderer,
 };
@@ -155,13 +154,25 @@ impl super::Store {
         out: &mut DynamicGeometry,
     ) -> Result<super::PresentationStats> {
         let StaticBlockSceneFrame {
-            content, world, origin, camera, camera_rotation, radius, scoping, text_filtering,
-            game_time, partial, sample_light,
+            content,
+            world,
+            origin,
+            camera,
+            camera_rotation,
+            radius,
+            scoping,
+            text_filtering,
+            game_time,
+            partial,
+            sample_light,
         } = frame;
         if !radius.is_finite() || !(0. ..=4096.).contains(&radius) {
             return Err("block presentation radius bound".into());
         }
-        let models = self.models.clone().ok_or("entity model cache not activated")?;
+        let models = self
+            .models
+            .clone()
+            .ok_or("entity model cache not activated")?;
         let models = models.as_ref();
         let mut stats = super::PresentationStats {
             state_revision: self.revision.to_string(),
@@ -203,7 +214,11 @@ impl super::Store {
                 .filter(|&i| i != 1 || !(gateway || block.type_name == "minecraft:beacon"))
                 .map(|i| (f64::from(block.position[i]) + 0.5 - camera[i]).powi(2))
                 .sum::<f64>();
-            let limit = if gateway { 256_f64.powi(2) } else { radius_squared };
+            let limit = if gateway {
+                256_f64.powi(2)
+            } else {
+                radius_squared
+            };
             if distance > limit {
                 continue;
             }
@@ -230,16 +245,23 @@ impl super::Store {
             let indices = out.indices.each_ref().map(Vec::len);
             // Project against an immutable Store before entering the drawing
             // closure, which mutates only disjoint cache/render fields.
-            let prepared = if matches!(block.type_name.as_str(), "minecraft:mob_spawner" | "minecraft:trial_spawner")
-                && self.preview_cache.get(&block.position).is_none_or(|entry| {
-                    entry.revision != block.revision || entry.entity.as_ref().ok()
-                        .is_some_and(|entity| super::presentation::binding_stale(models, entity, game_time))
-                })
-            {
+            let prepared = if matches!(
+                block.type_name.as_str(),
+                "minecraft:mob_spawner" | "minecraft:trial_spawner"
+            ) && self.preview_cache.get(&block.position).is_none_or(|entry| {
+                entry.revision != block.revision
+                    || entry.entity.as_ref().ok().is_some_and(|entity| {
+                        super::presentation::binding_stale(models, entity, game_time)
+                    })
+            }) {
                 Some((|| -> Result<Option<super::Entity>> {
-                    let Some(data) = items::spawner_entity(block, content)? else { return Ok(None) };
-                    let mut entity = super::preview::from_nbt(data, self, models, content, self.frame_tick)?;
-                    let binding = super::presentation::material(self, models, &entity, content, game_time)?;
+                    let Some(data) = items::spawner_entity(block, content)? else {
+                        return Ok(None);
+                    };
+                    let mut entity =
+                        super::preview::from_nbt(data, self, models, content, self.frame_tick)?;
+                    let binding =
+                        super::presentation::material(self, models, &entity, content, game_time)?;
                     if !models.has_authored_rig(&binding.rig) {
                         return Err(format!("spawner entity rig not activated: {}", binding.rig));
                     }
@@ -255,15 +277,25 @@ impl super::Store {
                         return Ok(BlockRenderStatus::SourceHidden);
                     }
                     if let Some(prepared) = prepared {
-                        let entity = prepared.and_then(|entity| entity.ok_or_else(|| "spawner preview data disappeared".into()));
-                        self.preview_cache.insert(block.position, super::preview::Entry {
-                            revision: block.revision,
-                            entity,
+                        let entity = prepared.and_then(|entity| {
+                            entity.ok_or_else(|| "spawner preview data disappeared".into())
                         });
+                        self.preview_cache.insert(
+                            block.position,
+                            super::preview::Entry {
+                                revision: block.revision,
+                                entity,
+                            },
+                        );
                     }
-                    let entity = self.preview_cache[&block.position].entity.as_ref().map_err(Clone::clone)?;
+                    let entity = self.preview_cache[&block.position]
+                        .entity
+                        .as_ref()
+                        .map_err(Clone::clone)?;
                     let (dimensions, scale) = models.dimensions(entity)?;
-                    let size = (dimensions.width * scale).max(dimensions.height * scale).max(1.);
+                    let size = (dimensions.width * scale)
+                        .max(dimensions.height * scale)
+                        .max(1.);
                     let preview_scale = 0.53125 / size;
                     let tick = self.frame_tick;
                     let mut draw_store = super::presentation::DrawStore {
@@ -277,20 +309,48 @@ impl super::Store {
                         bed_direction: &|_| None,
                         clock_context: None,
                     };
-                    let mut painter = |_: &Value, matrix: Mat4, light: [f32; 2], out: &mut DynamicGeometry| {
-                        let mut diagnostics = super::PresentationStats::default();
-                        super::presentation::draw_entity(entity, models, content,
-                            super::presentation::EntityDrawFrame { origin: [0.; 3], tick, partial, light,
-                                parent: Some(matrix * Mat4::from_scale(Vec3::splat(preview_scale))) },
-                            &mut draw_store, out, &mut diagnostics)?;
-                        if let Some((key, error)) = diagnostics.unrendered.into_iter().next() {
-                            return Err(format!("{key}: {error}"));
-                        }
-                        Ok(BlockRenderStatus::Rendered)
-                    };
-                    items::spawner(block, models, content, BlockPose { root, partial, light }, &mut painter, out)
+                    let mut painter =
+                        |_: &Value, matrix: Mat4, light: [f32; 2], out: &mut DynamicGeometry| {
+                            let mut diagnostics = super::PresentationStats::default();
+                            super::presentation::draw_entity(
+                                entity,
+                                models,
+                                content,
+                                super::presentation::EntityDrawFrame {
+                                    origin: [0.; 3],
+                                    tick,
+                                    partial,
+                                    light,
+                                    parent: Some(
+                                        matrix * Mat4::from_scale(Vec3::splat(preview_scale)),
+                                    ),
+                                },
+                                &mut draw_store,
+                                out,
+                                &mut diagnostics,
+                            )?;
+                            if let Some((key, error)) = diagnostics.unrendered.into_iter().next() {
+                                return Err(format!("{key}: {error}"));
+                            }
+                            Ok(BlockRenderStatus::Rendered)
+                        };
+                    items::spawner(
+                        block,
+                        models,
+                        content,
+                        BlockPose {
+                            root,
+                            partial,
+                            light,
+                        },
+                        &mut painter,
+                        out,
+                    )
                 })(),
-                "minecraft:campfire" | "minecraft:vault" | "minecraft:brushable_block" | "minecraft:shelf" => {
+                "minecraft:campfire"
+                | "minecraft:vault"
+                | "minecraft:brushable_block"
+                | "minecraft:shelf" => {
                     let mut item = |observed: &Value,
                                     context: &str,
                                     seed: i32,
@@ -300,7 +360,12 @@ impl super::Store {
                         super::render_special::append_observed_item(
                             content,
                             observed,
-                            super::render_special::ObservedItemFrame { context, seed, root, light },
+                            super::render_special::ObservedItemFrame {
+                                context,
+                                seed,
+                                root,
+                                light,
+                            },
                             &mut self.items,
                             &mut self.special_render_cache,
                             out,
@@ -315,7 +380,11 @@ impl super::Store {
                         items::display(
                             block,
                             content,
-                            &mut items::DisplayFrame { light, sample_light, item: &mut item },
+                            &mut items::DisplayFrame {
+                                light,
+                                sample_light,
+                                item: &mut item,
+                            },
                             root,
                             out,
                         )
@@ -432,18 +501,23 @@ impl super::Store {
                 "minecraft:skull" => (|| {
                     let name = block_name(block, content)?;
                     let profile = &block.data["profile"];
-                    let skin = if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
-                        && !profile.is_null()
-                    {
-                        Some(super::profiles::head_skin(&self.profiles, profile)?)
-                    } else {
-                        None
-                    };
+                    let skin =
+                        if matches!(name, "minecraft:player_head" | "minecraft:player_wall_head")
+                            && !profile.is_null()
+                        {
+                            Some(super::profiles::head_skin(&self.profiles, profile)?)
+                        } else {
+                            None
+                        };
                     skull_geometry(
                         block,
                         models,
                         content,
-                        BlockPose { root, partial, light },
+                        BlockPose {
+                            root,
+                            partial,
+                            light,
+                        },
                         skin,
                         &mut self.transforms,
                         out,
@@ -644,12 +718,25 @@ fn copper_statue(
     let root = root
         * Mat4::from_translation(Vec3::new(0.5, 1.5, 0.5))
         * Mat4::from_rotation_y((180. - yaw(facing)).to_radians());
-    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light }, transforms, out, |name, pivot, rotation| {
-        if name == "root" {
-            pivot.y = 0.;
-            rotation.z = PI;
-        }
-    })?;
+    paint_rig(
+        rig(m, key)?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, &format!("entity/copper_golem/copper_golem{suffix}"))?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntityCutout,
+            alpha: 1.,
+            light,
+        },
+        transforms,
+        out,
+        |name, pivot, rotation| {
+            if name == "root" {
+                pivot.y = 0.;
+                rotation.z = PI;
+            }
+        },
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn bell(
@@ -670,12 +757,25 @@ fn bell(
     let root = root
         * Mat4::from_translation(Vec3::new(0.5, 1., 0.5))
         * Mat4::from_scale(Vec3::new(1., -1., -1.));
-    paint_rig(rig(m, "minecraft:bell#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/bell/bell_body")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, transforms, out, |name, _, rotation| {
-        if name == "bell_body" {
-            rotation.x = angle[0];
-            rotation.z = angle[1];
-        }
-    })?;
+    paint_rig(
+        rig(m, "minecraft:bell#main")?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/bell/bell_body")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        transforms,
+        out,
+        |name, _, rotation| {
+            if name == "bell_body" {
+                rotation.x = angle[0];
+                rotation.z = angle[1];
+            }
+        },
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn chest(
@@ -747,11 +847,24 @@ fn chest(
         * Mat4::from_translation(Vec3::new(0.5, 18. / 16., 0.5))
         * Mat4::from_rotation_y(-yaw(prop(e, c, "facing").unwrap_or("north")).to_radians())
         * Mat4::from_scale(Vec3::new(1., -1., -1.));
-    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/chest/{material}{suffix}"))?, color: [1.; 3], layer: EntityMaterial::EntityCutoutCull, alpha: 1., light }, t, out, |name, _, r| {
-        if name == "lid" || name == "lock" {
-            r.x = angle;
-        }
-    })?;
+    paint_rig(
+        rig(m, key)?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, &format!("entity/chest/{material}{suffix}"))?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntityCutoutCull,
+            alpha: 1.,
+            light,
+        },
+        t,
+        out,
+        |name, _, r| {
+            if name == "lid" || name == "lock" {
+                r.x = angle;
+            }
+        },
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn shulker(
@@ -789,12 +902,25 @@ fn shulker(
         * Mat4::from_scale(Vec3::new(1., -1., -1.))
         * Mat4::from_translation(Vec3::new(0., -1., 0.));
     let progress = e.progress(f.partial);
-    paint_rig(rig(m, "minecraft:shulker_box#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, &material)?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |name, p, r| {
-        if name == "lid" {
-            p.y = 1.5 - progress * 0.5;
-            r.y = progress * 1.5 * PI;
-        }
-    })?;
+    paint_rig(
+        rig(m, "minecraft:shulker_box#main")?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, &material)?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntityCutout,
+            alpha: 1.,
+            light: f.light,
+        },
+        t,
+        out,
+        |name, p, r| {
+            if name == "lid" {
+                p.y = 1.5 - progress * 0.5;
+                r.y = progress * 1.5 * PI;
+            }
+        },
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn skull_geometry(
@@ -806,7 +932,11 @@ fn skull_geometry(
     t: &mut Vec<Mat4>,
     out: &mut DynamicGeometry,
 ) -> Result<BlockRenderStatus> {
-    let BlockPose { root, partial, light } = pose;
+    let BlockPose {
+        root,
+        partial,
+        light,
+    } = pose;
     let name = block_name(e, c)?.trim_start_matches("minecraft:");
     let kind = name.replace("_wall", "");
     let (key, material) = skull_parts(&kind).ok_or("unknown source skull block")?;
@@ -851,7 +981,20 @@ fn skull_geometry(
         * Mat4::from_scale(Vec3::new(-1., -1., 1.));
     let s = &e.animation.source;
     let animation = s.skull_ticks as f32 + if s.skull_active { partial } else { 0. };
-    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex, color: [1.; 3], layer, alpha: 1., light }, t, out, |name, _, r| skull_pose(name, animation, r))?;
+    paint_rig(
+        rig(m, key)?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex,
+            color: [1.; 3],
+            layer,
+            alpha: 1.,
+            light,
+        },
+        t,
+        out,
+        |name, _, r| skull_pose(name, animation, r),
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 /// Rig key and texture of each source skull kind (block name without `minecraft:` and
@@ -919,23 +1062,36 @@ fn book(
             ),
         )
     };
-    paint_rig(rig(m, "minecraft:book#main")?, root, crate::entities::presentation::RigStyle { tex: texture(c, "entity/enchantment/enchanting_table_book")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |name, p, r| {
-        match name {
-            "left_lid" => r.y = PI + angles[0],
-            "right_lid" => r.y = -angles[0],
-            "left_pages" => r.y = angles[0],
-            "right_pages" => r.y = -angles[0],
-            "flip_page1" => r.y = angles[0] * (1. - 2. * angles[1]),
-            "flip_page2" => r.y = angles[0] * (1. - 2. * angles[2]),
-            _ => {}
-        }
-        if matches!(
-            name,
-            "left_pages" | "right_pages" | "flip_page1" | "flip_page2"
-        ) {
-            p.x = math::sin(angles[0]) / 16.;
-        }
-    })?;
+    paint_rig(
+        rig(m, "minecraft:book#main")?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, "entity/enchantment/enchanting_table_book")?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light: f.light,
+        },
+        t,
+        out,
+        |name, p, r| {
+            match name {
+                "left_lid" => r.y = PI + angles[0],
+                "right_lid" => r.y = -angles[0],
+                "left_pages" => r.y = angles[0],
+                "right_pages" => r.y = -angles[0],
+                "flip_page1" => r.y = angles[0] * (1. - 2. * angles[1]),
+                "flip_page2" => r.y = angles[0] * (1. - 2. * angles[2]),
+                _ => {}
+            }
+            if matches!(
+                name,
+                "left_pages" | "right_pages" | "flip_page1" | "flip_page2"
+            ) {
+                p.x = math::sin(angles[0]) / 16.;
+            }
+        },
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn conduit(
@@ -951,16 +1107,42 @@ fn conduit(
     let time = s.ticks as f32 + f.partial;
     let rotation = (s.conduit_rotation + if s.conduit_active { f.partial } else { 0. }) * -0.0375;
     if !s.conduit_active {
-        paint_rig(rig(m, "minecraft:conduit#shell")?, root * Mat4::from_translation(Vec3::splat(0.5))
-            * Mat4::from_rotation_y(rotation.to_radians()), crate::entities::presentation::RigStyle { tex: texture(c, "entity/conduit/base")?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+        paint_rig(
+            rig(m, "minecraft:conduit#shell")?,
+            root * Mat4::from_translation(Vec3::splat(0.5))
+                * Mat4::from_rotation_y(rotation.to_radians()),
+            crate::entities::presentation::RigStyle {
+                tex: texture(c, "entity/conduit/base")?,
+                color: [1.; 3],
+                layer: EntityMaterial::EntitySolid,
+                alpha: 1.,
+                light: f.light,
+            },
+            t,
+            out,
+            |_, _, _| {},
+        )?;
     } else {
         let bob = math::sin(time * 0.1) / 2. + 0.5;
         let y = 0.3 + (bob * bob + bob) * 0.2;
-        paint_rig(rig(m, "minecraft:conduit#cage")?, root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
-            * Mat4::from_quat(Quat::from_axis_angle(
-                Vec3::new(0.5, 1., 0.5).normalize(),
-                rotation,
-            )), crate::entities::presentation::RigStyle { tex: texture(c, "entity/conduit/cage")?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+        paint_rig(
+            rig(m, "minecraft:conduit#cage")?,
+            root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
+                * Mat4::from_quat(Quat::from_axis_angle(
+                    Vec3::new(0.5, 1., 0.5).normalize(),
+                    rotation,
+                )),
+            crate::entities::presentation::RigStyle {
+                tex: texture(c, "entity/conduit/cage")?,
+                color: [1.; 3],
+                layer: EntityMaterial::EntityCutout,
+                alpha: 1.,
+                light: f.light,
+            },
+            t,
+            out,
+            |_, _, _| {},
+        )?;
         let phase = s.ticks / 66 % 3;
         let rotate = match phase {
             1 => Mat4::from_rotation_x(FRAC_PI_2),
@@ -976,25 +1158,64 @@ fn conduit(
             },
         )?;
         let windroot = root * Mat4::from_translation(Vec3::splat(0.5));
-        paint_rig(rig(m, "minecraft:conduit#wind")?, windroot * rotate, crate::entities::presentation::RigStyle { tex: wind, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
-        paint_rig(rig(m, "minecraft:conduit#wind")?, windroot
-            * Mat4::from_scale(Vec3::splat(0.875))
-            * Mat4::from_rotation_x(PI)
-            * Mat4::from_rotation_z(PI), crate::entities::presentation::RigStyle { tex: wind, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+        paint_rig(
+            rig(m, "minecraft:conduit#wind")?,
+            windroot * rotate,
+            crate::entities::presentation::RigStyle {
+                tex: wind,
+                color: [1.; 3],
+                layer: EntityMaterial::EntityCutout,
+                alpha: 1.,
+                light: f.light,
+            },
+            t,
+            out,
+            |_, _, _| {},
+        )?;
+        paint_rig(
+            rig(m, "minecraft:conduit#wind")?,
+            windroot
+                * Mat4::from_scale(Vec3::splat(0.875))
+                * Mat4::from_rotation_x(PI)
+                * Mat4::from_rotation_z(PI),
+            crate::entities::presentation::RigStyle {
+                tex: wind,
+                color: [1.; 3],
+                layer: EntityMaterial::EntityCutout,
+                alpha: 1.,
+                light: f.light,
+            },
+            t,
+            out,
+            |_, _, _| {},
+        )?;
         let billboard = Mat4::from_rotation_y(-f.camera_rotation[0].to_radians())
             * Mat4::from_rotation_x(f.camera_rotation[1].to_radians());
-        paint_rig(rig(m, "minecraft:conduit#eye")?, root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
-            * Mat4::from_scale(Vec3::splat(2. / 3.))
-            * billboard
-            * Mat4::from_rotation_z(PI)
-            * Mat4::from_rotation_y(PI), crate::entities::presentation::RigStyle { tex: texture(
-            c,
-            if s.conduit_hunting {
-                "entity/conduit/open_eye"
-            } else {
-                "entity/conduit/closed_eye"
+        paint_rig(
+            rig(m, "minecraft:conduit#eye")?,
+            root * Mat4::from_translation(Vec3::new(0.5, y, 0.5))
+                * Mat4::from_scale(Vec3::splat(2. / 3.))
+                * billboard
+                * Mat4::from_rotation_z(PI)
+                * Mat4::from_rotation_y(PI),
+            crate::entities::presentation::RigStyle {
+                tex: texture(
+                    c,
+                    if s.conduit_hunting {
+                        "entity/conduit/open_eye"
+                    } else {
+                        "entity/conduit/closed_eye"
+                    },
+                )?,
+                color: [1.; 3],
+                layer: EntityMaterial::EntityCutout,
+                alpha: 1.,
+                light: f.light,
             },
-        )?, color: [1.; 3], layer: EntityMaterial::EntityCutout, alpha: 1., light: f.light }, t, out, |_, _, _| {})?;
+            t,
+            out,
+            |_, _, _| {},
+        )?;
     }
     Ok(BlockRenderStatus::Rendered)
 }
@@ -1055,7 +1276,20 @@ fn bed(
                 (180. + yaw(prop(e, c, "facing").unwrap_or("north"))).to_radians(),
             ),
         );
-    paint_rig(rig(m, key)?, root, crate::entities::presentation::RigStyle { tex: texture(c, &format!("entity/bed/{color}"))?, color: [1.; 3], layer: EntityMaterial::EntitySolid, alpha: 1., light }, t, out, |_, _, _| {})?;
+    paint_rig(
+        rig(m, key)?,
+        root,
+        crate::entities::presentation::RigStyle {
+            tex: texture(c, &format!("entity/bed/{color}"))?,
+            color: [1.; 3],
+            layer: EntityMaterial::EntitySolid,
+            alpha: 1.,
+            light,
+        },
+        t,
+        out,
+        |_, _, _| {},
+    )?;
     Ok(BlockRenderStatus::Rendered)
 }
 fn piston(
@@ -1130,25 +1364,13 @@ mod tests {
     }
 
     fn sign_received_geometry(both_sides: bool, glow: bool) {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         use crate::protocol::{Reader, Writer};
         for (kind, name) in [
-            (
-                "minecraft:sign",
-                "minecraft:oak_sign",
-            ),
-            (
-                "minecraft:sign",
-                "minecraft:oak_wall_sign",
-            ),
-            (
-                "minecraft:hanging_sign",
-                "minecraft:oak_hanging_sign",
-            ),
-            (
-                "minecraft:hanging_sign",
-                "minecraft:oak_wall_hanging_sign",
-            ),
+            ("minecraft:sign", "minecraft:oak_sign"),
+            ("minecraft:sign", "minecraft:oak_wall_sign"),
+            ("minecraft:hanging_sign", "minecraft:oak_hanging_sign"),
+            ("minecraft:hanging_sign", "minecraft:oak_wall_hanging_sign"),
         ] {
             let mut content = Content::test_cube();
             content.names[1] = name.into();
@@ -1189,7 +1411,23 @@ mod tests {
                 .ensure_sign_block_entity(position, 1, &content, 1)
                 .unwrap();
             let mut geometry = DynamicGeometry::default();
-            let defaults = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
+            let defaults = store
+                .append_static_block_geometry(
+                    crate::entities::StaticBlockSceneFrame {
+                        content: &content,
+                        world: &World::new(0, 256),
+                        origin,
+                        camera,
+                        camera_rotation: [0., 0.],
+                        radius: 32.,
+                        scoping: false,
+                        text_filtering: false,
+                        game_time: 0,
+                        partial: 0.,
+                        sample_light: &|_| Ok(Some([7., 3.])),
+                    },
+                    &mut geometry,
+                )
                 .unwrap();
             assert_eq!(defaults.block_entities, 1);
             assert!(defaults.unrendered.is_empty());
@@ -1202,25 +1440,28 @@ mod tests {
                 let initial_body_indices =
                     geometry.indices[EntityMaterial::EntityCutout as usize].len();
                 let messages = if both_sides {
-                    ["FRONT", "Solaris", "Line 3", "Line 4"]
+                    ["FRONT", "Krasnokamen", "Line 3", "Line 4"]
                 } else {
                     ["P1 PARITY", "", "", ""]
                 }
-                    .into_iter()
-                    .map(|line| {
-                        if compound {
-                            Tag::record([("text", Tag::string(line))])
-                        } else {
-                            Tag::string(line)
-                        }
-                    })
-                    .collect();
+                .into_iter()
+                .map(|line| {
+                    if compound {
+                        Tag::record([("text", Tag::string(line))])
+                    } else {
+                        Tag::string(line)
+                    }
+                })
+                .collect();
                 let mut fields = vec![
                     (
                         "front_text",
                         Tag::record([
                             ("messages", Tag::List(messages)),
-                            ("color", Tag::string(if both_sides { "white" } else { "red" })),
+                            (
+                                "color",
+                                Tag::string(if both_sides { "white" } else { "red" }),
+                            ),
                             ("has_glowing_text", Tag::Byte(i8::from(glow))),
                         ]),
                     ),
@@ -1233,12 +1474,15 @@ mod tests {
                     fields.push((
                         "back_text",
                         Tag::record([
-                            ("messages", Tag::List(
-                                ["BACK", "Solaris", "Line 3", "Line 4"]
-                                    .into_iter()
-                                    .map(Tag::string)
-                                    .collect(),
-                            )),
+                            (
+                                "messages",
+                                Tag::List(
+                                    ["BACK", "Krasnokamen", "Line 3", "Line 4"]
+                                        .into_iter()
+                                        .map(Tag::string)
+                                        .collect(),
+                                ),
+                            ),
                             ("color", Tag::string("white")),
                             ("has_glowing_text", Tag::Byte(i8::from(glow))),
                         ]),
@@ -1261,14 +1505,35 @@ mod tests {
                     if both_sides { "FRONT" } else { "P1 PARITY" }
                 );
                 if both_sides {
-                    assert_eq!(font.language.plain(&data["back_text"]["messages"][0]).unwrap(), "BACK");
+                    assert_eq!(
+                        font.language
+                            .plain(&data["back_text"]["messages"][0])
+                            .unwrap(),
+                        "BACK"
+                    );
                 } else {
                     assert!(data.get("back_text").is_none());
                 }
                 assert_eq!(store.block_entities[&position].state, Some(1));
                 let initial_text_indices =
                     geometry.indices[EntityMaterial::TextPolygonOffset as usize].len();
-                let submitted = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(Some([7., 3.])) }, &mut geometry)
+                let submitted = store
+                    .append_static_block_geometry(
+                        crate::entities::StaticBlockSceneFrame {
+                            content: &content,
+                            world: &World::new(0, 256),
+                            origin,
+                            camera,
+                            camera_rotation: [0., 0.],
+                            radius: 32.,
+                            scoping: false,
+                            text_filtering: false,
+                            game_time: 0,
+                            partial: 0.,
+                            sample_light: &|_| Ok(Some([7., 3.])),
+                        },
+                        &mut geometry,
+                    )
                     .unwrap();
                 assert_eq!(submitted.block_entities, 1);
                 assert!(submitted.unrendered.is_empty());
@@ -1281,13 +1546,18 @@ mod tests {
                     geometry.indices[EntityMaterial::EntityCutout as usize].len(),
                     initial_body_indices
                 );
-                let text = &geometry.indices[EntityMaterial::TextPolygonOffset as usize][initial_text_indices..];
+                let text = &geometry.indices[EntityMaterial::TextPolygonOffset as usize]
+                    [initial_text_indices..];
                 assert!(!text.is_empty());
-                assert!(text
-                    .iter()
-                    .all(|index| geometry.vertices[*index as usize].light == if glow { [15.; 2] } else { [7., 3.] }));
-                assert!(geometry.indices[EntityMaterial::EntityCutout as usize].is_empty(),
-                    "the block entity must not duplicate the terrain's sign body");
+                assert!(
+                    text.iter()
+                        .all(|index| geometry.vertices[*index as usize].light
+                            == if glow { [15.; 2] } else { [7., 3.] })
+                );
+                assert!(
+                    geometry.indices[EntityMaterial::EntityCutout as usize].is_empty(),
+                    "the block entity must not duplicate the terrain's sign body"
+                );
                 let board_z = if kind == "minecraft:sign" && name.contains("_wall_") {
                     0.9375
                 } else {
@@ -1302,12 +1572,20 @@ mod tests {
                     let [a, b, c] = [point(a), point(b), point(c)];
                     let normal = (b - a).cross(c - a).z;
                     if a.z < board_z {
-                        assert!([a, b, c].iter().all(|p| p.z < board_z && p.z > board_z - 0.1));
+                        assert!(
+                            [a, b, c]
+                                .iter()
+                                .all(|p| p.z < board_z && p.z > board_z - 0.1)
+                        );
                         assert!(normal < 0.);
                         front_triangles += 1;
                     } else {
                         assert!(both_sides);
-                        assert!([a, b, c].iter().all(|p| p.z > board_z && p.z < board_z + 0.1));
+                        assert!(
+                            [a, b, c]
+                                .iter()
+                                .all(|p| p.z > board_z && p.z < board_z + 0.1)
+                        );
                         assert!(normal > 0.);
                         back_triangles += 1;
                     }
@@ -1318,7 +1596,23 @@ mod tests {
                 }
             }
             let mut pending = DynamicGeometry::default();
-            let unavailable_light = store.append_static_block_geometry(crate::entities::StaticBlockSceneFrame { content: &content, world: &World::new(0, 256), origin, camera, camera_rotation: [0., 0.], radius: 32., scoping: false, text_filtering: false, game_time: 0, partial: 0., sample_light: &|_| Ok(None) }, &mut pending)
+            let unavailable_light = store
+                .append_static_block_geometry(
+                    crate::entities::StaticBlockSceneFrame {
+                        content: &content,
+                        world: &World::new(0, 256),
+                        origin,
+                        camera,
+                        camera_rotation: [0., 0.],
+                        radius: 32.,
+                        scoping: false,
+                        text_filtering: false,
+                        game_time: 0,
+                        partial: 0.,
+                        sample_light: &|_| Ok(None),
+                    },
+                    &mut pending,
+                )
                 .unwrap();
             assert_eq!(unavailable_light.lighting_pending, 1);
             assert_eq!(unavailable_light.block_entities, 0);

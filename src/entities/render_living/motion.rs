@@ -85,7 +85,9 @@ impl MotionFacts {
         match self.walk_uses_y {
             WalkVertical::Never => false,
             WalkVertical::Always => true,
-            WalkVertical::BodyEquipped => entity.equipment_value(6).is_some_and(|stack| stack.count > 0),
+            WalkVertical::BodyEquipped => entity
+                .equipment_value(6)
+                .is_some_and(|stack| stack.count > 0),
         }
     }
     pub fn max_head_yaw(&self, models: &Models, entity: &Entity) -> Option<f32> {
