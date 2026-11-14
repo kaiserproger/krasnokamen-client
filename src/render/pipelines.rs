@@ -182,9 +182,10 @@ impl Pipelines {
                     &world_buffers,
                     MATERIALS[material],
                     if MATERIALS[material].shader.kind == 11 { COLOR } else { super::post::HDR },
+                    "source_vertex",
                 ));
                 first_person.push(create_source(
-                    device, &shader, &layout, &world_buffers, MATERIALS[material], COLOR,
+                    device, &shader, &layout, &world_buffers, MATERIALS[material], COLOR, "source_vertex",
                 ));
             }
         }
@@ -397,13 +398,16 @@ fn create(
     })
 }
 
-fn create_source(
+/// A pinned Source RenderType pipeline; `vertex` is `source_vertex` or a stage that
+/// leaves through the same `source_out` (the GPU crowd's `crowd_vertex`).
+pub(super) fn create_source(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     layout: &wgpu::PipelineLayout,
     buffers: &[wgpu::VertexBufferLayout<'_>],
     descriptor: Descriptor,
     target: wgpu::TextureFormat,
+    vertex: &str,
 ) -> wgpu::RenderPipeline {
     let constants = descriptor.shader.constants();
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -411,7 +415,7 @@ fn create_source(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("source_vertex"),
+            entry_point: Some(vertex),
             compilation_options: wgpu::PipelineCompilationOptions {
                 constants: &constants,
                 ..Default::default()

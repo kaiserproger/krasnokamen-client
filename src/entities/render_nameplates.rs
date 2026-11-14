@@ -669,6 +669,8 @@ mod tests {
             death_tick: None,
             hurt_direction: 0.,
             submitted_revision: None,
+            clip: Default::default(),
+            crowd: None,
         });
         handle
     }
@@ -1200,6 +1202,8 @@ mod tests {
             death_tick: None,
             hurt_direction: 0.,
             submitted_revision: None,
+            clip: Default::default(),
+            crowd: None,
         };
         let received = entity.metadata.clone();
         super::super::display::on_metadata(&models, &mut entity, &received);

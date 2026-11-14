@@ -14,6 +14,9 @@ use std::{
     time::Instant,
 };
 mod arena;
+#[cfg(test)]
+mod entity_instancing_tests;
+mod entity_instancing;
 mod far;
 mod far_generate;
 mod frame;
@@ -332,6 +335,9 @@ struct FrameStats {
     // outline mask. The matching index count is `entity_submitted_indices`;
     // no second counter. Shadow-depth re-submissions stay in `draw_calls`.
     entity_draws: u64,
+    // GPU crowd: instances culled this frame and indirect draws issued in all views.
+    crowd_instances: u64,
+    crowd_draws: u64,
     // Cull provenance: graph rejection runs before the frustum test, so a
     // graph-rejected section may also sit outside the frustum.
     frustum_rejected_chunks: u64,
@@ -402,6 +408,9 @@ pub struct Renderer {
     uploaded_meshes: Vec<([i32; 3], u64)>,
     fixture: Option<ResidentMesh>,
     dynamic: Stream<{ EntityMaterial::COUNT }>,
+    /// GPU crowd renderer; `None` when the adapter lacks compute, indirect draws or
+    /// vertex-stage storage buffers (those entities then stay on the CPU path).
+    crowd: Option<entity_instancing::Crowd>,
     first_person: Stream<{ EntityMaterial::COUNT }>,
     overlay: Stream<5>,
     sunrise: Stream,
@@ -751,6 +760,9 @@ impl Renderer {
             &features,
         );
         let dynamic = Stream::new(&device);
+        let crowd = entity_instancing::supported(downlevel.flags, &device.limits())
+            .then(|| entity_instancing::Crowd::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout));
+        capabilities["crowd_instancing_enabled"] = json!(crowd.is_some());
         let first_person = Stream::new(&device);
         let overlay = Stream::new(&device);
         let sunrise = Stream::new(&device);
@@ -837,6 +849,7 @@ impl Renderer {
             staged_chunks: Vec::new(),
             uploaded_meshes: Vec::new(),
             dynamic,
+            crowd,
             first_person,
             overlay,
             sunrise,
@@ -891,6 +904,11 @@ impl Renderer {
 
     pub(crate) fn software_adapter(&self) -> bool {
         self.device_type == wgpu::DeviceType::Cpu
+    }
+
+    /// Whether this renderer draws `Scene::crowd` (session routing for crowd entities).
+    pub fn crowd_supported(&self) -> bool {
+        self.crowd.is_some()
     }
 
     pub fn set_reference_mode(&mut self, reference: bool) {

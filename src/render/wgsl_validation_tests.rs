@@ -6,10 +6,16 @@ use std::path::Path;
 /// (label, runtime source, override constants a pipeline sets).
 fn shaders() -> Vec<(&'static str, String, Vec<(&'static str, f64)>)> {
     vec![
-        // `shader.wgsl` + `atmosphere.wgsl`; specializations keep their defaults.
+        // `shader.wgsl` + `atmosphere.wgsl` + crowd vertex stages; specializations keep
+        // their defaults.
         (
-            "shader.wgsl+atmosphere.wgsl",
+            "shader.wgsl+atmosphere.wgsl+entity_instancing_types.wgsl+entity_instancing.wgsl",
             super::graphics::main_shader_source(),
+            vec![],
+        ),
+        (
+            "entity_instancing_types.wgsl+entity_instancing_prepare.wgsl",
+            super::entity_instancing::prepare_source(),
             vec![],
         ),
         (
