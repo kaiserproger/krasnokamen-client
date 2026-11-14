@@ -1076,3 +1076,68 @@ fn client_pointer_gates_on_the_exact_screen_and_emits_cursor_edges() {
         ] if *x == 10. && *y == 20.
     ));
 }
+
+/// HC-4: the window's IME events (lib.rs `WindowEvent::Ime`) become `UiIntent::Composition`
+/// and `UiIntent::Text`. A preedit must show inside the focused field without touching the
+/// committed text, and a CJK commit must land as ordinary text with the preedit cleared.
+#[test]
+fn ime_preedit_and_cjk_commit_edit_the_focused_field() {
+    let (content, mut inventory, mut ui) = state();
+    show(&mut ui, &sample(vec![])).unwrap();
+    rebuild(&mut ui, &content, &inventory);
+    click(&mut ui, &content, &mut inventory, "dialog/input/name");
+    // lib.rs routes IME events only while this gate is open.
+    assert!(ui.text_field_focused());
+    // "にほ" is six UTF-8 bytes; the IME caret ends at the preedit end.
+    ui.execute(
+        UiIntent::Composition {
+            text: "にほ".into(),
+            cursor: Some([0, 6]),
+        },
+        &mut inventory,
+        &content,
+    )
+    .unwrap();
+    let field = ui.fields.get("dialog/input/name").unwrap();
+    assert_eq!(field.display(), "Ёлкиにほ", "the preedit shows in place");
+    assert_eq!(field.text, "Ёлки", "the preedit is not committed text");
+    assert_eq!(field.display_cursor(), Some("Ёлки".len() + 6));
+    ui.execute(
+        UiIntent::Text {
+            text: "日本".into(),
+        },
+        &mut inventory,
+        &content,
+    )
+    .unwrap();
+    let field = ui.fields.get("dialog/input/name").unwrap();
+    assert_eq!(
+        field.display(),
+        "Ёлки日本",
+        "the CJK commit is ordinary text"
+    );
+    assert!(field.composition.is_empty(), "the preedit is cleared");
+    // No field focused means no composition: IME text cannot reach a button.
+    let context = ui.context(&inventory);
+    ui.execute(
+        UiIntent::Focus {
+            context,
+            element_id: "dialog/action/0".into(),
+        },
+        &mut inventory,
+        &content,
+    )
+    .unwrap();
+    assert!(!ui.text_field_focused());
+    assert!(
+        ui.execute(
+            UiIntent::Composition {
+                text: "ほ".into(),
+                cursor: None,
+            },
+            &mut inventory,
+            &content,
+        )
+        .is_err()
+    );
+}
