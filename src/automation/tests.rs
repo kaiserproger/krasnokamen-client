@@ -44,6 +44,22 @@ pub(super) fn client() -> (Arc<Core>, mpsc::Receiver<crate::api::Request>) {
         receiver,
     )
 }
+
+#[test]
+fn offline_schema_matches_live_tools_in_both_presentation_modes() {
+    let (core, _) = client();
+    let exported = super::schema();
+    assert_eq!(exported["headless_tools"], json!(core.tools()));
+    core.shared.observation.lock().unwrap().data = json!({"presentation_available": true});
+    assert_eq!(exported["tools"], json!(core.tools()));
+    assert!(
+        exported["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["inputSchema"].is_object())
+    );
+}
 #[test]
 fn entity_census_schema_export_matches_live_validation() {
     let args = json!({"radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":""});
