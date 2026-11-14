@@ -553,6 +553,28 @@ The Native10 source and integrated executable add the generic Loader sections `i
 - Sounds use exact verified owned paths and bounded complete single-stream Ogg Vorbis: mono 8–48 kHz, at most 256 KiB encoded and two seconds/96,000 decoded frames, with CRC/EOS and allocation-bounded setup validation. Playback uses the existing Master mixer. Mixer submission is not an audibility/output-capture claim; inactive commands reject optionally, and unavailable audio output is explicit.
 - `minecraft_navigate_to_block` retains the canonical integer `x,y,z` and optional 0.1–120-second timeout (default eight). It searches received collision/chunks and emits ordinary movement, never teleportation. A solid target means a collision-free adjacent standing endpoint. Arrival requires a grounded collision-free observed pose within 1.5 horizontal and 1.25 vertical blocks; stale-world, cancellation, errors and completion release held inputs. Each walking search is bounded to 8,192 states, 4,096 columns and 65,536 queries and is anchored at the caller's current position on every replan (up to 24 replans); a far target is walked as capped first legs through loaded chunks rather than rejected, with rises up to one block and descents up to three. A solid target requires an actual standing endpoint (never instant arrival from the start cell); closed doors are not passable (open them with `use_item_on` first). Swimming/climbing/flight/mounted routes, unsupported gap jumps and unsafe fluid/contextual supports are not admitted. Missing chunks are not air.
 
+The starting anchor prefers the current column, then tries only columns touched
+by the player's collision footprint. A grounded edge pose can therefore enter
+its supporting neighbor even when the center column is lower; every anchor
+still passes the same swept collision, height and support checks. Four cardinal
+edge poses and an unsupported-gap rejection are covered by the navigation
+regressions. The seed-24 retained-world return to `(131,76,-216)` failed on the
+original client and passed three windowed runs on corrected pin
+`75755212b117-345e4b64`; this is the original-path fix proof, not fresh
+civilization acceptance.
+
+An intermediate waypoint's distance tolerance never permits cutting a collision
+corner: the next segment must also be clear from the observed body. When the
+planned segment remains valid, the controller finishes centering even inside
+its ordinary movement deadzone; changed geometry still replans normally.
+The open-door regression failed before this correction and all 21 navigation
+tests passed afterward. Pin `75755212b117-3902797f` then reached the original
+seed-24 bed `(166,75,-282)` in three windowed saved-world runs after ordinary
+door use, with the exact bed head raycast and a retained screenshot. This does
+not add automatic door opening or establish fresh civilization acceptance.
+The owner-host receipt is
+`<work>/receipts/CivSimStallFix/native-waypoint-centering.json`.
+
 The new `.analysis/native10` probes retain canonical harness/Xvfb lifecycle ownership and actual-window GPU captures. Privileged fixture grants/block setup and empty logical settlement creation are labeled separately from ordinary actions; they establish neither earned production/quality nor physical-village gameplay. Broader navigation, sound and full-gameplay approval still require their real runtime receipts.
 
 The October 3 rotated-stone failure was reproduced in the real windowed client at world block `[204,64,-446]`, section `[12,4,-28]`, state `minecraft:stone`: rotation roundoff produced interpolation coordinates outside `[0,1]` and sky light `-1/16`. The selected Y=180° model was deterministically reconstructed, not read from a runtime name field. Interpolation coordinates are now bounded before weights, without clamping light values; missing received sky/block light remains unknown and the strict mesh upload guard stays enabled. Four focused regressions passed. Fixed executable `04b677cc…` subsequently rendered textured stone fixtures, trees and terrain in real windowed GPU captures against final server `d67836d6…`; see `.analysis/native10/lighting-runtime-proof.json`. This is a rendering smoke, not per-vertex lighting/pixel parity, full-scene readiness or physical scanout. Uncontended startup retained the 120-second bound: 121 chunks in 81.824 seconds, 1.478775 chunks/s; no timeout-contract change was needed.

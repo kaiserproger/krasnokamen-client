@@ -51,7 +51,9 @@ fn entity_census_schema_export_matches_live_validation() {
     super::catalog::validate("minecraft_list_entities", &json!({
         "radius":128,"limit":16,"entity_type":"minecraft:villager","cursor":"18446744073709551615"
     })).unwrap();
-    assert!(super::catalog::validate("minecraft_list_entities", &json!({"entity_type":""})).is_err());
+    assert!(
+        super::catalog::validate("minecraft_list_entities", &json!({"entity_type":""})).is_err()
+    );
     let exported = super::schema();
     for catalog in ["tools", "headless_tools"] {
         let tool = exported[catalog]
