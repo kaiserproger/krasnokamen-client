@@ -4,6 +4,7 @@
   entity_models.py fmt     [model.json ...]   canonical compact formatting (run after every edit)
   entity_models.py check   [model.json ...]   schema/UV/texture validation (all models if none given)
   entity_models.py preview  model.json [-o out.png] [--texture path/below/textures.png]
+  entity_models.py selection-report raw-coverage.json [-o report.json]
 
 `preview` renders front / 3-4 / side / back views with the real vanilla texture plus a UV
 map panel: each cube face rectangle is outlined, opaque texels no cube samples are tinted red.
@@ -413,7 +414,39 @@ def fmt(path):
         f.write("\n".join(out) + "\n")
 
 
+def selection_report(report):
+    """Summarize the Rust selector/catalog receipt; never reimplement rig resolution here."""
+    if report.get("schema") != 1 or report.get("game_version") != "26.3":
+        raise ValueError("expected a 26.3 schema-1 Rust selection coverage receipt")
+    rows = report["rows"]
+    if not rows or len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("selection coverage rows must be nonempty and uniquely identified")
+    summary = {"rows": len(rows), "classes": {}, "classifications": {},
+               "catalog_failures": [], "selection_failures": [], "unaccepted": 0}
+    for row in rows:
+        for field, group in [("class", "classes"), ("classification", "classifications")]:
+            value = row[field]
+            summary[group][value] = summary[group].get(value, 0) + 1
+        if row["classification"] in ("missing", "rejected"):
+            summary["catalog_failures"].append(row["id"])
+        if row["class"] == "selection" and not row["coverage_pass"]:
+            summary["selection_failures"].append(row["id"])
+        if not row["accepted"]:
+            summary["unaccepted"] += 1
+    return {**report, "summary": summary}
+
+
 def main(argv):
+    if argv and argv[0] == "selection-report":
+        report = selection_report(load(argv[1]))
+        if "-o" in argv:
+            with open(argv[argv.index("-o") + 1], "w") as output:
+                json.dump(report, output, indent=2)
+                output.write("\n")
+        print(json.dumps(report["summary"], indent=2))
+        return int(bool(report["summary"]["catalog_failures"]
+                        or report["summary"]["selection_failures"]
+                        or report["summary"]["classifications"].get("non-rig-unverified")))
     if argv and argv[0] == "sheet":
         out = argv[argv.index("-o") + 1]
         files = [a for a in argv[1:] if a.endswith(".json")]

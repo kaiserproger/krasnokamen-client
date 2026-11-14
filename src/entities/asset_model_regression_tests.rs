@@ -98,16 +98,47 @@ fn glow_squid_tentacle_front_texels_face_the_ring_center() {
 }
 
 #[test]
-fn bed_legs_use_individual_unmirrored_texture_nets() {
-    for id in ["bed_head", "bed_foot"] {
-        let rig = rig(id);
-        for normal in [-Vec3::Z, Vec3::Z] {
-            let left = face(rig, "leg_left", normal);
-            let right = face(rig, "leg_right", normal);
-            assert!(texture_right(left).x * texture_right(right).x > 0., "{id}: wood grain reversed");
-            assert_ne!(uv_bounds(left), uv_bounds(right), "{id}: legs have separate atlas islands");
-        }
+fn bed_item_uses_resource_model_halves_without_a_legacy_entity_texture() {
+    use crate::protocol::content::{Content, TextureRegion};
+    let mut content = Content::test_cube();
+    content.item_names.insert(1, "minecraft:red_bed".into());
+    content.insert_test_resource("assets/minecraft/items/red_bed.json", br#"{
+        "model":{"type":"minecraft:composite","models":[
+            {"type":"minecraft:model","model":"minecraft:block/red_bed_head"},
+            {"type":"minecraft:model","model":"minecraft:block/red_bed_foot",
+             "transformation":{"translation":[0,0,1]}}
+        ]}
+    }"#);
+    // Independent cube fixtures exercise the supplied 26.3 resource graph's
+    // normal-model path, not the deleted 26.1.2 special/entity-texture path.
+    for (part, layer) in [("head", 5), ("foot", 6)] {
+        let texture = format!("minecraft:block/red_bed_{part}_up");
+        content.insert_test_texture(&texture, TextureRegion {
+            layer, uv: [0., 0., 1., 1.], width: 16, height: 16,
+        });
+        let model = serde_json::json!({"textures":{"bed":texture},"elements":[{
+            "from":[0,0,0],"to":[16,9,16],"faces":{
+                "up":{"texture":"#bed"},"down":{"texture":"#bed"},
+                "north":{"texture":"#bed"},"south":{"texture":"#bed"},
+                "east":{"texture":"#bed"},"west":{"texture":"#bed"}
+            }}]});
+        content.insert_test_resource(
+            &format!("assets/minecraft/models/block/red_bed_{part}.json"),
+            &serde_json::to_vec(&model).unwrap(),
+        );
     }
+    let mut items = crate::ui::items::ItemModels::new();
+    let mut stack = crate::inventory::Stack::default();
+    stack.id = 1;
+    stack.count = 1;
+    let model = items.model(&content, &stack, "gui").unwrap();
+    assert_eq!(model.quads.len(), 12);
+    for layer in [5, 6] {
+        assert_eq!(model.quads.iter().filter(|q| q.texture_layer == layer).count(), 6);
+    }
+    let (low, high) = model.quads.iter().flat_map(|q| q.positions).map(|p| p[2])
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+    assert_eq!((low, high), (0., 2.));
 }
 
 #[test]

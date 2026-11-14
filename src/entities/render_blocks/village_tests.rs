@@ -273,109 +273,6 @@ fn village_chest_lid_opens_around_hinge_while_body_stays_put() {
     assert!(moved, "open lid must move lid/lock vertices");
 }
 
-#[test]
-fn village_bed_foot_and_head_use_distinct_rigs_and_bed_texture() {
-    for (part, key, quads) in [
-        ("foot", "minecraft:bed_foot#main", 2usize),
-        ("head", "minecraft:bed_head#main", 3usize),
-    ] {
-        let content = village_content(
-            "minecraft:red_bed",
-            "minecraft:bed",
-            BTreeMap::from([
-                ("facing".into(), "north".into()),
-                ("part".into(), part.into()),
-            ]),
-            vec![("minecraft:entity/bed/red", 5)],
-        );
-        let rig = Rig {
-            bones: vec![bone(
-                "bed",
-                [0., 0., 0.],
-                (0..quads).map(|i| quad(i as f32, 0., 0., 1., 1.)).collect(),
-            )],
-            part_by_name: BTreeMap::new(),
-        };
-        let mut store = super::super::Store::new();
-        store.activate_models(Arc::new(models_with(vec![(key.into(), rig)])));
-        let position = [11, 64, -20];
-        place(&mut store, &content, position);
-        let (origin, camera) = camera_for(position);
-        let world = World::new(0, 256);
-        let mut geometry = DynamicGeometry::default();
-        let stats = render_static(
-            &mut store,
-            &content,
-            &world,
-            origin,
-            camera,
-            0.,
-            &mut geometry,
-        );
-        assert_eq!(stats.block_entities, 1, "bed {part} must render");
-        assert!(
-            stats.unrendered.is_empty(),
-            "bed {part}: {:?}",
-            stats.unrendered
-        );
-        // Distinct authored quad counts per half prove the foot/head rig key
-        // selection actually ran instead of rendering one shared quad.
-        assert_eq!(geometry.vertices.len(), quads * 4, "bed {part} quads");
-        assert_eq!(
-            geometry.indices[EntityMaterial::EntitySolid as usize].len(),
-            quads * 6,
-            "bed {part} indices"
-        );
-        assert_eq!(stats.vertices, quads * 4);
-        assert!(geometry.vertices.iter().all(|v| v.texture_layer == 5));
-        assert!(geometry.vertices.iter().all(|v| v.light == [7., 3.]));
-    }
-}
-
-#[test]
-fn village_bed_facing_rotates_rendered_geometry() {
-    let mut content = village_content(
-        "minecraft:red_bed",
-        "minecraft:bed",
-        BTreeMap::from([
-            ("facing".into(), "north".into()),
-            ("part".into(), "foot".into()),
-        ]),
-        vec![("minecraft:entity/bed/red", 5)],
-    );
-    let mut store = super::super::Store::new();
-    store.activate_models(Arc::new(models_with(vec![(
-        "minecraft:bed_foot#main".into(),
-        Rig {
-            bones: vec![bone("bed", [0., 0., 0.], vec![quad(0., 0., 0., 1., 1.)])],
-            part_by_name: BTreeMap::new(),
-        },
-    )])));
-    let position = [11, 64, -20];
-    place(&mut store, &content, position);
-    let (origin, camera) = camera_for(position);
-    let world = World::new(0, 256);
-    let mut north = DynamicGeometry::default();
-    render_static(&mut store, &content, &world, origin, camera, 0., &mut north);
-    assert_eq!(north.vertices.len(), 4);
-    content.insert_test_state_properties(
-        1,
-        BTreeMap::from([
-            ("facing".into(), "east".into()),
-            ("part".into(), "foot".into()),
-        ]),
-    );
-    let mut east = DynamicGeometry::default();
-    let stats = render_static(&mut store, &content, &world, origin, camera, 0., &mut east);
-    assert_eq!(stats.block_entities, 1);
-    assert!(stats.unrendered.is_empty());
-    assert_eq!(east.vertices.len(), 4);
-    let moved = east.vertices.iter().zip(&north.vertices).any(|(a, b)| {
-        let d: [f32; 3] = std::array::from_fn(|i| a.position[i] - b.position[i]);
-        d.iter().map(|v| v * v).sum::<f32>() > 1e-10
-    });
-    assert!(moved, "east-facing bed must sit rotated from north");
-}
 
 #[test]
 fn village_bell_body_renders_and_swing_moves_it() {
@@ -512,28 +409,6 @@ fn copper_statue_item_uses_complete_texture_resource_location() {
     }
 }
 
-#[test]
-fn bed_item_uses_distinct_head_and_foot_geometry() {
-    let models = models_with(Vec::new());
-    let stack = crate::inventory::Stack::default();
-    let mut content = Content::test_cube();
-    content.insert_test_texture("minecraft:entity/bed/red", test_region(5));
-    let render = |part| {
-        crate::entities::special_item(
-            &models,
-            &content,
-            &stack,
-            &serde_json::json!({"type":"minecraft:bed", "texture":"minecraft:red", "part":part}),
-        )
-        .unwrap()
-    };
-    let head = render("head");
-    let foot = render("foot");
-    assert_ne!(head.quads.iter().map(|q| q.positions).collect::<Vec<_>>(),
-               foot.quads.iter().map(|q| q.positions).collect::<Vec<_>>());
-    assert_ne!(head.quads.iter().map(|q| q.uv).collect::<Vec<_>>(),
-               foot.quads.iter().map(|q| q.uv).collect::<Vec<_>>());
-}
 
 #[test]
 fn trident_special_item_uses_entity_texture() {
@@ -634,7 +509,6 @@ fn unknown_special_rig_falls_back_to_placeholder_instead_of_failing() {
         "minecraft:conduit_shell#main",
         "minecraft:decorated_pot_base#main",
         "minecraft:standing_banner#main",
-        "minecraft:bed_head#main",
         "minecraft:skeleton_skull#main",
         "minecraft:wither_skeleton_skull#main",
         "minecraft:zombie_head#main",
