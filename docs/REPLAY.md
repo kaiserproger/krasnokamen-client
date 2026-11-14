@@ -255,6 +255,12 @@ and compare `cpu_state_sha256` in the sidecars. GPU RGBA hashes are recorded but
 are not promised identical across devices/drivers. Repeat on lavapipe under
 Xvfb when collecting that platform's acceptance receipt.
 
+Mobs a frame does not draw wait (`docs/ENTITY_PRESENTATION.md`). The CPU hash
+covers the age and pose of every received entity, so it depends on the camera
+path since the cut, not only on the recording and time. An identical shot (same
+camera, start and settings) stays deterministic. Hashes pinned before that rule
+must be re-pinned.
+
 For a sub-20-TPS battle take, author tick-second camera keys and export with
 `--timebase tick --render-distance 20 --motion-samples 1`. Run the two identical
 exports sequentially through the current graphical admission wrapper. Compare
@@ -304,7 +310,9 @@ Each frame also contains `presentation`:
   a GPU-visible count or proof that every recorded soldier is in camera range.
 - `crowd_fallback`: the existing CPU-path counts by crowd kind and reason.
 - `entity_extraction`: the session's existing presentation statistics, including
-  known/eligible/submitted entities and unrendered reasons.
+  known/eligible/submitted entities and unrendered reasons. `ticked` and
+  `waited` count the entity ticks that ran and waited since the session began
+  (`docs/ENTITY_PRESENTATION.md`).
 - `cpu_entity_extract_ms`: measured CPU extraction time accumulated across that
   frame's shutter samples and replay advancement. The first frame includes the
   single target refresh that ends its cut-boundary seek; this is not GPU time.

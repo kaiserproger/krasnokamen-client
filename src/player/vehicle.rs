@@ -1285,7 +1285,7 @@ pub(crate) fn passenger_position(
     if position.iter().any(|value| !value.is_finite()) || !yaw.is_finite() {
         return Err("invalid vehicle attachment transform".into());
     }
-    let entity = entities.resolve(handle)?;
+    let handle = entity.handle;
     let models = entities.models_ref().ok_or("entity_models_not_activated")?;
     let schema = models
         .schemas
@@ -1335,12 +1335,12 @@ pub(crate) fn passenger_position(
                 }),
             ];
         }
-        Some("net.minecraft.world.entity.animal.equine.AbstractHorse") => {
+        Seat::Horse => {
             let motion = motion.ok_or("source_horse_seat_motion_missing")?;
             point[1] += 0.15 * f64::from(motion.stand_old);
             point[2] += -0.7 * f64::from(motion.stand_old);
         }
-        Some("net.minecraft.world.entity.animal.camel.Camel") => {
+        Seat::Camel => {
             let pose_time = match entities.metadata(handle, "LAST_POSE_CHANGE_TICK")? {
                 Some(Metadata::Long(value)) => value
                     .parse::<i64>()
@@ -1363,7 +1363,7 @@ pub(crate) fn passenger_position(
                 }),
             ];
         }
-        Some("net.minecraft.world.entity.monster.Strider") => {
+        Seat::Strider => {
             let motion = motion.ok_or("source_strider_seat_motion_missing")?;
             let phase = motion.walk_position
                 * if boolean(entities, handle, "DATA_BABY_ID", false)? {
@@ -1375,14 +1375,12 @@ pub(crate) fn passenger_position(
                 0.12 * math::cos(f64::from(phase * 1.5)) * 2. * motion.walk_speed.min(0.25),
             );
         }
-        Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") => {
+        Seat::CubeMob => {
             let size = integer(entities, handle, "ID_SIZE", 1)?.max(1);
             point = [0., f64::from(height) - 0.015625 * f64::from(size), 0.];
         }
-        Some("net.minecraft.world.entity.Entity")
-        | Some("net.minecraft.world.entity.animal.equine.Llama")
-        | Some("net.minecraft.world.entity.vehicle.minecart.AbstractMinecart") => {}
-        _ => return Err(format!("unknown_source_mount_seat:{}", schema.class)),
+        Seat::Attachment => {}
+        Seat::Unknown => return Err(format!("unknown_source_mount_seat:{}", schema.class)),
     }
     let point = rotate_seat(point, yaw);
     let attachment = rotate_seat(rider_attachment, rider_yaw);

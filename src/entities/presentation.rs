@@ -55,6 +55,10 @@ pub struct PresentationStats {
     /// Entities of crowd kinds left on the CPU path, per kind and reason.
     pub crowd_fallback: BTreeMap<&'static str, BTreeMap<&'static str, usize>>,
     pub unrendered: BTreeMap<String, String>,
+    /// Entity ticks run and waited by `Store::tick_presentation` since the store began
+    /// (a waiting entity only interpolates; see `tick_presentation`).
+    pub ticked: u64,
+    pub waited: u64,
 }
 pub(super) fn value<'a>(models: &Models, e: &'a Entity, name: &str) -> Option<&'a Metadata> {
     models
@@ -715,6 +719,8 @@ pub fn append(
     let mut stats = PresentationStats {
         state_revision: store.revision.to_string(),
         known: store.len(),
+        ticked: store.ticked_ticks,
+        waited: store.waiting_ticks,
         ..Default::default()
     };
     store.frame_partial = partial.clamp(0., 1.);
@@ -757,6 +763,8 @@ pub fn append(
         if distance > f64::from(radius) * f64::from(radius) {
             continue;
         }
+        store.mark_shown(slot, tick, &models, content)?;
+        let entity = &store.slots[slot];
         stats.eligible += 1;
         // Text displays are world text drawn by the nameplate pass.
         if matches!(
@@ -1548,6 +1556,21 @@ pub(super) fn draw_entity(
                         out,
                     )?;
                 }
+            }
+            // minecraft.wiki: the charged aura stays visible on an invisible creeper.
+            if entity.type_name == "minecraft:creeper"
+                && let Err(reason) = super::creeper::append_charge(
+                    entity,
+                    models,
+                    content,
+                    (tick, partial, matrix),
+                    store.transforms,
+                    out,
+                )
+            {
+                stats
+                    .unrendered
+                    .insert(format!("{}:charge", entity.type_name), reason);
             }
             // minecraft.wiki: the charged aura stays visible on an invisible creeper.
             if entity.type_name == "minecraft:creeper"

@@ -6,6 +6,37 @@ use crate::{
     protocol::{Result, content::Content, world::World},
 };
 
+/// Where `Store::candidate_slots` found a candidate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Place {
+    /// A body in this spatial cell.
+    Bucket([i32; 2]),
+    /// A mounted body: its root vehicle's cell (`None`: a link of its chain is not received,
+    /// so every query considers it).
+    Seat(Option<[i32; 2]>),
+}
+
+/// The cells a candidate query visits (`Store::query_cells`): x and z within `low..=high`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Cells {
+    pub bucket: [[i32; 2]; 2],
+    pub seat: [[i32; 2]; 2],
+}
+
+impl Place {
+    /// Whether a query visiting `cells` yields an entity found here.
+    pub(crate) fn within(self, cells: &Cells) -> bool {
+        let inside = |cell: [i32; 2], [low, high]: [[i32; 2]; 2]| {
+            (low[0]..=high[0]).contains(&cell[0]) && (low[1]..=high[1]).contains(&cell[1])
+        };
+        match self {
+            Self::Bucket(cell) => inside(cell, cells.bucket),
+            Self::Seat(Some(cell)) => inside(cell, cells.seat),
+            Self::Seat(None) => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct EntityHit {
     pub handle: Handle,
@@ -36,8 +67,18 @@ pub(crate) struct AnimationState {
     pub combat: super::animation::Selection,
     /// Frame tick at which the entity was last inside the camera's presentation box.
     pub shown_tick: u64,
-    /// Ticks this mob waited outside the box (see `tick_presentation`).
+    /// Ticks this mob waited undrawn since its last tick or absorb (`tick_presentation`,
+    /// `Store::absorb_wait`).
     pub waited: u32,
+    /// `waited` when the current interpolation began (`Entity::move_to`): the received body
+    /// interpolates through the ticks waited since then only.
+    pub lerp_start_waited: u32,
+}
+impl AnimationState {
+    /// Ticks the current interpolation advanced while this mob waited.
+    pub(crate) fn lerp_waited(&self) -> u32 {
+        self.waited.saturating_sub(self.lerp_start_waited)
+    }
 }
 impl Default for AnimationState {
     fn default() -> Self {
@@ -60,6 +101,7 @@ impl Default for AnimationState {
             combat: super::animation::Selection::default(),
             shown_tick: 0,
             waited: 0,
+            lerp_start_waited: 0,
         }
     }
 }
@@ -88,6 +130,10 @@ pub(crate) fn may_glance(models: &Models, e: &Entity) -> bool {
         && super::presentation::int_at(e, ids.mob_flags).unwrap_or(0) & 1 == 0
         && e.type_name != "minecraft:armor_stand"
 }
+/// Mobs this close to the local body (`Store::set_look_target`) never wait, whatever the camera
+/// draws: the local player can reach, push or collide with them (vanilla entity reach is at most
+/// 6 blocks), and their tick state feeds that collision, hit and interaction prediction.
+const BODY_TICK_RADIUS: f64 = 16.;
 /// Whether `e`'s presentation still advances on its own after this tick.
 fn stays_active(e: &Entity) -> bool {
     e.physical.lerp_progress < e.physical.lerp_duration
@@ -251,18 +297,15 @@ impl Store {
         self.candidate_slots(area)
             .map(|(_, slot)| &self.slots[slot])
     }
-    /// `candidates` as slots, each with the spatial cell it was found in (`None`: a mounted
-    /// body, considered wherever it is).
-    pub(crate) fn candidate_slots(
-        &self,
-        area: Bounds,
-    ) -> impl Iterator<Item = (Option<[i32; 2]>, usize)> {
-        let (low, high) = self.query_cells(area);
+    /// `candidates` as slots, each with where it was found.
+    pub(crate) fn candidate_slots(&self, area: Bounds) -> impl Iterator<Item = (Place, usize)> {
+        let cells = self.query_cells(area);
+        let [low, high] = cells.bucket;
         self.spatial
             .range([low[0], i32::MIN]..=[high[0], i32::MAX])
             .filter(move |(cell, _)| cell[1] >= low[1] && cell[1] <= high[1])
             .flat_map(|(cell, ids)| ids.iter().map(move |id| (*cell, *id)))
-            .filter_map(|(cell, id)| Some((Some(cell), *self.ids.get(&id)?)))
+            .filter_map(|(cell, id)| Some((Place::Bucket(cell), *self.ids.get(&id)?)))
             .filter(|(_, slot)| self.slots[*slot].vehicle.is_none())
             // Mounted bodies may be received far from their seat. Their raw
             // body bucket cannot decide whether the presentation exists.
@@ -278,13 +321,35 @@ impl Store {
                     .is_some_and(|s| s.discarded || s.special.discarded)
             })
     }
-    /// The spatial cells `candidates(area)` visits: x and z each within `low..=high`.
-    pub(crate) fn query_cells(&self, area: Bounds) -> ([i32; 2], [i32; 2]) {
+    /// The spatial cells `candidates(area)` visits for bucketed entities, and for the root
+    /// vehicles of mounted bodies: twice the padding, since a seat lies within its vehicle's
+    /// box and the rider's box reaches past it (both within one padding).
+    pub(crate) fn query_cells(&self, area: Bounds) -> Cells {
         let padding = self.query_padding();
-        (
-            super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
-            super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
-        )
+        let range = |padding: f64| {
+            [
+                super::cell([area.min[0] - padding, 0., area.min[2] - padding]),
+                super::cell([area.max[0] + padding, 0., area.max[2] + padding]),
+            ]
+        };
+        Cells {
+            bucket: range(padding),
+            seat: range(2. * padding),
+        }
+    }
+    /// Spatial cell of the root of `vehicle`'s chain (its raw received position, as bucketed);
+    /// `None` when a link is not received.
+    fn root_cell(&self, mut vehicle: Handle) -> Option<[i32; 2]> {
+        for _ in 0..self.ids.len().min(1024) + 1 {
+            let entity = self
+                .get(vehicle.network_id)
+                .filter(|entity| entity.handle == vehicle)?;
+            match entity.vehicle {
+                Some(next) => vehicle = next,
+                None => return Some(super::cell(entity.position)),
+            }
+        }
+        None
     }
     fn root_vehicle(&self, mut id: i32) -> Result<i32> {
         for _ in 0..self.ids.len().min(1024) + 1 {
@@ -294,6 +359,17 @@ impl Store {
             id = parent.network_id;
         }
         Err("entity passenger cycle".into())
+    }
+    /// Whether the latest frame drew a body of the chain from `id` up. `mark_shown` marks a
+    /// drawn chain whole; this also covers one formed after that frame (a mount).
+    fn chain_shown(&self, id: i32, depth: usize) -> bool {
+        self.get(id).is_some_and(|e| {
+            e.physical.shown_tick == self.frame_tick
+                || (depth < 1024
+                    && e.passenger_ids
+                        .iter()
+                        .any(|&p| self.chain_shown(p, depth + 1)))
+        })
     }
     fn pickable(&self, models: &Models, e: &Entity) -> Result<bool> {
         Ok(match owner(models, e, "isPickable") {
@@ -734,9 +810,11 @@ impl Store {
     /// squashing after a landing, and the strongest glance.
     pub fn motion_observation(&self) -> serde_json::Value {
         let (tick, partial) = (self.frame_tick, self.frame_partial);
-        let (mut glancing, mut squashing) = (0u32, 0u32);
+        let (mut glancing, mut squashing, mut waiting) = (0u32, 0u32, 0u32);
         let mut best: Option<(f32, &Entity, f32)> = None;
         for e in &self.slots {
+            // A waiting mob's motion holds where it stopped (`tick_presentation`).
+            waiting += u32::from(e.physical.waited > 0);
             let (yaw, _, weight) = e.physical.motion.look(partial);
             if weight > 0.05 {
                 glancing += 1;
@@ -749,7 +827,7 @@ impl Store {
             }
         }
         serde_json::json!({
-            "glancing": glancing, "squashing": squashing,
+            "glancing": glancing, "squashing": squashing, "waiting": waiting,
             "strongest_glance": best.map(|(weight, e, yaw)| serde_json::json!({
                 "entity_id": e.handle.network_id, "entity_type": e.type_name,
                 "weight": weight, "look_yaw": yaw,
@@ -775,13 +853,27 @@ impl Store {
         let Some(models) = self.models.clone() else {
             return Ok(());
         };
+        // No metadata or attribute that sizes an entity changes while entities tick:
+        // `Models::sized` memoizes.
+        let _sized = super::resources::SizedScope::enter();
         let mut active = std::mem::take(&mut self.physical_active);
         let look_target = self.look_target;
-        // While frames draw entities (one did since the last tick), a mob outside the camera's
-        // presentation box waits: its animation resumes where it stopped (no jump) and its
-        // interpolation catches up on entry. Without frames (headless, seek warm-up, several
-        // ticks in one frame) every entity ticks.
-        let presenting = !frozen && self.frame_tick + 1 >= tick;
+        // While frames draw entities, a mob the latest frame did not draw (outside the camera's
+        // presentation box, or inside it past its vanilla draw distance; never by frustum or
+        // occlusion) waits, unless it is near the local body (`BODY_TICK_RADIUS`): its received
+        // body still interpolates (`Entity::presented_transform` counts waited ticks), and it
+        // absorbs the wait when it is next drawn or ticks (`Store::absorb_wait`;
+        // docs/ENTITY_PRESENTATION.md). Frames count as drawing up to `MAX_TICKS_WITHOUT_FRAME`
+        // ticks after the latest one, so the rule holds at any frame rate the owner draws; past
+        // that (headless, after a seek: `frame_tick` 0, a stalled frame owner) every entity ticks.
+        let presenting = !frozen
+            && self.frame_tick != 0
+            && tick.saturating_sub(self.frame_tick) <= super::MAX_TICKS_WITHOUT_FRAME;
+        // A passenger chain waits or ticks as one: it ticks when the latest frame drew any of its
+        // bodies (`chain_shown`); the local player's never waits.
+        let local_root = self
+            .local_entity_id
+            .and_then(|id| self.root_vehicle(id).ok());
         // Entities whose presentation stops moving leave `physical_active` after the loop.
         let mut idle = Vec::new();
         for id in &active {
@@ -792,7 +884,7 @@ impl Store {
             };
             let e = &self.slots[slot];
             if presenting
-                && e.physical.shown_tick + 1 < tick
+                && e.physical.shown_tick != self.frame_tick
                 && self.local_entity_id != Some(*id)
                 && e.source
                     .as_ref()
@@ -800,9 +892,33 @@ impl Store {
                 && e.passenger_ids.is_empty()
                 && e.vehicle.is_none()
                 && e.physical.dragon.is_none()
+                && look_target.is_none_or(|eye| {
+                    e.position
+                        .iter()
+                        .zip(eye)
+                        .map(|(p, q)| (p - f64::from(q)).powi(2))
+                        .sum::<f64>()
+                        > BODY_TICK_RADIUS * BODY_TICK_RADIUS
+                })
+                && ((e.passenger_ids.is_empty() && e.vehicle.is_none())
+                    || self
+                        .root_vehicle(*id)
+                        .is_ok_and(|root| local_root != Some(root) && !self.chain_shown(root, 0)))
             {
                 let e = &mut self.slots[slot];
                 e.physical.waited = e.physical.waited.saturating_add(1);
+                // Its interpolation ended: release its motion span now, as a tick would, so it
+                // does not widen every spatial query while it waits.
+                let span = if u64::from(e.physical.lerp_progress)
+                    + u64::from(e.physical.lerp_waited())
+                    >= u64::from(e.physical.lerp_duration)
+                {
+                    std::mem::take(&mut e.physical.lerp_span)
+                } else {
+                    0
+                };
+                self.remove_motion_span(span);
+                self.waiting_ticks += 1;
                 continue;
             }
             let paused = frozen
@@ -840,7 +956,6 @@ impl Store {
                 .physical
                 .lerp_progress
                 .saturating_add(1)
-                .saturating_add(waited)
                 .min(e.physical.lerp_duration.saturating_add(1));
             e.physical.seat_game_time = game_time;
             if matches!(
@@ -980,6 +1095,80 @@ impl Store {
         entity.physical.lerp_duration = 1;
         entity.physical.lerp_phase = 0.;
         Ok(())
+    }
+    /// Marks the body in `slot` drawn by the frame at `tick`, with every body of its passenger
+    /// chain: a rider is drawn where its vehicle's interpolation puts it, so a chain ticks or
+    /// waits as one (`tick_presentation`). A body that waited absorbs the wait before it is
+    /// drawn (`absorb_wait`).
+    pub(crate) fn mark_shown(
+        &mut self,
+        slot: usize,
+        tick: u64,
+        models: &Models,
+        content: &Content,
+    ) -> Result<()> {
+        let entity = &self.slots[slot];
+        let own = entity.handle.network_id;
+        if entity.vehicle.is_none() && entity.passenger_ids.is_empty() {
+            self.slots[slot].physical.shown_tick = tick;
+            return self.absorb_wait(slot, models, content);
+        }
+        let root = self.root_vehicle(own).unwrap_or(own);
+        // This frame already drew the chain through another of its bodies: it is marked whole.
+        if entity.physical.shown_tick == tick
+            && self
+                .get(root)
+                .is_some_and(|e| e.physical.shown_tick == tick)
+        {
+            return Ok(());
+        }
+        self.slots[slot].physical.shown_tick = tick;
+        self.absorb_wait(slot, models, content)?;
+        let mut pending = vec![root];
+        for _ in 0..self.ids.len().min(1024) + 1 {
+            let Some(id) = pending.pop() else { break };
+            let Some(&slot) = self.ids.get(&id) else {
+                continue;
+            };
+            self.slots[slot].physical.shown_tick = tick;
+            self.absorb_wait(slot, models, content)?;
+            pending.extend_from_slice(&self.slots[slot].passenger_ids);
+        }
+        Ok(())
+    }
+    /// The absorb-wait contract (docs/ENTITY_PRESENTATION.md): the ticks the mob in `slot`
+    /// waited (`tick_presentation`) count as elapsed, applied in one step when it is next drawn
+    /// or ticks, whichever comes first. Closed-form in elapsed ticks: received-body
+    /// interpolation, the peek and stand steps toward the current targets (they converge
+    /// within 20 and 6 steps), and the Source age, item use and countdowns
+    /// (`source_state::absorb_wait`). Walk, body and head smoothing, wings, seat motion and
+    /// `EntityMotion` are not: they resume where they stopped and converge over the ticks
+    /// that follow.
+    fn absorb_wait(&mut self, slot: usize, models: &Models, content: &Content) -> Result<()> {
+        let e = &mut self.slots[slot];
+        if e.physical.waited == 0 {
+            return Ok(());
+        }
+        let lerp_waited = e.physical.lerp_waited();
+        let waited = std::mem::take(&mut e.physical.waited);
+        e.physical.lerp_start_waited = 0;
+        e.physical.lerp_progress = e
+            .physical
+            .lerp_progress
+            .saturating_add(u8::try_from(lerp_waited).unwrap_or(u8::MAX))
+            .min(e.physical.lerp_duration.saturating_add(1));
+        let ids = models.ids(e);
+        let peek = super::presentation::int_at(e, ids.peek).unwrap_or(0) as f32 * 0.01;
+        let standing = super::presentation::flag_at(e, ids.standing);
+        for _ in 0..waited.min(20) {
+            e.physical.peek = approach(e.physical.peek, peek, 0.05);
+        }
+        let steps = waited.min(6) as f32;
+        e.physical.bear_stand =
+            (e.physical.bear_stand + if standing { steps } else { -steps }).clamp(0., 6.);
+        e.physical.peek_old = e.physical.peek;
+        e.physical.bear_stand_old = e.physical.bear_stand;
+        super::source_state::absorb_wait(e, models, content, waited)
     }
     fn root_has_player(&self, id: i32, models: &Models, depth: usize) -> Result<bool> {
         if depth > 1024 {

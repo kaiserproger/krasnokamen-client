@@ -1,8 +1,9 @@
 //! Vanilla 26.3 entity draw distance: the gate `EntityRenderer.shouldRender` applies before
 //! frustum culling (`Entity.shouldRender(camX, camY, camZ)` → `shouldRenderAtSqrDistance`
-//! and its overrides). An entity it rejects is not drawn: no body, shadow or nameplate. It
-//! still ticks, as the vanilla client ticks every entity. Bytecode:
-//! receipts/BvItemCache/javap-26.3-entity-distance.txt.
+//! and its overrides). An entity it rejects is not drawn: no body, shadow or nameplate. The
+//! vanilla client still ticks it; here, while frames draw entities, a mob it rejects waits like
+//! one outside the frame's radius and catches up when drawn again (`tick_presentation`,
+//! docs/ENTITY_PRESENTATION.md). Bytecode: receipts/BvItemCache/javap-26.3-entity-distance.txt.
 
 use super::{Entity, metadata::Metadata, resources::Models};
 

@@ -380,6 +380,10 @@ Native capture uses the same textured indexed depth target, grass biome tint/alp
 Capture metadata's `gait_frame` samples living-entity animation inputs at
 scene extraction with the same partial tick as the captured frame. It lists
 received entities, not proof that each entity produced visible pixels.
+Each living row's `waited` counts the ticks that mob has waited undrawn
+(`docs/ENTITY_PRESENTATION.md`). Its walk values hold where they stopped until
+it is drawn or ticks again. Observation `player.entity_motion` counts `waiting`
+mobs, and its glance and squash counts include their held values.
 
 `minecraft_press_inputs` accepts `hold: true` or `hold: false` with `keys` and
 `ticks: 1` to press or release controller-owned inputs across MCP calls; controller

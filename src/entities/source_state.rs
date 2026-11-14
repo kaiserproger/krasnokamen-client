@@ -26,6 +26,10 @@ pub(crate) struct SourceState {
     pub display: Option<Box<render_special::DisplaySnapshot>>,
     pub display_revision: u64,
     previous_yaw: f32,
+    /// The block cells (`x, y, z` low..high) of the last water probe that found every cell
+    /// received and none of them water, and the world's `block_revision` then: while both
+    /// stay the same the probe answers dry without reading the blocks again.
+    dry: Option<([[i32; 3]; 2], u64)>,
 }
 impl SourceState {
     pub fn new(entity: &Entity, models: &Models) -> Result<Self> {
@@ -68,6 +72,7 @@ impl SourceState {
             display: None,
             display_revision: u64::MAX,
             previous_yaw: entity.transform.yaw,
+            dry: None,
         })
     }
 }
@@ -209,35 +214,116 @@ pub(crate) fn on_metadata(models: &Models, entity: &mut Entity, changed: &[bool;
     let Some(mut source) = entity.source.take() else {
         return;
     };
+    // A waiting entity's received data arrives at the age a ticked one would have
+    // (`absorb_wait` adds the waited ticks at its next tick).
+    let age = source.age.wrapping_add(entity.physical.waited as i32);
     if let Some(living) = source.living.as_mut() {
-        living.on_metadata(models, entity, changed, source.age);
+        living.on_metadata(models, entity, changed, age);
     }
-    source
-        .special
-        .on_metadata(models, entity, changed, source.age);
+    source.special.on_metadata(models, entity, changed, age);
     entity.source = Some(source);
 }
+/// The Source part of the absorb-wait contract (`Store::absorb_wait`, which also steps the
+/// interpolation, peek and stand): the ticks `entity` waited count as elapsed. Its age, its
+/// active item use (resolved as its next tick would, `prepare_item_use`) and the countdowns its
+/// ticks run down (`EntityUseState` timers, the stand counter) catch up in one step, so
+/// age-stamped timers (item use, timelines) and interaction predictions read what a mob ticked
+/// all along has.
+pub(crate) fn absorb_wait(
+    entity: &mut Entity,
+    models: &Models,
+    content: &Content,
+    waited: u32,
+) -> Result<()> {
+    if waited == 0 {
+        return Ok(());
+    }
+    let Some(mut source) = entity.source.take() else {
+        return Ok(());
+    };
+    // `tick` ages a discarded entity too, and runs nothing else for it; nor for one whose
+    // blocks were not received at its latest tick (`pending_world`).
+    source.age = source.age.wrapping_add(waited as i32);
+    let result = (|| {
+        if source.discarded || source.special.discarded || source.pending_world {
+            return Ok(());
+        }
+        if let Some(living) = source.living.as_mut() {
+            living.prepare_item_use(models, entity, content, source.age)?;
+        }
+        let steps = i32::try_from(waited).unwrap_or(i32::MAX);
+        let state = &mut source.use_state;
+        for timer in [
+            &mut state.age_lock_particle_timer,
+            &mut state.forced_age_timer,
+            &mut state.in_love,
+        ] {
+            if *timer > 0 {
+                *timer = timer.saturating_sub(steps).max(0);
+            }
+        }
+        if state.stand_counter > 0 {
+            if state.stand_counter > steps {
+                state.stand_counter -= steps;
+            } else {
+                state.stand_counter = 0;
+                clear_standing(models, entity);
+            }
+        }
+        Ok(())
+    })();
+    entity.source = Some(source);
+    result
+}
+/// The stand counter ran out: the predicted flags drop the standing bit (`tick`, `absorb_wait`).
+fn clear_standing(models: &Models, entity: &mut Entity) {
+    if let Some(index) = models.accessor(&entity.type_name, "DATA_ID_FLAGS") {
+        let flags = p::number(models, entity, "DATA_ID_FLAGS").unwrap_or(0) & !32;
+        entity
+            .predicted_metadata
+            .insert(index, Metadata::Byte(flags as i8));
+    }
+}
+/// The block cells `water_contact` reads for `bounds`: `x, y, z` from `low` up to, not
+/// including, `high`.
+fn water_cells(bounds: Bounds, top_only: bool) -> [[i32; 3]; 2] {
+    let (min_y, max_y) = if top_only {
+        (
+            bounds.max[1].floor() as i32,
+            (bounds.max[1] + 0.001).ceil() as i32,
+        )
+    } else {
+        (bounds.min[1].floor() as i32, bounds.max[1].ceil() as i32)
+    };
+    [
+        [
+            bounds.min[0].floor() as i32,
+            min_y,
+            bounds.min[2].floor() as i32,
+        ],
+        [
+            bounds.max[0].ceil() as i32,
+            max_y,
+            bounds.max[2].ceil() as i32,
+        ],
+    ]
+}
+/// Whether water touches `bounds` (its top only, for a boat); `None` while a read block is not
+/// received. `dry` is set when every read block was received and none was water.
 fn water_contact(
     world: &World,
     content: &Content,
     bounds: Bounds,
     top_only: bool,
+    dry: &mut bool,
 ) -> Result<Option<bool>> {
     let top = bounds.max[1] + 0.001;
-    let min_y = if top_only {
-        bounds.max[1].floor() as i32
-    } else {
-        bounds.min[1].floor() as i32
-    };
-    let max_y = if top_only {
-        top.ceil() as i32
-    } else {
-        bounds.max[1].ceil() as i32
-    };
+    let [low, high] = water_cells(bounds, top_only);
     let mut contact = false;
-    for x in bounds.min[0].floor() as i32..bounds.max[0].ceil() as i32 {
-        for y in min_y..max_y {
-            for z in bounds.min[2].floor() as i32..bounds.max[2].ceil() as i32 {
+    let mut water = false;
+    for x in low[0]..high[0] {
+        for y in low[1]..high[1] {
+            for z in low[2]..high[2] {
                 let position = [x, y, z];
                 let Some(state) = world.block(position) else {
                     return Ok(None);
@@ -249,6 +335,7 @@ fn water_contact(
                 else {
                     continue;
                 };
+                water = true;
                 if world.block([x, y + 1, z]).is_none() {
                     return Ok(None);
                 }
@@ -261,6 +348,7 @@ fn water_contact(
             }
         }
     }
+    *dry = !water;
     Ok(Some(contact))
 }
 /// Whether received block collision lies directly under the feet (`bounds` is the
@@ -324,12 +412,20 @@ pub(crate) fn tick(
         }
         let bounds = super::physical::bounds(models, entity, 0, 0.)?.deflated(0.001);
         let in_water = if source.living.is_some() {
-            water_contact(world, content, bounds, false)?
+            let key = (water_cells(bounds, false), world.block_revision());
+            if source.dry == Some(key) {
+                Some(false)
+            } else {
+                let mut dry = false;
+                let contact = water_contact(world, content, bounds, false, &mut dry)?;
+                source.dry = dry.then_some(key);
+                contact
+            }
         } else {
             Some(false)
         };
         let under_water = match boat_bounds {
-            Some(bounds) => water_contact(world, content, bounds, true)?,
+            Some(bounds) => water_contact(world, content, bounds, true, &mut false)?,
             None => Some(false),
         };
         source.pending_world = in_water.is_none() || under_water.is_none();
@@ -356,12 +452,7 @@ pub(crate) fn tick(
         if state.stand_counter > 0 {
             state.stand_counter -= 1;
             if state.stand_counter == 0 {
-                if let Some(index) = models.accessor(&entity.type_name, "DATA_ID_FLAGS") {
-                    let flags = p::number(models, entity, "DATA_ID_FLAGS").unwrap_or(0) & !32;
-                    entity
-                        .predicted_metadata
-                        .insert(index, Metadata::Byte(flags as i8));
-                }
+                clear_standing(models, entity);
             }
         }
         // Furnace fuel, tadpole age and allay duplication cooldown only advance on the server.

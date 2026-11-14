@@ -3,6 +3,7 @@ pub(crate) mod clock;
 pub mod format;
 pub(crate) mod record;
 mod roster;
+pub(crate) mod scan;
 #[cfg(test)]
 use crate::protocol::packet_ids::{configuration, login, play};
 use crate::{protocol::network::Phase, session::Session};

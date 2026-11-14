@@ -352,7 +352,7 @@ mod tests {
             attribute_ids: BTreeMap::new(),
             digest: String::new(),
             armor_models: BTreeMap::new(),
-            motion: BTreeMap::new(),
+            motion: Default::default(),
         };
         let transform = Transform {
             position: [11., 20., -4.],
@@ -403,6 +403,7 @@ mod tests {
             crowd: None,
             clock: None,
             kind_slot: Default::default(),
+            sized_memo: Default::default(),
         };
         (Store::default(), models, entity)
     }

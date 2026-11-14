@@ -130,8 +130,35 @@ pub struct Ids {
     pub boat: bool,
     /// Vanilla draw-distance rule of the kind (`view_range::within`).
     pub view_rule: super::view_range::Rule,
-    /// `getPassengerAttachmentPoint` is AbstractHorse's or Strider's (`SeatMotion`).
-    pub seat_motion: bool,
+    /// Owner of `getPassengerAttachmentPoint` (`player::vehicle::passenger_position`).
+    pub seat: Seat,
+}
+
+/// Owner of a kind's `getPassengerAttachmentPoint`, which places its passengers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Seat {
+    /// `AbstractBoat`; chest boats and rafts seat differently.
+    Boat {
+        chest: bool,
+        raft: bool,
+    },
+    /// `AbstractHorse` (`SeatMotion`).
+    Horse,
+    Camel,
+    /// `Strider` (`SeatMotion`).
+    Strider,
+    CubeMob,
+    /// `Entity`, `Llama`, `AbstractMinecart`: the received `PASSENGER` attachment.
+    Attachment,
+    /// No source seat rule.
+    Unknown,
+}
+
+impl Seat {
+    /// The kind tracks `SeatMotion` (horse stand, strider walk) for its passengers.
+    pub fn moves(self) -> bool {
+        matches!(self, Self::Horse | Self::Strider)
+    }
 }
 
 impl Ids {
@@ -155,7 +182,7 @@ impl Ids {
         charging: [None; 2],
         last_pose_change: None,
         boat: false,
-        seat_motion: false,
+        seat: Seat::Unknown,
         view_rule: super::view_range::Rule::Entity,
     };
     fn of(schema: &EntitySchema) -> Self {
@@ -234,6 +261,9 @@ pub struct Sizing {
     armor_stand: bool,
     /// The kind has a `POSES` table (avatars): dimensions by pose name.
     avatar: bool,
+    /// Per `DATA_POSE` id (`Models::poses`, `None` for an id it lacks): what `sized` asks of
+    /// the pose's name, resolved once instead of comparing names per entity.
+    poses: Vec<Option<PoseRule>>,
     goat: bool,
     /// A sniffer's `State` ids named `DIGGING` (empty for every other kind).
     digging_states: Vec<i32>,
@@ -244,9 +274,18 @@ pub struct Sizing {
     sitting: Option<Dimensions>,
     long_jumping: Option<Dimensions>,
     digging: Option<Dimensions>,
-    standing: Option<Dimensions>,
     /// The kind's box rule in `physical::bounds_at`.
     shape: Shape,
+}
+
+/// One pose of a kind (`Sizing::poses`).
+#[derive(Debug)]
+struct PoseRule {
+    sleeping: bool,
+    sitting: bool,
+    long_jumping: bool,
+    /// An avatar's dimensions in this pose: its `POSES` entry, else `STANDING_DIMENSIONS`.
+    avatar: Option<Dimensions>,
 }
 
 /// How `physical::bounds_at` derives a kind's box from its dimensions.
@@ -367,7 +406,6 @@ impl Sizing {
             sitting: constant("SITTING_DIMENSIONS"),
             long_jumping: constant("LONG_JUMPING_DIMENSIONS"),
             digging: constant("DIGGING_DIMENSIONS"),
-            standing: constant("STANDING_DIMENSIONS"),
             shape: match kind {
                 "minecraft:item_frame" | "minecraft:glow_item_frame" => Shape::ItemFrame,
                 "minecraft:interaction" => Shape::Interaction,
@@ -539,7 +577,8 @@ pub struct Models {
     pub attribute_ids: BTreeMap<u32, String>,
     pub digest: String,
     pub(crate) armor_models: BTreeMap<String, ArmorModels>,
-    pub(crate) motion: BTreeMap<String, MotionFacts>,
+    /// Hashed by kind name: looked up per ticked living entity.
+    pub(crate) motion: NameMap<MotionFacts>,
 }
 /// Renderer rig keys of the per-slot armor shells of a humanoid family.
 #[derive(Deserialize, Debug)]
@@ -614,7 +653,7 @@ impl Models {
             attributes: doc.attributes,
             digest: Self::digest(),
             armor_models: BTreeMap::new(),
-            motion: doc.motion,
+            motion: doc.motion.into_iter().collect(),
         })
     }
     pub fn load(content: &Content) -> Result<Self> {
@@ -650,7 +689,7 @@ impl Models {
             attributes: doc.attributes,
             digest: Self::digest(),
             armor_models: doc.armor_models,
-            motion: doc.motion,
+            motion: doc.motion.into_iter().collect(),
         })
     }
     /// Rig key of one armor slot shell (`head`/`chest`/`legs`/`feet`) of a humanoid family.
@@ -732,7 +771,9 @@ impl Models {
         self.sized(entity)
             .map(|(dimensions, scale, _)| (dimensions, scale))
     }
-    /// `dimensions` and the kind's box rule (`physical::bounds_at`).
+    /// `dimensions` and the kind's box rule (`physical::bounds_at`). Inside a `SizedScope`
+    /// (one frame's or tick's presentation, where metadata and attributes do not change) an
+    /// entity's repeated calls are answered from its memo of that scope.
     pub(crate) fn sized<'a>(
         &'a self,
         entity: &super::Entity,
@@ -753,9 +794,11 @@ impl Models {
                 .and_then(super::Metadata::boolean)
                 .unwrap_or(false)
         };
-        let pose = self
+        let pose_id = number(sizing.pose).unwrap_or(0) as u8;
+        let pose = sizing
             .poses
-            .get(&(number(sizing.pose).unwrap_or(0) as u8))
+            .get(usize::from(pose_id))
+            .and_then(Option::as_ref)
             .ok_or("unknown entity pose")?;
         let living = sizing.living;
         let mut attribute_scale = if living {
@@ -802,17 +845,9 @@ impl Models {
                 shape,
             ));
         }
-        if sizing.avatar
-            && let Some(DimensionConstant::Poses(poses)) = schema.dimension_constants.get("POSES")
-        {
-            return Ok((
-                poses
-                    .get(pose)
-                    .or(sizing.standing.as_ref())
-                    .ok_or("source avatar dimensions missing")?,
-                attribute_scale,
-                shape,
-            ));
+        if sizing.avatar {
+            present(&pose.avatar, "source avatar dimensions missing")?;
+            return Ok((SizedChoice::Avatar(pose_id), attribute_scale));
         }
         let baby = boolean(sizing.baby);
         let age_scale = if baby { sizing.baby_scale } else { 1. };
@@ -858,7 +893,7 @@ impl Models {
                 shape,
             ));
         }
-        if let Some(baby_dimensions) = &sizing.baby_dimensions {
+        if sizing.baby_dimensions.is_some() {
             return Ok((
                 if baby {
                     baby_dimensions
@@ -866,12 +901,11 @@ impl Models {
                     &schema.dimensions
                 },
                 attribute_scale,
-                shape,
             ));
         }
         let owner = &sizing.owner;
         if *owner == SizeOwner::ChestedHorse && !baby {
-            return Ok((&schema.dimensions, attribute_scale, shape));
+            return Ok((SizedChoice::Schema, attribute_scale));
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
@@ -898,14 +932,78 @@ impl Models {
             SizeOwner::Other | SizeOwner::ChestedHorse => 1.,
         };
         Ok((
-            &schema.dimensions,
+            SizedChoice::Schema,
             if schema.dimensions.fixed {
                 1.
             } else {
                 age_scale * attribute_scale * family_scale
             },
-            shape,
         ))
+    }
+}
+
+thread_local! {
+    /// Nonzero while a `SizedScope` is alive on this thread: its id.
+    static SIZED_SCOPE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+static NEXT_SIZED_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// One frame's or tick's presentation, during which no metadata or attribute changes: while it
+/// is alive `Models::sized` memoizes each entity's answer (`Entity::sized_memo`).
+pub(crate) struct SizedScope(u64);
+impl SizedScope {
+    pub(crate) fn enter() -> Self {
+        let id = NEXT_SIZED_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self(SIZED_SCOPE.with(|scope| scope.replace(id)))
+    }
+}
+impl Drop for SizedScope {
+    fn drop(&mut self) {
+        SIZED_SCOPE.with(|scope| scope.set(self.0));
+    }
+}
+
+/// An entity's `Models::sized` answer within one `SizedScope` (`scope` 0: none).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SizedMemo {
+    scope: u64,
+    choice: SizedChoice,
+    scale: f32,
+}
+
+/// Which of its kind's dimensions `Models::sized` chose (each present when chosen).
+#[derive(Clone, Copy, Debug, Default)]
+enum SizedChoice {
+    #[default]
+    Schema,
+    Sleeping,
+    Marker,
+    Baby,
+    Avatar(u8),
+    Sitting,
+    LongJumping,
+    Digging,
+}
+impl SizedChoice {
+    fn of<'a>(self, schema: &'a EntitySchema, sizing: &'a Sizing) -> &'a Dimensions {
+        let present = |dimensions: &'a Option<Dimensions>| {
+            dimensions.as_ref().expect("chosen dimensions are present")
+        };
+        match self {
+            Self::Schema => &schema.dimensions,
+            Self::Sleeping => present(&sizing.sleeping),
+            Self::Marker => present(&sizing.marker),
+            Self::Baby => present(&sizing.baby_dimensions),
+            Self::Avatar(pose) => present(
+                &sizing.poses[usize::from(pose)]
+                    .as_ref()
+                    .expect("chosen pose is known")
+                    .avatar,
+            ),
+            Self::Sitting => present(&sizing.sitting),
+            Self::LongJumping => present(&sizing.long_jumping),
+            Self::Digging => present(&sizing.digging),
+        }
     }
 }
 pub(super) fn part_lookup(bones: &[Bone]) -> BTreeMap<String, usize> {
@@ -1918,6 +2016,55 @@ mod tests {
         assert_eq!((b.min[1], b.max[1]), (10., 10. + f64::from(1.95f32)));
     }
 
+    /// Each mount kind's `getPassengerAttachmentPoint` owner selects its seat rule once.
+    #[test]
+    fn mount_seat_rules_resolve_per_kind() {
+        let (_, models) = super::every_kind();
+        let seat = |kind: &str| {
+            let (_, mut e) = super::super::animation_tests::fixture();
+            e.type_name = kind.into();
+            models.ids(&e).seat
+        };
+        assert_eq!(
+            seat("minecraft:oak_boat"),
+            Seat::Boat {
+                chest: false,
+                raft: false
+            }
+        );
+        assert_eq!(
+            seat("minecraft:oak_chest_boat"),
+            Seat::Boat {
+                chest: true,
+                raft: false
+            }
+        );
+        assert_eq!(
+            seat("minecraft:bamboo_raft"),
+            Seat::Boat {
+                chest: false,
+                raft: true
+            }
+        );
+        assert_eq!(
+            seat("minecraft:bamboo_chest_raft"),
+            Seat::Boat {
+                chest: true,
+                raft: true
+            }
+        );
+        assert_eq!(seat("minecraft:horse"), Seat::Horse);
+        assert_eq!(seat("minecraft:skeleton_horse"), Seat::Horse);
+        assert_eq!(seat("minecraft:camel"), Seat::Camel);
+        assert_eq!(seat("minecraft:strider"), Seat::Strider);
+        assert_eq!(seat("minecraft:slime"), Seat::CubeMob);
+        for kind in ["minecraft:minecart", "minecraft:llama", "minecraft:pig"] {
+            assert_eq!(seat(kind), Seat::Attachment, "{kind}");
+        }
+        assert!(seat("minecraft:horse").moves() && seat("minecraft:strider").moves());
+        assert!(!seat("minecraft:camel").moves() && !seat("minecraft:oak_boat").moves());
+    }
+
     #[test]
     fn regression_263_cushion_and_painting_metadata() {
         use crate::protocol::{Reader, Writer};
@@ -2030,5 +2177,156 @@ mod tests {
         };
         assert_eq!(poses["SLEEPING"].eye_height, 0.2);
         assert!(poses["SLEEPING"].fixed);
+    }
+
+    /// `sized` answers each `DATA_POSE` id by the name `Models::poses` gives it: an avatar's
+    /// `POSES` entry (its standing dimensions for a pose it lacks), a sleeping living body's
+    /// sleeping box, a sitting camel's sitting rule.
+    #[test]
+    fn sized_follows_each_pose_name() {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        for (id, kind) in [(1, "minecraft:mannequin"), (2, "minecraft:camel")] {
+            let mut spawn = Writer::default();
+            spawn.var(id);
+            spawn.0.extend_from_slice(&[0; 16]);
+            spawn.var(doc.entities[kind].protocol_id as i32);
+            for coordinate in [0f64, 64., 0.] {
+                spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+            }
+            spawn.0.extend_from_slice(&[0; 4]);
+            spawn.var(0);
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap();
+        }
+        let size = |d: &Dimensions| (d.width, d.height, d.eye_height);
+        let constant =
+            |kind: &str, name: &str| match doc.entities[kind].dimension_constants.get(name) {
+                Some(DimensionConstant::Dimensions(d)) => Some(size(d)),
+                _ => None,
+            };
+        let Some(DimensionConstant::Poses(table)) = doc.entities["minecraft:mannequin"]
+            .dimension_constants
+            .get("POSES")
+        else {
+            panic!("mannequin POSES table");
+        };
+        let sized_in = |store: &mut super::super::Store, id: i32, pose: u8| {
+            let index = models
+                .entity_accessor(store.get(id).unwrap(), "DATA_POSE")
+                .unwrap();
+            let entity = store.get_mut(id).unwrap();
+            entity
+                .metadata
+                .insert(index, super::super::Metadata::Pose(pose));
+            models
+                .dimensions(store.get(id).unwrap())
+                .map(|(d, _)| size(d))
+                .ok()
+        };
+        let mut checked = 0;
+        for (&pose, name) in &models.poses {
+            let avatar = if name == "SLEEPING" {
+                constant("minecraft:mannequin", "SLEEPING_DIMENSIONS")
+            } else {
+                table
+                    .get(name)
+                    .map(size)
+                    .or_else(|| constant("minecraft:mannequin", "STANDING_DIMENSIONS"))
+            };
+            assert_eq!(sized_in(&mut store, 1, pose), avatar, "mannequin {name}");
+            let camel = match name.as_str() {
+                "SITTING" => constant("minecraft:camel", "SITTING_DIMENSIONS"),
+                "SLEEPING" => constant("minecraft:camel", "SLEEPING_DIMENSIONS"),
+                _ => Some(size(&doc.entities["minecraft:camel"].dimensions)),
+            };
+            assert_eq!(sized_in(&mut store, 2, pose), camel, "camel {name}");
+            checked += 1;
+        }
+        assert_eq!(checked, 18);
+        // Each rule changes the answer: sleeping and crouching boxes differ from standing ones,
+        // and a sitting camel has no `SITTING_DIMENSIONS` in these facts (an error, not its box).
+        assert!(constant("minecraft:camel", "SLEEPING_DIMENSIONS").is_some());
+        assert!(constant("minecraft:camel", "SITTING_DIMENSIONS").is_none());
+        assert_ne!(table["CROUCHING"].height, table["STANDING"].height);
+    }
+
+    /// `sized` memoizes an entity's answer within one `SizedScope` only: a pose received
+    /// between two frames resizes the entity in the next one, and outside any scope every call
+    /// reads the metadata afresh.
+    #[test]
+    fn sized_memo_lasts_one_scope() {
+        use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
+        let doc = Models::parse().unwrap();
+        let mut content = Content::test_cube();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        let models = std::sync::Arc::new(Models::load(&content).unwrap());
+        let mut store = super::super::Store::default();
+        store.activate_models(std::sync::Arc::clone(&models));
+        let mut spawn = Writer::default();
+        spawn.var(1);
+        spawn.0.extend_from_slice(&[0; 16]);
+        spawn.var(doc.entities["minecraft:mannequin"].protocol_id as i32);
+        for coordinate in [0f64, 64., 0.] {
+            spawn.0.extend_from_slice(&coordinate.to_be_bytes());
+        }
+        spawn.0.extend_from_slice(&[0; 4]);
+        spawn.var(0);
+        store
+            .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+            .unwrap();
+        let pose_of = |name: &str| {
+            *models
+                .poses
+                .iter()
+                .find(|(_, pose)| pose.as_str() == name)
+                .unwrap()
+                .0
+        };
+        let index = models
+            .entity_accessor(store.get(1).unwrap(), "DATA_POSE")
+            .unwrap();
+        let set_pose = |store: &mut super::super::Store, name: &str| {
+            store
+                .get_mut(1)
+                .unwrap()
+                .metadata
+                .insert(index, super::super::Metadata::Pose(pose_of(name)));
+        };
+        let height = |store: &super::super::Store| {
+            models.dimensions(store.get(1).unwrap()).unwrap().0.height
+        };
+        set_pose(&mut store, "STANDING");
+        let standing = {
+            let _frame = SizedScope::enter();
+            let first = height(&store);
+            assert_eq!(height(&store), first, "repeated within the scope");
+            first
+        };
+        set_pose(&mut store, "CROUCHING");
+        let crouching = {
+            let _frame = SizedScope::enter();
+            height(&store)
+        };
+        assert!(
+            crouching < standing,
+            "the next scope sees the received pose: {crouching} vs {standing}"
+        );
+        set_pose(&mut store, "STANDING");
+        assert_eq!(height(&store), standing, "outside a scope");
     }
 }

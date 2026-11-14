@@ -721,7 +721,7 @@ mod tests {
                     baby: sets.remove("baby").unwrap(),
                 },
             )]),
-            motion: BTreeMap::new(),
+            motion: Default::default(),
         };
         let mut cache = Cache::default();
         cache.assets.insert(
@@ -1905,7 +1905,7 @@ mod tests {
             attribute_ids: BTreeMap::new(),
             digest: String::new(),
             armor_models: BTreeMap::new(),
-            motion: BTreeMap::new(),
+            motion: Default::default(),
         };
         let texture = TextureRegion {
             layer: 0,

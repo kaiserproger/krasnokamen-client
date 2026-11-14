@@ -878,7 +878,10 @@ mod tests {
         let mut player = Player::new();
         player.pose_known = true;
         player.visual.shown = Some(stack);
-        player.visual.items.insert_test_model("test:held", content.models[0].clone());
+        player
+            .visual
+            .items
+            .insert_test_model("test:held", content.models[0].clone());
         let mut scene = crate::api::Scene {
             yaw: 0.,
             pitch: 0.,
@@ -902,8 +905,15 @@ mod tests {
             .unwrap();
         // The rest hand pose must be exactly still: no idle offset or roll.
         let hand = player.visual.sample(&player, 1.).hand;
-        assert_eq!(hand.offset, [0., 0., 0.], "rest hand offset must be zero, got {hand:?}");
-        assert_eq!(hand.roll_deg, 0., "rest hand roll must be zero, got {hand:?}");
+        assert_eq!(
+            hand.offset,
+            [0., 0., 0.],
+            "rest hand offset must be zero, got {hand:?}"
+        );
+        assert_eq!(
+            hand.roll_deg, 0.,
+            "rest hand roll must be zero, got {hand:?}"
+        );
         // Recover the camera-space placement: the render pass adds
         // presentation_origin = origin - camera_position and applies
         // camera_view(ZERO, yaw, pitch), so the item lands in pure camera space.

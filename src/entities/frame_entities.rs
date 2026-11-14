@@ -11,8 +11,8 @@ use crate::player::Bounds;
 #[derive(Debug)]
 pub(crate) struct Entry {
     pub slot: usize,
-    /// Spatial cell it was found in; `None` for a mounted body, which every pass considers.
-    cell: Option<[i32; 2]>,
+    /// Where `Store::candidate_slots` found it (a body's cell, a mounted body's root cell).
+    place: Place,
     pub transform: Result<Transform, String>,
     /// Squared camera distance of the presented position (infinite when it failed).
     pub distance_squared: f64,
@@ -27,7 +27,7 @@ impl Entry {
         store: &Store,
         models: &Models,
         slot: usize,
-        cell: Option<[i32; 2]>,
+        place: Place,
         camera: [f64; 3],
         range: f64,
         tick: u64,
@@ -124,19 +124,17 @@ impl FrameEntities {
         })
     }
     /// The entries `Store::candidates` yields for `range` around `camera`, in its order: the
-    /// bucketed ones in the cells it visits, then every mounted body.
+    /// bodies in the cells it visits, then the mounted bodies whose root vehicle it visits.
     fn within_range<'a>(
         &'a self,
         store: &Store,
         camera: [f64; 3],
         range: f64,
     ) -> impl Iterator<Item = &'a Entry> + 'a {
-        let (low, high) = store.query_cells(area(camera, range));
-        self.entries.iter().filter(move |entry| {
-            entry.cell.is_none_or(|cell| {
-                (low[0]..=high[0]).contains(&cell[0]) && (low[1]..=high[1]).contains(&cell[1])
-            })
-        })
+        let cells = store.query_cells(area(camera, range));
+        self.entries
+            .iter()
+            .filter(move |entry| entry.place.within(&cells))
     }
 }
 
@@ -300,5 +298,48 @@ mod tests {
             .frame_entities(&mut own, &models, camera, 16., 1, partial)
             .count();
         assert!(!own.entries.is_empty(), "an ended frame is not reused");
+    }
+
+    /// A small query (a crosshair ray, a push, a shadow range) yields the mounted bodies seated
+    /// near it, not all of them: every rider whose presented box can reach the area is a
+    /// candidate, riders seated far away are not.
+    #[test]
+    fn riders_are_candidates_near_their_root_vehicle_only() {
+        let (store, _) = battle_store();
+        let riders: Vec<_> = store.passenger_vehicles.keys().copied().collect();
+        assert!(riders.len() > 100, "{} riders", riders.len());
+        let seated = |id: i32| {
+            store
+                .presented_transform(store.get(id).unwrap(), 1, 0.)
+                .unwrap()
+                .position
+        };
+        let camera = seated(riders[riders.len() / 2]);
+        let range = 4.;
+        let found: std::collections::BTreeSet<_> = store
+            .candidates(area(camera, range))
+            .map(|entity| entity.handle.network_id)
+            .collect();
+        let mut near = 0;
+        for id in riders {
+            let position = seated(id);
+            let reach = (0..3)
+                .step_by(2)
+                .map(|i| (position[i] - camera[i]).abs())
+                .fold(0., f64::max);
+            if reach <= range + 1. {
+                near += 1;
+                assert!(
+                    found.contains(&id),
+                    "rider {id} at {position:?} reaches the area"
+                );
+            } else if reach > range + 4. * store.query_padding() + 32. {
+                assert!(
+                    !found.contains(&id),
+                    "rider {id} at {position:?} is seated far away"
+                );
+            }
+        }
+        assert!(near > 0, "a rider sits within the area");
     }
 }

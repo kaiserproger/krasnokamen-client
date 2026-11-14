@@ -58,6 +58,7 @@ pub(crate) use render_blocks::{
     BlockPresentation, BlockRenderStatus, EntityPainter, MovingBlockPainter, StaticBlockSceneFrame,
 };
 pub use resources::Models;
+pub(crate) use resources::Seat;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -178,15 +179,17 @@ pub struct Entity {
     pub(crate) clock: Option<render_special::ClockMemo>,
     /// This entity's kind slot in the active schema table (`Models::schema_of`).
     pub(crate) kind_slot: std::cell::Cell<resources::KindSlot>,
+    /// `Models::sized`'s answer within the current `resources::SizedScope`.
+    pub(crate) sized_memo: std::cell::Cell<resources::SizedMemo>,
 }
 impl Entity {
     /// Interpolates this entity's received body only. Scene consumers resolve
     /// passenger attachments through `Store::presented_transform`.
     pub fn presented_transform(&self, _tick: u64, partial: f32) -> Transform {
-        // Ticks a mob waited outside the camera's box count as elapsed (`tick_presentation`),
-        // so it is drawn and new motion starts where a mob ticked all along would be.
+        // Ticks a mob waited undrawn count as elapsed (`tick_presentation`), so it is drawn and
+        // new motion starts where a mob ticked all along would be.
         let elapsed = (f64::from(self.physical.lerp_progress)
-            + f64::from(self.physical.waited)
+            + f64::from(self.physical.lerp_waited())
             + if self.physical.frozen {
                 0.
             } else {
@@ -218,6 +221,12 @@ impl Entity {
         }
         self.previous.interpolate(self.transform, factor)
     }
+    /// Ticks this mob waited undrawn since its last tick (`Store::tick_presentation`): evidence
+    /// channels sampling tick state (`capture_gait_frame`, `entity_motion`) report it, since a
+    /// waiting mob's tick state holds where it stopped.
+    pub(crate) fn waited_ticks(&self) -> u32 {
+        self.physical.waited
+    }
     fn move_to(
         &mut self,
         target: Transform,
@@ -243,7 +252,7 @@ impl Entity {
         self.on_ground = ground;
         self.observed_tick = tick;
         self.physical.lerp_progress = if snap { self.physical.lerp_duration } else { 0 };
-        self.physical.waited = 0;
+        self.physical.lerp_start_waited = self.physical.waited;
         self.physical.lerp_phase = if snap { 0. } else { phase.clamp(0., 0.999) };
     }
 }
@@ -260,10 +269,17 @@ pub struct BlockEntity {
     pub event: Option<(u8, u8, u64)>,
     pub(crate) animation: blocks::BlockAnimation,
 }
+/// Ticks the session owner runs per turn before it draws again (`lib.rs`): ticks up to this many
+/// after the latest frame still belong to drawing frames, so the mobs that frame did not draw
+/// wait (`Store::tick_presentation`); later ticks have no frames and every entity ticks.
+pub(crate) const MAX_TICKS_WITHOUT_FRAME: u64 = 4;
 #[derive(Default)]
 pub struct Store {
     slots: Vec<Entity>,
-    ids: BTreeMap<i32, usize>,
+    /// Network id -> slot. Hashed, not ordered: looked up per entity many times a tick and frame
+    /// (an ordered map of ~20k ids walked several scattered nodes per lookup); `observation`
+    /// sorts the ids it pages.
+    ids: IdMap,
     spatial: BTreeMap<[i32; 2], BTreeSet<i32>>,
     pub(crate) motion_spans: BTreeMap<i64, usize>,
     leash_holders: BTreeMap<Handle, BTreeSet<i32>>,
@@ -292,6 +308,10 @@ pub struct Store {
     /// interpolation from the pose already on screen instead of snapping.
     pub(crate) frame_partial: f32,
     pub(crate) frame_tick: u64,
+    /// Entity ticks `tick_presentation` ran and waited since the store began (evidence:
+    /// copied into each frame's `PresentationStats`).
+    pub(crate) ticked_ticks: u64,
+    pub(crate) waiting_ticks: u64,
     /// Local player eye for idle head look-at; `None` disables it.
     pub(crate) look_target: Option<[f32; 3]>,
     /// Vanilla `Entity.viewScale` of the frames being drawn (`view_range::view_scale`).
@@ -341,6 +361,11 @@ impl Store {
     /// Vanilla `Entity.setViewScale` for the frames that follow (`view_range::view_scale`).
     pub fn set_view_scale(&mut self, scale: f64) {
         self.view_scale = ViewScale(scale);
+    }
+    /// A seek discards presentation history: no frame has drawn since, so every entity ticks
+    /// until the next frame (`tick_presentation`).
+    pub(crate) fn forget_frames(&mut self) {
+        self.frame_tick = 0;
     }
     pub fn set_text_renderer(&mut self, text: Rc<crate::ui::render::TextRenderer>) {
         self.nameplate_cache = render_nameplates::Cache::default();
@@ -799,12 +824,14 @@ impl Store {
         let mut rows = Vec::with_capacity(limit);
         let mut bytes_used = 2048usize;
         let mut next = None;
-        for (&id, &slot) in self.ids.range((
-            after
-                .map(std::ops::Bound::Excluded)
-                .unwrap_or(std::ops::Bound::Unbounded),
-            std::ops::Bound::Unbounded,
-        )) {
+        let mut ids: Vec<(i32, usize)> = self
+            .ids
+            .iter()
+            .filter(|(id, _)| after.is_none_or(|after| **id > after))
+            .map(|(&id, &slot)| (id, slot))
+            .collect();
+        ids.sort_unstable_by_key(|&(id, _)| id);
+        for (id, slot) in ids {
             if rows.len() == limit {
                 next = rows
                     .last()
@@ -934,6 +961,7 @@ impl Store {
                     crowd: None,
                     clock: None,
                     kind_slot: Default::default(),
+                    sized_memo: Default::default(),
                     physical: physical::AnimationState::default(),
                 });
                 if name == "minecraft:fishing_bobber"
@@ -1728,6 +1756,8 @@ impl Store {
         frame: EntityRenderFrame<'_>,
         out: &mut DynamicGeometry,
     ) -> Result<PresentationStats> {
+        // No metadata or attribute changes while the frame draws: `Models::sized` memoizes.
+        let _sized = resources::SizedScope::enter();
         // A temporary render slot reuses the ordinary rig/equipment path without
         // registering the predicted local avatar as a received remote entity.
         if self.render_local_avatar
@@ -1754,6 +1784,25 @@ impl Store {
 }
 fn cell(p: [f64; 3]) -> [i32; 2] {
     [(p[0] / 16.).floor() as i32, (p[2] / 16.).floor() as i32]
+}
+/// `Store::ids`: network ids hashed by one multiply (the FxHash step), not SipHash.
+type IdMap = std::collections::HashMap<i32, usize, std::hash::BuildHasherDefault<IdHasher>>;
+#[derive(Default)]
+struct IdHasher(u64);
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.0 =
+                (self.0.rotate_left(5) ^ u64::from(byte)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        }
+    }
+    fn write_i32(&mut self, value: i32) {
+        self.0 = (self.0.rotate_left(5) ^ u64::from(value as u32))
+            .wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
 }
 /// Floor of `Store::spatial_padding`: the farthest a default-size box reaches past its schema
 /// width (a shulker peeking a block, a four-block painting).

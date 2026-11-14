@@ -672,7 +672,7 @@ mod p1_helmet_tests {
             attribute_ids: BTreeMap::new(),
             digest: String::new(),
             armor_models: BTreeMap::new(),
-            motion: BTreeMap::new(),
+            motion: Default::default(),
         }));
         for hand in [0, 1] {
             let mut inventory = InventoryStore::default();

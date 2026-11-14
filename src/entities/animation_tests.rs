@@ -16,7 +16,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         attribute_ids: BTreeMap::new(),
         digest: String::new(),
         armor_models: BTreeMap::new(),
-        motion: BTreeMap::new(),
+        motion: Default::default(),
     };
     let transform = Transform {
         position: [0.; 3],
@@ -67,6 +67,7 @@ pub(super) fn fixture() -> (Models, Entity) {
         crowd: None,
         clock: None,
         kind_slot: Default::default(),
+        sized_memo: Default::default(),
     };
     let facts: render_living::MotionFacts = serde_json::from_value(json!({
         "class":"authored.fixture", "is_mob":true, "walk_uses_y":"never", "methods":{},
@@ -1302,6 +1303,8 @@ fn seat_attachment_unsupported_parent_rule_is_reported_not_drawn_at_body() {
     let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
     assert!(geometry.vertices.is_empty());
     assert!(stats.unrendered["minecraft:villager"].starts_with("unknown_source_mount_seat:"));
+    let (stats, geometry) = seat_attachment_frame(&mut store, 1, 0.5, [500., 202., 500.]);
+    assert!(geometry.vertices.is_empty() && stats.unrendered.is_empty());
 }
 #[test]
 fn animation_local_render_slot_is_restored_even_when_extraction_fails() {

@@ -13,6 +13,10 @@ mod clouds;
 mod command_suggestion_limit_tests;
 #[cfg(test)]
 mod entity_aim_tests;
+mod follow;
+#[cfg(test)]
+mod hud_packet_tests;
+mod local_server;
 #[cfg(test)]
 mod attack_dispatch_tests;
 #[cfg(test)]

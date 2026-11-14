@@ -938,13 +938,20 @@ fn submitted_index_count_is_per_frame_not_cumulative() {
     let mut expected = None;
     for _ in 0..8 {
         renderer.render(&scene, None, &observation()).unwrap();
-        renderer.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: Some(std::time::Duration::from_secs(30)),
-        }).unwrap();
+        renderer
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(30)),
+            })
+            .unwrap();
         let indices = renderer.stats.submitted_indices;
         assert!(indices >= 6, "frame must submit the terrain quad");
-        assert_eq!(*expected.get_or_insert(indices), indices, "counts must reset each frame");
+        assert_eq!(
+            *expected.get_or_insert(indices),
+            indices,
+            "counts must reset each frame"
+        );
     }
 }
 
