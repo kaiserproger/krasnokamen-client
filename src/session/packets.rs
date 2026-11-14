@@ -1,8 +1,8 @@
-use crate::protocol::packet_ids::play::serverbound as sb;
-use crate::protocol::packet_ids::play::clientbound as cb;
-use crate::protocol::packet_ids::{login, configuration};
 use super::*;
-use crate::protocol::{self, world::Chunk, Reader};
+use crate::protocol::packet_ids::play::clientbound as cb;
+use crate::protocol::packet_ids::play::serverbound as sb;
+use crate::protocol::packet_ids::{configuration, login};
+use crate::protocol::{self, Reader, world::Chunk};
 impl Session {
     fn initialize_player_attributes(&mut self) -> Result<()> {
         let schema = self
@@ -104,23 +104,23 @@ impl Session {
     }
     fn custom_payload(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let channel = r.string(32767)?;
-        if channel.starts_with("solaris:loader") {
+        if channel.starts_with("krasnokamen:loader") {
             let payload = r.take(r.bytes.len() - r.offset)?;
             match channel.as_str() {
-                "solaris:loader/probe" if self.phase == "configuration" => {
+                "krasnokamen:loader/probe" if self.phase == "configuration" => {
                     if !payload.is_empty() {
                         return Err("Loader probe carries no payload".into());
                     }
                     // The network state machine already wrote the hello in packet order.
                 }
-                "solaris:loader/manifest" if self.phase == "configuration" => {
+                "krasnokamen:loader/manifest" if self.phase == "configuration" => {
                     let grants = crate::loader::Loader::local_permissions()?;
                     let outgoing = self.loader.begin(payload, &grants)?;
                     self.send_loader(outgoing)?;
                 }
-                "solaris:loader/artifact" if self.phase == "configuration" => {
+                "krasnokamen:loader/artifact" if self.phase == "configuration" => {
                     if let Some(outgoing) = self.loader.artifact(payload)? {
-                        let activated = outgoing.channel == "solaris:loader/ack";
+                        let activated = outgoing.channel == "krasnokamen:loader/ack";
                         if activated {
                             self.activate_loader_content()?;
                             self.event(json!({"type":"loader_activated","platform":"native","origin":"hash_verified_received_bundle"}));
@@ -128,7 +128,7 @@ impl Session {
                         self.send_loader(outgoing)?;
                     }
                 }
-                "solaris:loader/view" if self.phase == "play" => {
+                "krasnokamen:loader/view" if self.phase == "play" => {
                     let ui = self
                         .ui
                         .as_mut()
@@ -141,7 +141,7 @@ impl Session {
                         Err(error) => self.event(json!({"type":"loader_view_rejected","error":error,"origin":"received_optional_payload"})),
                     }
                 }
-                "solaris:loader/sound" => {
+                "krasnokamen:loader/sound" => {
                     match self.loader.sound(
                         payload,
                         self.phase == "play" && self.network.is_some(),
@@ -183,12 +183,12 @@ impl Session {
                 }
                 _ => return Err(format!("unsupported Loader channel or phase: {channel}")),
             }
-        } else if channel.starts_with("solaris:lod/") && self.phase == "play" {
+        } else if channel.starts_with("krasnokamen:lod/") && self.phase == "play" {
             let payload = r.take(r.bytes.len() - r.offset)?;
             let outcome = match channel.as_str() {
-                "solaris:lod/hello" => self.far.hello(payload),
-                "solaris:lod/program" => self.far.program(payload),
-                "solaris:lod/tile" => match self.content.as_ref() {
+                "krasnokamen:lod/hello" => self.far.hello(payload),
+                "krasnokamen:lod/program" => self.far.program(payload),
+                "krasnokamen:lod/tile" => match self.content.as_ref() {
                     Some(content) => self.far.tile(payload, content),
                     None => Ok(()),
                 },
@@ -228,7 +228,8 @@ impl Session {
             let opened = match self.open_sign_editor(position, front) {
                 Ok(opened) => opened,
                 Err(error) => {
-                    self.player.warn_local_prediction(None, "Sign editor", &error);
+                    self.player
+                        .warn_local_prediction(None, "Sign editor", &error);
                     false
                 }
             };
@@ -249,7 +250,8 @@ impl Session {
         {
             self.environment.publish_world(&mut self.world)?;
             if id == cb::SET_TIME {
-                self.player.update_world_time(self.environment.game_time(), self.client_tick);
+                self.player
+                    .update_world_time(self.environment.game_time(), self.client_tick);
             }
             self.server_frozen = self.environment.frozen;
             if id == cb::TICKING_STEP {
@@ -276,13 +278,21 @@ impl Session {
         }
         if id == cb::BLOCK_ENTITY_DATA {
             let position = protocol::unpack_pos(Reader::new(r.bytes).i64()?);
-            let snapshot = self.predicted_blocks.get_mut(&position)
+            let snapshot = self
+                .predicted_blocks
+                .get_mut(&position)
                 .and_then(|prediction| prediction.block_entity.as_mut());
             self.entities.receive_block_entity_data(
-                &mut Reader::new(r.bytes), content, self.client_tick, snapshot,
+                &mut Reader::new(r.bytes),
+                content,
+                self.client_tick,
+                snapshot,
             )?;
             handled = true;
-        } else if self.entities.apply(id, &mut Reader::new(r.bytes), content, self.client_tick)? {
+        } else if self
+            .entities
+            .apply(id, &mut Reader::new(r.bytes), content, self.client_tick)?
+        {
             handled = true;
         }
         if let Some(ui) = &mut self.ui {
@@ -320,7 +330,10 @@ impl Session {
                 self.item_spawn = Some(crate::ui::item_dynamic::GlobalPos { dimension, pos });
             }
             cb::BUNDLE_DELIMITER | cb::CHUNK_BATCH_START | cb::KEEP_ALIVE => {}
-            cb::PING => { r.i32()?; r.done()?; } // Pong is sent immediately by the socket owner.
+            cb::PING => {
+                r.i32()?;
+                r.done()?;
+            } // Pong is sent immediately by the socket owner.
             cb::DISCONNECT => return Err(format!("Play disconnect: {}", r.nbt()?)),
             cb::LOGIN => {
                 self.player.entity_id = r.i32()?;
@@ -601,7 +614,9 @@ impl Session {
                     audio.stop();
                 }
             }
-            cb::RESOURCE_PACK_PUSH => return Err("Play resource-pack activation unsupported".into()),
+            cb::RESOURCE_PACK_PUSH => {
+                return Err("Play resource-pack activation unsupported".into());
+            }
             cb::TRANSFER => return Err("server transfer unsupported".into()),
             cb::COOKIE_REQUEST => {
                 let key = r.string(32767)?;
@@ -641,10 +656,70 @@ impl Session {
             // bools, doubles/floats, count, registry particle) is counted, not
             // rendered: particle presentation is unsupported (local use/block
             // predictions already emit unsupported_local_particle_presentation).
-            cb::ANIMATE | cb::AWARD_STATS | cb::BOSS_EVENT | cb::CHANGE_DIFFICULTY | cb::CHUNKS_BIOMES | cb::CLEAR_TITLES | cb::COMMAND_SUGGESTIONS | cb::COMMANDS | cb::CUSTOM_CHAT_COMPLETIONS | cb::DEBUG_BLOCK_VALUE | cb::DEBUG_CHUNK_VALUE | cb::DEBUG_ENTITY_VALUE | cb::DEBUG_EVENT | cb::DEBUG_SAMPLE | cb::DELETE_CHAT | cb::DISGUISED_CHAT | cb::ENTITY_EVENT
-            | cb::INITIALIZE_BORDER | cb::PLAYER_LOOK_AT | cb::RESET_SCORE | cb::ROTATE_HEAD | cb::SELECT_ADVANCEMENTS_TAB | cb::SERVER_DATA | cb::SET_ACTION_BAR_TEXT | cb::SET_BORDER_CENTER | cb::SET_BORDER_LERP_SIZE | cb::SET_BORDER_SIZE | cb::SET_BORDER_WARNING_DELAY | cb::SET_BORDER_WARNING_DISTANCE | cb::SET_CHUNK_CACHE_CENTER
-            | cb::SET_DISPLAY_OBJECTIVE | cb::SET_ENTITY_DATA | cb::SET_ENTITY_LINK | cb::SET_EQUIPMENT | cb::SET_OBJECTIVE | cb::SET_PLAYER_TEAM | cb::SET_SCORE | cb::SET_SIMULATION_DISTANCE | cb::SET_SUBTITLE_TEXT | cb::SET_TITLE_TEXT | cb::SET_TITLES_ANIMATION | cb::SYSTEM_CHAT
-            | cb::TAB_LIST | cb::TAG_QUERY | cb::TELEPORT_ENTITY | cb::TEST_INSTANCE_BLOCK_STATUS | cb::UPDATE_ADVANCEMENTS | cb::PROJECTILE_POWER | cb::CUSTOM_REPORT_DETAILS | cb::SERVER_LINKS | cb::WAYPOINT | cb::CLEAR_DIALOG | cb::SHOW_DIALOG | cb::ADD_TRANSIENT_BLOCK | cb::GAME_RULE_VALUES | cb::LEVEL_PARTICLES | cb::LOW_DISK_SPACE_WARNING | cb::OPEN_BOOK | cb::PONG_RESPONSE | cb::PLAYER_COMBAT_END | cb::PLAYER_COMBAT_ENTER | cb::RESOURCE_PACK_POP | cb::POST_EFFECTS | cb::SWING_ANIMATION => {
+            cb::ANIMATE
+            | cb::AWARD_STATS
+            | cb::BOSS_EVENT
+            | cb::CHANGE_DIFFICULTY
+            | cb::CHUNKS_BIOMES
+            | cb::CLEAR_TITLES
+            | cb::COMMAND_SUGGESTIONS
+            | cb::COMMANDS
+            | cb::CUSTOM_CHAT_COMPLETIONS
+            | cb::DEBUG_BLOCK_VALUE
+            | cb::DEBUG_CHUNK_VALUE
+            | cb::DEBUG_ENTITY_VALUE
+            | cb::DEBUG_EVENT
+            | cb::DEBUG_SAMPLE
+            | cb::DELETE_CHAT
+            | cb::DISGUISED_CHAT
+            | cb::ENTITY_EVENT
+            | cb::INITIALIZE_BORDER
+            | cb::PLAYER_LOOK_AT
+            | cb::RESET_SCORE
+            | cb::ROTATE_HEAD
+            | cb::SELECT_ADVANCEMENTS_TAB
+            | cb::SERVER_DATA
+            | cb::SET_ACTION_BAR_TEXT
+            | cb::SET_BORDER_CENTER
+            | cb::SET_BORDER_LERP_SIZE
+            | cb::SET_BORDER_SIZE
+            | cb::SET_BORDER_WARNING_DELAY
+            | cb::SET_BORDER_WARNING_DISTANCE
+            | cb::SET_CHUNK_CACHE_CENTER
+            | cb::SET_DISPLAY_OBJECTIVE
+            | cb::SET_ENTITY_DATA
+            | cb::SET_ENTITY_LINK
+            | cb::SET_EQUIPMENT
+            | cb::SET_OBJECTIVE
+            | cb::SET_PLAYER_TEAM
+            | cb::SET_SCORE
+            | cb::SET_SIMULATION_DISTANCE
+            | cb::SET_SUBTITLE_TEXT
+            | cb::SET_TITLE_TEXT
+            | cb::SET_TITLES_ANIMATION
+            | cb::SYSTEM_CHAT
+            | cb::TAB_LIST
+            | cb::TAG_QUERY
+            | cb::TELEPORT_ENTITY
+            | cb::TEST_INSTANCE_BLOCK_STATUS
+            | cb::UPDATE_ADVANCEMENTS
+            | cb::PROJECTILE_POWER
+            | cb::CUSTOM_REPORT_DETAILS
+            | cb::SERVER_LINKS
+            | cb::WAYPOINT
+            | cb::CLEAR_DIALOG
+            | cb::SHOW_DIALOG
+            | cb::ADD_TRANSIENT_BLOCK
+            | cb::GAME_RULE_VALUES
+            | cb::LEVEL_PARTICLES
+            | cb::LOW_DISK_SPACE_WARNING
+            | cb::OPEN_BOOK
+            | cb::PONG_RESPONSE
+            | cb::PLAYER_COMBAT_END
+            | cb::PLAYER_COMBAT_ENTER
+            | cb::RESOURCE_PACK_POP
+            | cb::POST_EFFECTS
+            | cb::SWING_ANIMATION => {
                 *self.ignored_presentation.entry(id).or_default() += 1;
             }
             _ => return Err(format!("unknown mandatory Play packet {id}")),
@@ -777,16 +852,20 @@ impl Session {
         if let Some(prediction) = self.predicted_blocks.get_mut(&position) {
             // ClientLevel.setServerVerifiedBlockState retains the local block
             // until endPredictionsUpTo acknowledges this prediction sequence.
-            let local_block = self.world.block(position)
-                .map(|local| content.info(local).map(|info| info.block)).transpose()?;
+            let local_block = self
+                .world
+                .block(position)
+                .map(|local| content.info(local).map(|info| info.block))
+                .transpose()?;
             if let Some(entity) = &prediction.block_entity
                 && !entity.matches_state(state, content)?
             {
                 prediction.block_entity = None;
             }
-            if prediction.block_entity.is_none() && local_block != Some(new_block)
-            {
-                prediction.block_entity = self.entities.new_block_entity_snapshot(position, state, content)?;
+            if prediction.block_entity.is_none() && local_block != Some(new_block) {
+                prediction.block_entity = self
+                    .entities
+                    .new_block_entity_snapshot(position, state, content)?;
             }
             prediction.received = state;
             self.received_blocks.insert(position, self.packet_sequence);
@@ -905,15 +984,28 @@ mod tests {
             } else {
                 Nbt::Compound(vec![
                     ("text".into(), Nbt::String("Kicked".into())),
-                    ("extra".into(), Nbt::List(10, vec![Nbt::Compound(vec![
-                        ("text".into(), Nbt::String(": maintenance".into())),
-                    ])])),
-                ]).write_root(&mut packet).unwrap();
+                    (
+                        "extra".into(),
+                        Nbt::List(
+                            10,
+                            vec![Nbt::Compound(vec![(
+                                "text".into(),
+                                Nbt::String(": maintenance".into()),
+                            )])],
+                        ),
+                    ),
+                ])
+                .write_root(&mut packet)
+                .unwrap();
             }
             let error = session.apply(phase, id, &packet.0).unwrap_err();
             let mut ui = UiState::new_state(&content).unwrap();
             ui.show_disconnected(format!("{phase:?} packet 0x{id:02x} sequence 1: {error}"));
-            assert_eq!(ui.title_error_text().as_deref(), Some("Kicked: maintenance"), "{phase:?}");
+            assert_eq!(
+                ui.title_error_text().as_deref(),
+                Some("Kicked: maintenance"),
+                "{phase:?}"
+            );
         }
     }
 
@@ -938,13 +1030,19 @@ mod tests {
         writer.i64(protocol::pack_pos([-31, 70, 42]));
         writer.f32(10.);
         writer.f32(20.);
-        session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &writer.0).unwrap();
+        session
+            .apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &writer.0)
+            .unwrap();
         let spawn = session.item_spawn.as_ref().unwrap();
         assert_eq!(spawn.dimension, "minecraft:the_nether");
         assert_eq!(spawn.pos, [-31, 70, 42]);
         let mut malformed = writer.0;
         malformed.push(0);
-        assert!(session.apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &malformed).is_err());
+        assert!(
+            session
+                .apply(Phase::Play, cb::SET_DEFAULT_SPAWN_POSITION, &malformed)
+                .is_err()
+        );
         assert_eq!(session.item_spawn.as_ref().unwrap().pos, [-31, 70, 42]);
     }
 
@@ -1009,14 +1107,22 @@ mod tests {
 
     #[test]
     fn block_burst_answers_keepalive_before_consumption_and_drains_in_one_frame() {
-        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, sync::mpsc, thread, time::{Duration, Instant}};
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            sync::mpsc,
+            thread,
+            time::{Duration, Instant},
+        };
         fn packet(socket: &mut TcpStream) -> (i32, Vec<u8>) {
             let mut header = Vec::new();
             loop {
                 let mut byte = [0];
                 socket.read_exact(&mut byte).unwrap();
                 header.push(byte[0]);
-                if byte[0] & 128 == 0 { break; }
+                if byte[0] & 128 == 0 {
+                    break;
+                }
                 assert!(header.len() < 5);
             }
             let mut body = vec![0; Reader::new(&header).count(1024).unwrap()];
@@ -1026,7 +1132,9 @@ mod tests {
             (id, body[r.offset..].to_vec())
         }
         fn send(socket: &mut TcpStream, id: i32, body: &[u8]) {
-            socket.write_all(&protocol::frame(id, body, None).unwrap()).unwrap();
+            socket
+                .write_all(&protocol::frame(id, body, None).unwrap())
+                .unwrap();
         }
         const COUNT: i32 = 80_000;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1036,8 +1144,12 @@ mod tests {
         let peer = thread::spawn(move || {
             let (mut login, _) = listener.accept().unwrap();
             let (mut status, _) = listener.accept().unwrap();
-            login.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            login.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            login
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            login
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             packet(&mut status);
             packet(&mut status);
             let mut response = Writer::default();
@@ -1072,11 +1184,16 @@ mod tests {
         for x in 1..=COUNT / 4096 {
             session.world.insert([x, 0], template.clone()).unwrap();
         }
-        session.network = Some(Network::connect(address.to_string(), "BurstTest".into(), 8, Arc::new(|| {})).unwrap());
+        session.network = Some(
+            Network::connect(address.to_string(), "BurstTest".into(), 8, Arc::new(|| {})).unwrap(),
+        );
         // No consumer runs until the peer observes the echo: a full world-event
         // queue must never stop the socket owner from reading the keepalive.
         let elapsed = answer.recv_timeout(Duration::from_secs(1));
-        assert!(elapsed.is_ok(), "keepalive starved behind 80k block events: {elapsed:?}");
+        assert!(
+            elapsed.is_ok(),
+            "keepalive starved behind 80k block events: {elapsed:?}"
+        );
         assert!(elapsed.unwrap() < Duration::from_secs(1));
         // The fixture installed content already; start at the wire Configuration
         // boundary without running content activation a second time.
@@ -1144,10 +1261,12 @@ mod tests {
             geometry.indices[crate::api::EntityMaterial::EntityCutout as usize].len(),
             64 * 6
         );
-        assert!(geometry
-            .vertices
-            .iter()
-            .all(|vertex| vertex.light == [15., 0.]));
+        assert!(
+            geometry
+                .vertices
+                .iter()
+                .all(|vertex| vertex.light == [15., 0.])
+        );
         let a = glam::Vec3::from_array(geometry.vertices[0].position);
         let b = glam::Vec3::from_array(geometry.vertices[1].position);
         let c = glam::Vec3::from_array(geometry.vertices[2].position);
@@ -1248,8 +1367,18 @@ mod tests {
         let content = session.content.as_mut().unwrap();
         content.configure_test_comparator();
         content.insert_test_placement_metadata(1, json!({"block_entity_type": null}));
-        session.predicted_blocks.insert(position, PredictedBlock { received: 1, sequence: 7, block_entity: None });
-        session.world.set(position, 2, |state| Ok(state == 0)).unwrap();
+        session.predicted_blocks.insert(
+            position,
+            PredictedBlock {
+                received: 1,
+                sequence: 7,
+                block_entity: None,
+            },
+        );
+        session
+            .world
+            .set(position, 2, |state| Ok(state == 0))
+            .unwrap();
         session.reconcile_ack(6).unwrap();
         assert_eq!(session.world.block(position), Some(2));
         session.reconcile_ack(7).unwrap();
@@ -1362,19 +1491,31 @@ mod tests {
             .unwrap()
             .synchronize(&session.inventory, session.content.as_ref().unwrap())
             .unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Menu);
+        assert_eq!(
+            session.ui.as_ref().unwrap().screen(),
+            crate::ui::Screen::Menu
+        );
         let mut close = Writer::default();
         close.var(0);
-        session.apply(Phase::Play, cb::CONTAINER_CLOSE, &close.0).unwrap();
         session
-            .apply(Phase::Play, cb::SHOW_DIALOG, &notice_dialog_bytes("Settlement"))
+            .apply(Phase::Play, cb::CONTAINER_CLOSE, &close.0)
+            .unwrap();
+        session
+            .apply(
+                Phase::Play,
+                cb::SHOW_DIALOG,
+                &notice_dialog_bytes("Settlement"),
+            )
             .unwrap();
         assert_eq!(
             session.ui.as_ref().unwrap().screen(),
             crate::ui::Screen::ServerDialog
         );
         session.apply(Phase::Play, cb::CLEAR_DIALOG, &[]).unwrap();
-        assert_eq!(session.ui.as_ref().unwrap().screen(), crate::ui::Screen::Game);
+        assert_eq!(
+            session.ui.as_ref().unwrap().screen(),
+            crate::ui::Screen::Game
+        );
     }
 
     #[test]
@@ -1384,12 +1525,18 @@ mod tests {
         session.receive_block(position, 1).unwrap();
         session.ui = None;
         let body = open_sign_bytes(position, true);
-        session.apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &body).unwrap();
+        session
+            .apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &body)
+            .unwrap();
         assert_eq!(session.phase, "play");
         assert!(session.error.is_none());
         let mut malformed = body;
         malformed.push(0);
-        assert!(session.apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &malformed).is_err());
+        assert!(
+            session
+                .apply(Phase::Play, cb::OPEN_SIGN_EDITOR, &malformed)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1521,7 +1668,7 @@ mod tests {
     }
 
     fn sign_data_bytes(position: [i32; 3], kind: i32) -> Vec<u8> {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let text = |line: &str| {
             Tag::record([
                 (
@@ -1624,9 +1771,11 @@ mod tests {
             },
         );
         session.reconcile_ack(6).unwrap();
-        assert!(session.entities.block_entities[&position]
-            .predicted_data
-            .is_some());
+        assert!(
+            session.entities.block_entities[&position]
+                .predicted_data
+                .is_some()
+        );
         session.reconcile_ack(7).unwrap();
         assert_eq!(session.world.block(position), Some(0));
         assert_eq!(session.entities.block_entity_data(position), None);
@@ -1756,7 +1905,7 @@ mod tests {
 
     #[test]
     fn p1_review_non_sign_editor_preserves_open_menu_and_admission() {
-        use crate::inventory::{nbt, Tag};
+        use crate::inventory::{Tag, nbt};
         let position = [-1, 3, -1];
         let mut session = sign_session(position, "minecraft:sign");
         session.receive_block(position, 0).unwrap();

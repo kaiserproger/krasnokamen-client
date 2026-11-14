@@ -1,8 +1,8 @@
-use super::models::shapes::{rectangles_cover, FeatureRequirements, TerrainFact};
+use super::models::shapes::{FeatureRequirements, TerrainFact, rectangles_cover};
 pub use super::models::{BakedModel, BakedQuad, ModelTransform, TintKind};
 use super::{
-    models::{Baker, JavaRandom},
     Result,
+    models::{Baker, JavaRandom},
 };
 use crate::api::{AtlasMip, AtlasPatch, RenderLayer};
 use serde_json::{Map, Value};
@@ -46,7 +46,6 @@ fn interaction_fact_versions_match(
         && interaction == INTERACTION_FACTS_VERSION
         && item_properties == ITEM_PROPERTIES_VERSION
 }
-
 
 #[derive(serde::Deserialize)]
 struct ItemDefaultsReport {
@@ -209,25 +208,25 @@ fn interaction_facts(
     names: &[String],
     items: &BTreeMap<u32, String>,
 ) -> Result<(Vec<BlockInteraction>, BTreeMap<u32, ItemInteraction>)> {
-    let block_path = std::env::var("SOLARIS_CLIENT_BLOCK_USE_FACTS")
+    let block_path = std::env::var("KRASNOKAMEN_CLIENT_BLOCK_USE_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/block_use_classes.json"));
     let block_bytes = bounded_bytes(&block_path, 1 << 20)?;
     let blocks: BlockUseReport<'_> = serde_json::from_slice(&block_bytes)
         .map_err(|error| format!("invalid block use facts: {error}"))?;
-    let item_path = std::env::var("SOLARIS_CLIENT_ITEM_USE_FACTS")
+    let item_path = std::env::var("KRASNOKAMEN_CLIENT_ITEM_USE_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/item_use_owners.json"));
     let item_bytes = bounded_bytes(&item_path, 1 << 20)?;
     let item_use: ItemUseReport<'_> = serde_json::from_slice(&item_bytes)
         .map_err(|error| format!("invalid item use facts: {error}"))?;
-    let interaction_path = std::env::var("SOLARIS_CLIENT_INTERACTION_FACTS")
+    let interaction_path = std::env::var("KRASNOKAMEN_CLIENT_INTERACTION_FACTS")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/interaction_facts.json"));
     let interaction_bytes = bounded_bytes(&interaction_path, 1 << 20)?;
     let interaction: InteractionReport<'_> = serde_json::from_slice(&interaction_bytes)
         .map_err(|error| format!("invalid interaction facts: {error}"))?;
-    let properties_path = std::env::var("SOLARIS_CLIENT_ITEM_PROPERTIES")
+    let properties_path = std::env::var("KRASNOKAMEN_CLIENT_ITEM_PROPERTIES")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data.join("reports/item_properties.json"));
     let properties_bytes = bounded_bytes(&properties_path, 1 << 20)?;
@@ -323,9 +322,7 @@ struct StatePredicates {
 fn state_predicates(bytes: &[u8], count: usize) -> Result<BTreeMap<usize, StatePredicates>> {
     let report: StatePredicatesReport<'_> = serde_json::from_slice(bytes)
         .map_err(|error| format!("invalid block state predicates: {error}"))?;
-    if report.game_version != STATE_PREDICATES_VERSION
-        || report.states.len() != count
-    {
+    if report.game_version != STATE_PREDICATES_VERSION || report.states.len() != count {
         return Err(
             "block state predicate source version or complete holder coverage mismatch".into(),
         );
@@ -783,11 +780,17 @@ fn collect_resources(
 /// Convert a filesystem-relative name, not an external resource identifier.
 /// The separator is explicit so Windows path handling is exercised on Unix too.
 fn resource_file_id(ns: &str, relative: &str, separator: char) -> Result<String> {
-    let stem = relative.rsplit_once('.').ok_or("resource extension missing")?.0;
+    let stem = relative
+        .rsplit_once('.')
+        .ok_or("resource extension missing")?
+        .0;
     let mut id = String::with_capacity(ns.len() + 1 + stem.len());
     id.push_str(ns);
     id.push(':');
-    id.extend(stem.chars().map(|ch| if ch == separator { '/' } else { ch }));
+    id.extend(
+        stem.chars()
+            .map(|ch| if ch == separator { '/' } else { ch }),
+    );
     split_id(&id)?;
     Ok(id)
 }
@@ -992,25 +995,24 @@ impl Content {
         Self::load_mode(false)
     }
     fn load_mode(presentation: bool) -> Result<Self> {
-        let root =
-            PathBuf::from(std::env::var("SOLARIS_CLIENT_RESOURCE_ROOT").map_err(|_| {
-                "SOLARIS_CLIENT_RESOURCE_ROOT required for verified local resources"
-            })?);
+        let root = PathBuf::from(std::env::var("KRASNOKAMEN_CLIENT_RESOURCE_ROOT").map_err(
+            |_| "KRASNOKAMEN_CLIENT_RESOURCE_ROOT required for verified local resources",
+        )?);
         let data = PathBuf::from(
-            std::env::var("SOLARIS_CLIENT_DATA_DIR")
-                .map_err(|_| "SOLARIS_CLIENT_DATA_DIR required for pinned local data")?,
+            std::env::var("KRASNOKAMEN_CLIENT_DATA_DIR")
+                .map_err(|_| "KRASNOKAMEN_CLIENT_DATA_DIR required for pinned local data")?,
         );
-        let index = std::env::var("SOLARIS_CLIENT_ASSET_INDEX")
+        let index = std::env::var("KRASNOKAMEN_CLIENT_ASSET_INDEX")
             .ok()
             .map(PathBuf::from);
-        let assets = std::env::var("SOLARIS_CLIENT_ASSET_ROOT")
+        let assets = std::env::var("KRASNOKAMEN_CLIENT_ASSET_ROOT")
             .ok()
             .map(PathBuf::from);
         if index.is_some() != assets.is_some() {
             return Err("verified asset index/root must be supplied together".into());
         }
         let mut roots = vec![root];
-        if let Some(packs) = std::env::var_os("SOLARIS_CLIENT_RESOURCE_PACKS") {
+        if let Some(packs) = std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_PACKS") {
             roots.extend(std::env::split_paths(&packs));
         }
         let source = ResourceSource::new(
@@ -1070,14 +1072,14 @@ impl Content {
             .as_u64()
             .filter(|v| *v < 1000000)
             .ok_or("block state count bound")? as usize;
-        let collision_path = std::env::var("SOLARIS_CLIENT_COLLISION_SHAPES")
+        let collision_path = std::env::var("KRASNOKAMEN_CLIENT_COLLISION_SHAPES")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/block_collision_shapes.bin"));
         let mut collision = ShapeTable::load(&collision_path)?;
         if collision.state_ids.len() != max + 1 {
             return Err("collision report state count mismatch".into());
         }
-        let terrain_path = std::env::var("SOLARIS_CLIENT_TERRAIN_FACTS")
+        let terrain_path = std::env::var("KRASNOKAMEN_CLIENT_TERRAIN_FACTS")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/terrain_facts.json"));
         let (terrain, property_domains, required_features) =
@@ -1092,7 +1094,7 @@ impl Content {
             }
         }
         collision.normalize_offsets(&terrain);
-        let predicate_path = std::env::var("SOLARIS_CLIENT_BLOCK_STATE_PREDICATES")
+        let predicate_path = std::env::var("KRASNOKAMEN_CLIENT_BLOCK_STATE_PREDICATES")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/block_state_predicates.json"));
         let mut predicates = state_predicates(&bounded_bytes(&predicate_path, 8 << 20)?, max + 1)?;
@@ -1313,7 +1315,7 @@ impl Content {
                 return Err("block-item default state outside received source table".into());
             }
         }
-        let creative_path = std::env::var("SOLARIS_CLIENT_CREATIVE_TABS")
+        let creative_path = std::env::var("KRASNOKAMEN_CLIENT_CREATIVE_TABS")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data.join("reports/creative_tabs.json"));
         let creative_tabs_report: Arc<[u8]> = Arc::from(bounded_bytes(&creative_path, 16 << 20)?);
@@ -2133,7 +2135,9 @@ impl Content {
     #[cfg(test)]
     pub(crate) fn insert_test_texture(&mut self, name: &str, region: TextureRegion) {
         self.textures.insert(name.to_owned(), region);
-        self.texture_materials.entry(name.to_owned()).or_insert(RenderLayer::Opaque);
+        self.texture_materials
+            .entry(name.to_owned())
+            .or_insert(RenderLayer::Opaque);
     }
     #[cfg(test)]
     pub(crate) fn set_test_collision(&mut self, state: u32, boxes: Vec<[f64; 6]>) {
@@ -2239,19 +2243,28 @@ impl Content {
         self.insert_test_block_interaction(1, false);
         self.block_interactions[1].use_without_item = Arc::from("DoorBlock");
         self.block_interactions[1].hand_open = Some(true);
-        self.required_features.blocks.insert(self.names[1].clone(), Arc::from([]));
-        self.property_domains.insert(self.names[1].clone(), BTreeMap::from([
-            ("half".into(), vec!["lower".into(), "upper".into()]),
-            ("open".into(), vec!["false".into(), "true".into()]),
-        ]));
+        self.required_features
+            .blocks
+            .insert(self.names[1].clone(), Arc::from([]));
+        self.property_domains.insert(
+            self.names[1].clone(),
+            BTreeMap::from([
+                ("half".into(), vec!["lower".into(), "upper".into()]),
+                ("open".into(), vec!["false".into(), "true".into()]),
+            ]),
+        );
         for _ in 0..3 {
             self.states.push(self.states[1].clone());
             self.properties.push(BTreeMap::new());
         }
         let domains = &self.property_domains[&self.names[1]];
         let mut states = vec![u32::MAX; 4];
-        for (id, half, open) in [(1, "lower", "false"), (2, "lower", "true"),
-                                 (3, "upper", "false"), (4, "upper", "true")] {
+        for (id, half, open) in [
+            (1, "lower", "false"),
+            (2, "lower", "true"),
+            (3, "upper", "false"),
+            (4, "upper", "true"),
+        ] {
             let properties = BTreeMap::from([
                 ("half".to_owned(), half.to_owned()),
                 ("open".to_owned(), open.to_owned()),
@@ -2261,9 +2274,15 @@ impl Content {
             self.properties[id as usize] = properties;
         }
         self.block_states[1] = states;
-        self.insert_test_block_sound(1, 1., 1., BTreeMap::from([
-            ("open".into(), "test:open".into()), ("close".into(), "test:close".into()),
-        ]));
+        self.insert_test_block_sound(
+            1,
+            1.,
+            1.,
+            BTreeMap::from([
+                ("open".into(), "test:open".into()),
+                ("close".into(), "test:close".into()),
+            ]),
+        );
     }
     #[cfg(test)]
     pub(crate) fn set_test_signal_owner(&mut self, state: u32, owner: &str) {
@@ -2297,9 +2316,12 @@ impl Content {
         self.insert_test_block_interaction(1, false);
         self.set_test_signal_owner(1, "DiodeBlock");
         self.insert_test_placement_metadata(0, serde_json::json!({"hierarchy": []}));
-        self.insert_test_placement_metadata(1, serde_json::json!({
-            "hierarchy": ["net.minecraft.world.level.block.DiodeBlock"]
-        }));
+        self.insert_test_placement_metadata(
+            1,
+            serde_json::json!({
+                "hierarchy": ["net.minecraft.world.level.block.DiodeBlock"]
+            }),
+        );
     }
     #[cfg(test)]
     pub(crate) fn configure_test_redstone_lamp(&mut self) {
@@ -2308,11 +2330,14 @@ impl Content {
         lamp.block = 2;
         lamp.registry_id = 2;
         self.states.extend([lamp.clone(), lamp]);
-        self.properties.push(BTreeMap::from([("lit".into(), "false".into())]));
-        self.properties.push(BTreeMap::from([("lit".into(), "true".into())]));
-        self.property_domains.insert(self.names[2].clone(), BTreeMap::from([
-            ("lit".into(), vec!["false".into(), "true".into()]),
-        ]));
+        self.properties
+            .push(BTreeMap::from([("lit".into(), "false".into())]));
+        self.properties
+            .push(BTreeMap::from([("lit".into(), "true".into())]));
+        self.property_domains.insert(
+            self.names[2].clone(),
+            BTreeMap::from([("lit".into(), vec!["false".into(), "true".into()])]),
+        );
         self.block_states.push(vec![3, 4]);
         self.insert_test_block_interaction(2, false);
         self.block_interactions[2].placement = Arc::from("RedstoneLampBlock");
@@ -2340,13 +2365,16 @@ impl Content {
                 }
             }
         }
-        self.property_domains.insert(self.names[2].clone(), BTreeMap::from([
-            ("facing".into(), vec!["north".into()]),
-            ("half".into(), vec!["lower".into()]),
-            ("hinge".into(), vec!["left".into(), "right".into()]),
-            ("open".into(), vec!["false".into(), "true".into()]),
-            ("powered".into(), vec!["false".into(), "true".into()]),
-        ]));
+        self.property_domains.insert(
+            self.names[2].clone(),
+            BTreeMap::from([
+                ("facing".into(), vec!["north".into()]),
+                ("half".into(), vec!["lower".into()]),
+                ("hinge".into(), vec!["left".into(), "right".into()]),
+                ("open".into(), vec!["false".into(), "true".into()]),
+                ("powered".into(), vec!["false".into(), "true".into()]),
+            ]),
+        );
         self.block_states.push(ids);
         self.insert_test_block_interaction(2, false);
         self.block_interactions[2].placement = Arc::from("DoorBlock");
@@ -2762,11 +2790,16 @@ struct Atlas {
 // Shelf packing in identifier order wastes whole pages when a few tall sprites
 // appear late. Read only each distinct PNG's dimensions before choosing a
 // deterministic frame-height order; full decoding and its budgets remain below.
-fn atlas_packing_order<'a>(source: &'a ResourceSource, names: &'a BTreeSet<String>) -> Result<Vec<&'a str>> {
+fn atlas_packing_order<'a>(
+    source: &'a ResourceSource,
+    names: &'a BTreeSet<String>,
+) -> Result<Vec<&'a str>> {
     let mut dimensions = BTreeMap::new();
     let mut order = Vec::with_capacity(names.len());
-    for name in names.iter().map(String::as_str)
-        .filter(|name| *name != "solaris:white" && *name != "minecraft:missingno")
+    for name in names
+        .iter()
+        .map(String::as_str)
+        .filter(|name| *name != "krasnokamen:white" && *name != "minecraft:missingno")
     {
         let (physical, generated): (&str, bool) = match source.palette_sprites.get(name) {
             Some(palettes::PaletteSprite::Generated { base, .. }) => (base, true),
@@ -2778,14 +2811,19 @@ fn atlas_packing_order<'a>(source: &'a ResourceSource, names: &'a BTreeSet<Strin
         } else {
             let (namespace, path) = split_id(physical)?;
             let bytes = source.bytes(&format!("assets/{namespace}/textures/{path}.png"))?;
-            if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
+            if bytes.len() < 24
+                || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
                 || &bytes[8..16] != b"\0\0\0\rIHDR"
             {
                 return Err(format!("invalid PNG header {physical}"));
             }
             let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
             let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-            let metadata = if generated { Value::Null } else { source.texture_metadata(name)? };
+            let metadata = if generated {
+                Value::Null
+            } else {
+                source.texture_metadata(name)?
+            };
             let size = sprite_dimensions([width, height], &metadata)?;
             dimensions.insert((physical, generated), size);
             size
@@ -2816,9 +2854,12 @@ impl Atlas {
         let mut animations = Vec::new();
         let mut animation_bytes = 0usize;
         let order = atlas_packing_order(source, names)?;
-        for name in ["solaris:white", "minecraft:missingno"].into_iter().chain(order) {
+        for name in ["krasnokamen:white", "minecraft:missingno"]
+            .into_iter()
+            .chain(order)
+        {
             let image = match name {
-                "solaris:white" => Image {
+                "krasnokamen:white" => Image {
                     width: 1,
                     height: 1,
                     rgba: vec![255; 4],
@@ -2833,7 +2874,7 @@ impl Atlas {
                 (layers as usize + 1) * mip_bytes,
             )?;
             let (_, path) = split_id(name)?;
-            let metadata = if name == "solaris:white" || name == "minecraft:missingno" {
+            let metadata = if name == "krasnokamen:white" || name == "minecraft:missingno" {
                 Value::Null
             } else {
                 source.texture_metadata(name)?
@@ -3250,19 +3291,31 @@ mod tests {
 
     #[test]
     fn all_published_26_3_interaction_fact_labels_are_required() {
-        assert!(interaction_fact_versions_match("26.3", "26.3", "26.3", "26.3"));
+        assert!(interaction_fact_versions_match(
+            "26.3", "26.3", "26.3", "26.3"
+        ));
         assert!(!interaction_fact_versions_match(
             "26.3", "26.1.2", "26.3", "26.3"
         ));
     }
 
-
     #[test]
     fn filesystem_resource_ids_normalize_windows_separators_only_at_source_boundary() {
         let expected = "minecraft:block/acacia_door_bottom";
-        assert_eq!(resource_file_id("minecraft", r"block\acacia_door_bottom.png", '\\').unwrap(), expected);
+        assert_eq!(
+            resource_file_id("minecraft", r"block\acacia_door_bottom.png", '\\').unwrap(),
+            expected
+        );
         let native = Path::new("block").join("acacia_door_bottom.png");
-        assert_eq!(resource_file_id("minecraft", native.to_str().unwrap(), std::path::MAIN_SEPARATOR).unwrap(), expected);
+        assert_eq!(
+            resource_file_id(
+                "minecraft",
+                native.to_str().unwrap(),
+                std::path::MAIN_SEPARATOR
+            )
+            .unwrap(),
+            expected
+        );
         assert!(resource_file_id("minecraft", r"block\acacia_door_bottom.png", '/').is_err());
         assert!(resource_file_id("minecraft", r"..\escape.png", '\\').is_err());
         assert!(resource_file_id("minecraft", r"C:\escape.png", '\\').is_err());
@@ -3289,27 +3342,35 @@ mod tests {
                 .unwrap(),
             &[7, 2, 9, 2]
         );
-        assert!(content
-            .registry_tag_contains("minecraft:block", "test:selection", 2)
-            .unwrap());
-        assert!(!content
-            .registry_tag_contains("minecraft:block", "test:selection", 3)
-            .unwrap());
+        assert!(
+            content
+                .registry_tag_contains("minecraft:block", "test:selection", 2)
+                .unwrap()
+        );
+        assert!(
+            !content
+                .registry_tag_contains("minecraft:block", "test:selection", 3)
+                .unwrap()
+        );
         assert_eq!(
             content
                 .registry_tag_optional("minecraft:block", "test:absent")
                 .unwrap(),
             None
         );
-        assert!(content
-            .registry_tag_optional("test:unobserved_registry", "test:absent")
-            .is_err());
-        assert!(content
-            .set_tags(BTreeMap::from([(
-                "minecraft:block".into(),
-                BTreeMap::from([("test:selection".into(), vec![10])]),
-            )]))
-            .is_err());
+        assert!(
+            content
+                .registry_tag_optional("test:unobserved_registry", "test:absent")
+                .is_err()
+        );
+        assert!(
+            content
+                .set_tags(BTreeMap::from([(
+                    "minecraft:block".into(),
+                    BTreeMap::from([("test:selection".into(), vec![10])]),
+                )]))
+                .is_err()
+        );
         assert_eq!(
             content
                 .registry_tag("minecraft:block", "test:selection")
@@ -3325,9 +3386,11 @@ mod tests {
         limits
             .check_sprite_preprocessing("test:large_sprite", 780 * 608 * 4, 7_364_236, 268_173_312)
             .unwrap();
-        assert!(limits
-            .check_sprite_preprocessing("test:oversized", usize::MAX, 0, 0)
-            .is_err());
+        assert!(
+            limits
+                .check_sprite_preprocessing("test:oversized", usize::MAX, 0, 0)
+                .is_err()
+        );
     }
 
     #[test]

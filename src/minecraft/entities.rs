@@ -1,13 +1,13 @@
 //! Bounded entity tools use received identity/state and the ordinary player action path.
-use super::{lifecycle, Outcome};
+use super::{Outcome, lifecycle};
 use crate::{
     api::InputIntent,
     entities::{Entity, Handle, Metadata},
     player::{Bounds, InteractionIntent},
-    protocol::{content::Content, Result},
+    protocol::{Result, content::Content},
     session::Session,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) const SUPPORTED_TOOLS: &[&str] = &[
@@ -451,17 +451,30 @@ impl super::EntityCensus {
         cursor: &str,
         limit: usize,
     ) -> Result<Value> {
-        if !cursor.is_empty()
-            && cursor.parse::<u64>().map_err(|_| "invalid_cursor")? != self.serial
+        if !cursor.is_empty() && cursor.parse::<u64>().map_err(|_| "invalid_cursor")? != self.serial
         {
             return Err("entity census cursor expired".into());
         }
-        let snapshot = self.snapshot.as_mut().ok_or("entity census cursor expired")?;
-        if snapshot.epochs != epochs || snapshot.radius != radius || snapshot.kind.as_deref() != kind {
+        let snapshot = self
+            .snapshot
+            .as_mut()
+            .ok_or("entity census cursor expired")?;
+        if snapshot.epochs != epochs
+            || snapshot.radius != radius
+            || snapshot.kind.as_deref() != kind
+        {
             return Err("entity census query or context changed".into());
         }
-        let serial = self.serial.checked_add(1).ok_or("entity census cursor exhausted")?;
-        let entities = snapshot.rows.by_ref().take(limit).map(|(_, value)| value).collect::<Vec<_>>();
+        let serial = self
+            .serial
+            .checked_add(1)
+            .ok_or("entity census cursor exhausted")?;
+        let entities = snapshot
+            .rows
+            .by_ref()
+            .take(limit)
+            .map(|(_, value)| value)
+            .collect::<Vec<_>>();
         let more = snapshot.rows.len() != 0;
         let mut value = json!({
             "in_play":true,"radius":radius,"visible_count":snapshot.total,
@@ -498,33 +511,50 @@ pub(super) fn start(
         "minecraft_list_entities" => {
             let radius = number(args, "radius", Some(32.), 0., 128.)?;
             let limit = integer(args, "limit", Some(128), 1, 512)? as usize;
-            let kind = args.get("entity_type").map(|_| text(args, "entity_type", 128)).transpose()?;
-            let cursor = args.get("cursor").map(|value| value.as_str().ok_or("invalid_cursor")).transpose()?;
+            let kind = args
+                .get("entity_type")
+                .map(|_| text(args, "entity_type", 128))
+                .transpose()?;
+            let cursor = args
+                .get("cursor")
+                .map(|value| value.as_str().ok_or("invalid_cursor"))
+                .transpose()?;
             if let Some(cursor) = cursor {
                 let epochs = session.context_epochs();
                 if cursor.is_empty() {
                     let radius_squared = radius * radius;
-                    let rows = session.entities.received_entities()
+                    let rows = session
+                        .entities
+                        .received_entities()
                         .filter(|entity| {
-                            distance_squared(entity.position, session.player.position) <= radius_squared
+                            distance_squared(entity.position, session.player.position)
+                                <= radius_squared
                                 && kind.is_none_or(|kind| kind == entity.type_name)
                         })
-                        .map(|entity| list_entity_value(session, entity)
-                            .map(|value| (entity.handle.network_id, value)))
+                        .map(|entity| {
+                            list_entity_value(session, entity)
+                                .map(|value| (entity.handle.network_id, value))
+                        })
                         .collect::<Result<Vec<_>>>()?;
                     session.entity_census.begin(epochs, radius, kind, rows);
                 }
                 return Ok(Some(Outcome::Complete(
-                    session.entity_census.page(epochs, radius, kind, cursor, limit)?,
+                    session
+                        .entity_census
+                        .page(epochs, radius, kind, cursor, limit)?,
                 )));
             }
             let (page, total) = entity_page(
-                session.entities.received_entities().map(|entity| (
-                    distance_squared(entity.position, session.player.position),
-                    entity.handle.network_id,
-                    entity.type_name.as_str(),
-                )),
-                radius, limit, kind,
+                session.entities.received_entities().map(|entity| {
+                    (
+                        distance_squared(entity.position, session.player.position),
+                        entity.handle.network_id,
+                        entity.type_name.as_str(),
+                    )
+                }),
+                radius,
+                limit,
+                kind,
             );
             let entities = page
                 .iter()
@@ -904,10 +934,19 @@ mod observation_tests {
         let mut session = Session::new_mode("entity-census".into(), false);
         let mut content = Content::test_cube();
         let facts: Value = serde_json::from_str(include_str!(
-            "../../assets/solaris/entities/entity-facts.json"
-        )).unwrap();
-        content.entity_names = facts["entities"].as_object().unwrap().iter()
-            .map(|(name, schema)| (u32::try_from(schema["protocol_id"].as_u64().unwrap()).unwrap(), name.clone()))
+            "../../assets/krasnokamen/entities/entity-facts.json"
+        ))
+        .unwrap();
+        content.entity_names = facts["entities"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, schema)| {
+                (
+                    u32::try_from(schema["protocol_id"].as_u64().unwrap()).unwrap(),
+                    name.clone(),
+                )
+            })
             .collect();
         session.entities.activate_models(std::sync::Arc::new(
             crate::entities::Models::load_state(&content).unwrap(),
@@ -922,8 +961,12 @@ mod observation_tests {
     fn census_spawn(session: &mut Session, id: i32, x: f64) {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let content = session.content.as_ref().unwrap();
-        let kind = content.entity_names.iter()
-            .find(|(_, name)| *name == "minecraft:villager").unwrap().0;
+        let kind = content
+            .entity_names
+            .iter()
+            .find(|(_, name)| *name == "minecraft:villager")
+            .unwrap()
+            .0;
         let mut packet = Writer::default();
         packet.var(id);
         packet.0.extend([u8::try_from(id).unwrap(); 16]);
@@ -932,11 +975,17 @@ mod observation_tests {
         packet.f64(0.);
         packet.f64(0.);
         packet.0.extend([0u8; 5]);
-        session.entities.apply(cb::ADD_ENTITY, &mut Reader::new(&packet.0), content, 1).unwrap();
+        session
+            .entities
+            .apply(cb::ADD_ENTITY, &mut Reader::new(&packet.0), content, 1)
+            .unwrap();
     }
 
     fn census_page(session: &mut Session, arguments: Value) -> Value {
-        match start(session, "minecraft_list_entities", &arguments).unwrap().unwrap() {
+        match start(session, "minecraft_list_entities", &arguments)
+            .unwrap()
+            .unwrap()
+        {
             Outcome::Complete(value) => value,
             Outcome::Pending(_) => panic!("entity census unexpectedly waits"),
         }
@@ -954,14 +1003,20 @@ mod observation_tests {
 
         session.player.position[0] = 1024.;
         census_spawn(&mut session, 11, 1025.);
-        let second = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":first["next_cursor"],
-        }));
+        let second = census_page(
+            &mut session,
+            json!({
+                "radius":128,"limit":1,"cursor":first["next_cursor"],
+            }),
+        );
         assert_eq!(second["visible_count"], 3);
         assert_eq!(second["entities"][0]["entity_id"], 7);
-        let last = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":second["next_cursor"],
-        }));
+        let last = census_page(
+            &mut session,
+            json!({
+                "radius":128,"limit":1,"cursor":second["next_cursor"],
+            }),
+        );
         assert_eq!(last["visible_count"], 3);
         assert_eq!(last["entities"][0]["entity_id"], 9);
         assert_eq!(last["next_cursor"], Value::Null);
@@ -978,21 +1033,30 @@ mod observation_tests {
         for (id, x) in [(5, 127.), (7, 2.), (9, 129.)] {
             census_spawn(&mut session, id, x);
         }
-        let absent = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:sheep",
-        }));
+        let absent = census_page(
+            &mut session,
+            json!({
+                "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:sheep",
+            }),
+        );
         assert_eq!(absent["visible_count"], 0);
         assert_eq!(absent["entities"], json!([]));
         assert_eq!(absent["next_cursor"], Value::Null);
 
-        let first = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:villager",
-        }));
+        let first = census_page(
+            &mut session,
+            json!({
+                "radius":128,"limit":1,"cursor":"","entity_type":"minecraft:villager",
+            }),
+        );
         assert_eq!(first["visible_count"], 2);
         assert_eq!(first["entities"][0]["entity_id"], 5);
-        let last = census_page(&mut session, json!({
-            "radius":128,"limit":1,"cursor":first["next_cursor"],"entity_type":"minecraft:villager",
-        }));
+        let last = census_page(
+            &mut session,
+            json!({
+                "radius":128,"limit":1,"cursor":first["next_cursor"],"entity_type":"minecraft:villager",
+            }),
+        );
         assert_eq!(last["entities"][0]["entity_id"], 7);
         assert_eq!(last["next_cursor"], Value::Null);
         assert_eq!(last["truncated"], false);
@@ -1006,27 +1070,73 @@ mod observation_tests {
         }
         let first = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
         let cursor = first["next_cursor"].as_str().unwrap();
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":64,"limit":1,"cursor":cursor,
-        })).is_err());
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":cursor,"entity_type":"minecraft:villager",
-        })).is_err());
-        assert!(session.entity_census.page((0, 1), 128., None, cursor, 1).is_err());
+        assert!(
+            start(
+                &mut session,
+                "minecraft_list_entities",
+                &json!({
+                    "radius":64,"limit":1,"cursor":cursor,
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            start(
+                &mut session,
+                "minecraft_list_entities",
+                &json!({
+                    "radius":128,"limit":1,"cursor":cursor,"entity_type":"minecraft:villager",
+                })
+            )
+            .is_err()
+        );
+        assert!(
+            session
+                .entity_census
+                .page((0, 1), 128., None, cursor, 1)
+                .is_err()
+        );
 
         let replacement = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":""}));
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":cursor,
-        })).is_err());
+        assert!(
+            start(
+                &mut session,
+                "minecraft_list_entities",
+                &json!({
+                    "radius":128,"limit":1,"cursor":cursor,
+                })
+            )
+            .is_err()
+        );
         let current = replacement["next_cursor"].as_str().unwrap();
-        let second = census_page(&mut session, json!({"radius":128,"limit":1,"cursor":current}));
+        let second = census_page(
+            &mut session,
+            json!({"radius":128,"limit":1,"cursor":current}),
+        );
         assert_eq!(second["entities"][0]["entity_id"], 7);
-        assert!(start(&mut session, "minecraft_list_entities", &json!({
-            "radius":128,"limit":1,"cursor":current,
-        })).is_err());
+        assert!(
+            start(
+                &mut session,
+                "minecraft_list_entities",
+                &json!({
+                    "radius":128,"limit":1,"cursor":current,
+                })
+            )
+            .is_err()
+        );
         session.disconnect();
-        assert!(session.entity_census.page((0, 0), 128., None,
-            second["next_cursor"].as_str().unwrap(), 1).is_err());
+        assert!(
+            session
+                .entity_census
+                .page(
+                    (0, 0),
+                    128.,
+                    None,
+                    second["next_cursor"].as_str().unwrap(),
+                    1
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -1039,17 +1149,18 @@ mod observation_tests {
             (16000., 5, "minecraft:villager"),
             (17000., 11, "minecraft:villager"),
         ];
-        let (page, total) = entity_page(
-            entities.into_iter(), 128., 3, Some("minecraft:villager"),
-        );
+        let (page, total) = entity_page(entities.into_iter(), 128., 3, Some("minecraft:villager"));
         assert_eq!(page.iter().map(|row| row.1).collect::<Vec<_>>(), [7, 9, 5]);
         assert_eq!(total, 3);
     }
 
     #[test]
     fn entity_census_unpaged_calls_preserve_nearest_order() {
-        let entities = [(1., 9, "minecraft:villager"), (100., 5, "minecraft:villager"),
-                        (81., 7, "minecraft:villager")];
+        let entities = [
+            (1., 9, "minecraft:villager"),
+            (100., 5, "minecraft:villager"),
+            (81., 7, "minecraft:villager"),
+        ];
         let (nearest, _) = entity_page(entities.into_iter(), 128., 2, None);
         assert_eq!(nearest.iter().map(|row| row.1).collect::<Vec<_>>(), [9, 7]);
     }
