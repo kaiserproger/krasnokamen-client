@@ -752,7 +752,7 @@ mod tests {
     #[test]
     fn reduced_motion_is_reversible_and_theme_switching_leaves_no_visual_residue() {
         let ctx = egui::Context::default();
-        let dark = resolve("solaris-original", &[]);
+        let dark = resolve("krasnokamen-original", &[]);
         let light = resolve("porcelain", &[]);
         apply(&ctx, &dark, true);
         let style = ctx.style();

@@ -3,12 +3,12 @@ mod planner;
 use super::Outcome;
 use crate::{
     api::InputIntent,
-    player::{collision, Bounds},
+    player::{Bounds, collision},
     protocol::Result,
     session::Session,
 };
 use planner::{Planner, Space};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 pub(super) struct Task {
@@ -538,7 +538,10 @@ impl Task {
             session.input(InputIntent::Look { yaw, pitch: 0. })?;
         }
         let jump = session.player.grounded && point[1] - p[1] > 0.6001;
-        self.movement(session, [center_before_turn || distance > 0.12 * 0.12, jump])?;
+        self.movement(
+            session,
+            [center_before_turn || distance > 0.12 * 0.12, jump],
+        )?;
         Ok(None)
     }
     fn movement(&mut self, session: &mut Session, next: [bool; 2]) -> Result<()> {
@@ -822,8 +825,12 @@ mod tests {
             content.set_test_collision(state, vec![[0., 0., 0., 0.1875, 1., 1.]]);
         }
         for (position, state) in [([149, 1, 51], 2), ([149, 2, 51], 4)] {
-            session.world.set(position, state, |state|
-                session.content.as_ref().unwrap().block_is_air(state)).unwrap();
+            session
+                .world
+                .set(position, state, |state| {
+                    session.content.as_ref().unwrap().block_is_air(state)
+                })
+                .unwrap();
         }
         session.player.position = [149.41612090453967, 1., 52.50179587565344];
         let mut task = active_task(&session);
@@ -831,8 +838,14 @@ mod tests {
         task.held = [false; 2];
         task.plan(&session).unwrap();
         assert!(task.on_event(&mut session).unwrap().is_none());
-        assert_eq!(session.observation().data["inputs"]["held"], json!(["forward"]));
-        assert!((-100. ..=-80.).contains(&session.player.yaw),
-            "must align east before turning north into the door: {}", session.player.yaw);
+        assert_eq!(
+            session.observation().data["inputs"]["held"],
+            json!(["forward"])
+        );
+        assert!(
+            (-100. ..=-80.).contains(&session.player.yaw),
+            "must align east before turning north into the door: {}",
+            session.player.yaw
+        );
     }
 }
