@@ -110,7 +110,10 @@ impl Store {
         e.damage_tick = player.hurt_tick;
         e.animation = player.visual_swing(tick);
         // The first dead tick, kept while dead, so the death tilt advances (vanilla deathTime).
-        e.death_tick = player.health.filter(|h| *h <= 0.).map(|_| e.death_tick.unwrap_or(tick));
+        e.death_tick = player
+            .health
+            .filter(|h| *h <= 0.)
+            .map(|_| e.death_tick.unwrap_or(tick));
         let pose = match player.pose {
             Pose::Standing => 0,
             Pose::FallFlying => 1,
@@ -128,7 +131,8 @@ impl Store {
         }
         let action = player.visual_item_use();
         if let Some(index) = models.accessor("minecraft:player", "DATA_PLAYER_MAIN_HAND") {
-            e.metadata.insert(index, Metadata::Arm(u8::from(player.main_arm_right())));
+            e.metadata
+                .insert(index, Metadata::Arm(u8::from(player.main_arm_right())));
         }
         if let Some(index) = models.accessor("minecraft:player", "DATA_LIVING_ENTITY_FLAGS") {
             let flags = action.map_or(0, |(hand, _, _)| 1 | (hand << 1));

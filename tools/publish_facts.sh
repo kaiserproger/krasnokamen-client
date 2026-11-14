@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the data-only Solaris facts bundle from <repo>/dist and merge its entry
+# Build the data-only Krasnokamen facts bundle from <repo>/dist and merge its entry
 # into the content manifest for the static file server (replacing only an entry
 # with the same name, so the content bundle and older revisions stay listed).
 #
@@ -35,7 +35,7 @@ if [[ ! "$GAME_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
   echo "publish_facts: launcher GAME_VERSION is not a release version: $GAME_VERSION" >&2
   exit 1
 fi
-NAME="solaris-facts-${GAME_VERSION}-r${REV}"
+NAME="krasnokamen-facts-${GAME_VERSION}-r${REV}"
 BASE_URL="http://135.106.208.217:8080/static"
 
 FACTS_FILES=(
@@ -135,7 +135,7 @@ tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
 
 SHA="$(sha256sum "$OUT" | awk '{print $1}')"
 SIZE="$(stat -c%s "$OUT")"
-JSON="$OUT_DIR/solaris-content.json"
+JSON="$OUT_DIR/krasnokamen-content.json"
 if [[ -f "$JSON" ]]; then
   BASE="$(cat "$JSON")"
 else

@@ -104,7 +104,9 @@ impl Store {
         if !render_blocks::has_factory(name) && !render_blocks::source_no_factory(name) {
             return Err(format!("unknown block entity constructor type: {name}"));
         }
-        let kind = content.block_entity_names.iter()
+        let kind = content
+            .block_entity_names
+            .iter()
             .find_map(|(kind, value)| (value == name).then_some(*kind))
             .ok_or_else(|| format!("block entity type unavailable: {name}"))?;
         // Parsers project absent item lists/profiles/targets to constructor defaults.
@@ -114,7 +116,8 @@ impl Store {
             });
             json!({"front_text":text,"back_text":text,"is_waxed":false})
         } else if name == "minecraft:structure_block" {
-            let mode = content.state_properties(state)
+            let mode = content
+                .state_properties(state)
                 .and_then(|properties| properties.get("mode"))
                 .map(|mode| mode.to_ascii_uppercase())
                 .unwrap_or_else(|| "DATA".into());
@@ -125,9 +128,16 @@ impl Store {
         let animation = parse(name, &data, content)?;
         Ok(Some(BlockEntitySnapshot {
             entity: BlockEntity {
-                position, kind, type_name: name.into(), data: Arc::new(data),
-                predicted_data: None, raw_nbt: Arc::from([]), state: Some(state),
-                revision: self.revision, event: None, animation,
+                position,
+                kind,
+                type_name: name.into(),
+                data: Arc::new(data),
+                predicted_data: None,
+                raw_nbt: Arc::from([]),
+                state: Some(state),
+                revision: self.revision,
+                event: None,
+                animation,
             },
             active: false,
         }))
@@ -146,7 +156,9 @@ impl Store {
         let data = Arc::new(r.nbt()?);
         let raw_nbt: Arc<[u8]> = Arc::from(&r.bytes[start..r.offset]);
         r.done()?;
-        let name = content.block_entity_names.get(&kind)
+        let name = content
+            .block_entity_names
+            .get(&kind)
             .ok_or_else(|| format!("unknown block entity type {kind}"))?;
         let visible = self.block_entity_name(position) == Some(name.as_str());
         if let Some(snapshot) = snapshot.filter(|snapshot| snapshot.entity.type_name == *name) {
@@ -154,9 +166,17 @@ impl Store {
             snapshot.active |= animation.piston.is_some();
             self.revision += 1;
             if visible {
-                snapshot.entity.update_data(data.clone(), raw_nbt.clone(), animation, self.revision, false);
+                snapshot.entity.update_data(
+                    data.clone(),
+                    raw_nbt.clone(),
+                    animation,
+                    self.revision,
+                    false,
+                );
             } else {
-                snapshot.entity.update_data(data, raw_nbt, animation, self.revision, false);
+                snapshot
+                    .entity
+                    .update_data(data, raw_nbt, animation, self.revision, false);
                 return Ok(());
             }
         }

@@ -41,17 +41,28 @@ impl Renderer {
     pub(crate) fn terrain_frame_id(&self) -> u64 {
         self.frame_id
     }
-    pub(crate) fn terrain_frame(&self, keys: &[[i32; 3]], revisions: &[u64]) -> Option<(u64, Vec<bool>)> {
+    pub(crate) fn terrain_frame(
+        &self,
+        keys: &[[i32; 3]],
+        revisions: &[u64],
+    ) -> Option<(u64, Vec<bool>)> {
         if self.surface.is_none() || self.gpu_failed.load(Ordering::Acquire) || self.frame_id == 0 {
             return None;
         }
-        let selected = keys.iter().zip(revisions).map(|(key, revision)| {
-            let chunk = self.chunks.get(key)?;
-            if chunk.revision != *revision || chunk.uploaded_time_ms.is_none() || chunk.visibility != Some(1.) {
-                return None;
-            }
-            Some(self.visible.iter().any(|visible| visible.key == *key))
-        }).collect::<Option<Vec<_>>>()?;
+        let selected = keys
+            .iter()
+            .zip(revisions)
+            .map(|(key, revision)| {
+                let chunk = self.chunks.get(key)?;
+                if chunk.revision != *revision
+                    || chunk.uploaded_time_ms.is_none()
+                    || chunk.visibility != Some(1.)
+                {
+                    return None;
+                }
+                Some(self.visible.iter().any(|visible| visible.key == *key))
+            })
+            .collect::<Option<Vec<_>>>()?;
         Some((self.frame_id, selected))
     }
     pub(crate) fn completed_terrain_frame(&self) -> u64 {
@@ -188,9 +199,10 @@ impl Renderer {
         });
         target["uploaded_texture_revision"] =
             json!(self.texture_revision.map(|revision| revision.to_string()));
-        target["gpu_activated_texture_revision"] = json!(self
-            .resource_revision()
-            .map(|revision| revision.to_string()));
+        target["gpu_activated_texture_revision"] = json!(
+            self.resource_revision()
+                .map(|revision| revision.to_string())
+        );
         target["resource_activation_frame_id"] =
             json!(self.texture_activation_frame.map(|frame| frame.to_string()));
         target["gpu_failed"] = json!(self.gpu_failed.load(Ordering::Acquire));
@@ -215,11 +227,11 @@ impl Renderer {
         });
         target["desired_maximum_frame_latency"] = json!(self.config.desired_maximum_frame_latency);
         target["terrain_multi_draw_indirect"] = json!(self.mdi.is_some() && !self.reference_mode);
-        target["terrain_indirect_candidates"] = json!(self.mdi.as_ref().map_or(0, |mdi| mdi
-            .candidates
-            .iter()
-            .map(Vec::len)
-            .sum::<usize>()));
+        target["terrain_indirect_candidates"] = json!(
+            self.mdi
+                .as_ref()
+                .map_or(0, |mdi| mdi.candidates.iter().map(Vec::len).sum::<usize>())
+        );
         target["terrain_indirect_candidates_opaque"] = json!(self.stats.terrain_candidates_opaque);
         target["terrain_indirect_candidates_cutout"] = json!(self.stats.terrain_candidates_cutout);
         target["terrain_hiz_occlusion"] =
@@ -241,16 +253,18 @@ impl Renderer {
         target["shadow_terrain_api_calls"] = json!(self.stats.shadow_terrain_api_calls);
         target["shadow_terrain_logical_draws"] = json!(self.stats.shadow_terrain_logical_draws);
         target["shadow_terrain_indices"] = json!(self.stats.shadow_terrain_indices);
-        target["shadow_indirect_reserved_bytes"] = json!(self
-            .shadow
-            .batch
-            .as_ref()
-            .map_or(0, shadow::ShadowBatch::reserved_bytes));
+        target["shadow_indirect_reserved_bytes"] = json!(
+            self.shadow
+                .batch
+                .as_ref()
+                .map_or(0, shadow::ShadowBatch::reserved_bytes)
+        );
         target["entity_draws"] = json!(self.stats.entity_draws);
         target["entity_submitted_indices"] = json!(self.stats.entity_submitted_indices);
         target["crowd_instances"] = json!(self.stats.crowd_instances);
         target["crowd_draw_calls"] = json!(self.stats.crowd_draws);
-        target["crowd_upload_bytes"] = json!(self.crowd.as_ref().map_or(0, |crowd| crowd.uploaded_bytes));
+        target["crowd_upload_bytes"] =
+            json!(self.crowd.as_ref().map_or(0, |crowd| crowd.uploaded_bytes));
         // Entity/block-entity contributions share material draws.
         target["entity_geometry_indices"] = json!(self.stats.entity_geometry_indices);
         target["block_entity_geometry_indices"] = json!(self.stats.block_entity_geometry_indices);
@@ -269,10 +283,10 @@ impl Renderer {
         target["index_count"] = json!(self.stats.submitted_indices);
         target["draw_calls"] = json!(self.stats.draw_calls);
         target["frame_wall_ms"] = json!(self.last_frame_ms);
-        target["cpu_prepare_submit_ms"] = json!((self.last_frame_ms
-            - self.stats.surface_acquire_ms
-            - self.stats.present_call_ms)
-            .max(0.));
+        target["cpu_prepare_submit_ms"] = json!(
+            (self.last_frame_ms - self.stats.surface_acquire_ms - self.stats.present_call_ms)
+                .max(0.)
+        );
         target["cpu_upload_ms"] = json!(self.stats.upload_ms);
         target["cpu_visibility_sort_ms"] = json!(self.stats.visibility_ms);
         target["cpu_draw_encode_ms"] = json!(self.stats.draw_encode_ms);
@@ -359,9 +373,10 @@ impl Renderer {
             json!(u64::from(self.config.width) * u64::from(self.config.height) * 12);
         // Shadow cascades + opaque depth/colour copies + bloom, god-ray and TAA
         // history targets; the scene HDR target is reported separately above.
-        resident["fancy_target_active_bytes"] = json!((self.shadow.target_bytes()
-            + self.post.target_bytes())
-        .saturating_sub(u64::from(self.config.width) * u64::from(self.config.height) * 8));
+        resident["fancy_target_active_bytes"] = json!(
+            (self.shadow.target_bytes() + self.post.target_bytes())
+                .saturating_sub(u64::from(self.config.width) * u64::from(self.config.height) * 8)
+        );
         resident["shadow_instance_reserved_bytes"] = json!(((mesh::MAX_CHUNKS + 2) * 16) as u64);
         resident["terrain_vertex_budget_bytes"] = json!(mesh::VERTEX_BUDGET);
         resident["terrain_index_budget_bytes"] = json!(mesh::INDEX_BUDGET);

@@ -4,9 +4,9 @@ use crate::{
     entities,
     inventory::Stack,
     protocol::{
+        Result,
         content::Content,
         models::{BakedModel, TintKind},
-        Result,
     },
 };
 use glam::{Mat4, Vec3};
@@ -109,7 +109,10 @@ pub(crate) fn report_item_model_failure(c: &Content, s: &Stack, error: &str) {
     }
 }
 pub(crate) fn item_model_id<'a>(content: &'a Content, stack: &'a Stack) -> Option<&'a str> {
-    stack.components.get("minecraft:item_model").and_then(Value::as_str)
+    stack
+        .components
+        .get("minecraft:item_model")
+        .and_then(Value::as_str)
         .or_else(|| content.item_names.get(&stack.id).map(String::as_str))
 }
 
@@ -151,7 +154,8 @@ impl ItemModels {
     }
     #[cfg(test)]
     pub(crate) fn insert_test_graph(&mut self, id: &str, graph: Value) {
-        self.definitions.insert(id.into(), Arc::new(serde_json::json!({"model": graph})));
+        self.definitions
+            .insert(id.into(), Arc::new(serde_json::json!({"model": graph})));
     }
     pub fn clear(&mut self) {
         self.definitions.clear();
@@ -204,7 +208,8 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, [f32; 6])> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.2))
+        self.select(c, s, ctx)
+            .map(|selected| (&selected.1, selected.2))
     }
     /// `model_with` plus the selection's shape: equal shapes mean identical entity geometry
     /// (display transform of `ctx`, quad positions, UVs, colours, layers, materials, alpha
@@ -215,7 +220,8 @@ impl ItemModels {
         s: &Stack,
         ctx: &ItemContext,
     ) -> Result<(&'a BakedModel, u64)> {
-        self.select(c, s, ctx).map(|selected| (&selected.1, selected.3))
+        self.select(c, s, ctx)
+            .map(|selected| (&selected.1, selected.3))
     }
     /// The received stack's client item definition (`assets/<ns>/items/<path>.json`).
     fn definition(&mut self, c: &Content, s: &Stack) -> Result<Arc<Value>> {
@@ -237,7 +243,9 @@ impl ItemModels {
         }
         match self.definition(c, s)?.get("swap_animation_scale") {
             None => Ok(1.),
-            Some(value) => value.as_f64().map(|v| v as f32)
+            Some(value) => value
+                .as_f64()
+                .map(|v| v as f32)
                 .ok_or_else(|| "item swap_animation_scale must be a number".into()),
         }
     }
@@ -350,7 +358,10 @@ impl ItemModels {
                 }
                 if ctx.display == "gui"
                     && short(node["type"].as_str().unwrap_or("")) == "special"
-                    && matches!(short(node["model"]["type"].as_str().unwrap_or("")), "head" | "player_head")
+                    && matches!(
+                        short(node["model"]["type"].as_str().unwrap_or("")),
+                        "head" | "player_head"
+                    )
                 {
                     sort_gui_special_head(&mut model);
                 }
@@ -366,13 +377,16 @@ impl ItemModels {
             }
             let display = display_matrix(&result, &ctx.display);
             let bounds = model_bounds(&result, display);
-            let shape = *self.shapes.entry(shape_key(&result, display)).or_insert_with(|| {
-                NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            });
-            return Ok(self
-                .selected
-                .entry(key)
-                .or_insert((Arc::clone(&s.components), result, bounds, shape)));
+            let shape = *self
+                .shapes
+                .entry(shape_key(&result, display))
+                .or_insert_with(|| NEXT_SHAPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            return Ok(self.selected.entry(key).or_insert((
+                Arc::clone(&s.components),
+                result,
+                bounds,
+                shape,
+            )));
         }
         Ok(&self.selected[&key])
     }
@@ -391,8 +405,20 @@ fn shape_key(model: &BakedModel, display: Mat4) -> Vec<u32> {
             RenderLayer::Opaque | RenderLayer::Cutout => EntityMaterial::ItemCutout,
             RenderLayer::Translucent => EntityMaterial::ItemTranslucent,
         });
-        key.extend(q.positions.iter().flatten().chain(q.uv.iter().flatten()).chain(&color).map(|v| v.to_bits()));
-        key.extend([q.alpha.to_bits(), q.texture_layer, material as u32, u32::from(q.light_emission)]);
+        key.extend(
+            q.positions
+                .iter()
+                .flatten()
+                .chain(q.uv.iter().flatten())
+                .chain(&color)
+                .map(|v| v.to_bits()),
+        );
+        key.extend([
+            q.alpha.to_bits(),
+            q.texture_layer,
+            material as u32,
+            u32::from(q.light_emission),
+        ]);
     }
     key
 }
@@ -401,15 +427,21 @@ fn shape_key(model: &BakedModel, display: Mat4) -> Vec<u32> {
 fn sort_gui_special_head(model: &mut BakedModel) {
     let display = display_matrix(model, "gui");
     let depth = |q: &crate::protocol::models::BakedQuad| {
-        q.positions.iter()
+        q.positions
+            .iter()
             .map(|p| display.transform_point3(Vec3::from_array(*p)).z)
-            .sum::<f32>() * 0.25
+            .sum::<f32>()
+            * 0.25
     };
     // Heads have few quads; stable insertion sort preserves coplanar skin layers
     // without allocating a second list of geometry.
     for i in 1..model.quads.len() {
         let mut j = i;
-        while j > 0 && depth(&model.quads[j]).total_cmp(&depth(&model.quads[j - 1])).is_lt() {
+        while j > 0
+            && depth(&model.quads[j])
+                .total_cmp(&depth(&model.quads[j - 1]))
+                .is_lt()
+        {
             model.quads.swap(j, j - 1);
             j -= 1;
         }
@@ -425,9 +457,17 @@ pub(crate) fn display_matrix(model: &BakedModel, context: &str) -> Mat4 {
     if let Some(t) = model.display.get(context) {
         let mirrored = matches!(context, "thirdperson_lefthand" | "firstperson_lefthand");
         let translation = Vec3::from_array(t.translation)
-            * if mirrored { Vec3::new(-1., 1., 1.) } else { Vec3::ONE };
+            * if mirrored {
+                Vec3::new(-1., 1., 1.)
+            } else {
+                Vec3::ONE
+            };
         let rotation = Vec3::from_array(t.rotation)
-            * if mirrored { Vec3::new(1., -1., -1.) } else { Vec3::ONE };
+            * if mirrored {
+                Vec3::new(1., -1., -1.)
+            } else {
+                Vec3::ONE
+            };
         Mat4::from_translation(translation)
             * Mat4::from_rotation_x(rotation.x.to_radians())
             * Mat4::from_rotation_y(rotation.y.to_radians())
@@ -622,7 +662,11 @@ fn selection(v: &Value, s: &Stack, c: &ItemContext) -> Result<String> {
     )
 }
 fn number(v: &Value, s: &Stack, c: &ItemContext) -> Result<f32> {
-    if let Some(value) = c.world.as_ref().and_then(|world| world.number(v, s, c.seed)) {
+    if let Some(value) = c
+        .world
+        .as_ref()
+        .and_then(|world| world.number(v, s, c.seed))
+    {
         return Ok(value);
     }
     Ok(
@@ -765,7 +809,9 @@ fn graph_transform(t: &Value) -> Result<Mat4> {
 fn apply_graph_transform(m: &mut BakedModel, transformation: Mat4) {
     for q in &mut m.quads {
         for p in &mut q.positions {
-            *p = transformation.transform_point3(Vec3::from_array(*p)).to_array();
+            *p = transformation
+                .transform_point3(Vec3::from_array(*p))
+                .to_array();
         }
     }
 }
@@ -781,17 +827,16 @@ mod tests {
         let mut stack = Stack::default();
         assert!(!has_foil(&stack));
         Arc::make_mut(&mut stack.components).insert(
-            "minecraft:enchantments".into(), json!({"minecraft:sharpness": 1}),
+            "minecraft:enchantments".into(),
+            json!({"minecraft:sharpness": 1}),
         );
         assert!(has_foil(&stack));
-        Arc::make_mut(&mut stack.components).insert(
-            "minecraft:enchantment_glint_override".into(), json!(false),
-        );
+        Arc::make_mut(&mut stack.components)
+            .insert("minecraft:enchantment_glint_override".into(), json!(false));
         assert!(!has_foil(&stack));
         Arc::make_mut(&mut stack.components).clear();
-        Arc::make_mut(&mut stack.components).insert(
-            "minecraft:enchantment_glint_override".into(), json!(true),
-        );
+        Arc::make_mut(&mut stack.components)
+            .insert("minecraft:enchantment_glint_override".into(), json!(true));
         assert!(has_foil(&stack));
     }
 
@@ -819,11 +864,20 @@ mod tests {
             "fallback":{"type":"minecraft:model","model":"test:early"},
             "entries":[{"threshold":0.5,"model":{"type":"minecraft:model","model":"test:late"}}]});
         let world = ItemWorldContext {
-            dimension:"minecraft:overworld".into(), position:[0.,64.,0.], yaw:0.,
-            game_tick:1, sun_angle:90., moon_phase:0., spawn:None, death:None,
-            needles:Arc::default(),
+            dimension: "minecraft:overworld".into(),
+            position: [0., 64., 0.],
+            yaw: 0.,
+            game_tick: 1,
+            sun_angle: 90.,
+            moon_phase: 0.,
+            spawn: None,
+            death: None,
+            needles: Arc::default(),
         };
-        let mut ctx = ItemContext { world:Some(world), ..Default::default() };
+        let mut ctx = ItemContext {
+            world: Some(world),
+            ..Default::default()
+        };
         let stack = Stack::default();
         for display in ["gui", "firstperson_righthand"] {
             ctx.display = display.into();
@@ -844,48 +898,88 @@ mod tests {
 
     #[test]
     fn selected_bundle_rechecks_nested_dynamic_branch_within_tick() {
-        use crate::inventory::{ComponentPatch, ComponentValue, Tag};
         use super::super::item_dynamic::ItemWorldContext;
+        use crate::inventory::{ComponentPatch, ComponentValue, Tag};
 
         let content = Content::test_cube();
         let mut models = ItemModels::new();
         let cube = content.models[0].clone();
         let quad_count = cube.quads.len();
         models.baked.insert("test:early".into(), cube);
-        models.baked.insert("test:late".into(), BakedModel::default());
-        models.definitions.insert("test:clock".into(), Arc::new(json!({"model":{
-            "type":"minecraft:range_dispatch", "property":"minecraft:time",
-            "source":"daytime", "wobble":false,
-            "fallback":{"type":"minecraft:model","model":"test:early"},
-            "entries":[{"threshold":0.5,"model":{"type":"minecraft:model","model":"test:late"}}]
-        }})));
-        models.definitions.insert("test:bundle".into(), Arc::new(json!({"model":{
-            "type":"minecraft:bundle/selected_item"
-        }})));
+        models
+            .baked
+            .insert("test:late".into(), BakedModel::default());
+        models.definitions.insert(
+            "test:clock".into(),
+            Arc::new(json!({"model":{
+                "type":"minecraft:range_dispatch", "property":"minecraft:time",
+                "source":"daytime", "wobble":false,
+                "fallback":{"type":"minecraft:model","model":"test:early"},
+                "entries":[{"threshold":0.5,"model":{"type":"minecraft:model","model":"test:late"}}]
+            }})),
+        );
+        models.definitions.insert(
+            "test:bundle".into(),
+            Arc::new(json!({"model":{
+                "type":"minecraft:bundle/selected_item"
+            }})),
+        );
         let mut nested = Stack::default();
         nested.id = 1;
         nested.count = 1;
-        Arc::make_mut(&mut nested.components).insert("minecraft:item_model".into(), json!("test:clock"));
+        Arc::make_mut(&mut nested.components)
+            .insert("minecraft:item_model".into(), json!("test:clock"));
         let mut bundle = Stack::default();
         bundle.id = 2;
         bundle.count = 1;
-        Arc::make_mut(&mut bundle.components).insert("minecraft:item_model".into(), json!("test:bundle"));
+        Arc::make_mut(&mut bundle.components)
+            .insert("minecraft:item_model".into(), json!("test:bundle"));
         bundle.patch = Arc::new(ComponentPatch {
-            added: BTreeMap::from([(0, ComponentValue {
-                name: "minecraft:bundle_contents".into(), value: Tag::Empty,
-                wire_range: 0..0, adventure: None, hash: None, nested_stacks: Arc::from([nested]),
-            })]),
+            added: BTreeMap::from([(
+                0,
+                ComponentValue {
+                    name: "minecraft:bundle_contents".into(),
+                    value: Tag::Empty,
+                    wire_range: 0..0,
+                    adventure: None,
+                    hash: None,
+                    nested_stacks: Arc::from([nested]),
+                },
+            )]),
             removed: Vec::new(),
         });
         let world = ItemWorldContext {
-            dimension: "minecraft:overworld".into(), position: [0., 64., 0.], yaw: 0.,
-            game_tick: 1, sun_angle: 90., moon_phase: 0., spawn: None, death: None,
+            dimension: "minecraft:overworld".into(),
+            position: [0., 64., 0.],
+            yaw: 0.,
+            game_tick: 1,
+            sun_angle: 90.,
+            moon_phase: 0.,
+            spawn: None,
+            death: None,
             needles: Arc::default(),
         };
-        let mut ctx = ItemContext { selected_bundle: Some(0), world: Some(world), ..Default::default() };
-        assert_eq!(models.model_with(&content, &bundle, &ctx).unwrap().quads.len(), quad_count);
+        let mut ctx = ItemContext {
+            selected_bundle: Some(0),
+            world: Some(world),
+            ..Default::default()
+        };
+        assert_eq!(
+            models
+                .model_with(&content, &bundle, &ctx)
+                .unwrap()
+                .quads
+                .len(),
+            quad_count
+        );
         ctx.world.as_mut().unwrap().sun_angle = 270.;
-        assert!(models.model_with(&content, &bundle, &ctx).unwrap().quads.is_empty());
+        assert!(
+            models
+                .model_with(&content, &bundle, &ctx)
+                .unwrap()
+                .quads
+                .is_empty()
+        );
     }
 
     #[test]
@@ -923,11 +1017,20 @@ mod tests {
         ] {
             Arc::make_mut(&mut stack.components).insert(
                 "minecraft:enchantments".into(),
-                if level == 0 { json!({}) } else { json!({"minecraft:quick_charge": level}) },
+                if level == 0 {
+                    json!({})
+                } else {
+                    json!({"minecraft:quick_charge": level})
+                },
             );
-            let charge = crate::player::crossbow_charge_ticks(&stack, &content, &mut |_| 0.).unwrap();
+            let charge =
+                crate::player::crossbow_charge_ticks(&stack, &content, &mut |_| 0.).unwrap();
             assert_eq!(charge, ticks);
-            let ctx = ItemContext { using_item, crossbow_pull: elapsed / charge, ..ItemContext::default() };
+            let ctx = ItemContext {
+                using_item,
+                crossbow_pull: elapsed / charge,
+                ..ItemContext::default()
+            };
             let mut nodes = Vec::new();
             evaluate(&graph, &stack, &ctx, 0, Mat4::IDENTITY, &mut nodes).unwrap();
             assert_eq!(nodes[0].0["model"], expected);
@@ -978,21 +1081,25 @@ mod tests {
         let source = content.models[0].clone();
         let mut models = ItemModels::new();
         models.baked.insert("test:cube".into(), source.clone());
-        models.definitions.insert("test:transforms".into(), Arc::new(json!({"model":{
-            "type":"minecraft:condition", "property":"minecraft:using_item",
-            "transformation":{"scale":[1.,-1.,-1.]},
-            "on_false":{"type":"minecraft:composite","models":[
-                {"type":"minecraft:model","model":"test:cube",
-                 "transformation":{"translation":[0.,2.,3.]}},
-                {"type":"minecraft:model","model":"test:cube"}
-            ]},
-            "on_true":{"type":"minecraft:model","model":"test:cube"}
-        }})));
+        models.definitions.insert(
+            "test:transforms".into(),
+            Arc::new(json!({"model":{
+                "type":"minecraft:condition", "property":"minecraft:using_item",
+                "transformation":{"scale":[1.,-1.,-1.]},
+                "on_false":{"type":"minecraft:composite","models":[
+                    {"type":"minecraft:model","model":"test:cube",
+                     "transformation":{"translation":[0.,2.,3.]}},
+                    {"type":"minecraft:model","model":"test:cube"}
+                ]},
+                "on_true":{"type":"minecraft:model","model":"test:cube"}
+            }})),
+        );
         let mut stack = Stack::default();
         stack.id = 1;
         stack.count = 1;
         stack.components = Arc::new(BTreeMap::from([(
-            "minecraft:item_model".into(), json!("test:transforms"),
+            "minecraft:item_model".into(),
+            json!("test:transforms"),
         )]));
         let model = models.model(&content, &stack, "gui").unwrap();
         assert_eq!(model.quads.len(), source.quads.len() * 2);
@@ -1000,10 +1107,16 @@ mod tests {
             for (vertex, position) in quad.positions.iter().enumerate() {
                 let [x, y, z] = *position;
                 assert_eq!(model.quads[index].positions[vertex], [x, -y - 2., -z - 3.]);
-                assert_eq!(model.quads[index + source.quads.len()].positions[vertex], [x, -y, -z]);
+                assert_eq!(
+                    model.quads[index + source.quads.len()].positions[vertex],
+                    [x, -y, -z]
+                );
             }
         }
-        let ctx = ItemContext { using_item: true, ..ItemContext::default() };
+        let ctx = ItemContext {
+            using_item: true,
+            ..ItemContext::default()
+        };
         let model = models.model_with(&content, &stack, &ctx).unwrap();
         assert_eq!(model.quads.len(), source.quads.len());
         let [x, y, z] = source.quads[0].positions[0];
@@ -1022,12 +1135,32 @@ mod tests {
         model.quads[0].texture_layer = 20;
         model.quads[1].texture_layer = 10;
         model.quads[2].texture_layer = 11;
-        let materials = model.quads.iter().map(|q| (q.layer, q.entity_material)).collect::<Vec<_>>();
+        let materials = model
+            .quads
+            .iter()
+            .map(|q| (q.layer, q.entity_material))
+            .collect::<Vec<_>>();
         sort_gui_special_head(&mut model);
-        assert_eq!(model.quads.iter().map(|q| q.texture_layer).collect::<Vec<_>>(), [10, 11, 20]);
-        assert_eq!((model.quads[0].layer, model.quads[0].entity_material), materials[1]);
-        assert_eq!((model.quads[1].layer, model.quads[1].entity_material), materials[2]);
-        assert_eq!((model.quads[2].layer, model.quads[2].entity_material), materials[0]);
+        assert_eq!(
+            model
+                .quads
+                .iter()
+                .map(|q| q.texture_layer)
+                .collect::<Vec<_>>(),
+            [10, 11, 20]
+        );
+        assert_eq!(
+            (model.quads[0].layer, model.quads[0].entity_material),
+            materials[1]
+        );
+        assert_eq!(
+            (model.quads[1].layer, model.quads[1].entity_material),
+            materials[2]
+        );
+        assert_eq!(
+            (model.quads[2].layer, model.quads[2].entity_material),
+            materials[0]
+        );
     }
 
     #[test]
@@ -1143,48 +1276,84 @@ mod tests {
         content.insert_test_resource("assets/test/models/item/banner_base.json", br#"{}"#);
         let mut models = ItemModels::new();
         models.set_entity_models(Arc::new(empty_entity_models()));
-        models.definitions.insert("test:banner".into(), Arc::new(json!({"model":{
-            "type":"minecraft:special", "base":"test:item/banner_base",
-            "model":{"type":"minecraft:banner","color":"red"}
-        }})));
+        models.definitions.insert(
+            "test:banner".into(),
+            Arc::new(json!({"model":{
+                "type":"minecraft:special", "base":"test:item/banner_base",
+                "model":{"type":"minecraft:banner","color":"red"}
+            }})),
+        );
         let mut stack = Stack::default();
         stack.id = 1;
         stack.count = 1;
         stack.components = Arc::new(BTreeMap::from([(
-            "minecraft:item_model".into(), json!("test:banner"),
+            "minecraft:item_model".into(),
+            json!("test:banner"),
         )]));
         let model = models.model(&content, &stack, "gui").unwrap();
-        assert!(model.quads.iter().any(|q| q.texture_layer == 6
-            && matches!(q.tint, TintKind::Constant(_))));
+        assert!(
+            model
+                .quads
+                .iter()
+                .any(|q| q.texture_layer == 6 && matches!(q.tint, TintKind::Constant(_)))
+        );
     }
 
     /// `left` equals the reflection (x -> -x) of the right-hand transform applied to the
     /// mirrored unit-cube point, with the same source values in both contexts.
     fn assert_left_mirrored(model: &BakedModel, left_context: &str, right_context: &str) {
         let mut same_transform = model.clone();
-        let left = *same_transform.display.get(left_context)
+        let left = *same_transform
+            .display
+            .get(left_context)
             .expect("left hand display resource");
         same_transform.display.insert(right_context.into(), left);
         let left = display_matrix(model, left_context);
         let right = display_matrix(&same_transform, right_context);
         let reflect = Vec3::new(-1., 1., 1.);
-        for point in [Vec3::splat(0.5), Vec3::new(0.2, 0.3, 0.8), Vec3::new(0.9, 0.7, 0.1)] {
+        for point in [
+            Vec3::splat(0.5),
+            Vec3::new(0.2, 0.3, 0.8),
+            Vec3::new(0.9, 0.7, 0.1),
+        ] {
             let mirrored_input = (point - Vec3::splat(0.5)) * reflect + Vec3::splat(0.5);
             let expected = right.transform_point3(mirrored_input) * reflect;
             let actual = left.transform_point3(point);
-            assert!((actual - expected).length() < 1e-5, "{left_context}: {actual:?} != {expected:?}");
+            assert!(
+                (actual - expected).length() < 1e-5,
+                "{left_context}: {actual:?} != {expected:?}"
+            );
         }
     }
 
-    fn assert_shield_hand_frame(content: &Content, models: &mut ItemModels, stack: &Stack, using_item: bool) {
-        let ctx = |display: &str| ItemContext { display: display.into(), using_item, ..ItemContext::default() };
-        let baseline = models.model_with(content, stack, &ctx("gui")).unwrap().clone();
+    fn assert_shield_hand_frame(
+        content: &Content,
+        models: &mut ItemModels,
+        stack: &Stack,
+        using_item: bool,
+    ) {
+        let ctx = |display: &str| ItemContext {
+            display: display.into(),
+            using_item,
+            ..ItemContext::default()
+        };
+        let baseline = models
+            .model_with(content, stack, &ctx("gui"))
+            .unwrap()
+            .clone();
         assert!(!baseline.quads.is_empty());
-        for hand in ["thirdperson_righthand", "thirdperson_lefthand", "firstperson_lefthand"] {
+        for hand in [
+            "thirdperson_righthand",
+            "thirdperson_lefthand",
+            "firstperson_lefthand",
+        ] {
             let model = models.model_with(content, stack, &ctx(hand)).unwrap();
             assert_eq!(model.quads.len(), baseline.quads.len());
             for (actual, original) in model.quads.iter().zip(&baseline.quads) {
-                assert_eq!(actual.positions, original.positions, "geometry changed for {hand}");
+                assert_eq!(
+                    actual.positions, original.positions,
+                    "geometry changed for {hand}"
+                );
             }
             if let Some(right) = hand.strip_suffix("lefthand") {
                 assert_left_mirrored(model, hand, &format!("{right}righthand"));
@@ -1197,62 +1366,122 @@ mod tests {
         macro_rules! pack {
             ($($name:literal),* $(,)?) => {[$((
                 $name,
-                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/items/", $name, ".json"))[..],
-                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/models/item/", $name, ".json"))[..],
+                &include_bytes!(concat!("../../assets/battle_video/assets/krasnokamen_battle/items/", $name, ".json"))[..],
+                &include_bytes!(concat!("../../assets/battle_video/assets/krasnokamen_battle/models/item/", $name, ".json"))[..],
             )),*]};
         }
         macro_rules! blocking {
             ($($name:literal),* $(,)?) => {[$((
                 $name,
-                &include_bytes!(concat!("../../assets/battle_video/assets/solaris_battle/models/item/", $name, "_blocking.json"))[..],
+                &include_bytes!(concat!("../../assets/battle_video/assets/krasnokamen_battle/models/item/", $name, "_blocking.json"))[..],
             )),*]};
         }
-        let weapons = pack!["iron_longsword", "iron_spear", "iron_lance", "iron_halberd", "iron_flanged_mace",
-            "iron_longbow_standby", "iron_heavy_crossbow_standby"];
-        let shields = pack!["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
-        let blocking_models = blocking!["red_heater_shield", "blue_heater_shield", "iron_kite_shield", "iron_tower_shield"];
+        let weapons = pack![
+            "iron_longsword",
+            "iron_spear",
+            "iron_lance",
+            "iron_halberd",
+            "iron_flanged_mace",
+            "iron_longbow_standby",
+            "iron_heavy_crossbow_standby"
+        ];
+        let shields = pack![
+            "red_heater_shield",
+            "blue_heater_shield",
+            "iron_kite_shield",
+            "iron_tower_shield"
+        ];
+        let blocking_models = blocking![
+            "red_heater_shield",
+            "blue_heater_shield",
+            "iron_kite_shield",
+            "iron_tower_shield"
+        ];
         let mut content = Content::test_cube();
-        let region = |layer| crate::protocol::content::TextureRegion { layer, uv: [0., 0., 1., 1.], width: 64, height: 64 };
-        content.insert_test_texture("solaris_battle:item/battle_parts", region(10));
+        let region = |layer| crate::protocol::content::TextureRegion {
+            layer,
+            uv: [0., 0., 1., 1.],
+            width: 64,
+            height: 64,
+        };
+        content.insert_test_texture("krasnokamen_battle:item/battle_parts", region(10));
         for (n, (name, ..)) in shields.iter().enumerate() {
-            content.insert_test_texture(&format!("solaris_battle:item/{name}"), region(11 + n as u32));
+            content.insert_test_texture(
+                &format!("krasnokamen_battle:item/{name}"),
+                region(11 + n as u32),
+            );
         }
         for (name, graph, geometry) in weapons.iter().chain(shields.iter()) {
-            content.insert_test_resource(&format!("assets/solaris_battle/items/{name}.json"), graph);
-            content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}.json"), geometry);
+            content.insert_test_resource(
+                &format!("assets/krasnokamen_battle/items/{name}.json"),
+                graph,
+            );
+            content.insert_test_resource(
+                &format!("assets/krasnokamen_battle/models/item/{name}.json"),
+                geometry,
+            );
         }
         for (name, geometry) in &blocking_models {
-            content.insert_test_resource(&format!("assets/solaris_battle/models/item/{name}_blocking.json"), geometry);
+            content.insert_test_resource(
+                &format!("assets/krasnokamen_battle/models/item/{name}_blocking.json"),
+                geometry,
+            );
         }
         let stack_for = |name: &str| {
             let mut stack = Stack::default();
             stack.id = 1;
             stack.count = 1;
             stack.components = Arc::new(BTreeMap::from([(
-                "minecraft:item_model".into(), json!(format!("solaris_battle:{name}")),
+                "minecraft:item_model".into(),
+                json!(format!("krasnokamen_battle:{name}")),
             )]));
             stack
         };
         for (name, ..) in &weapons {
             let mut models = ItemModels::new();
-            let baked = models.model(&content, &stack_for(name), "thirdperson_righthand").unwrap();
+            let baked = models
+                .model(&content, &stack_for(name), "thirdperson_righthand")
+                .unwrap();
             // Real 3D: far more than the two faces of a flat sprite, with display transforms.
-            assert!(baked.quads.len() > 12, "{name}: {} quads", baked.quads.len());
-            assert!(baked.display.contains_key("thirdperson_righthand"), "{name}");
+            assert!(
+                baked.quads.len() > 12,
+                "{name}: {} quads",
+                baked.quads.len()
+            );
+            assert!(
+                baked.display.contains_key("thirdperson_righthand"),
+                "{name}"
+            );
             assert!(baked.display.contains_key("thirdperson_lefthand"), "{name}");
         }
         for (name, ..) in &shields {
             let mut models = ItemModels::new();
             let stack = stack_for(name);
-            let idle = models.model(&content, &stack, "thirdperson_lefthand").unwrap().clone();
-            assert!(idle.quads.len() >= 18, "{name}: plate, boss and handle boxes");
-            let state = ItemContext { display: "thirdperson_lefthand".into(), using_item: true, ..ItemContext::default() };
+            let idle = models
+                .model(&content, &stack, "thirdperson_lefthand")
+                .unwrap()
+                .clone();
+            assert!(
+                idle.quads.len() >= 18,
+                "{name}: plate, boss and handle boxes"
+            );
+            let state = ItemContext {
+                display: "thirdperson_lefthand".into(),
+                using_item: true,
+                ..ItemContext::default()
+            };
             let blocking = models.model_with(&content, &stack, &state).unwrap().clone();
             assert_eq!(blocking.quads.len(), idle.quads.len(), "{name}");
-            assert_ne!(blocking.display["thirdperson_lefthand"].rotation, idle.display["thirdperson_lefthand"].rotation,
-                "{name}: using_item must select the blocking display");
+            assert_ne!(
+                blocking.display["thirdperson_lefthand"].rotation,
+                idle.display["thirdperson_lefthand"].rotation,
+                "{name}: using_item must select the blocking display"
+            );
             // Thickness: plate, boss and handle span well over one pixel in depth.
-            let (lo, hi) = idle.quads.iter().flat_map(|q| q.positions.iter().map(|p| p[2]))
+            let (lo, hi) = idle
+                .quads
+                .iter()
+                .flat_map(|q| q.positions.iter().map(|p| p[2]))
                 .fold((f32::MAX, f32::MIN), |(lo, hi), z| (lo.min(z), hi.max(z)));
             assert!(hi - lo > 6. / 16., "{name}: shield depth {}", hi - lo);
         }
@@ -1261,56 +1490,97 @@ mod tests {
     #[test]
     fn left_hand_displays_mirror_shield_and_sword_in_first_and_third_person() {
         let mut content = Content::test_cube();
-        content.insert_test_texture("minecraft:entity/shield/shield_base_nopattern",
-            crate::protocol::content::TextureRegion { layer: 5, uv: [0., 0., 1., 1.], width: 64, height: 64 });
+        content.insert_test_texture(
+            "minecraft:entity/shield/shield_base_nopattern",
+            crate::protocol::content::TextureRegion {
+                layer: 5,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
         let display = br#"{"display":{"thirdperson_righthand":{"rotation":[17,31,43],"translation":[2,3,4]},"thirdperson_lefthand":{"rotation":[17,31,43],"translation":[2,3,4]},"firstperson_lefthand":{"rotation":[17,31,43],"translation":[2,3,4]}}}"#;
         content.insert_test_resource("assets/test/models/item/shield_idle.json", display);
         content.insert_test_resource("assets/test/models/item/shield_blocking.json", display);
         let mut models = ItemModels::new();
         models.set_entity_models(Arc::new(empty_entity_models()));
         let shield = |base| json!({"type":"minecraft:special","base":base,"model":{"type":"minecraft:shield"}});
-        models.definitions.insert("test:shield_alias".into(), Arc::new(json!({"model":{
-            "type":"minecraft:condition","property":"minecraft:using_item",
-            "transformation":{"scale":[1.0,-1.0,-1.0]},
-            "on_false":shield("test:item/shield_idle"),
-            "on_true":shield("test:item/shield_blocking")
-        }})));
+        models.definitions.insert(
+            "test:shield_alias".into(),
+            Arc::new(json!({"model":{
+                "type":"minecraft:condition","property":"minecraft:using_item",
+                "transformation":{"scale":[1.0,-1.0,-1.0]},
+                "on_false":shield("test:item/shield_idle"),
+                "on_true":shield("test:item/shield_blocking")
+            }})),
+        );
         let mut stack = Stack::default();
         stack.id = 1;
         stack.count = 1;
-        stack.components = Arc::new(BTreeMap::from([("minecraft:item_model".into(), json!("test:shield_alias"))]));
+        stack.components = Arc::new(BTreeMap::from([(
+            "minecraft:item_model".into(),
+            json!("test:shield_alias"),
+        )]));
         for using_item in [false, true] {
             assert_shield_hand_frame(&content, &mut models, &stack, using_item);
         }
 
-        let asymmetric = ModelTransform { rotation: [17., 31., 43.], translation: [0.2, 0.3, 0.4], scale: [0.7, 0.8, 0.9] };
+        let asymmetric = ModelTransform {
+            rotation: [17., 31., 43.],
+            translation: [0.2, 0.3, 0.4],
+            scale: [0.7, 0.8, 0.9],
+        };
         let mut sword_model = content.models[0].clone();
-        sword_model.display.insert("thirdperson_lefthand".into(), asymmetric);
-        sword_model.display.insert("thirdperson_righthand".into(), asymmetric);
+        sword_model
+            .display
+            .insert("thirdperson_lefthand".into(), asymmetric);
+        sword_model
+            .display
+            .insert("thirdperson_righthand".into(), asymmetric);
         models.baked.insert("test:sword".into(), sword_model);
-        models.definitions.insert("test:sword".into(), Arc::new(json!({"model":{"type":"minecraft:model","model":"test:sword"}})));
-        stack.components = Arc::new(BTreeMap::from([("minecraft:item_model".into(), json!("test:sword"))]));
+        models.definitions.insert(
+            "test:sword".into(),
+            Arc::new(json!({"model":{"type":"minecraft:model","model":"test:sword"}})),
+        );
+        stack.components = Arc::new(BTreeMap::from([(
+            "minecraft:item_model".into(),
+            json!("test:sword"),
+        )]));
         let baseline = models.model(&content, &stack, "gui").unwrap().clone();
         for hand in ["thirdperson_righthand", "thirdperson_lefthand"] {
             let sword = models.model(&content, &stack, hand).unwrap();
             assert_eq!(sword.quads.len(), baseline.quads.len());
             for (actual, original) in sword.quads.iter().zip(&baseline.quads) {
-                assert_eq!(actual.positions, original.positions, "ordinary model must not shift");
+                assert_eq!(
+                    actual.positions, original.positions,
+                    "ordinary model must not shift"
+                );
             }
             if hand == "thirdperson_lefthand" {
                 assert_left_mirrored(sword, hand, "thirdperson_righthand");
             }
         }
         let mut fixture = BakedModel::default();
-        fixture.display.insert("thirdperson_lefthand".into(), asymmetric);
-        fixture.display.insert("thirdperson_righthand".into(), asymmetric);
-        fixture.display.insert("firstperson_lefthand".into(), asymmetric);
-        fixture.display.insert("firstperson_righthand".into(), asymmetric);
+        fixture
+            .display
+            .insert("thirdperson_lefthand".into(), asymmetric);
+        fixture
+            .display
+            .insert("thirdperson_righthand".into(), asymmetric);
+        fixture
+            .display
+            .insert("firstperson_lefthand".into(), asymmetric);
+        fixture
+            .display
+            .insert("firstperson_righthand".into(), asymmetric);
         // 26.3 ItemStackRenderState applies ItemTransform with displayContext.leftHand(),
         // which is true for FIRST_PERSON_LEFT_HAND as well as THIRD_PERSON_LEFT_HAND.
         assert_left_mirrored(&fixture, "thirdperson_lefthand", "thirdperson_righthand");
         assert_left_mirrored(&fixture, "firstperson_lefthand", "firstperson_righthand");
-        assert_ne!(display_matrix(&fixture, "firstperson_lefthand"), display_matrix(&fixture, "firstperson_righthand"));
+        assert_ne!(
+            display_matrix(&fixture, "firstperson_lefthand"),
+            display_matrix(&fixture, "firstperson_righthand")
+        );
     }
 
     #[test]
@@ -1322,44 +1592,80 @@ mod tests {
         content.insert_test_resource("assets/test/models/item/flat.json",
             br#"{"display":{"firstperson_righthand":{"rotation":[0,-90,25],"translation":[1.13,3.2,1.13],"scale":[0.68,0.68,0.68]},
                 "thirdperson_righthand":{"translation":[0,3,1],"scale":[0.55,0.55,0.55]}}}"#);
-        content.insert_test_resource("assets/test/models/item/framed.json", br#"{"parent":"test:item/flat"}"#);
+        content.insert_test_resource(
+            "assets/test/models/item/framed.json",
+            br#"{"parent":"test:item/flat"}"#,
+        );
         content.insert_test_resource("assets/test/models/item/tool.json",
             br#"{"parent":"test:item/flat","display":{"firstperson_lefthand":{"rotation":[0,90,-25]}}}"#);
         content.insert_test_resource("assets/test/models/item/override.json",
             br#"{"parent":"test:item/tool","display":{"firstperson_righthand":{"translation":[2,0,0]}}}"#);
         let framed = content.bake_model("test:item/framed").unwrap();
-        for (left, right) in [("firstperson_lefthand", "firstperson_righthand"), ("thirdperson_lefthand", "thirdperson_righthand")] {
+        for (left, right) in [
+            ("firstperson_lefthand", "firstperson_righthand"),
+            ("thirdperson_lefthand", "thirdperson_righthand"),
+        ] {
             let (l, r) = (framed.display[left], framed.display[right]);
-            assert_eq!((l.rotation, l.translation, l.scale), (r.rotation, r.translation, r.scale), "{left}");
+            assert_eq!(
+                (l.rotation, l.translation, l.scale),
+                (r.rotation, r.translation, r.scale),
+                "{left}"
+            );
             assert_left_mirrored(&framed, left, right);
         }
         let tool = content.bake_model("test:item/tool").unwrap();
-        assert_eq!(tool.display["firstperson_lefthand"].rotation, [0., 90., -25.]);
+        assert_eq!(
+            tool.display["firstperson_lefthand"].rotation,
+            [0., 90., -25.]
+        );
         let overridden = content.bake_model("test:item/override").unwrap();
-        assert_eq!(overridden.display["firstperson_lefthand"].translation, [0.125, 0., 0.]);
-        assert_eq!(overridden.display["firstperson_lefthand"].rotation, [0., 0., 0.]);
+        assert_eq!(
+            overridden.display["firstperson_lefthand"].translation,
+            [0.125, 0., 0.]
+        );
+        assert_eq!(
+            overridden.display["firstperson_lefthand"].rotation,
+            [0., 0., 0.]
+        );
     }
 
     #[test]
-    #[ignore = "requires SOLARIS_CLIENT_RESOURCE_ROOT with runtime game resources"]
+    #[ignore = "requires KRASNOKAMEN_CLIENT_RESOURCE_ROOT with runtime game resources"]
     fn resolved_shield_hand_frame_with_runtime_display_resources() {
-        let root = std::path::PathBuf::from(std::env::var_os("SOLARIS_CLIENT_RESOURCE_ROOT")
-            .expect("set SOLARIS_CLIENT_RESOURCE_ROOT to the activated resource root"));
+        let root = std::path::PathBuf::from(
+            std::env::var_os("KRASNOKAMEN_CLIENT_RESOURCE_ROOT")
+                .expect("set KRASNOKAMEN_CLIENT_RESOURCE_ROOT to the activated resource root"),
+        );
         let read = |path: &str| std::fs::read(root.join(path)).expect("runtime shield resource");
         let mut content = Content::test_cube();
-        content.insert_test_texture("minecraft:entity/shield/shield_base_nopattern",
-            crate::protocol::content::TextureRegion { layer: 5, uv: [0., 0., 1., 1.], width: 64, height: 64 });
-        for path in ["assets/minecraft/models/item/shield.json", "assets/minecraft/models/item/shield_blocking.json"] {
+        content.insert_test_texture(
+            "minecraft:entity/shield/shield_base_nopattern",
+            crate::protocol::content::TextureRegion {
+                layer: 5,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
+        for path in [
+            "assets/minecraft/models/item/shield.json",
+            "assets/minecraft/models/item/shield_blocking.json",
+        ] {
             content.insert_test_resource(path, &read(path));
         }
         let mut models = ItemModels::new();
         models.set_entity_models(Arc::new(empty_entity_models()));
         let graph = serde_json::from_slice(&read("assets/minecraft/items/shield.json")).unwrap();
-        models.definitions.insert("test:shield_alias".into(), Arc::new(graph));
+        models
+            .definitions
+            .insert("test:shield_alias".into(), Arc::new(graph));
         let mut stack = Stack::default();
         stack.id = 1;
         stack.count = 1;
-        stack.components = Arc::new(BTreeMap::from([("minecraft:item_model".into(), json!("test:shield_alias"))]));
+        stack.components = Arc::new(BTreeMap::from([(
+            "minecraft:item_model".into(),
+            json!("test:shield_alias"),
+        )]));
         for using_item in [false, true] {
             assert_shield_hand_frame(&content, &mut models, &stack, using_item);
         }

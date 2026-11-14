@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Battle shot planner: `solaris-client scan-replay` timeline -> kit cameras + shots.txt.
+"""Battle shot planner: `krasnokamen-client scan-replay` timeline -> kit cameras + shots.txt.
 
   battle_shots.py plan TIMELINE.jsonl --out DIR --name NAME [--seconds 75] [--radius 20]
       DIR/cameras/NAME/*.json, DIR/shots.txt ("NAME CAMERA START END RADIUS", camera paths

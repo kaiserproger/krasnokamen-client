@@ -6,7 +6,10 @@ fn advancement(frame: i32) -> Toast {
 }
 
 fn entry() -> RecipeEntry {
-    RecipeEntry { station: None, result: None }
+    RecipeEntry {
+        station: None,
+        result: None,
+    }
 }
 
 #[test]
@@ -34,7 +37,10 @@ fn instance_slides_in_on_the_quadratic_curve_holds_five_seconds_and_slides_out()
     assert_eq!(toasts.sounds.len(), 1);
     // AdvancementToast.DISPLAY_TIME: hidden once fully visible for 5000 ms.
     toasts.update(6_700);
-    assert_eq!(toasts.sounds, ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]);
+    assert_eq!(
+        toasts.sounds,
+        ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]
+    );
     assert_eq!(toasts.visible[0].visible_portion, 1.);
     toasts.update(7_000);
     assert_eq!(toasts.visible[0].visible_portion, 0.75);
@@ -95,7 +101,9 @@ fn recipe_entries_merge_into_one_toast_and_cycle_over_the_display_time() {
     assert!(toasts.queued.is_empty());
     toasts.update(1_000);
     let displayed = |toasts: &ToastManager| match &toasts.visible[0].toast.kind {
-        ToastKind::Recipe { displayed, entries, .. } => (*displayed, entries.len()),
+        ToastKind::Recipe {
+            displayed, entries, ..
+        } => (*displayed, entries.len()),
         ToastKind::Advancement { .. } | ToastKind::System { .. } => unreachable!(),
     };
     assert_eq!(displayed(&toasts), (0, 3));
@@ -107,7 +115,10 @@ fn recipe_entries_merge_into_one_toast_and_cycle_over_the_display_time() {
     assert_eq!(toasts.sounds, ["minecraft:ui.toast.in"]);
     // Hidden 5000 ms after the last change (at fully-visible time 400).
     toasts.update(6_000);
-    assert_eq!(toasts.sounds, ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]);
+    assert_eq!(
+        toasts.sounds,
+        ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]
+    );
 }
 
 #[test]
@@ -115,12 +126,28 @@ fn unsecure_server_warning_takes_two_slots_and_hides_after_ten_seconds() {
     let title = Arc::new(json!({"translate": "multiplayer.unsecureserver.toast.title"}));
     let message = Arc::new(json!({"translate": "multiplayer.unsecureserver.toast"}));
     // One title line, three message lines of at most 200 pixels.
-    let toast = Toast::system(title.clone(), Some(message.clone()), 1, 3, Some(197), 10_000.);
+    let toast = Toast::system(
+        title.clone(),
+        Some(message.clone()),
+        1,
+        3,
+        Some(197),
+        10_000.,
+    );
     assert_eq!((toast.width(), toast.height()), (227, 56));
     // Narrow text still keeps the 160-pixel minimum plus the 30-pixel margin.
-    assert_eq!(Toast::system(title.clone(), None, 1, 0, Some(90), 10_000.).width(), 190);
-    assert_eq!(Toast::system(title.clone(), None, 1, 0, None, 10_000.).width(), 230);
-    assert_eq!(Toast::system(title, None, 2, 0, Some(90), 10_000.).height(), 44);
+    assert_eq!(
+        Toast::system(title.clone(), None, 1, 0, Some(90), 10_000.).width(),
+        190
+    );
+    assert_eq!(
+        Toast::system(title.clone(), None, 1, 0, None, 10_000.).width(),
+        230
+    );
+    assert_eq!(
+        Toast::system(title, None, 2, 0, Some(90), 10_000.).height(),
+        44
+    );
     let mut toasts = ToastManager::default();
     toasts.add(toast);
     toasts.add(advancement(0));
@@ -137,7 +164,10 @@ fn unsecure_server_warning_takes_two_slots_and_hides_after_ten_seconds() {
     toasts.update(10_699);
     assert_eq!(toasts.visible[0].visible_for, 9_999);
     assert_eq!(toasts.visible[0].visible_portion, 1.);
-    assert_eq!(toasts.sounds, ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]);
+    assert_eq!(
+        toasts.sounds,
+        ["minecraft:ui.toast.in", "minecraft:ui.toast.out"]
+    );
     // UNSECURE_SERVER_WARNING displays for 10000 ms.
     toasts.update(10_700);
     assert_eq!(toasts.sounds.len(), 3);
@@ -207,12 +237,25 @@ fn progress_map_order_matches_the_java_hash_map() {
     );
     // Nine equal hashes in one bin of a 16-slot table: treeifyBin doubles it.
     let colliding = [
-        "t:AaAaAaAa", "t:AaAaAaBB", "t:AaAaBBAa", "t:AaAaBBBB", "t:AaBBAaAa",
-        "t:AaBBAaBB", "t:AaBBBBAa", "t:AaBBBBBB", "t:BBAaAaAa",
+        "t:AaAaAaAa",
+        "t:AaAaAaBB",
+        "t:AaAaBBAa",
+        "t:AaAaBBBB",
+        "t:AaBBAaAa",
+        "t:AaBBAaBB",
+        "t:AaBBBBAa",
+        "t:AaBBBBBB",
+        "t:BBAaAaAa",
     ];
     let mut ids = colliding.to_vec();
-    ids.extend(["minecraft:story/mine_stone", "minecraft:story/upgrade_tools"]);
+    ids.extend([
+        "minecraft:story/mine_stone",
+        "minecraft:story/upgrade_tools",
+    ]);
     let mut expected = colliding.to_vec();
-    expected.extend(["minecraft:story/upgrade_tools", "minecraft:story/mine_stone"]);
+    expected.extend([
+        "minecraft:story/upgrade_tools",
+        "minecraft:story/mine_stone",
+    ]);
     assert_eq!(progress_map_order(&ids), expected);
 }
