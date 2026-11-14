@@ -1,6 +1,6 @@
 {
   "textures": {
-    "all": "solaris_fixture:block/checker"
+    "all": "krasnokamen_fixture:block/checker"
   },
   "elements": [
     {

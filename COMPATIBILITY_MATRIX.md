@@ -17,9 +17,9 @@ all packet behavior or any mandatory domain below.
 | Class | Stable/semantic ID | Required coverage or declared boundary | Authority | Status | Variants / test IDs / evidence |
 |---|---|---|---|---|---|
 | level | `ROW-0038` | `Java-client-compatible`: Все обязательные клиентские функции закреплённой версии, а не только несколько серверных сценариев | `SRC-0038` (line 38) | not_started | — |
-| level | `ROW-0039` | `Solaris-native`: Совместимые Loader-контракты, permissions, bundles, интерфейсы, предметы/блоки/звук; новые возможности только через negotiated extension | `SRC-0039` (line 39) | not_started | — |
+| level | `ROW-0039` | `Krasnokamen-native`: Совместимые Loader-контракты, permissions, bundles, интерфейсы, предметы/блоки/звук; новые возможности только через negotiated extension | `SRC-0039` (line 39) | not_started | — |
 | level | `ROW-0040` | `Client-WASM`: Самостоятельный ограниченный клиентский ABI и полноценный lifecycle безопасных расширений | `SRC-0040` (line 40) | not_started | — |
-| level | `ROW-0041` | `Singleplayer-Solaris`: Локальный Rust-сервер Solaris, управление миром, сохранение, пауза/LAN и явно выбранные правила | `SRC-0041` (line 41) | not_started | — |
+| level | `ROW-0041` | `Singleplayer-Krasnokamen`: Локальный Rust-сервер Krasnokamen, управление миром, сохранение, пауза/LAN и явно выбранные правила | `SRC-0041` (line 41) | not_started | — |
 | level | `ROW-0042` | `Singleplayer-vanilla-parity`: Дополнительно подтверждена полнота серверной симуляции и worldgen; успех клиента этого не доказывает | `SRC-0042` (line 42) | not_started | — |
 | level | `ROW-0043` | `Official-services`: Реально проверены доступные официальные службы, включая нужные права приложения; неподдержанное явно указано | `SRC-0043` (line 43) | not_started | — |
 | architecture | `ROW-0057` | Rust + `winit` + собственный renderer поверх `wgpu`: Контролируемые данные/кадр и portable GPU backend. Не писать заново Vulkan/Metal/DX12 до обнаружения конкретного ограничителя | `SRC-0057` (line 57) | not_started | — |
@@ -29,7 +29,7 @@ all packet behavior or any mandatory domain below.
 | architecture | `ROW-0061` | Оптимизация данных и количества работы раньше SIMD: Rust сам по себе не устраняет лишние обходы, draw calls, allocations и синхронизации | `SRC-0061` (line 61) | not_started | — |
 | architecture | `ROW-0062` | GPU-driven drawing как приоритетный fast path: Не требует одного CPU draw на сущность; baseline остаётся на той же модели данных | `SRC-0062` (line 62) | not_started | — |
 | architecture | `ROW-0063` | MCP использует обычный input/action path: Тест проверяет настоящий клиент; отдельного «бот-клиента с похожими функциями» нет | `SRC-0063` (line 63) | not_started | — |
-| architecture | `ROW-0064` | Client-WASM отдельно от server `solaris:plugin`: Серверная экономика/инвентарь/боевые решения не исполняются повторно на машине игрока | `SRC-0064` (line 64) | not_started | — |
+| architecture | `ROW-0064` | Client-WASM отдельно от server `krasnokamen:plugin`: Серверная экономика/инвентарь/боевые решения не исполняются повторно на машине игрока | `SRC-0064` (line 64) | not_started | — |
 | architecture | `ROW-0065` | Исходные ассеты отдельно от производных caches: Проверяемое происхождение, отсутствие копий Mojang в релизе, быстрый повторный запуск | `SRC-0065` (line 65) | not_started | — |
 | architecture | `ROW-0066` | Полнота и быстродействие принимаются независимыми gates: Быстрые кубы не заменяют воду, прозрачность, мобов, шрифты, инвентарь и звук | `SRC-0066` (line 66) | not_started | — |
 | domain | `ROW-0126` | Launcher/shell: Профили, account lifecycle, список серверов, адреса IPv4/IPv6/DNS, необходимые SRV-правила, direct connect, progress, cancel/retry, понятные disconnects | `SRC-0126` (line 126) | not_started | — |
@@ -45,7 +45,7 @@ all packet behavior or any mandatory domain below.
 | domain | `ROW-0136` | Audio: Music, positional/world/UI sounds, categories/volumes, weighted events, loops/streams, attenuation/pitch, subtitles, device change, mute/focus policy | `SRC-0136` (line 136) | not_started | — |
 | domain | `ROW-0137` | Resource packs: Порядок наложения, namespaces, models/blockstates/item definitions, atlas/animation, fonts/languages/sounds, dynamic reload, pack filters/metadata version | `SRC-0137` (line 137) | not_started | — |
 | domain | `ROW-0138` | Chat/services: Подписи/сертификаты и command signing где требуются версией; ошибки/неподписанные сообщения отображаются честно; reporting/social/Realms проходят отдельную проверку API | `SRC-0138` (line 138) | not_started | — |
-| domain | `ROW-0139` | Local play: Создание/выбор/удаление/backup мира, lifecycle локального Solaris, LAN, paused/unpaused state, server settings, сохранение и восстановление | `SRC-0139` (line 139) | not_started | — |
+| domain | `ROW-0139` | Local play: Создание/выбор/удаление/backup мира, lifecycle локального Krasnokamen, LAN, paused/unpaused state, server settings, сохранение и восстановление | `SRC-0139` (line 139) | not_started | — |
 | automation | `ROW-0672` | Discovery: describe, capabilities, list instances, health/readiness, limits, schemas, guide | `SRC-0672` (line 672) | not_started | — |
 | automation | `ROW-0673` | Sessions: connect, connection status/wait Play, disconnect; target profile и server identity явны | `SRC-0673` (line 673) | not_started | — |
 | automation | `ROW-0674` | Observation: player/pose/stats, inventory/cursor, container, target/raycast, loaded blocks/light, entities, recipe book, effects, chat/components | `SRC-0674` (line 674) | not_started | — |
@@ -55,7 +55,7 @@ all packet behavior or any mandatory domain below.
 | automation | `ROW-0678` | Containers: click/quick-move/drag/number-key/button, expected screen/container revision, server-observed result | `SRC-0678` (line 678) | not_started | — |
 | automation | `ROW-0679` | UI: inspect semantic tree, focus/type/select/scroll/click, inspect deny reason, wait view, Loader action/request view | `SRC-0679` (line 679) | not_started | — |
 | automation | `ROW-0680` | Navigation: bounded movement in known world using normal inputs; arrival predicate, progress/stuck reasons/cancel | `SRC-0680` (line 680) | not_started | — |
-| automation | `ROW-0681` | Solaris: activated bundles/permissions, namespaced view/markers/selection, action receipt; only data sent to this session | `SRC-0681` (line 681) | not_started | — |
+| automation | `ROW-0681` | Krasnokamen: activated bundles/permissions, namespaced view/markers/selection, action receipt; only data sent to this session | `SRC-0681` (line 681) | not_started | — |
 | automation | `ROW-0682` | Rendering: capture screenshot, inspect frame metadata/passes/draw stats, wait mesh/resource ready, optional bounded debug overlays | `SRC-0682` (line 682) | not_started | — |
 | automation | `ROW-0683` | Audio: inspect playback state, start bounded capture from configured sink, read levels/artifact; distinguish command vs output | `SRC-0683` (line 683) | not_started | — |
 | automation | `ROW-0684` | Performance: start/stop named capture, metrics snapshot, marker/timeline, memory residency, queues, shader/mesh compilation stats | `SRC-0684` (line 684) | not_started | — |
@@ -127,7 +127,7 @@ all packet behavior or any mandatory domain below.
 | acceptance | `MCP-10` | Screenshot подтверждает actual framebuffer; offscreen/state-only flags не выданы за onscreen evidence | `SRC-0923` (line 923) | not_started | — |
 | acceptance | `MCP-11` | Startup descriptor/guide/host config позволяют новому агенту обнаружить exact instance без знания прошлой беседы | `SRC-0924` (line 924) | not_started | — |
 | acceptance | `MCP-12` | Недоверенный текст в чате/книге не меняет permissions, tool catalog или actor instructions | `SRC-0925` (line 925) | not_started | — |
-| acceptance | `SP-01` | Локальный Solaris start/save/exit/crash/restart и LAN выполняются без JVM клиента | `SRC-0926` (line 926) | not_started | — |
+| acceptance | `SP-01` | Локальный Krasnokamen start/save/exit/crash/restart и LAN выполняются без JVM клиента | `SRC-0926` (line 926) | not_started | — |
 | acceptance | `SP-02` | World import сохраняет оригинал и явно отвергает неподдержанное вместо data loss | `SRC-0927` (line 927) | not_started | — |
 | acceptance | `SP-03` | `Singleplayer-vanilla-parity` не объявляется без отдельного server/worldgen coverage | `SRC-0928` (line 928) | not_started | — |
 | acceptance | `PERF-01` | P01–P10 имеют raw measurements, equality settings и неизменённые workloads | `SRC-0929` (line 929) | not_started | — |
@@ -142,9 +142,9 @@ all packet behavior or any mandatory domain below.
 | service | `MICROSOFT-XBOX-MINECRAFT` | Own application registration, OAuth, entitlement/profile/session join; external access gate | `SRC-0084` (line 84) | not_started | — |
 | service | `REALMS-SOCIAL-REPORTING` | Official API/access evidence; absence blocks service completeness | `SRC-0765` (line 765) | not_started | — |
 | server | `VANILLA-TARGET` | Official target vanilla server | `SRC-0763` (line 763) | not_started | — |
-| server | `SOLARIS-BASE` | Current Solaris without addons | `SRC-0763` (line 763) | not_started | — |
-| server | `SOLARIS-BUNDLES` | Solaris standard presentation bundles | `SRC-0763` (line 763) | not_started | — |
-| server | `SOLARIS-WASM` | Solaris client-WASM scenarios | `SRC-0763` (line 763) | not_started | — |
+| server | `KRASNOKAMEN-BASE` | Current Krasnokamen without addons | `SRC-0763` (line 763) | not_started | — |
+| server | `KRASNOKAMEN-BUNDLES` | Krasnokamen standard presentation bundles | `SRC-0763` (line 763) | not_started | — |
+| server | `KRASNOKAMEN-WASM` | Krasnokamen client-WASM scenarios | `SRC-0763` (line 763) | not_started | — |
 | server | `ADVERSARIAL` | Adversarial server fixture | `SRC-0763` (line 763) | not_started | — |
 | interop | `PROXY-PAPER` | Separately declared interoperability only after verification | `SRC-0763` (line 763) | not_started | — |
 | pack-extension | `SHADER-OVERRIDES` | Version-specific vanilla shader overrides audit; not implied by PNG/JSON support | `SRC-0143` (line 143) | not_started | — |
@@ -155,10 +155,10 @@ all packet behavior or any mandatory domain below.
 | out_of_scope | `NON-DESKTOP` | Web, Android, iOS and consoles require separate request | `SRC-0051` (line 51) | not_started | — |
 | stage | `C00` | контракт, provenance и измерительный стенд | `SRC-0945` (line 945) | accepted | `.analysis/evidence/C00/acceptance-receipt.json`, `independent-review.json`; explicit own-auth/native-Loader/release-licensing blockers |
 | stage | `C01` | реальное окно, render loop и MCP до игровой логики | `SRC-0951` (line 951) | accepted | `.analysis/evidence/C01/acceptance-receipt.json`, `independent-review.json`; actual Linux/X11 Vulkan GPU window, resize/focus/Escape, authenticated HTTP+same-instance stdio, saturation-safe cleanup |
-| stage | `C02` | настоящий vanilla session и первый gameplay loop | `SRC-0957` (line 957) | accepted | `.analysis/evidence/C02/acceptance-receipt.json`, `independent-review.json`; both actual official/Solaris ordinary SURVIVAL loops, authoritative inventory, native/GPU frames and authorized isolated PCM; retained remesh/light/terminal-queue failures plus corrected regressions and final-binary native/EOF smoke; no hardware-audibility, complete gameplay re-run on final binary or full-client claim |
+| stage | `C02` | настоящий vanilla session и первый gameplay loop | `SRC-0957` (line 957) | accepted | `.analysis/evidence/C02/acceptance-receipt.json`, `independent-review.json`; both actual official/Krasnokamen ordinary SURVIVAL loops, authoritative inventory, native/GPU frames and authorized isolated PCM; retained remesh/light/terminal-queue failures plus corrected regressions and final-binary native/EOF smoke; no hardware-audibility, complete gameplay re-run on final binary or full-client claim |
 | stage | `C03` | масштаб terrain без потери картинки | `SRC-0963` (line 963) | not_started | — |
 | stage | `C04` | entities, все взаимодействия, containers и UI | `SRC-0969` (line 969) | not_started | — |
-| stage | `C05` | Solaris native compatibility | `SRC-0975` (line 975) | not_started | — |
+| stage | `C05` | Krasnokamen native compatibility | `SRC-0975` (line 975) | not_started | — |
 | stage | `C06` | полноценный client-WASM host | `SRC-0981` (line 981) | not_started | — |
 | stage | `C07` | GPU-driven fast path и большой бой | `SRC-0987` (line 987) | not_started | — |
 | stage | `C08` | singleplayer, services и desktop completeness | `SRC-0993` (line 993) | not_started | — |

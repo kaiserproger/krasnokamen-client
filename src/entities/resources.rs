@@ -1,15 +1,15 @@
+use super::krasnokamen_models;
 use super::render_living::MotionFacts;
-use super::solaris_models;
-use crate::protocol::{content::Content, Result};
+use crate::protocol::{Result, content::Content};
 use glam::{Mat4, Vec3};
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-/// Solaris-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
+/// Krasnokamen-owned entity metadata: protocol ids, dimensions, metadata accessors, texture/variant
 /// selection, head/body turn limits and armor shell keys. Pure data, no geometry.
-const ENTITY_FACTS: &str = include_str!("../../assets/solaris/entities/entity-facts.json");
+const ENTITY_FACTS: &str = include_str!("../../assets/krasnokamen/entities/entity-facts.json");
 const FACTS_SCHEMA: u32 = 1;
 
 #[derive(Deserialize)]
@@ -151,12 +151,12 @@ pub(crate) struct ArmorModels {
 impl Models {
     fn parse() -> Result<Document> {
         let doc: Document = serde_json::from_str(ENTITY_FACTS)
-            .map_err(|e| format!("solaris entity facts schema: {e}"))?;
+            .map_err(|e| format!("krasnokamen entity facts schema: {e}"))?;
         if doc.schema != FACTS_SCHEMA || doc.game_version != "26.3" {
-            return Err("solaris entity facts source/target mismatch".into());
+            return Err("krasnokamen entity facts source/target mismatch".into());
         }
         if doc.entities.len() > 1024 || doc.poses.len() != 18 {
-            return Err("solaris entity facts catalog mismatch".into());
+            return Err("krasnokamen entity facts catalog mismatch".into());
         }
         for (name, schema) in &doc.entities {
             if !schema.width.is_finite()
@@ -190,7 +190,7 @@ impl Models {
     fn digest() -> String {
         let mut digest = Sha256::new();
         digest.update(ENTITY_FACTS.as_bytes());
-        digest.update(solaris_models::embedded_digest());
+        digest.update(krasnokamen_models::embedded_digest());
         format!("{:x}", digest.finalize())
     }
     fn attribute_ids(attributes: &BTreeMap<String, AttributeBounds>) -> BTreeMap<u32, String> {
@@ -224,7 +224,7 @@ impl Models {
             return Err("source skin catalog mismatch".into());
         }
         Self::check_registry(&doc, content)?;
-        // Geometry is Solaris-authored (`solaris_models`); the facts carry no meshes. A family
+        // Geometry is Krasnokamen-authored (`krasnokamen_models`); the facts carry no meshes. A family
         // whose rig has no authored model gets a visible entity-sized placeholder box.
         let mut rigs = BTreeMap::new();
         for (kind, family) in &doc.families {
@@ -233,9 +233,9 @@ impl Models {
                 .get(kind)
                 .map_or((0.6, 1.8), |schema| (schema.width, schema.height));
             for key in std::iter::once(&family.rig).chain(family.baby_rig.as_ref()) {
-                if solaris_models::authored(key).is_none() {
+                if krasnokamen_models::authored(key).is_none() {
                     rigs.entry(key.clone())
-                        .or_insert_with(|| solaris_models::placeholder(width, height));
+                        .or_insert_with(|| krasnokamen_models::placeholder(width, height));
                 }
             }
         }
@@ -260,20 +260,20 @@ impl Models {
         let set = if baby { &armor.baby } else { &armor.adult };
         set.get(part).map(String::as_str)
     }
-    /// Geometry for a renderer rig key: explicit entry, else Solaris-authored model, else a
+    /// Geometry for a renderer rig key: explicit entry, else Krasnokamen-authored model, else a
     /// placeholder box. Never fails; a missing model must not stop the frame.
     pub(crate) fn rig(&self, key: &str) -> &Rig {
         static FALLBACK: std::sync::LazyLock<Rig> =
-            std::sync::LazyLock::new(|| solaris_models::placeholder(0.75, 0.75));
+            std::sync::LazyLock::new(|| krasnokamen_models::placeholder(0.75, 0.75));
         self.rigs
             .get(key)
-            .or_else(|| solaris_models::authored(key))
+            .or_else(|| krasnokamen_models::authored(key))
             .unwrap_or(&FALLBACK)
     }
     /// Whether a real (non-placeholder) model exists for the key.
     pub(crate) fn has_authored_rig(&self, key: &str) -> bool {
         self.rigs.get(key).is_some_and(|rig| !rig.is_placeholder())
-            || (!self.rigs.contains_key(key) && solaris_models::authored(key).is_some())
+            || (!self.rigs.contains_key(key) && krasnokamen_models::authored(key).is_some())
     }
     pub fn accessor(&self, kind: &str, name: &str) -> Option<u8> {
         self.schemas
@@ -458,11 +458,12 @@ impl Models {
         }
         // AbstractCubeMob.getDefaultDimensions scales the type dimensions by size alone,
         // replacing LivingEntity's age scale: a baby sulfur cube is as large as its size.
-        let age_scale = if owner == Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") {
-            1.
-        } else {
-            age_scale
-        };
+        let age_scale =
+            if owner == Some("net.minecraft.world.entity.monster.cubemob.AbstractCubeMob") {
+                1.
+            } else {
+                age_scale
+            };
         let family_scale = match owner {
             Some("net.minecraft.world.entity.animal.fish.Pufferfish") => {
                 match number("PUFF_STATE").unwrap_or(0) {
@@ -547,23 +548,32 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     use serde_json::json;
     let doc = Models::parse().unwrap();
     let mut content = Content::test_cube();
-    content.entity_names = doc.entities.iter()
-        .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+    content.entity_names = doc
+        .entities
+        .iter()
+        .map(|(name, schema)| (schema.protocol_id, name.clone()))
+        .collect();
     let models = Models::load(&content).unwrap();
     let mut textures = std::collections::BTreeSet::new();
     fn collect(value: &Value, textures: &mut std::collections::BTreeSet<String>) {
         match value {
             Value::String(s) if s.contains("entity/") => {
                 let (namespace, path) = s.split_once(':').unwrap_or(("minecraft", s));
-                textures.insert(format!("{namespace}:{}",
-                    path.trim_start_matches("textures/").trim_end_matches(".png")));
+                textures.insert(format!(
+                    "{namespace}:{}",
+                    path.trim_start_matches("textures/")
+                        .trim_end_matches(".png")
+                ));
             }
             Value::Object(fields) => fields.values().for_each(|v| collect(v, textures)),
             Value::Array(values) => values.iter().for_each(|v| collect(v, textures)),
             _ => {}
         }
     }
-    collect(&serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(), &mut textures);
+    collect(
+        &serde_json::from_str::<Value>(ENTITY_FACTS).unwrap(),
+        &mut textures,
+    );
     // VillagerProfessionLayer computes these constructor-default paths rather than storing
     // them in the facts. Keep fixture resource absence separate from selection coverage.
     for family in ["villager", "zombie_villager"] {
@@ -573,15 +583,26 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
     }
     let textures: Vec<_> = textures.into_iter().collect();
     for (index, name) in textures.iter().enumerate() {
-        content.insert_test_texture(name.trim_end_matches(".png"), TextureRegion {
-            layer: index as u32 + 1, uv: [0., 0., 1., 1.], width: 64, height: 64,
-        });
+        content.insert_test_texture(
+            name.trim_end_matches(".png"),
+            TextureRegion {
+                layer: index as u32 + 1,
+                uv: [0., 0., 1., 1.],
+                width: 64,
+                height: 64,
+            },
+        );
     }
     let mut rows = Vec::new();
     let mut store = Store::default();
     for (registry, entries) in &models.builtin_variants {
-        store.registries.insert(registry.clone(), entries.iter()
-            .map(|(name, value)| (name.clone(), value.clone())).collect());
+        store.registries.insert(
+            registry.clone(),
+            entries
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        );
     }
     for (kind, schema) in &models.schemas {
         let entity = || {
@@ -591,7 +612,14 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             spawn.0.extend_from_slice(&[0; 16]);
             spawn.var(schema.protocol_id as i32);
             spawn.0.extend_from_slice(&[0; 29]);
-            fixture.apply(clientbound::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+            fixture
+                .apply(
+                    clientbound::ADD_ENTITY,
+                    &mut Reader::new(&spawn.0),
+                    &content,
+                    1,
+                )
+                .unwrap();
             fixture.slots.pop().unwrap()
         };
         let Some(family) = models.families.get(kind) else {
@@ -609,30 +637,46 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                 "scope":"declared family demand, including keys not reached by current selectors"}));
         }
         for baby in [false, true] {
-            if baby && !schema.accessors.contains_key("DATA_BABY_ID") { continue; }
-            let base = if baby { family.baby_rig.as_ref().unwrap_or(&family.rig) } else { &family.rig };
+            if baby && !schema.accessors.contains_key("DATA_BABY_ID") {
+                continue;
+            }
+            let base = if baby {
+                family.baby_rig.as_ref().unwrap_or(&family.rig)
+            } else {
+                &family.rig
+            };
             let age = if baby { "baby" } else { "adult" };
             let default_entity = entity();
             let default_key = if kind == "minecraft:player"
-                && models.default_skin(Some(&default_entity.uuid)).unwrap().model == super::PlayerModel::Slim
+                && models
+                    .default_skin(Some(&default_entity.uuid))
+                    .unwrap()
+                    .model
+                    == super::PlayerModel::Slim
             {
                 "minecraft:player_slim#main".to_owned()
             } else if kind == "minecraft:pufferfish" {
                 "minecraft:pufferfish_small#main".to_owned()
-            } else { base.clone() };
+            } else {
+                base.clone()
+            };
             let mut cases = vec![("default".to_owned(), default_entity, default_key, None)];
             if let Some(registry) = presentation::variant_registry(kind)
                 && let Some(entries) = store.registries.get(registry)
             {
                 for (index, (name, data)) in entries.iter().enumerate() {
                     let mut e = entity();
-                    let accessor = models.accessor(kind, "DATA_VARIANT_ID")
-                        .or_else(|| models.accessor(kind, "DATA_VARIANT")).unwrap();
+                    let accessor = models
+                        .accessor(kind, "DATA_VARIANT_ID")
+                        .or_else(|| models.accessor(kind, "DATA_VARIANT"))
+                        .unwrap();
                     e.metadata.insert(accessor, Metadata::Int(index as i32));
                     let expected = match data["model"].as_str() {
-                        Some(model) if !matches!(model, "normal" | "temperate") =>
-                            format!("minecraft:{model}_{}{}#main",
-                                kind.trim_start_matches("minecraft:"), if baby { "_baby" } else { "" }),
+                        Some(model) if !matches!(model, "normal" | "temperate") => format!(
+                            "minecraft:{model}_{}{}#main",
+                            kind.trim_start_matches("minecraft:"),
+                            if baby { "_baby" } else { "" }
+                        ),
                         _ => base.clone(),
                     };
                     let expected_texture = if data["assets"].is_object() {
@@ -645,23 +689,37 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                         data["baby_asset_id"].as_str().or(data["asset_id"].as_str())
                     } else {
                         data["asset_id"].as_str()
-                    }.map(str::to_owned);
+                    }
+                    .map(str::to_owned);
                     cases.push((format!("received/{name}"), e, expected, expected_texture));
                 }
             }
             // Only these numeric selectors change the rig in `material`.
             let shape = match kind.as_str() {
-                "minecraft:pufferfish" => Some(("PUFF_STATE", vec![
-                    (0, "minecraft:pufferfish_small#main"),
-                    (1, "minecraft:pufferfish_medium#main"), (2, "minecraft:pufferfish#main")])),
-                "minecraft:tropical_fish" => Some(("DATA_ID_TYPE_VARIANT", vec![
-                    (0, base.as_str()), (1, "minecraft:tropical_fish_large#main")])),
+                "minecraft:pufferfish" => Some((
+                    "PUFF_STATE",
+                    vec![
+                        (0, "minecraft:pufferfish_small#main"),
+                        (1, "minecraft:pufferfish_medium#main"),
+                        (2, "minecraft:pufferfish#main"),
+                    ],
+                )),
+                "minecraft:tropical_fish" => Some((
+                    "DATA_ID_TYPE_VARIANT",
+                    vec![
+                        (0, base.as_str()),
+                        (1, "minecraft:tropical_fish_large#main"),
+                    ],
+                )),
                 _ => None,
             };
             if let Some((accessor, values)) = shape {
                 for (value, expected) in values {
                     let mut e = entity();
-                    e.metadata.insert(models.accessor(kind, accessor).unwrap(), Metadata::Int(value));
+                    e.metadata.insert(
+                        models.accessor(kind, accessor).unwrap(),
+                        Metadata::Int(value),
+                    );
                     cases.push((format!("{accessor}/{value}"), e, expected.to_owned(), None));
                 }
             }
@@ -671,8 +729,13 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
                 }
                 let selected = presentation::material(&store, &models, &e, &content, 0);
                 let (key, selected_texture, error) = match selected {
-                    Ok(binding) => (Some(binding.rig),
-                        textures.get(binding.texture.layer.saturating_sub(1) as usize).cloned(), None),
+                    Ok(binding) => (
+                        Some(binding.rig),
+                        textures
+                            .get(binding.texture.layer.saturating_sub(1) as usize)
+                            .cloned(),
+                        None,
+                    ),
                     Err(error) => (None, None, Some(error)),
                 };
                 rows.push(json!({"id":format!("selection/{kind}/{age}/{case}"),
@@ -685,49 +748,61 @@ pub(super) fn rig_selection_contract() -> Vec<Value> {
             }
             // Poses share a rig, but each remains a distinct visual/animation obligation.
             for (id, pose) in &models.poses {
-                rows.push(json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
+                rows.push(
+                    json!({"id":format!("pose/{kind}/{age}/{pose}"),"class":"pose",
                     "entity":kind,"age":age,"pose":pose,"metadata_value":id,
                     "required_rig":base,"selected_rig":null,
                     "selection_error":null,"scope":"rig demand only; animation/pixels unverified",
                     "vanilla_reachability":if baby && family.baby_rig.is_none() {
                         "unverified_inherited_baby_accessor"
-                    } else { "declared_family" }}));
+                    } else { "declared_family" }}),
+                );
             }
         }
         for (enum_name, values) in &schema.enum_ids {
             for (id, value) in values {
-                rows.push(json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
+                rows.push(
+                    json!({"id":format!("enum/{kind}/{enum_name}/{id}"),"class":"enum",
                     "entity":kind,"enum":enum_name,"metadata_value":id,"value":value,
                     "required_rig":family.rig,"selected_rig":null,
-                    "scope":"facts inventory; received enum presentation unverified"}));
+                    "scope":"facts inventory; received enum presentation unverified"}),
+                );
             }
         }
         for texture in &family.textures {
-            rows.push(json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
+            rows.push(
+                json!({"id":format!("texture/{kind}/{texture}"),"class":"texture",
                 "entity":kind,"texture":texture,"required_rig":family.rig,"selected_rig":null,
-                "scope":"declared material inventory, not evidence that a state selects it"}));
+                "scope":"declared material inventory, not evidence that a state selects it"}),
+            );
         }
     }
     for (kind, armor) in &models.armor_models {
         for (age, slots) in [("adult", &armor.adult), ("baby", &armor.baby)] {
             for (slot, key) in slots {
-                rows.push(json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
+                rows.push(
+                    json!({"id":format!("armor/{kind}/{age}/{slot}"),"class":"armor",
                     "entity":kind,"age":age,"slot":slot,"required_rig":key,"selected_rig":null,
-                    "scope":"facts armor key; reachability and equipped pixels unverified"}));
+                    "scope":"facts armor key; reachability and equipped pixels unverified"}),
+                );
             }
         }
     }
     for (index, skin) in models.default_skins.iter().enumerate() {
-        rows.push(json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
+        rows.push(
+            json!({"id":format!("skin/{index}"),"class":"skin","texture":skin.texture,
             "required_rig":if skin.model == super::PlayerModel::Slim {
                 "minecraft:player_slim#main"
             } else { "minecraft:player#main" }, "selected_rig":null,
-            "scope":"default skin layout demand; profile publication and pixels unverified"}));
+            "scope":"default skin layout demand; profile publication and pixels unverified"}),
+        );
     }
     for (name, data) in &models.builtin_variants["minecraft:painting_variant"] {
-        rows.push(json!({"id":format!("painting/{name}"),"class":"painting-variant",
+        rows.push(
+            json!({"id":format!("painting/{name}"),"class":"painting-variant",
             "required_rig":null,"selected_rig":null,"variant":data,
-            "scope":"resource-driven painting segments, not an authored entity rig"}));
+            "scope":"resource-driven painting segments, not an authored entity rig"}),
+        );
     }
     rows
 }
@@ -738,71 +813,134 @@ mod tests {
 
     /// Textures of the received-render fixture; each has its own atlas layer.
     const FIXTURE_TEXTURES: [&str; 8] = [
-        "test:painting/canvas", "minecraft:painting/back", "minecraft:test/frame",
-        "minecraft:entity/minecart/minecart", "minecraft:entity/cushion/white_cushion",
-        "minecraft:entity/cushion/lime_cushion", "minecraft:entity/boat/poplar",
+        "test:painting/canvas",
+        "minecraft:painting/back",
+        "minecraft:test/frame",
+        "minecraft:entity/minecart/minecart",
+        "minecraft:entity/cushion/white_cushion",
+        "minecraft:entity/cushion/lime_cushion",
+        "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
     ];
     fn fixture_layer(texture: &str) -> u32 {
-        7 + FIXTURE_TEXTURES.iter().position(|name| *name == texture).unwrap() as u32
+        7 + FIXTURE_TEXTURES
+            .iter()
+            .position(|name| *name == texture)
+            .unwrap() as u32
     }
 
-    fn render_received_fixture(kind: &str, direction: i32, metadata: &[u8]) -> crate::api::DynamicGeometry {
+    fn render_received_fixture(
+        kind: &str,
+        direction: i32,
+        metadata: &[u8],
+    ) -> crate::api::DynamicGeometry {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let variant = serde_json::json!({"width":1,"height":1,"asset_id":"test:canvas"});
-        content.set_registries(BTreeMap::from([("minecraft:painting_variant".into(),
-            vec![("test:canvas".into(), variant.clone())])]));
+        content.set_registries(BTreeMap::from([(
+            "minecraft:painting_variant".into(),
+            vec![("test:canvas".into(), variant.clone())],
+        )]));
         let region = crate::protocol::content::TextureRegion {
-            layer: 7, uv: [0., 0., 1., 1.], width: 16, height: 16,
+            layer: 7,
+            uv: [0., 0., 1., 1.],
+            width: 16,
+            height: 16,
         };
         for texture in FIXTURE_TEXTURES {
-            content.insert_test_texture(texture, crate::protocol::content::TextureRegion {
-                layer: fixture_layer(texture), ..region
-            });
+            content.insert_test_texture(
+                texture,
+                crate::protocol::content::TextureRegion {
+                    layer: fixture_layer(texture),
+                    ..region
+                },
+            );
         }
         // Owned box fixture, not copied vanilla geometry.
-        let faces: serde_json::Map<String, Value> = ["north", "south", "east", "west", "up", "down"]
-            .into_iter().map(|face| (face.into(), serde_json::json!({"texture":"#frame"}))).collect();
+        let faces: serde_json::Map<String, Value> =
+            ["north", "south", "east", "west", "up", "down"]
+                .into_iter()
+                .map(|face| (face.into(), serde_json::json!({"texture":"#frame"})))
+                .collect();
         let frame = serde_json::to_vec(&serde_json::json!({
             "textures":{"frame":"test/frame"},
             "elements":[{"from":[2,2,14],"to":[14,14,16],"faces":faces}]
-        })).unwrap();
+        }))
+        .unwrap();
         for name in ["item_frame", "glow_item_frame"] {
-            content.insert_test_resource(&format!("assets/minecraft/models/block/{name}.json"), &frame);
+            content.insert_test_resource(
+                &format!("assets/minecraft/models/block/{name}.json"),
+                &frame,
+            );
         }
         content.item_names.insert(1, "test:token".into());
         content.insert_test_item_components(1, BTreeMap::new());
         content.insert_test_resource("assets/test/models/token.json", &frame);
-        content.insert_test_resource("assets/test/items/token.json",
-            br#"{"model":{"type":"minecraft:model","model":"test:token"}}"#);
+        content.insert_test_resource(
+            "assets/test/items/token.json",
+            br#"{"model":{"type":"minecraft:model","model":"test:token"}}"#,
+        );
         let models = std::sync::Arc::new(Models::load(&content).unwrap());
         let mut store = super::super::Store::default();
-        store.registries.insert("minecraft:painting_variant".into(),
-            vec![("test:canvas".into(), variant)]);
+        store.registries.insert(
+            "minecraft:painting_variant".into(),
+            vec![("test:canvas".into(), variant)],
+        );
         store.activate_models(models);
         let mut spawn = Writer::default();
         spawn.var(1);
-        spawn.0.extend_from_slice(&[0;16]);
+        spawn.0.extend_from_slice(&[0; 16]);
         spawn.var(doc.entities[kind].protocol_id as i32);
         for coordinate in [4_f64, 4., 3.] {
             spawn.0.extend_from_slice(&coordinate.to_be_bytes());
         }
-        spawn.0.extend_from_slice(&[0;4]);
+        spawn.0.extend_from_slice(&[0; 4]);
         spawn.var(direction);
-        store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap();
+        store
+            .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+            .unwrap();
         if !metadata.is_empty() {
-            store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1).unwrap();
+            store
+                .apply(cb::SET_ENTITY_DATA, &mut Reader::new(metadata), &content, 1)
+                .unwrap();
         }
         let mut out = crate::api::DynamicGeometry::default();
-        let stats = store.append_geometry(crate::entities::EntityRenderFrame { content: &content, origin: [4.,4.,3.], camera: [4.,5.,0.], camera_rotation: [0.;2], radius: 32., tick: 1, partial: 0., game_time: 0, clock_environment: None, maps: crate::ui::MapRenderFixture::empty().view(), tint_source: &|tint, _| match tint { crate::protocol::models::TintKind::None => Ok([1.; 3]), crate::protocol::models::TintKind::Constant(color) => Ok(color), _ => Err("test biome tint not installed".into()) }, light: &|point| {
-            // A painting's segment cells are available, but not its generic eye sample.
-            Ok((kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
-                .then_some([15.;2]))
-        }, bed_direction: &|_| None }, &mut out).unwrap();
+        let stats = store
+            .append_geometry(
+                crate::entities::EntityRenderFrame {
+                    content: &content,
+                    origin: [4., 4., 3.],
+                    camera: [4., 5., 0.],
+                    camera_rotation: [0.; 2],
+                    radius: 32.,
+                    tick: 1,
+                    partial: 0.,
+                    game_time: 0,
+                    clock_environment: None,
+                    maps: crate::ui::MapRenderFixture::empty().view(),
+                    tint_source: &|tint, _| match tint {
+                        crate::protocol::models::TintKind::None => Ok([1.; 3]),
+                        crate::protocol::models::TintKind::Constant(color) => Ok(color),
+                        _ => Err("test biome tint not installed".into()),
+                    },
+                    light: &|point| {
+                        // A painting's segment cells are available, but not its generic eye sample.
+                        Ok(
+                            (kind != "minecraft:painting" || point.iter().all(|v| v.fract() == 0.))
+                                .then_some([15.; 2]),
+                        )
+                    },
+                    bed_direction: &|_| None,
+                },
+                &mut out,
+            )
+            .unwrap();
         assert_eq!(stats.submitted, 1, "{kind}: {:?}", stats.unrendered);
         assert!(!out.vertices.is_empty(), "{kind}");
         out
@@ -811,7 +949,11 @@ mod tests {
     #[test]
     fn entity_render_rc1_empty_item_frame_has_body_at_packet_anchor() {
         let out = render_received_fixture("minecraft:item_frame", 2, &[]);
-        assert!(out.vertices.iter().all(|v| (0. ..=1.).contains(&v.position[2])));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| (0. ..=1.).contains(&v.position[2]))
+        );
         assert!(out.vertices.iter().any(|v| v.position[2] >= 0.9));
     }
 
@@ -823,25 +965,42 @@ mod tests {
     #[test]
     fn entity_render_rc1_painting_emits_mesh_from_received_spawn() {
         let out = render_received_fixture("minecraft:painting", 2, &[]);
-        assert!(out.vertices.iter().all(|v| (0.9374..=1.0001).contains(&v.position[2])));
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| (0.9374..=1.0001).contains(&v.position[2]))
+        );
     }
 
     #[test]
     fn entity_render_rc1_minecart_mesh_is_above_rail_not_buried() {
         let out = render_received_fixture("minecraft:minecart", 0, &[]);
-        let bottom = out.vertices.iter().map(|v| v.position[1]).fold(f32::INFINITY, f32::min);
-        let top = out.vertices.iter().map(|v| v.position[1]).fold(f32::NEG_INFINITY, f32::max);
-        assert!(bottom >= -0.001, "minecart bottom below received rail position: {bottom}");
+        let bottom = out
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::INFINITY, f32::min);
+        let top = out
+            .vertices
+            .iter()
+            .map(|v| v.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            bottom >= -0.001,
+            "minecart bottom below received rail position: {bottom}"
+        );
         assert!(top > 0.5, "minecart top buried: {top}");
     }
-
 
     #[test]
     fn entity_render_263_poplar_boats_use_boat_hulls_and_poplar_textures() {
         let boat = render_received_fixture("minecraft:poplar_boat", 0, &[]);
         let chest_boat = render_received_fixture("minecraft:poplar_chest_boat", 0, &[]);
         let count = |out: &crate::api::DynamicGeometry, texture: &str| {
-            out.vertices.iter().filter(|v| v.texture_layer == fixture_layer(texture)).count()
+            out.vertices
+                .iter()
+                .filter(|v| v.texture_layer == fixture_layer(texture))
+                .count()
         };
         let hull = count(&boat, "minecraft:entity/boat/poplar");
         assert!(hull > 0);
@@ -853,14 +1012,26 @@ mod tests {
 
     #[test]
     fn entity_render_rc1_frame_metadata_direction_overrides_spawn() {
-        let out = render_received_fixture("minecraft:item_frame", 2, &[1,8,12,5,255]);
-        assert!(out.vertices.iter().all(|v| v.position[0] >= -0.0001 && v.position[0] <= 0.1251));
+        let out = render_received_fixture("minecraft:item_frame", 2, &[1, 8, 12, 5, 255]);
+        assert!(
+            out.vertices
+                .iter()
+                .all(|v| v.position[0] >= -0.0001 && v.position[0] <= 0.1251)
+        );
     }
 
     #[test]
     fn entity_render_rc1_frame_emits_received_held_item_too() {
-        let out = render_received_fixture("minecraft:item_frame", 2, &[1,9,7,1,1,0,0,10,1,2,255]);
-        assert_eq!(out.vertices.len(), 48, "owned frame box plus owned held-item box");
+        let out = render_received_fixture(
+            "minecraft:item_frame",
+            2,
+            &[1, 9, 7, 1, 1, 0, 0, 10, 1, 2, 255],
+        );
+        assert_eq!(
+            out.vertices.len(),
+            48,
+            "owned frame box plus owned held-item box"
+        );
     }
 
     #[test]
@@ -868,9 +1039,14 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
-        content.particle_names.insert(123, "minecraft:raid_omen".into());
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        content
+            .particle_names
+            .insert(123, "minecraft:raid_omen".into());
         let models = std::sync::Arc::new(Models::load_state(&content).unwrap());
         let mut store = super::super::Store::default();
         store.activate_models(models);
@@ -879,18 +1055,29 @@ mod tests {
         spawn.0.extend_from_slice(&[0; 16]);
         spawn.var(120); // 26.3 slime
         spawn.0.extend_from_slice(&[0; 29]);
-        assert!(store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap());
+        assert!(
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap()
+        );
         // Entity 1, particle-list accessor 10, serializer 17, one particle 123,
         // followed by a byte metadata value to verify the particle consumes no options.
         let packet = [1, 10, 17, 1, 123, 8, 0, 42, 255];
         let mut reader = Reader::new(&packet);
-        assert!(store.apply(cb::SET_ENTITY_DATA, &mut reader, &content, 2).unwrap());
+        assert!(
+            store
+                .apply(cb::SET_ENTITY_DATA, &mut reader, &content, 2)
+                .unwrap()
+        );
         reader.done().unwrap();
         match &store.get(1).unwrap().metadata[&10] {
             super::super::metadata::Metadata::Particles(particles) => {
-                assert_eq!(particles, &[serde_json::json!({
-                    "type_id": 123, "type": "minecraft:raid_omen", "data": null
-                })]);
+                assert_eq!(
+                    particles,
+                    &[serde_json::json!({
+                        "type_id": 123, "type": "minecraft:raid_omen", "data": null
+                    })]
+                );
             }
             other => panic!("unexpected metadata: {other:?}"),
         }
@@ -903,18 +1090,32 @@ mod tests {
         // The embedded facts are the sorted 26.3 SimpleParticleType registry report.
         let doc = Models::parse().unwrap();
         assert_eq!(doc.simple_particles.len(), 106);
-        assert!(doc.simple_particles.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            doc.simple_particles
+                .windows(2)
+                .all(|pair| pair[0] < pair[1])
+        );
         for name in [
-            "minecraft:raid_omen", "minecraft:sulfur_bubbles", "minecraft:noxious_gas",
-            "minecraft:noxious_gas_cloud", "minecraft:red_poplar_leaves",
-            "minecraft:orange_poplar_leaves", "minecraft:yellow_poplar_leaves",
+            "minecraft:raid_omen",
+            "minecraft:sulfur_bubbles",
+            "minecraft:noxious_gas",
+            "minecraft:noxious_gas_cloud",
+            "minecraft:red_poplar_leaves",
+            "minecraft:orange_poplar_leaves",
+            "minecraft:yellow_poplar_leaves",
             "minecraft:sulfur_cube_goo",
         ] {
-            assert!(doc.simple_particles.iter().any(|particle| particle == name), "{name}");
+            assert!(
+                doc.simple_particles.iter().any(|particle| particle == name),
+                "{name}"
+            );
         }
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = Models::load_state(&content).unwrap();
         for (id, name) in doc.simple_particles.iter().enumerate() {
             content.particle_names.insert(id as u32, name.clone());
@@ -928,9 +1129,13 @@ mod tests {
             reader.done().unwrap();
             match &values[&8] {
                 super::super::metadata::Metadata::Particles(particles) => {
-                    assert_eq!(particles, &[serde_json::json!({
-                        "type_id": id, "type": name, "data": null
-                    })], "{name}");
+                    assert_eq!(
+                        particles,
+                        &[serde_json::json!({
+                            "type_id": id, "type": name, "data": null
+                        })],
+                        "{name}"
+                    );
                 }
                 other => panic!("{name}: unexpected metadata: {other:?}"),
             }
@@ -967,10 +1172,16 @@ mod tests {
         use crate::protocol::{Reader, Writer, packet_ids::play::clientbound as cb};
         let doc = Models::parse().unwrap();
         assert_eq!(doc.game_version, "26.3");
-        assert_eq!(doc.entities["minecraft:slime"].accessors["ID_SIZE"], [18, 1]);
+        assert_eq!(
+            doc.entities["minecraft:slime"].accessors["ID_SIZE"],
+            [18, 1]
+        );
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         content.item_names.insert(0, "test:body".into());
         content.insert_test_item_components(0, BTreeMap::new());
         let models = std::sync::Arc::new(Models::load_state(&content).unwrap());
@@ -981,9 +1192,22 @@ mod tests {
         spawn.0.extend_from_slice(&[0; 16]); // UUID
         spawn.var(120); // reports/registries.json: minecraft:slime
         spawn.0.extend_from_slice(&[0; 29]); // xyz, zero LP Vec3, rotations, spawn data
-        assert!(store.apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1).unwrap());
+        assert!(
+            store
+                .apply(cb::ADD_ENTITY, &mut Reader::new(&spawn.0), &content, 1)
+                .unwrap()
+        );
         // entity=1, accessor=18, INT serializer=1, size=4, end=255.
-        assert!(store.apply(cb::SET_ENTITY_DATA, &mut Reader::new(&[1, 18, 1, 4, 255]), &content, 2).unwrap());
+        assert!(
+            store
+                .apply(
+                    cb::SET_ENTITY_DATA,
+                    &mut Reader::new(&[1, 18, 1, 4, 255]),
+                    &content,
+                    2
+                )
+                .unwrap()
+        );
         assert_eq!(store.get(1).unwrap().metadata[&18].int(), Some(4));
         assert_eq!(models.dimensions(store.get(1).unwrap()).unwrap().1, 4.);
         // 26.3 SulfurCube's vertical walk animation is hasBodyItem(), not the
@@ -1001,16 +1225,21 @@ mod tests {
     fn regression_263_baby_cube_mob_dimensions_scale_by_size_not_age() {
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
         let models = Models::load_state(&content).unwrap();
         let (_, mut cube) = super::super::animation_tests::fixture();
         cube.type_name = "minecraft:sulfur_cube".into();
         assert_eq!(models.accessor(&cube.type_name, "DATA_BABY_ID"), Some(16));
         assert_eq!(models.accessor(&cube.type_name, "ID_SIZE"), Some(18));
         for baby in [false, true] {
-            cube.metadata.insert(16, super::super::metadata::Metadata::Bool(baby));
-            cube.metadata.insert(18, super::super::metadata::Metadata::Int(2));
+            cube.metadata
+                .insert(16, super::super::metadata::Metadata::Bool(baby));
+            cube.metadata
+                .insert(18, super::super::metadata::Metadata::Int(2));
             let (dimensions, scale) = models.dimensions(&cube).unwrap();
             assert_eq!((dimensions.width, dimensions.height), (0.49, 0.49));
             assert_eq!(scale, 2., "baby={baby}");
@@ -1021,12 +1250,22 @@ mod tests {
     fn regression_263_cushion_and_painting_metadata() {
         use crate::protocol::{Reader, Writer};
         let doc = Models::parse().unwrap();
-        assert_eq!(doc.entities["minecraft:cushion"].accessors["DATA_COLOR"], [8, 43]);
+        assert_eq!(
+            doc.entities["minecraft:cushion"].accessors["DATA_COLOR"],
+            [8, 43]
+        );
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id, name.clone())).collect();
-        content.set_registries(BTreeMap::from([("minecraft:painting_variant".into(),
-            (0..3).map(|id| (format!("test:painting_{id}"), serde_json::json!({}))).collect())]));
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id, name.clone()))
+            .collect();
+        content.set_registries(BTreeMap::from([(
+            "minecraft:painting_variant".into(),
+            (0..3)
+                .map(|id| (format!("test:painting_{id}"), serde_json::json!({})))
+                .collect(),
+        )]));
         let models = Models::load_state(&content).unwrap();
         let mut reader = Reader::new(&[8, 43, 14, 255]);
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
@@ -1037,8 +1276,15 @@ mod tests {
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
         reader.done().unwrap();
         assert_eq!(values[&9].serializer_id(), 34);
-        assert_eq!(values[&9].int(), Some(0), "holder reference 1 names registry entry 0");
-        let last = content.registry_entries("minecraft:painting_variant").unwrap().len() as i32;
+        assert_eq!(
+            values[&9].int(),
+            Some(0),
+            "holder reference 1 names registry entry 0"
+        );
+        let last = content
+            .registry_entries("minecraft:painting_variant")
+            .unwrap()
+            .len() as i32;
         let mut packet = Writer::default();
         packet.0.extend_from_slice(&[9, 34]);
         packet.var(last);
@@ -1050,13 +1296,19 @@ mod tests {
         let mut packet = Writer::default();
         packet.0.extend_from_slice(&[9, 34, 0, 2, 3]); // inline holder, width, height
         packet.string("test:painting");
-        packet.0.extend_from_slice(&[1, 8, 0, 1, b'T', 1, 8, 0, 1, b'A', 10, 0, 5, 255]);
+        packet
+            .0
+            .extend_from_slice(&[1, 8, 0, 1, b'T', 1, 8, 0, 1, b'A', 10, 0, 5, 255]);
         let mut reader = Reader::new(&packet.0);
         let values = super::super::metadata::decode(&mut reader, &content, &models).unwrap();
         reader.done().unwrap();
         assert_eq!(values[&9].serializer_id(), 34);
         assert_eq!(values[&9].int(), None);
-        assert_eq!(values[&10].int(), Some(5), "inline holder consumes exactly its fields");
+        assert_eq!(
+            values[&10].int(),
+            Some(5),
+            "inline holder consumes exactly its fields"
+        );
         let value = serde_json::to_value(&values[&9]).unwrap();
         assert_eq!(value["value"]["width"], 2);
         assert_eq!(value["value"]["height"], 3);
@@ -1069,8 +1321,11 @@ mod tests {
     fn entity_schema_rejects_same_names_at_stale_protocol_ids() {
         let doc = Models::parse().unwrap();
         let mut content = Content::test_cube();
-        content.entity_names = doc.entities.iter()
-            .map(|(name, schema)| (schema.protocol_id + 1, name.clone())).collect();
+        content.entity_names = doc
+            .entities
+            .iter()
+            .map(|(name, schema)| (schema.protocol_id + 1, name.clone()))
+            .collect();
         assert!(Models::check_registry(&doc, &content).is_err());
     }
 
