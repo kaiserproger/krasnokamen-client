@@ -176,8 +176,9 @@ The renderer asks for rigs by key (`minecraft:cow#renderer_main`, `minecraft:cow
 `minecraft:oak_chest_boat#renderer/model`, `minecraft:zombie#layer3/modelSet/head`...).
 `krasnokamen_models::model_id` maps a key to a model id (file stem): qualifiers are dropped, wood
 variants collapse (`boat`, `chest_boat`, `raft`, `chest_raft`, every `*_minecart` -> `minecart`),
-armor-layer slots map to `armor_<slot>` / `armor_baby_<slot>`, with species-specific baby
-shells where body pivots differ.
+adult armor-layer slots map to `armor_<slot>`, and the six baby wearers (zombie, husk, drowned,
+zombie villager, piglin, zombified piglin) map to their family shells `armor_baby_<family>_<slot>`;
+husk shares the zombie shells; there is no generic baby shell.
 
 ### Selection coverage is separate from texture coverage
 
