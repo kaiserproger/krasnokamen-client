@@ -19,6 +19,10 @@ mod far_generate;
 mod frame;
 mod graphics;
 pub use graphics::GraphicsPreset;
+#[cfg(test)]
+mod design_tests;
+#[cfg(test)]
+mod first_person_tests;
 mod material;
 mod mdi;
 mod mesh;
@@ -27,20 +31,16 @@ mod outline;
 mod packed;
 mod pipelines;
 mod post;
-mod shadow;
 mod progress;
 mod residency;
+#[cfg(test)]
+mod shader_tests;
+mod shadow;
 mod sky;
 mod timing;
 mod visibility;
 #[cfg(test)]
-mod shader_tests;
-#[cfg(test)]
 mod wgsl_validation_tests;
-#[cfg(test)]
-mod design_tests;
-#[cfg(test)]
-mod first_person_tests;
 use arena::Arena;
 use mesh::{ResidentMesh, Stream};
 use packed::{TerrainVertex, TileTable};
@@ -65,7 +65,8 @@ pub(crate) fn camera_view(eye: Vec3, yaw: f32, pitch: f32) -> Mat4 {
 #[cfg(test)]
 pub(crate) fn gpu_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 // Pinned Minecraft RGBA8 textures/targets multiply and blend display-encoded RGB.
@@ -138,12 +139,15 @@ fn gpu_instance() -> wgpu::Instance {
 pub fn doctor() -> Result<Value, String> {
     let instance = gpu_instance();
     let adapters = instance.enumerate_adapters(wgpu::Backends::all());
-    let evidence: Vec<_> = adapters.iter().map(|adapter| adapter_evidence(adapter, &adapter.get_info())).collect();
+    let evidence: Vec<_> = adapters
+        .iter()
+        .map(|adapter| adapter_evidence(adapter, &adapter.get_info()))
+        .collect();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .map_err(|e| format!("gpu_adapter_unavailable: {e}"))?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("Solaris doctor device"),
+        label: Some("Krasnokamen doctor device"),
         ..Default::default()
     }))
     .map_err(|e| format!("gpu_device_unavailable: {e}"))?;
@@ -483,7 +487,6 @@ fn classify_surface_error(error: &wgpu::SurfaceError, gpu_failed: bool) -> Surfa
     }
 }
 
-
 impl Renderer {
     pub async fn new(window: Arc<Window>, artifact_dir: PathBuf) -> Result<Self, String> {
         let instance = gpu_instance();
@@ -550,15 +553,20 @@ impl Renderer {
             && downlevel
                 .flags
                 .contains(wgpu::DownlevelFlags::NONBLOCKING_QUERY_RESOLVE);
-        let mdi_enabled = mdi::supported(adapter.features(),
-            std::env::var_os("SOLARIS_CLIENT_MDI").is_none_or(|value| value != "0"))
-            && downlevel.flags.contains(wgpu::DownlevelFlags::COMPUTE_SHADERS | wgpu::DownlevelFlags::INDIRECT_EXECUTION);
+        let mdi_enabled = mdi::supported(
+            adapter.features(),
+            std::env::var_os("KRASNOKAMEN_CLIENT_MDI").is_none_or(|value| value != "0"),
+        ) && downlevel.flags.contains(
+            wgpu::DownlevelFlags::COMPUTE_SHADERS | wgpu::DownlevelFlags::INDIRECT_EXECUTION,
+        );
         let mut features = if timestamps {
             wgpu::Features::TIMESTAMP_QUERY
         } else {
             wgpu::Features::empty()
         };
-        if mdi_enabled { features |= mdi::FEATURES; }
+        if mdi_enabled {
+            features |= mdi::FEATURES;
+        }
         capabilities["multi_draw_indirect_enabled"] = json!(mdi_enabled);
         let hiz_enabled = mdi_enabled
             && mdi::hiz_supported(
@@ -567,7 +575,7 @@ impl Renderer {
                     .allowed_usages
                     .contains(wgpu::TextureUsages::STORAGE_BINDING),
                 adapter.limits().max_storage_textures_per_shader_stage,
-                std::env::var_os("SOLARIS_CLIENT_HIZ").is_none_or(|value| value != "0"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_HIZ").is_none_or(|value| value != "0"),
             );
         capabilities["hiz_occlusion_enabled"] = json!(hiz_enabled);
         capabilities["enabled_features"] = json!(format!("{features:?}"));
@@ -594,7 +602,7 @@ impl Renderer {
         limits.max_buffer_size = adapter.limits().max_buffer_size.min(mesh::VERTEX_BUDGET);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                label: Some("Solaris window GPU"),
+                label: Some("Krasnokamen window GPU"),
                 required_features: features,
                 required_limits: limits,
                 ..Default::default()
@@ -615,10 +623,15 @@ impl Renderer {
             validation_failed.store(true, Ordering::Release);
             let _ = gpu_error_tx.try_send(format!("gpu_validation_failure: {error}"));
         }));
-        let present_modes = surface.as_ref().map_or_else(Vec::new, |surface|
-            surface.get_capabilities(&adapter).present_modes);
-        capabilities["surface_present_modes"] = json!(present_modes.iter()
-            .map(|mode| format!("{mode:?}")).collect::<Vec<_>>());
+        let present_modes = surface.as_ref().map_or_else(Vec::new, |surface| {
+            surface.get_capabilities(&adapter).present_modes
+        });
+        capabilities["surface_present_modes"] = json!(
+            present_modes
+                .iter()
+                .map(|mode| format!("{mode:?}"))
+                .collect::<Vec<_>>()
+        );
         let config = if let Some(surface) = &surface {
             let mut config = surface
                 .get_default_config(&adapter, width, height)
@@ -627,15 +640,17 @@ impl Renderer {
             // render to (RADV on Wayland lists Rgba16Unorm first, which needs
             // TEXTURE_FORMAT_16BIT_NORM).
             let formats = surface.get_capabilities(&adapter).formats;
-            if let Some(format) = [wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm]
-                .into_iter()
-                .find(|format| formats.contains(format))
-                .or_else(|| {
-                    formats.iter().copied().find(|format| {
-                        !format.is_srgb() && device.features().contains(format.required_features())
-                    })
+            if let Some(format) = [
+                wgpu::TextureFormat::Bgra8Unorm,
+                wgpu::TextureFormat::Rgba8Unorm,
+            ]
+            .into_iter()
+            .find(|format| formats.contains(format))
+            .or_else(|| {
+                formats.iter().copied().find(|format| {
+                    !format.is_srgb() && device.features().contains(format.required_features())
                 })
-            {
+            }) {
                 config.format = format;
             }
             config.present_mode = wgpu::PresentMode::Fifo;
@@ -739,9 +754,16 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let targets = Self::targets(&device, &config, &pipelines.blit);
-        let mut shadow = shadow::Shadow::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout);
+        let mut shadow =
+            shadow::Shadow::new(&device, &pipelines.camera_layout, &pipelines.atlas_layout);
         let features = GraphicsPreset::default().features();
-        shadow.configure(&device, features.cascades, features.water_ssr, config.width, config.height);
+        shadow.configure(
+            &device,
+            features.cascades,
+            features.water_ssr,
+            config.width,
+            config.height,
+        );
         let outline = outline::Outline::new(&device, config.width, config.height);
         let post = post::Post::new(
             &device,
@@ -765,7 +787,7 @@ impl Renderer {
         });
         if let Some(mdi) = &mut mdi {
             mdi.set_cold_history(
-                std::env::var_os("SOLARIS_CLIENT_HIZ").is_some_and(|value| value == "cold"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_HIZ").is_some_and(|value| value == "cold"),
             );
         }
         let timing = timing::Timing::new(&device, &queue, timestamps);
@@ -780,7 +802,7 @@ impl Renderer {
         }
         let progress =
             progress::Progress::new(device.clone(), progress_errors, gpu_failed.clone())?;
-        // GPU far-terrain generation needs compute; SOLARIS_CLIENT_FAR_GPU=0
+        // GPU far-terrain generation needs compute; KRASNOKAMEN_CLIENT_FAR_GPU=0
         // forces the session's CPU generator instead.
         let far = far::FarTerrain::new(
             &device,
@@ -789,7 +811,7 @@ impl Renderer {
                 downlevel
                     .flags
                     .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS),
-                std::env::var_os("SOLARIS_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
+                std::env::var_os("KRASNOKAMEN_CLIENT_FAR_GPU").is_none_or(|value| value != "0"),
             ),
         );
         Ok(Self {
@@ -906,9 +928,7 @@ impl Renderer {
     /// there. No per-frame allocation: borrows `self` through the drain.
     /// Reference-mode deliberate full uploads omit acks so the retained
     /// source survives per-frame rewrites.
-    pub(crate) fn drain_uploaded_meshes(
-        &mut self,
-    ) -> impl Iterator<Item = ([i32; 3], u64)> + '_ {
+    pub(crate) fn drain_uploaded_meshes(&mut self) -> impl Iterator<Item = ([i32; 3], u64)> + '_ {
         self.uploaded_meshes.drain(..)
     }
 
@@ -1240,7 +1260,10 @@ impl Renderer {
                 .automation_fence
                 .as_ref()
                 .is_some_and(|f| !f.load(Ordering::Acquire))
-                || request.cancelled.as_ref().is_some_and(|c| c.load(Ordering::Acquire));
+                || request
+                    .cancelled
+                    .as_ref()
+                    .is_some_and(|c| c.load(Ordering::Acquire));
             let stale = request
                 .expected_connection_epoch
                 .as_ref()
@@ -1288,39 +1311,38 @@ impl Renderer {
         {
             None => None,
             Some(Ok(frame)) => Some(frame),
-            Some(Err(error)) => match classify_surface_error(
-                &error,
-                self.gpu_failed.load(Ordering::Acquire),
-            ) {
-                SurfaceRecovery::Reconfigure => {
-                    self.surface
-                        .as_ref()
-                        .unwrap()
-                        .configure(&self.device, &self.config);
-                    if let Some(request) = capture {
-                        let _ = request
-                            .reply
-                            .send(Err("surface_reconfigured_retry_capture".into()));
+            Some(Err(error)) => {
+                match classify_surface_error(&error, self.gpu_failed.load(Ordering::Acquire)) {
+                    SurfaceRecovery::Reconfigure => {
+                        self.surface
+                            .as_ref()
+                            .unwrap()
+                            .configure(&self.device, &self.config);
+                        if let Some(request) = capture {
+                            let _ = request
+                                .reply
+                                .send(Err("surface_reconfigured_retry_capture".into()));
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
-                }
-                SurfaceRecovery::Skip => {
-                    if let Some(request) = capture {
-                        let _ = request.reply.send(Err("window_not_presentable".into()));
+                    SurfaceRecovery::Skip => {
+                        if let Some(request) = capture {
+                            let _ = request.reply.send(Err("window_not_presentable".into()));
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
-                }
-                SurfaceRecovery::Fatal => {
-                    let message = match error {
-                        wgpu::SurfaceError::OutOfMemory => "surface_out_of_memory".into(),
-                        _ => format!("surface_failure_device_failed: {error}"),
-                    };
-                    if let Some(request) = capture {
-                        let _ = request.reply.send(Err(message.clone()));
+                    SurfaceRecovery::Fatal => {
+                        let message = match error {
+                            wgpu::SurfaceError::OutOfMemory => "surface_out_of_memory".into(),
+                            _ => format!("surface_failure_device_failed: {error}"),
+                        };
+                        if let Some(request) = capture {
+                            let _ = request.reply.send(Err(message.clone()));
+                        }
+                        return Err(message);
                     }
-                    return Err(message);
                 }
-            },
+            }
         };
         if self.surface.is_some() {
             self.stats.surface_acquire_ms = acquisition.elapsed().as_secs_f64() * 1000.;
@@ -1369,20 +1391,21 @@ impl Renderer {
                         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                         mapped_at_creation: false,
                     });
-                    self.capture_cull = self
-                        .mdi
-                        .as_ref()
-                        .filter(|_| !self.reference_mode)
-                        .map(|mdi| {
-                            let counters = self.device.create_buffer(&wgpu::BufferDescriptor {
-                                label: Some("terrain culling counters of captured frame"),
-                                size: mdi::COUNTER_BYTES,
-                                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                                mapped_at_creation: false,
+                    self.capture_cull =
+                        self.mdi
+                            .as_ref()
+                            .filter(|_| !self.reference_mode)
+                            .map(|mdi| {
+                                let counters = self.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("terrain culling counters of captured frame"),
+                                    size: mdi::COUNTER_BYTES,
+                                    usage: wgpu::BufferUsages::COPY_DST
+                                        | wgpu::BufferUsages::MAP_READ,
+                                    mapped_at_creation: false,
+                                });
+                                mdi.copy_counters(&mut encoder, &counters);
+                                counters
                             });
-                            mdi.copy_counters(&mut encoder, &counters);
-                            counters
-                        });
                     encoder.copy_texture_to_buffer(
                         wgpu::TexelCopyTextureInfo {
                             texture: &self.targets.color,
@@ -1501,7 +1524,8 @@ impl Renderer {
                     metadata["gpu_timestamps"] = self.timing.latest.clone();
                     metadata["far_terrain"] = self.far.metrics();
                     metadata["submitted_frame_interval_ms"] = json!(self.frame_interval_ms);
-                    metadata["frame_interval_sample_frame_id"] = json!(self.frame_id.saturating_sub(1).to_string());
+                    metadata["frame_interval_sample_frame_id"] =
+                        json!(self.frame_id.saturating_sub(1).to_string());
                     metadata["environment"] = json!({"sky_kind":format!("{:?}",scene.environment.sky_kind),
                         "sun_angle":scene.environment.sun_angle,"moon_angle":scene.environment.moon_angle,
                         "star_angle":scene.environment.star_angle,"star_brightness":scene.environment.star_brightness,
@@ -1551,7 +1575,8 @@ impl Renderer {
             let cpu = timing::thread_cpu_seconds();
             frame.present();
             self.stats.present_call_ms = presentation.elapsed().as_secs_f64() * 1000.;
-            self.stats.present_thread_cpu_ms = cpu.zip(timing::thread_cpu_seconds())
+            self.stats.present_thread_cpu_ms = cpu
+                .zip(timing::thread_cpu_seconds())
                 .map(|(start, end)| (end - start).max(0.) * 1000.);
         }
         let now = Instant::now();
@@ -1586,7 +1611,8 @@ impl Renderer {
         }
         self.progress.submitted(submission)?;
         self.last_frame_ms = start.elapsed().as_secs_f64() * 1000.0;
-        self.stats.render_thread_cpu_ms = cpu_start.zip(timing::thread_cpu_seconds())
+        self.stats.render_thread_cpu_ms = cpu_start
+            .zip(timing::thread_cpu_seconds())
             .map(|(start, end)| (end - start).max(0.) * 1000.);
         Ok(())
     }
@@ -1603,9 +1629,15 @@ impl Renderer {
             .and_then(|capture| capture.mapped.try_recv().ok());
         if let Some(result) = mapped {
             let mut capture = self.capture.take().unwrap();
-            if capture.request.automation_fence.as_ref()
+            if capture
+                .request
+                .automation_fence
+                .as_ref()
                 .is_some_and(|fence| !fence.load(Ordering::Acquire))
-                || capture.request.cancelled.as_ref()
+                || capture
+                    .request
+                    .cancelled
+                    .as_ref()
                     .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
             {
                 let _ = capture.request.reply.send(Err("capture_cancelled".into()));
@@ -1650,7 +1682,10 @@ impl Renderer {
                             .automation_fence
                             .as_ref()
                             .is_some_and(|fence| !fence.load(std::sync::atomic::Ordering::Acquire))
-                            || capture.request.cancelled.as_ref()
+                            || capture
+                                .request
+                                .cancelled
+                                .as_ref()
                                 .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
                         {
                             return Err("capture_cancelled".into());
@@ -1692,7 +1727,10 @@ impl Renderer {
                             .automation_fence
                             .as_ref()
                             .is_some_and(|f| !f.load(Ordering::Acquire))
-                            || capture.request.cancelled.as_ref()
+                            || capture
+                                .request
+                                .cancelled
+                                .as_ref()
                                 .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
                         {
                             let _ = std::fs::remove_file(&capture.path);
@@ -1703,8 +1741,9 @@ impl Renderer {
                             crate::api::Command::Capture { name, .. } => name,
                             _ => unreachable!(),
                         };
-                        metadata["artifact_uri"] =
-                            json!(format!("solaris-client://artifacts/{artifact_name}.png"));
+                        metadata["artifact_uri"] = json!(format!(
+                            "krasnokamen-client://artifacts/{artifact_name}.png"
+                        ));
                         metadata["file_name"] =
                             json!(capture.path.file_name().unwrap().to_string_lossy());
                         metadata["path"] = json!(capture.path);
@@ -1736,53 +1775,79 @@ mod presentation_error_tests {
     fn automation_capture_cancellation_without_writer_stops_before_and_after_gpu_submission() {
         let _gpu_guard = gpu_test_lock();
         let directory = std::env::temp_dir().join(format!(
-            "solaris-capture-cancel-{}-{}", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                .unwrap().as_nanos(),
+            "krasnokamen-capture-cancel-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
         ));
         std::fs::create_dir(&directory).unwrap();
-        let mut renderer = pollster::block_on(Renderer::new_offscreen(
-            64, 64, directory.clone(),
-        )).unwrap();
+        let mut renderer =
+            pollster::block_on(Renderer::new_offscreen(64, 64, directory.clone())).unwrap();
         let (wake, events) = mpsc::channel();
-        renderer.set_wake(Arc::new(move || { let _ = wake.send(()); }));
+        renderer.set_wake(Arc::new(move || {
+            let _ = wake.send(());
+        }));
         let mut results = Vec::new();
         for before_submission in [true, false] {
             let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(before_submission));
             let (reply, response) = mpsc::sync_channel(1);
             let path = directory.join(format!("cancel-{before_submission}.png"));
             let previous_frame = renderer.frame_id;
-            renderer.render(&Scene::default(), Some(Request {
-                command: crate::api::Command::Capture {
-                    name: format!("cancel-{before_submission}"), destination: Some(path.clone()),
-                },
-                reply,
-                expected_connection_epoch: None,
-                expected_dimension_epoch: None,
-                automation_fence: None,
-                cancelled: Some(cancelled.clone()),
-            }), &super::shader_tests::observation()).unwrap();
+            renderer
+                .render(
+                    &Scene::default(),
+                    Some(Request {
+                        command: crate::api::Command::Capture {
+                            name: format!("cancel-{before_submission}"),
+                            destination: Some(path.clone()),
+                        },
+                        reply,
+                        expected_connection_epoch: None,
+                        expected_dimension_epoch: None,
+                        automation_fence: None,
+                        cancelled: Some(cancelled.clone()),
+                    }),
+                    &super::shader_tests::observation(),
+                )
+                .unwrap();
             if before_submission {
-                assert!(renderer.capture_ready(), "pre-submission cancellation queued a readback");
-                assert_eq!(renderer.frame_id, previous_frame, "cancelled capture submitted a frame");
+                assert!(
+                    renderer.capture_ready(),
+                    "pre-submission cancellation queued a readback"
+                );
+                assert_eq!(
+                    renderer.frame_id, previous_frame,
+                    "cancelled capture submitted a frame"
+                );
             } else {
-                assert!(!renderer.capture_ready(), "post-submission case must submit a capture");
+                assert!(
+                    !renderer.capture_ready(),
+                    "post-submission case must submit a capture"
+                );
             }
             cancelled.store(true, Ordering::Release);
-            renderer.device.poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: Some(std::time::Duration::from_secs(30)),
-            }).unwrap();
-            renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+            renderer
+                .device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(std::time::Duration::from_secs(30)),
+                })
+                .unwrap();
+            renderer
+                .device
+                .push_error_scope(wgpu::ErrorFilter::Validation);
             if !before_submission {
                 // This buffer cannot be mapped. Cancellation must discard it before
                 // entering cull-counter readback (including the blocking device poll).
-                renderer.capture.as_mut().unwrap().cull = Some(renderer.device.create_buffer(
-                    &wgpu::BufferDescriptor {
+                renderer.capture.as_mut().unwrap().cull =
+                    Some(renderer.device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("cancelled-capture-unmappable-counters"),
-                        size: 4, usage: wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
-                    },
-                ));
+                        size: 4,
+                        usage: wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }));
             }
             let deadline = Instant::now() + std::time::Duration::from_secs(30);
             let result = loop {
@@ -1790,22 +1855,31 @@ mod presentation_error_tests {
                 match response.try_recv() {
                     Ok(result) => break result,
                     Err(mpsc::TryRecvError::Empty) => {
-                        events.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        events
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                             .expect("capture completion must wake its owner");
                     }
                     Err(error) => panic!("capture owner lost: {error}"),
                 }
             };
-            assert!(pollster::block_on(renderer.device.pop_error_scope()).is_none(),
-                "cancelled capture attempted cull-counter mapping");
+            assert!(
+                pollster::block_on(renderer.device.pop_error_scope()).is_none(),
+                "cancelled capture attempted cull-counter mapping"
+            );
             results.push((before_submission, result, path.exists()));
         }
         drop(renderer);
         std::fs::remove_dir_all(directory).unwrap();
         for (before_submission, result, artifact_exists) in results {
-            assert_eq!(result.unwrap_err(), "capture_cancelled",
-                "cancellation before submission: {before_submission}");
-            assert!(!artifact_exists, "cancelled capture must not retain an artifact");
+            assert_eq!(
+                result.unwrap_err(),
+                "capture_cancelled",
+                "cancellation before submission: {before_submission}"
+            );
+            assert!(
+                !artifact_exists,
+                "cancelled capture must not retain an artifact"
+            );
         }
     }
 
