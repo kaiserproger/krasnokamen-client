@@ -345,6 +345,33 @@ mod tests {
         assert!(m.hand(1., 70., 0.).offset[0].abs() < 0.001);
     }
 
+    /// ISSUE-1-02: the source first-person hand is still at idle (26.3
+    /// `FirstPersonHandsAndItemsRenderer`); a native idle sway made a held tool drift
+    /// ("floating") off its anchor. Red when the time-based sway is restored.
+    #[test]
+    fn view_motion_hand_is_perfectly_still_at_rest() {
+        let mut m = ViewMotion::default();
+        let input = ViewInput {
+            yaw: 25.,
+            pitch: 10.,
+            grounded: true,
+            ..Default::default()
+        };
+        for _ in 0..2000 {
+            m.step(1. / 60., &input);
+        }
+        for walking in [0., 0.5, 1.] {
+            let hand = m.hand(walking, 25., 10.);
+            // The old sway was +-0.004/0.005 blocks and 0.5 degrees.
+            assert!(
+                hand.offset.iter().all(|v| v.abs() < 1e-4),
+                "walking {walking}: {hand:?}"
+            );
+            assert!(hand.roll_deg.abs() < 1e-3, "walking {walking}: {hand:?}");
+            m.step(0.37, &input);
+        }
+    }
+
     #[test]
     fn view_motion_time_split_does_not_change_the_result() {
         let input = ViewInput {

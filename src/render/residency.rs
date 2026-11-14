@@ -428,6 +428,13 @@ impl Renderer {
             &scene.first_person.indices.each_ref().map(Vec::as_slice),
             material::MATERIALS.map(|m| m.sort),
         )?;
+        self.hand.upload(
+            &self.device,
+            &self.queue,
+            &scene.hand.vertices,
+            &scene.hand.indices,
+            material::MATERIALS.map(|_| false),
+        )?;
         self.overlay.upload(
             &self.device,
             &self.queue,
