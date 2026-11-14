@@ -1127,7 +1127,7 @@ impl UiState {
                     c.action,
                     c.paint,
                 )?;
-                self.nodes.last_mut().unwrap().owner = "solaris_loader";
+                self.nodes.last_mut().unwrap().owner = "krasnokamen_loader";
                 x += c.width;
             }
             y += height + 4.;

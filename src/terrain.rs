@@ -1,18 +1,19 @@
 use crate::{
     api::{ChunkDraw, DynamicGeometry},
     protocol::{
+        Result,
         content::Content,
         world::{Chunk, Neighborhood, World},
-        Result,
     },
 };
 use glam::Mat4;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
+        Arc, Condvar, Mutex, PoisonError, Weak,
         atomic::{AtomicU64, Ordering},
-        mpsc, Arc, Condvar, Mutex, PoisonError, Weak,
+        mpsc,
     },
     thread,
     time::Instant,
@@ -34,7 +35,9 @@ const QUEUED_PER_WORKER: usize = 8;
 /// Half the hardware threads: the rest serve the session, the renderer, the
 /// network and audio threads and, in singleplayer, the local server.
 fn worker_count() -> usize {
-    thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(2, 8)
+    thread::available_parallelism()
+        .map_or(2, |n| n.get() / 2)
+        .clamp(2, 8)
 }
 // A 65×65 view may contain up to 24 nonempty vertical sections per column.
 pub(crate) const MAX_SECTIONS: usize = 131072;
@@ -109,7 +112,10 @@ impl<T> JobQueue<T> {
             if state.1 {
                 return None;
             }
-            state = self.ready.wait(state).unwrap_or_else(PoisonError::into_inner);
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     fn close(&self) {
@@ -690,7 +696,8 @@ impl Terrain {
                 },
             );
             if replaced.is_none() {
-                self.coverage_dirty.insert([completion.key[0], completion.key[2]]);
+                self.coverage_dirty
+                    .insert([completion.key[0], completion.key[2]]);
             }
             changed = true;
         }
@@ -884,7 +891,11 @@ impl Terrain {
         self.catalog.is_some()
             && self.rules.is_some()
             && (0..27).all(|i| {
-                let key = [center[0] + i % 3 - 1, center[1] + i / 3 % 3 - 1, center[2] + i / 9 - 1];
+                let key = [
+                    center[0] + i % 3 - 1,
+                    center[1] + i / 3 % 3 - 1,
+                    center[2] + i / 9 - 1,
+                ];
                 self.sections
                     .get(&key)
                     .is_none_or(|section| !self.pending.contains(&key) && section.running.is_none())
