@@ -8,14 +8,14 @@
 //! before and after the parent's mesher edits.
 
 use super::catalog::Catalog;
-use super::mesher::{self, BuiltSection, Rules, NORMALS};
+use super::mesher::{self, BuiltSection, NORMALS, Rules};
 use crate::api::{MeshGeometry, RenderLayer};
 use crate::protocol::content::{Content, TextureRegion};
 use crate::protocol::world::{
-    empty_block_entities, Chunk, Palette, Section, SurfaceHeightmap, World,
+    Chunk, Palette, Section, SurfaceHeightmap, World, empty_block_entities,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::{Arc, atomic::AtomicU64};
 
 const AIR: u32 = 0;
 const CUBE: u32 = 1;
@@ -86,7 +86,10 @@ fn full_32_chunk_view_can_queue_terrain_sections() {
     let cells: Vec<_> = (0..8).map(|y| [0, y * 16, 0]).collect();
     let template = lit_chunk(&cells, 8, 128);
     let mut terrain = super::Terrain::new(Arc::new(|| {})).unwrap();
-    terrain.view = Some(super::MeshView { center: [0, 0], radius: 32 });
+    terrain.view = Some(super::MeshView {
+        center: [0, 0],
+        radius: 32,
+    });
     for z in -32..=32 {
         for x in -32..=32 {
             world.insert([x, z], template.clone()).unwrap();
@@ -543,9 +546,11 @@ fn mesh_view_retires_geometry_bytes_and_changes_reentered_revision() {
             fade_duration_ms: Some(0),
         },
     );
-    assert!(terrain
-        .sync_view(&world, [56., 8., 8.], 1, &mut draws)
-        .unwrap());
+    assert!(
+        terrain
+            .sync_view(&world, [56., 8., 8.], 1, &mut draws)
+            .unwrap()
+    );
     assert!(draws.is_empty());
     assert_eq!(terrain.resident_bytes, 0);
     assert!(terrain.sections.is_empty());
@@ -751,7 +756,9 @@ fn terrain_with_aged_backlog(
         .set_render_rules([1.; 6], false, 0, Some(0))
         .unwrap();
     let mut draws = BTreeMap::new();
-    terrain.sync_view(world, camera, radius, &mut draws).unwrap();
+    terrain
+        .sync_view(world, camera, radius, &mut draws)
+        .unwrap();
     let joined = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(30))
         .unwrap();
@@ -824,7 +831,10 @@ fn one_update_fills_every_free_worker_slot() {
     let cells: Vec<_> = (0..4).map(|y| [8, y * 16 + 8, 8]).collect();
     for x in -4..=4 {
         for z in -4..=4 {
-            let cells: Vec<_> = cells.iter().map(|c| [c[0] + x * 16, c[1], c[2] + z * 16]).collect();
+            let cells: Vec<_> = cells
+                .iter()
+                .map(|c| [c[0] + x * 16, c[1], c[2] + z * 16])
+                .collect();
             world.insert([x, z], lit_chunk(&cells, 4, 64)).unwrap();
         }
     }
@@ -834,14 +844,30 @@ fn one_update_fills_every_free_worker_slot() {
         .set_render_rules([1.; 6], false, 0, Some(0))
         .unwrap();
     let eligible = 9 * 9 * 4;
-    assert!(terrain.max_in_flight > terrain.threads.len(), "workers keep queued work between updates");
-    assert!(terrain.max_in_flight < eligible, "fixture must exceed the queue bound");
+    assert!(
+        terrain.max_in_flight > terrain.threads.len(),
+        "workers keep queued work between updates"
+    );
+    assert!(
+        terrain.max_in_flight < eligible,
+        "fixture must exceed the queue bound"
+    );
     let mut draws = BTreeMap::new();
     terrain.update(&world, [8., 8., 8.], 4, &mut draws).unwrap();
-    let dispatched = terrain.sections.values().filter(|s| s.running.is_some()).count();
-    assert_eq!(dispatched, terrain.max_in_flight, "one update must fill every slot");
+    let dispatched = terrain
+        .sections
+        .values()
+        .filter(|s| s.running.is_some())
+        .count();
+    assert_eq!(
+        dispatched, terrain.max_in_flight,
+        "one update must fill every slot"
+    );
     assert_eq!(terrain.in_flight, terrain.max_in_flight);
-    assert!(terrain.has_pending, "a bounded selection must not claim the backlog is empty");
+    assert!(
+        terrain.has_pending,
+        "a bounded selection must not claim the backlog is empty"
+    );
     // First loads go nearest first (same centre distance the scheduler uses;
     // distinct distances differ by over a block here, insertion-time aging by
     // far less than half a block). The camera's own sections are prompt jobs.
@@ -856,9 +882,15 @@ fn one_update_fills_every_free_worker_slot() {
         .iter()
         .filter(|(key, _)| key.iter().any(|v| v.abs() > 1))
         .partition(|(_, s)| s.running.is_some());
-    assert!(!running.is_empty(), "every fourth job is reserved for first loads");
+    assert!(
+        !running.is_empty(),
+        "every fourth job is reserved for first loads"
+    );
     let farthest_running = running.iter().map(|(k, _)| distance(k)).fold(0., f64::max);
-    let nearest_idle = idle.iter().map(|(k, _)| distance(k)).fold(f64::MAX, f64::min);
+    let nearest_idle = idle
+        .iter()
+        .map(|(k, _)| distance(k))
+        .fold(f64::MAX, f64::min);
     assert!(
         farthest_running <= nearest_idle + 0.5,
         "dispatch must take the closest first loads first: {farthest_running} > {nearest_idle}"
@@ -894,7 +926,11 @@ fn coverage_changes_name_only_touched_columns() {
     terrain
         .set_render_rules([1.; 6], false, 0, Some(0))
         .unwrap();
-    assert_eq!(terrain.take_coverage_changes(), None, "activation re-evaluates everything");
+    assert_eq!(
+        terrain.take_coverage_changes(),
+        None,
+        "activation re-evaluates everything"
+    );
     let camera = [24., 8., 8.];
     let mut draws = BTreeMap::new();
     // Event-driven: each worker completion wakes the owner, like the window loop.
@@ -923,9 +959,16 @@ fn coverage_changes_name_only_touched_columns() {
     terrain.invalidate_chunk(&world, [2, 0]).unwrap();
     settle(&mut terrain, &world, &mut draws);
     assert!(!draws.contains_key(&[2, 0, 0]));
-    assert_eq!(terrain.take_coverage_changes(), Some(BTreeSet::from([[2, 0]])));
+    assert_eq!(
+        terrain.take_coverage_changes(),
+        Some(BTreeSet::from([[2, 0]]))
+    );
     terrain.reset(&mut draws);
-    assert_eq!(terrain.take_coverage_changes(), None, "a reset re-evaluates everything");
+    assert_eq!(
+        terrain.take_coverage_changes(),
+        None,
+        "a reset re-evaluates everything"
+    );
 }
 
 /// A chunk arrival used to rescan every section and loaded column; the
@@ -934,8 +977,12 @@ fn coverage_changes_name_only_touched_columns() {
 #[test]
 fn lifecycle_sync_reconciles_only_changed_columns() {
     let mut world = World::new(0, 32);
-    world.insert([0, 0], lit_chunk(&[[8, 8, 8]], 2, 32)).unwrap();
-    world.insert([1, 0], lit_chunk(&[[24, 8, 8]], 2, 32)).unwrap();
+    world
+        .insert([0, 0], lit_chunk(&[[8, 8, 8]], 2, 32))
+        .unwrap();
+    world
+        .insert([1, 0], lit_chunk(&[[24, 8, 8]], 2, 32))
+        .unwrap();
     let mut terrain = super::Terrain::new(Arc::new(|| {})).unwrap();
     let mut draws = BTreeMap::new();
     let camera = [8., 8., 8.];
@@ -944,8 +991,12 @@ fn lifecycle_sync_reconciles_only_changed_columns() {
     assert_eq!(keys(&terrain), BTreeSet::from([[0, 0, 0], [1, 0, 0]]));
     // Silent replacement with a newly non-empty upper section, a silent
     // arrival and a silent unload.
-    world.insert([1, 0], lit_chunk(&[[24, 8, 8], [24, 24, 8]], 2, 32)).unwrap();
-    world.insert([-1, 0], lit_chunk(&[[-8, 8, 8]], 2, 32)).unwrap();
+    world
+        .insert([1, 0], lit_chunk(&[[24, 8, 8], [24, 24, 8]], 2, 32))
+        .unwrap();
+    world
+        .insert([-1, 0], lit_chunk(&[[-8, 8, 8]], 2, 32))
+        .unwrap();
     world.remove([0, 0]);
     terrain.sync_view(&world, camera, 1, &mut draws).unwrap();
     assert_eq!(
@@ -957,7 +1008,9 @@ fn lifecycle_sync_reconciles_only_changed_columns() {
         [[-1, 0], [1, 0]]
     );
     // Columns outside the view stay out.
-    world.insert([5, 0], lit_chunk(&[[88, 8, 8]], 2, 32)).unwrap();
+    world
+        .insert([5, 0], lit_chunk(&[[88, 8, 8]], 2, 32))
+        .unwrap();
     terrain.sync_view(&world, camera, 1, &mut draws).unwrap();
     assert!(!terrain.sections.keys().any(|key| key[0] == 5));
 }
@@ -1008,8 +1061,10 @@ fn leaf_canopy_keeps_only_the_two_outer_layers_per_direction() {
         .filter(|quad| {
             let at = |i: u32| section.geometry.vertices[i as usize].position;
             let (a, c) = (at(quad[0]), at(quad[2]));
-            (0..3).all(|axis| a[axis].min(c[axis]) >= center[axis] - 0.01
-                && a[axis].max(c[axis]) <= center[axis] + 1.01)
+            (0..3).all(|axis| {
+                a[axis].min(c[axis]) >= center[axis] - 0.01
+                    && a[axis].max(c[axis]) <= center[axis] + 1.01
+            })
         })
         .count();
     assert_eq!(inside, 0, "buried leaf block must emit no faces");
@@ -1058,7 +1113,10 @@ const NETHER_SHADE: [f32; 6] = [0.9, 0.9, 0.8, 0.8, 0.6, 0.6];
 /// Vertex colour of each face of one isolated, fully lit cube meshed with the
 /// cardinal `weights`, after `edit` rewrote the fixture cube's model quads. The
 /// fixture stores each face's index in `texture_layer`, so quads stay attributable.
-fn face_shades(weights: [f32; 6], edit: impl Fn(&mut crate::protocol::models::BakedQuad)) -> [f32; 6] {
+fn face_shades(
+    weights: [f32; 6],
+    edit: impl Fn(&mut crate::protocol::models::BakedQuad),
+) -> [f32; 6] {
     let mut content = fixture_content();
     for quad in &mut content.models[0].quads {
         edit(quad);
@@ -1092,7 +1150,10 @@ fn face_shades(weights: [f32; 6], edit: impl Fn(&mut crate::protocol::models::Ba
         );
         colors[face] = vertex.color[0];
     }
-    assert!(colors.iter().all(|c| c.is_finite()), "all six faces emitted");
+    assert!(
+        colors.iter().all(|c| c.is_finite()),
+        "all six faces emitted"
+    );
     colors
 }
 

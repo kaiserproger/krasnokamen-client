@@ -53,7 +53,8 @@ pub(crate) struct Cache {
     models: BTreeMap<String, BakedModel>,
     text: BTreeMap<Handle, CachedText>,
     observed_items: BTreeMap<usize, ObservedItem>,
-    clock_needles: BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
+    clock_needles:
+        BTreeMap<Handle, std::sync::Arc<std::sync::Mutex<crate::ui::item_dynamic::Needles>>>,
 }
 impl Cache {
     pub fn remove(&mut self, handle: Handle) {
@@ -70,8 +71,9 @@ impl Cache {
     ) -> Result<Option<ItemContext>> {
         let is_clock = stack.is_some_and(|stack| {
             !stack.empty()
-                && crate::ui::items::item_model_id(content, stack)
-                    .is_some_and(|id| crate::ui::items::item_model_location(id) == ("minecraft", "clock"))
+                && crate::ui::items::item_model_id(content, stack).is_some_and(|id| {
+                    crate::ui::items::item_model_location(id) == ("minecraft", "clock")
+                })
         });
         let Some((base, time_at)) = environment.filter(|_| is_clock) else {
             self.clock_needles.remove(&entity.handle);
@@ -131,9 +133,12 @@ fn textured_quad(
         out,
     )
 }
-pub(crate) use items::{append_observed_item, ObservedItemFrame};
+pub(crate) use items::{ObservedItemFrame, append_observed_item};
 
-#[expect(clippy::too_many_arguments, reason = "Shares the scene extraction inputs without a second render-state owner")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Shares the scene extraction inputs without a second render-state owner"
+)]
 pub(crate) fn append(
     store: &mut Store,
     slot: usize,
@@ -146,26 +151,60 @@ pub(crate) fn append(
     light_source: &dyn Fn([f64; 3]) -> Result<Option<[f32; 2]>>,
     out: &mut DynamicGeometry,
 ) -> Result<Handled> {
-    if !matches!(store.slots[slot].type_name.as_str(),
-        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame") {
+    if !matches!(
+        store.slots[slot].type_name.as_str(),
+        "minecraft:painting" | "minecraft:item_frame" | "minecraft:glow_item_frame"
+    ) {
         return Ok(Handled::Unhandled);
     }
     let vertex_start = out.vertices.len();
     let index_starts = out.indices.each_ref().map(Vec::len);
     let result = (|| {
         if store.slots[slot].type_name == "minecraft:painting" {
-            return painting::append(&store.slots[slot], store, models,
-                content, origin, tick, partial, light_source, out);
+            return painting::append(
+                &store.slots[slot],
+                store,
+                models,
+                content,
+                origin,
+                tick,
+                partial,
+                light_source,
+                out,
+            );
         }
         let entity = &store.slots[slot];
         let (dimensions, scale) = models.dimensions(entity)?;
-        let Some(light) = p::entity_light(entity, models, tick, partial,
-            dimensions, scale, light_source)? else {
+        let Some(light) = p::entity_light(
+            entity,
+            models,
+            tick,
+            partial,
+            dimensions,
+            scale,
+            light_source,
+        )?
+        else {
             return Ok(Handled::PendingLighting);
         };
-        item_frame::append(entity, models, item_frame::ItemFrameResources {
-            cache: &mut store.special_render_cache, items: &mut store.items,
-        }, content, p::EntityDrawFrame { origin, tick, partial, light, parent: None }, clock_context, out)
+        item_frame::append(
+            entity,
+            models,
+            item_frame::ItemFrameResources {
+                cache: &mut store.special_render_cache,
+                items: &mut store.items,
+            },
+            content,
+            p::EntityDrawFrame {
+                origin,
+                tick,
+                partial,
+                light,
+                parent: None,
+            },
+            clock_context,
+            out,
+        )
     })();
     if result.is_err() {
         out.vertices.truncate(vertex_start);
