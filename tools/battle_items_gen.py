@@ -76,6 +76,20 @@ class Weapon:
         self.elements.append(el)
 
     def model(self, display):
+        # Java limits element coordinates to [-16, 32]. Contract about the grip
+        # at (8, 8, 8), then undo that contraction in every display transform.
+        extent = max(abs(value - 8) for element in self.elements
+                     for key in ("from", "to") for value in element[key])
+        if extent > 24:
+            factor = 24 / extent
+            for element in self.elements:
+                for key in ("from", "to"):
+                    element[key] = [round(8 + (value - 8) * factor, 12) for value in element[key]]
+                if "rotation" in element:
+                    rotation = element["rotation"]
+                    rotation["origin"] = [round(8 + (value - 8) * factor, 12) for value in rotation["origin"]]
+            for transform in display.values():
+                transform["scale"] = [round(value / factor, 12) for value in transform.get("scale", [1, 1, 1])]
         return {"textures": {"parts": "solaris_battle:item/battle_parts", "particle": "solaris_battle:item/battle_parts"},
                 "elements": self.elements, "display": display}
 

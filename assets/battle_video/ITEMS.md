@@ -2,7 +2,11 @@
 
 These are resource identifiers, not proof of a deliverable bundle. For local
 native-client development, `SOLARIS_CLIENT_RESOURCE_PACKS` accepts this extracted
-pack directory; Loader delivery has not been implemented or exercised.
+pack directory. The core `java-battle-functional` gate serves its ZIP through
+the ordinary optional server resource-pack push with Loader on 26.1.2.
+Vanilla's default policy prompts; automatic loading requires the per-server
+Resource Packs preference to be Enabled. Functional loading and screenshot
+review are separate checks.
 
 | Appearance | Component | Resource identifier | Suggested vanilla carrier |
 |---|---|---|---|
@@ -47,5 +51,15 @@ BLOCK pose shows the face to the front. Weapons are authored along +Y with the g
 model centre; the display transform turns them (spear, halberd leaning forward, lance
 couched forward-up, crossbow level with the prod across) and scales long weapons down
 through the element grid. The bows and crossbows are static models: draw and loaded states
-are not implemented. First-person display values are derived from the vanilla handheld ones
-and are not visually verified. Loader asset delivery is not implemented.
+are not implemented. First-person display values derive from vanilla handheld
+transforms; the battle gate captures the equipped spear/shield view, not every
+item and pose.
+
+Java element coordinates must stay within `[-16, 32]`. The generator contracts
+oversized weapons uniformly about the model/grip centre `(8, 8, 8)` and applies
+the reciprocal display scale, preserving their rendered dimensions, orientation
+and attachment instead of clipping the lance tip or halberd blade.
+`python3 -m unittest discover -s tools -p test_battle_items_gen.py` checks every
+pack model's bounds, generated-file consistency and transformed weapon geometry.
+The format-84 metadata declares `min_format` and `max_format` explicitly for
+26.1.2; without them Java falls back after rejecting the pack metadata.
