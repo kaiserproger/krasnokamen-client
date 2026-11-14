@@ -99,3 +99,27 @@ quick-moves them in menu order. This remains distinct from `PICKUP_ALL`.
 The `shift_double_click_*` regressions document both cases; real-client,
 authoritative server-state and Java-oracle scenario verification remain open.
 
+
+## CLIENT-HOLY-CHEST-STATIC-EFFECT-PLANES — battle rig effects (open)
+
+The holy chest rig included animated upstream effect planes as static gold
+rings and white crosses cutting through the wearer. Pre-rename client commit
+`0b8a4350` removed those planes; the same change is ported to
+`assets/krasnokamen/models/entity/battle_holy_chest.json`. Real-client visual
+verification is still required. Canonical row:
+`CLIENT-HOLY-CHEST-STATIC-EFFECT-PLANES` in the server bug ledger.
+
+## CLIENT-GPU-DEVICE-LOST-G2-PEAK — Vulkan device loss (open)
+
+Laptop RTX 4050, client `dd36acd5`: G2 `g2-14-push-in` returned `Parent
+device is lost` at 21:52:07 laptop time on 2026-11-13. A second loss was
+reported at 05:24:29 on 2026-11-14 at the start of G2R `g2r-11`. Both retries
+passed. The laptop reports NVIDIA Xid 32 for both, but the kernel log has not
+been returned and the code is unconfirmed.
+
+First repro: `g2-14-push-in`, t=253.45..257.45, radius 20, 1920x1080,
+peak melee of about 18,000 entities. The first application log is
+`receipts/BvCinemaReplay/laptop-returns/2026-11-13-g2/g2-14-push-in.devlost.log`;
+the second retry log is `receipts/BvCinemaReplay/laptop-returns/2026-11-14-g2r/g2r-11-dolly.log`.
+history is in `receipts/G2/LAPTOP-NEXT.md`. Not yet reproduced on the host.
+Canonical row: `CLIENT-GPU-DEVICE-LOST-G2-PEAK` in the server bug ledger.
