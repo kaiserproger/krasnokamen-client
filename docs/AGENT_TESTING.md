@@ -13,14 +13,52 @@ server in Configuration and Play client information. The focused
 `client_information_encodes_left_and_right_main_arm` regressions cover the
 setting and packet encoding; they do not replace a graphical held-item gate.
 
-### Held-map decorations
+### Received maps: held decorations and item frames
 
-`received_map_decorations_face_the_map_and_use_their_atlas_regions` sends a
-map-data packet through the UI dispatcher and checks marker positions,
-rotation, atlas regions and front-facing geometry on the held-map path. It
-also checks the shared renderer's item-frame visibility predicate, not a live
-item-frame render. This geometry regression does not replace the original
-windowed graphical waypoint scenario.
+The held-map winding correction already exists at the ClientNext source base.
+`received_map_decorations_face_the_map_and_use_their_atlas_regions` checks
+received icon placement, rotation, atlas regions and outward geometry.
+`map_lifecycle_tests` additionally covers decoration-list replacement/removal,
+omitted-list preservation, banner replacement, unknown IDs and session reset.
+These are geometry/state regressions, not graphical acceptance.
+
+Frames borrow `MapRenderView` from the same UI-owned received map store.
+The frame stack's `minecraft:map_id` selects the map; no local terrain or marker
+substitute is generated. A not-yet-observed ID remains the ordinary item model,
+matching the 26.3 renderer's unknown-map branch. Observed maps use quarter-turn
+frame rotation and the frame-visible decoration predicate. Focused
+`item_frame::map_tests` cover all six attachment directions, all eight received
+rotation values, invisible/glow frames, identity replacement, pixel erasure,
+stack removal and clearing the received store.
+
+Main must extend the original `entities/native-v2-map-frame-waypoint` gate:
+retain the received map ID, pixel patches, decoration kind/x/y/rotation,
+frame network ID and DATA_ITEM/DATA_ROTATION metadata; then capture the actual
+held and framed surfaces after those exact packets. Assert visible frame,
+banner and off-map-player icons on the held map at packet-derived positions;
+framed maps must show the received terrain and only frame-visible icons.
+Exercise ordinary frame rotation, map replacement/removal, same-ID updates,
+unknown-to-known ID transition, frame despawn and reconnect. Compare direction,
+rotation and glow/invisible variants to the pinned vanilla oracle. A frame body,
+decoded map state or geometry-only check is not a passing graphical gate.
+
+### Received potion impacts
+
+`received_potion_impact_uses_event_rgb_and_effect_family_until_expiry` sends
+actual LevelEvent bytes through Session dispatch. Events 2002 and 2007 use
+received RGB data, bottle fragments and animated effect/spell sprites. In the
+26.3 bytecode, 2007 selects instant-effect sprites: it does **not** mean lingering.
+The simulation is bounded and tick-driven, and unknown light is not fabricated.
+
+Main must throw splash and lingering potions with distinct custom colors through
+ordinary inputs and retain the actual LevelEvent event/position/data/sequence.
+Capture frames spanning each impact and expiry at that received position, with
+normal particle settings, including an instant-effect 2007 case, colored 2002,
+black RGB, nearby impacts and dimension/disconnect cleanup. Compare to vanilla.
+Neither a projectile disappearing nor a decoded event alone proves the burst.
+Run isolated negative controls for map winding, framed-map drawing and potion
+event admission; retain exact binary/tree/packet/frame identities. Source-phase
+authored cases are unexecuted until Main records focused runs and real frames.
 
 ### Mount inventory quick-move
 
@@ -28,6 +66,33 @@ The session associates an opened mount screen with the already received entity
 type before predicting quick-moves. `received_mount_screen_quick_moves_player_cargo`
 exercises packet dispatch and slot prediction for mount variants; it does not
 replace the original graphical custody/mount scenario or server confirmation.
+
+### Received passenger presentation
+
+Scene extraction and presented bounds resolve received passenger relations before
+using positions. The vehicle's interpolated transform and actual dimensions
+(including marker armor stands) supply its PASSENGER attachment; the rider's
+scaled, yaw-rotated VEHICLE attachment is subtracted. The attachment variants
+remain owned by `player/vehicle.rs`, shared with local mount prediction. Received
+body coordinates/interpolation are not rewritten, and the local predicted avatar
+is not attached a second time. Mounted candidates are not culled by their raw
+body bucket. Rigs, special renderers, lights, fire, text and shadows consume the
+derived position, not a per-vertex parent lookup.
+
+Authored `entities::animation_tests::seat_attachment_` regressions cover actual
+rig vertices and presented bounds with a deliberately different body/seat,
+marker dimensions, parent motion/yaw/scale and changed attachment, rider
+dimensions, dismount/removal, nested mounts, local prediction and frozen/stepped
+interpolation. The fixtures contain no Mojang bytes. These source-phase tests
+are unexecuted until Main runs the focused positive and production-only negative
+controls.
+
+The original resident-seat appearance gap stays OPEN until Main captures the
+actual native client on the corrected source, with the same received UUID,
+independent marker anchor and collision-safe body. Retain mounted and ordinary
+dismount/work frames, raw packet positions, passenger relation, metadata,
+binary/tree hashes and frame identity. A corrected server AABB, bent legs,
+source regression or successful travel alone does not establish seated appearance.
 
 ### Server resource-pack offers
 

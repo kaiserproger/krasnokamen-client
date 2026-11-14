@@ -83,23 +83,13 @@ impl Store {
             return Ok(0);
         };
         let darken = world.source_sky_darken().unwrap_or(0);
-        let min = [
-            ((camera[0] - SHADOW_RANGE) / 16.).floor() as i32,
-            ((camera[2] - SHADOW_RANGE) / 16.).floor() as i32,
-        ];
-        let max = [
-            ((camera[0] + SHADOW_RANGE) / 16.).floor() as i32,
-            ((camera[2] + SHADOW_RANGE) / 16.).floor() as i32,
-        ];
+        let area = crate::player::Bounds {
+            min: camera.map(|value| value - SHADOW_RANGE),
+            max: camera.map(|value| value + SHADOW_RANGE),
+        };
         let mut casters = 0;
-        for (_, bucket) in self
-            .spatial
-            .range([min[0], i32::MIN]..=[max[0], i32::MAX])
-            .filter(|(cell, _)| cell[1] >= min[1] && cell[1] <= max[1])
-        {
-            for id in bucket {
-                let entity = &self.slots[self.ids[id]];
-                let position = entity.presented_transform(tick, partial).position;
+        for entity in self.candidates(area) {
+                let position = self.presented_transform(entity, tick, partial)?.position;
                 let distance_squared = position
                     .iter()
                     .zip(camera)
@@ -124,7 +114,6 @@ impl Store {
                     out,
                 )?;
                 casters += usize::from(out.vertices.len() > before);
-            }
         }
         Ok(casters)
     }

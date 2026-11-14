@@ -160,6 +160,74 @@ variants collapse (`boat`, `chest_boat`, `raft`, `chest_raft`, every `*_minecart
 armor-layer slots map to `armor_<slot>` / `armor_baby_<slot>`, with species-specific baby
 shells where body pivots differ.
 
+### Selection coverage is separate from texture coverage
+
+`entity_selection_coverage_report` enumerates every facts entity, adult/baby selection,
+built-in received visual variant, rig-changing fish state, pose, exported enum value,
+declared family texture, humanoid armor slot and literal rig demand in production entity,
+equipment, block-entity and special-item selectors. It calls the production `material`
+selector and resolves demanded keys through the real `Catalog::from_sources` and `model_id`.
+The report retains **required** and **selected** keys separately: a missing variant cannot
+pass because its base family still renders. Test textures isolate selection from resource
+activation; they are not player textures or pixel evidence.
+
+Generate the raw JSON with `SOLARIS_ENTITY_COVERAGE_REPORT=<receipt>/coverage-raw.json`
+on `cargo test --lib entity_selection_coverage -- --nocapture`, then summarize it with
+`python3 tools/entity_models.py selection-report <receipt>/coverage-raw.json -o <receipt>/coverage.json`.
+The summary command returns nonzero for missing/rejected rigs, failed material selection,
+or unresolved non-family obligations. It does not delete the report on failure.
+`entity_selection_coverage_detects_removed_and_rejected_required_entry` removes and corrupts
+the cold-cow source in isolated catalog inputs; the exact received cold-cow row must fail
+while the valid catalog passes. No shipping asset is edited by this negative control.
+
+Classification is conservative: `missing` means no required source, `rejected` means a
+source exists but the runtime catalog did not admit it, and `simplified` means authored
+geometry without a matched visual proof. A simplified rig is **not** the magenta placeholder.
+Non-family entities are `non-rig-unverified`, not automatically missing authored rigs:
+paintings, frames, items and effects have other rendering owners; unsupported entities
+must remain explicit. Pose/enum/texture/armor and literal rows inventory demands, not proof
+of reachable state transitions or animation. Poses are an intentional conservative
+cross-product, not a claim that every species uses every pose. An inherited `DATA_BABY_ID`
+does not prove a species can be a baby; rows without a declared baby rig explicitly mark
+that reachability unverified. Dynamic resource-pack registries add obligations beyond the
+embedded built-in variants.
+
+All generated rows remain unaccepted. Promote only against retained native frames,
+entity IDs/received state, exact build/resource/settings identity and the same-version Java
+oracle scene. Adult/baby, received variants, equipped/posed entities and block/item special
+models each need real rendered samples. A contact sheet from this Python tool, a nonempty
+mesh, texel coverage or catalog presence cannot establish `rendered-and-oracle-verified`.
+The fail-visible runtime fallback remains unchanged.
+
+### Independently authored climate variant rigs
+
+The native-selection inventory found demanded keys for `cold_cow`, `cold_pig`,
+`cold_chicken`, `warm_cow` and `warm_zombie_nautilus`, including their conditional `_baby`
+candidates. Their exact ten assigned files are those stems under `assets/solaris/models/entity/`.
+The existing build-time directory embedding and `model_id` resolver admit them without a
+second catalog. This does not make every inherited baby accessor a vanilla requirement:
+26.3 `ZombieNautilus.canBeABaby()` is false, and `AgeableMob.isBaby()` gates on it. Its assigned
+`warm_zombie_nautilus_baby` entry covers a synthetic raw-metadata input only; ordinary vanilla
+baby-frame acceptance is unreachable and remains unaccepted pending the scope decision.
+
+Cow, pig and chicken bodies reuse the project's existing Solaris-authored primitives and
+joint names, with independently chosen cold-coat volume, horn segments, coat fringe and
+feather cuffs. The cold pig's adult coat uses the extra lower texture net. Baby rigs use the
+age-specific supplied texture layouts. The coral zombie nautilus is an independently drawn
+stepped shell, head, eight tentacles and four crossed coral fans; its baby is an authored
+half-size fit about the feet, sampling the same coral texture. These dimensions, deformations
+and placements are authoring choices, not exported game constants.
+
+Sources are the existing Solaris-owned JSON primitives and the local supplied PNG images
+(texture layout, opacity and color only). No Java model arrays, decompilation output, JAR
+model geometry or Mojang bytes are copied into these JSON files. Texture images and reference
+frames remain local receipts, never shipped assets. Failed scene attempts without their
+subjects are not geometry references or appearance proof.
+Catalog/selection regressions do not establish silhouette, animation or equipment parity:
+these entries remain simplified/unaccepted until their exact native and Java scenes qualify.
+
+
+
 ### Sign text belongs to the block-entity pass
 
 In 26.3 the resource-pack block models supply standing, wall and hanging sign
@@ -289,7 +357,14 @@ a fixed box). Placeholders are tinted in `presentation::emit_rig`.
   Adult and baby pigs use independently authored texture-sized head, snout, torso and leg
   geometry without separate ears or tail: the adult head sits in front of the body with the
   snout just below the eyes, and the piglet head rises a pixel above its back. The cold pig's
-  extra texture layer is not modelled.
+  separate authored coat samples its additional texture layer.
+  Adult camel and camel husk rigs stand on 22-pixel legs, so the back and saddle reach the
+  received two-block rider seat. The first rider sits on the back between the neck and the
+  hump. Sitting lowers the back by 19 pixels onto the received sitting seat and tucks the
+  folded front legs under the chest. `camel_back_and_saddle_carry_the_received_standing_and_sitting_seat`
+  checks both contacts. Two native-client scenes showed a remote rider seated on a saddled
+  camel. Solaris core never sends camel sitting poses, so sitting is checked only by the test.
+  Matched-vanilla appearance remains unverified.
   Allay, vex, baby bee, ghastling, rabbit, fox, panda, hoglin, zoglin, strider, guardian, elder
   guardian, cod, salmon and axolotl rigs (with their babies where listed) and the vindicator's
   clothing UVs were re-authored by eye from public minecraft.wiki renders; receipts list the

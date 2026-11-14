@@ -646,3 +646,192 @@ fn post_rc4_reauthored_rigs_keep_their_reference_silhouettes() {
         }
     }
 }
+
+/// Read literal demands from the production selectors rather than copying a test catalog.
+fn selection_contract() -> Vec<serde_json::Value> {
+    fn visit(dir: &std::path::Path, rows: &mut Vec<serde_json::Value>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { visit(&path, rows); continue; }
+            let name = path.file_name().unwrap().to_str().unwrap();
+            if path.extension().is_none_or(|ext| ext != "rs")
+                || name == "tests.rs" || name.ends_with("_tests.rs") { continue; }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let relative = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap().display().to_string();
+            let mut function = "";
+            let mut test_item = false;
+            for (line, text) in source.lines().enumerate() {
+                let trimmed = text.trim_start();
+                if trimmed == "#[cfg(test)]" { test_item = true; continue; }
+                if test_item {
+                    if trimmed.starts_with("#[") { continue; }
+                    test_item = false;
+                    // External test modules can precede production code. Inline test bodies
+                    // and test-only helpers end production in these entity modules.
+                    if trimmed.ends_with(';') { continue; }
+                    break;
+                }
+                if text.trim_start().starts_with("//") { continue; }
+                if let Some((_, tail)) = text.split_once("fn ") {
+                    function = tail.split('(').next().unwrap();
+                }
+                for key in text.split('"').skip(1).step_by(2).filter(|key|
+                    key.starts_with("minecraft:") && !key.contains('{')
+                        && (key.contains('#') || matches!(*key,
+                            "minecraft:wall_banner" | "minecraft:standing_banner")))
+                {
+                    let key = if key.contains('#') { key.to_owned() } else { format!("{key}#main") };
+                    let class = if relative.contains("render_blocks") { "block-special" }
+                        else if relative.ends_with("equipment.rs") { "equipment" }
+                        else if function == "special_item" { "item-special" }
+                        else { "literal" };
+                    rows.push(serde_json::json!({
+                        "id":format!("literal/{relative}/{}/{key}",line + 1),
+                        "class":class,"source":format!("{relative}:{}",line + 1),
+                        "selector":function,"required_rig":key,"selected_rig":null,
+                        "scope":"production literal demand; branch reachability/pixels unverified"
+                    }));
+                }
+            }
+        }
+    }
+    let mut rows = super::super::resources::rig_selection_contract();
+    visit(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/entities"), &mut rows);
+    rows.sort_by(|left, right| left["id"].as_str().unwrap().cmp(right["id"].as_str().unwrap()));
+    rows
+}
+
+fn resolve_contract(
+    rows: &[serde_json::Value],
+    sources: &[(&str, &str)],
+) -> Vec<serde_json::Value> {
+    fn normalize_texture(name: &str) -> &str {
+        name.trim_end_matches(".png").trim_start_matches("minecraft:").trim_start_matches("textures/")
+    }
+    let catalog = Catalog::from_sources(sources);
+    rows.iter().cloned().map(|mut row| {
+        let Some(key) = row["required_rig"].as_str() else {
+            row["classification"] = "non-rig-unverified".into();
+            row["coverage_pass"] = false.into();
+            row["accepted"] = false.into();
+            return row;
+        };
+        let id = model_id(key);
+        let rig = catalog.rigs.get(&id);
+        let classification = if rig.is_some() {
+            "simplified"
+        } else if sources.iter().any(|(file, _)| *file == format!("{id}.json")) {
+            "rejected"
+        } else {
+            "missing"
+        };
+        let selection_matches = row["selected_rig"].as_str().is_none_or(|selected| selected == key);
+        let selected = row["class"] == "selection";
+        let texture_matches = row["required_texture"].as_str().is_none_or(|expected|
+            row["selected_texture"].as_str().is_some_and(|actual|
+                normalize_texture(actual) == normalize_texture(expected)));
+        let passed = rig.is_some_and(|rig| !rig.is_placeholder())
+            && selection_matches && texture_matches && (!selected || row["selection_error"].is_null());
+        row["model_id"] = id.clone().into();
+        row["model_file"] = format!("assets/solaris/models/entity/{id}.json").into();
+        row["classification"] = classification.into();
+        row["coverage_pass"] = passed.into();
+        // Presence and UV coverage cannot prove a native or oracle frame.
+        row["accepted"] = false.into();
+        row["native_frame"] = serde_json::Value::Null;
+        row["java_frame"] = serde_json::Value::Null;
+        row
+    }).collect()
+}
+
+#[test]
+fn entity_selection_coverage_report() {
+    let rows = resolve_contract(&selection_contract(), EMBEDDED);
+    let ids: std::collections::BTreeSet<_> = rows.iter().map(|row| row["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), rows.len(), "coverage rows must have stable unique identities");
+    for class in ["family", "selection", "pose", "enum", "texture", "armor", "skin",
+        "painting-variant", "literal", "block-special", "item-special", "equipment", "non-family"] {
+        assert!(rows.iter().any(|row| row["class"] == class), "missing contract class {class}");
+    }
+    if let Some(path) = std::env::var_os("SOLARIS_ENTITY_COVERAGE_REPORT") {
+        let report = serde_json::json!({
+            "schema":1,"game_version":"26.3","embedded_models_digest":embedded_digest(),
+            "boundary":"Catalog/selection evidence only; simplified means authored, not oracle-verified. Non-family rows do not imply a missing rig.",
+            "rows":rows
+        });
+        std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn entity_selection_coverage_detects_removed_and_rejected_required_entry() {
+    let contract = selection_contract();
+    let row_id = "selection/minecraft:cow/adult/received/minecraft:cold";
+    let find = |rows: Vec<serde_json::Value>| rows.into_iter().find(|row| row["id"] == row_id).unwrap();
+    let good = find(resolve_contract(&contract, EMBEDDED));
+    assert_eq!(good["required_rig"], "minecraft:cold_cow#main");
+    assert_eq!(good["selected_rig"], good["required_rig"], "{good}");
+    assert_eq!(good["coverage_pass"], true, "{good}");
+    let removed: Vec<_> = EMBEDDED.iter().copied().filter(|(name, _)| *name != "cold_cow.json").collect();
+    let missing = find(resolve_contract(&contract, &removed));
+    assert_eq!(missing["classification"], "missing", "{missing}");
+    assert_eq!(missing["coverage_pass"], false, "{missing}");
+    eprintln!("negative control removed required entry: {missing}");
+    let rejected: Vec<_> = EMBEDDED.iter().map(|(name, source)|
+        (*name, if *name == "cold_cow.json" { "{invalid" } else { *source })).collect();
+    let bad = find(resolve_contract(&contract, &rejected));
+    assert_eq!(bad["classification"], "rejected", "{bad}");
+    assert_eq!(bad["coverage_pass"], false, "{bad}");
+    eprintln!("negative control rejected required entry: {bad}");
+}
+
+#[test]
+fn received_visual_variants_resolve_their_required_authored_entry() {
+    for row in resolve_contract(&selection_contract(), EMBEDDED) {
+        if row["class"] == "selection"
+            && row["case"].as_str().is_some_and(|case| case.starts_with("received/"))
+        {
+            assert_eq!(row["coverage_pass"], true, "{row}");
+        }
+    }
+}
+
+#[test]
+fn entity_selection_coverage_cold_cow_fringe_samples_the_fur_net() {
+    let model = embedded("cold_cow");
+    let body = model.bones.iter().find(|bone| bone.name == "body").unwrap();
+    let fringe = body.cubes.last().unwrap();
+    let samples_fur = |cube: &CubeSpec| {
+        let quads = cube_quads(cube, 64., 64.);
+        let mut sides = 0;
+        for (quad, normal) in quads {
+            if normal[1].abs() < 0.9 { continue; }
+            sides += 1;
+            if quad.iter().any(|vertex| {
+                !(30. ..=42.).contains(&(vertex[3] * 64.))
+                    || !(32. ..=42.).contains(&(vertex[4] * 64.))
+            }) { return false; }
+        }
+        sides == 2
+    };
+    assert_eq!(fringe.size[1], 0., "the coat front is a local-Y plane");
+    assert!(samples_fur(fringe), "both emitted faces must sample the fur, not the head net");
+    // A Front/Back override on this plane affects only its degenerate faces. Without the
+    // Up/Down fix the actual emitted faces fall back to the unrelated default UV net.
+    let mut wrong_faces = cube(fringe.origin, fringe.size, fringe.uv, fringe.mirror, fringe.inflate);
+    wrong_faces.faces.insert(Face::Front, [30., 32., 42., 42.]);
+    wrong_faces.faces.insert(Face::Back, [30., 32., 42., 42.]);
+    assert!(!samples_fur(&wrong_faces), "the original face-selection mutant must be detected");
+}
+
+#[test]
+fn entity_selection_coverage_marks_undeclared_baby_reachability() {
+    let rows = resolve_contract(&selection_contract(), EMBEDDED);
+    let row = |id| rows.iter().find(|row| row["id"] == id).unwrap();
+    let synthetic = row("selection/minecraft:zombie_nautilus/baby/received/minecraft:warm");
+    assert_eq!(synthetic["vanilla_reachability"], "unverified_inherited_baby_accessor");
+    assert_eq!(synthetic["accepted"], false);
+    let calf = row("selection/minecraft:cow/baby/received/minecraft:cold");
+    assert_eq!(calf["vanilla_reachability"], "declared_family");
+    assert_eq!(calf["accepted"], false, "a declared baby rig still needs actual frame proof");
+}

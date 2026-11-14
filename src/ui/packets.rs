@@ -93,6 +93,30 @@ pub struct MapState {
     #[serde(skip)]
     runs: Arc<[MapPixelRun]>,
 }
+
+/// Borrow the received map store and its label renderer; never synthesize map state.
+#[derive(Clone, Copy)]
+pub struct MapRenderView<'a> {
+    pub maps: &'a BTreeMap<i32, MapState>,
+    pub text: &'a super::render::TextRenderer,
+}
+#[cfg(test)]
+pub(crate) struct MapRenderFixture {
+    maps: BTreeMap<i32, MapState>,
+    text: super::render::TextRenderer,
+}
+#[cfg(test)]
+impl MapRenderFixture {
+    pub(crate) fn empty() -> Self {
+        Self {
+            maps: BTreeMap::new(),
+            text: super::render::TextRenderer::load_state(&Content::test_cube()).unwrap(),
+        }
+    }
+    pub(crate) fn view(&self) -> MapRenderView<'_> {
+        MapRenderView { maps: &self.maps, text: &self.text }
+    }
+}
 #[derive(Clone, Debug)]
 struct MapPixelRun {
     bounds: [f32; 4],
@@ -151,6 +175,9 @@ impl UiState {
     }
     pub fn maps(&self) -> &BTreeMap<i32, MapState> {
         &self.maps
+    }
+    pub fn map_render_view(&self) -> MapRenderView<'_> {
+        MapRenderView { maps: &self.maps, text: &self.text }
     }
     pub fn advancements(&self) -> &BTreeMap<String, AdvancementState> {
         &self.advancements
@@ -1087,3 +1114,7 @@ mod held_map_tests {
         assert!(face(&framed.vertices[0..4]) * face(&framed.vertices[4..8]) > 0.);
     }
 }
+
+#[cfg(test)]
+#[path = "map_lifecycle_tests.rs"]
+mod map_lifecycle_tests;

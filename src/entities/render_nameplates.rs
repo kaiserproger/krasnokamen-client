@@ -179,7 +179,7 @@ impl Cache {
         camera_rotation: [f32; 2],
         background_opacity: f32,
         received_light: [f32; 2],
-        tick: u64,
+        transform: super::Transform,
         partial: f32,
     ) -> Result<Option<DisplayCandidate>> {
         let (Some(state), Some(snapshot)) = (
@@ -215,7 +215,7 @@ impl Cache {
             return Ok(None);
         }
         let progress = state.progress(partial);
-        let t = entity.presented_transform(tick, partial);
+        let t = transform;
         let relative = Vec3::new(
             (t.position[0] - origin[0]) as f32,
             (t.position[1] - origin[1]) as f32,
@@ -371,25 +371,14 @@ impl Store {
                 .as_deref()
                 .ok_or("entity model cache not activated")?;
             let range = f64::from(radius.min(64.));
-            let query_radius = range + self.query_padding();
-            let min = [
-                ((camera[0] - query_radius) / 16.).floor() as i32,
-                ((camera[2] - query_radius) / 16.).floor() as i32,
-            ];
-            let max = [
-                ((camera[0] + query_radius) / 16.).floor() as i32,
-                ((camera[2] + query_radius) / 16.).floor() as i32,
-            ];
-            // Body submission skips invisible/marker entities and clears its ID
-            // scratch vector; query the same spatial index independently.
-            for (_, bucket) in self
-                .spatial
-                .range([min[0], i32::MIN]..=[max[0], i32::MAX])
-                .filter(|(cell, _)| cell[1] >= min[1] && cell[1] <= max[1])
-            {
-                for id in bucket {
-                    let entity = &self.slots[self.ids[id]];
-                    let position = entity.presented_transform(tick, partial).position;
+            let area = crate::player::Bounds {
+                min: camera.map(|value| value - range),
+                max: camera.map(|value| value + range),
+            };
+            // Same received candidates as bodies, including attached riders.
+            for entity in self.candidates(area) {
+                    let transform = self.presented_transform(entity, tick, partial)?;
+                    let position = transform.position;
                     let distance_squared = position
                         .iter()
                         .zip(camera)
@@ -402,7 +391,7 @@ impl Store {
                     if entity.type_name == "minecraft:text_display" {
                         let (dimensions, scale) = models.dimensions(entity)?;
                         let Some(received) = super::presentation::entity_light(
-                            entity, models, tick, partial, dimensions, scale, light,
+                            entity, self, models, tick, transform, dimensions, scale, light,
                         )?
                         else {
                             stats.lighting_pending += 1;
@@ -415,7 +404,7 @@ impl Store {
                             camera_rotation,
                             view.background_opacity,
                             received,
-                            tick,
+                            transform,
                             partial,
                         )? {
                             cache.displays.push(display);
@@ -440,7 +429,7 @@ impl Store {
                     };
                     let (dimensions, scale) = models.dimensions(entity)?;
                     let Some(received) = super::presentation::entity_light(
-                        entity, models, tick, partial, dimensions, scale, light,
+                        entity, self, models, tick, transform, dimensions, scale, light,
                     )?
                     else {
                         stats.lighting_pending += 1;
@@ -459,7 +448,6 @@ impl Store {
                         light: received,
                         submitted: false,
                     });
-                }
             }
             // Source sorts only SEE_THROUGH far-to-near; NORMAL retains
             // extraction order. Both scratch vectors retain their capacity.

@@ -7,6 +7,8 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+const WRITER_IDLE_TTL: Duration = Duration::from_secs(120);
+
 pub(super) fn nonce() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| format!("OS randomness unavailable: {e}"))?;
@@ -23,6 +25,7 @@ pub(super) struct Lease {
     pub controller: String,
     pub expires: Instant,
     pub live: Arc<AtomicBool>,
+    pub active_actions: usize,
     pub connection: String,
     pub dimension: String,
     pub pending_respawn: Option<Arc<AtomicBool>>,
@@ -67,6 +70,32 @@ pub(super) struct Core {
     pub profile: String,
     pub instance: String,
     pub artifact_dir: std::path::PathBuf,
+}
+
+pub(super) struct WriterAction<'a> {
+    core: &'a Core,
+    pub fence: Arc<AtomicBool>,
+}
+impl std::fmt::Debug for WriterAction<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriterAction").field("fence", &self.fence).finish()
+    }
+}
+impl Drop for WriterAction<'_> {
+    fn drop(&mut self) {
+        let mut control = self.core.control.lock();
+        let Some(lease) = control.lease.as_mut()
+            .filter(|lease| Arc::ptr_eq(&lease.live, &self.fence)) else {
+            return;
+        };
+        lease.active_actions -= 1;
+        if lease.active_actions != 0 {
+            return;
+        }
+        lease.expires = Instant::now() + WRITER_IDLE_TTL;
+        drop(control);
+        self.core.notify();
+    }
 }
 impl Core {
     pub fn tools(&self) -> Vec<&'static Value> {
@@ -154,10 +183,16 @@ impl Core {
     }
     pub fn controller(&self) -> Value {
         let c = self.control.lock();
+        let now = Instant::now();
         match &c.lease {
-            Some(l) if l.expires > Instant::now() => {
+            Some(l) if l.active_actions != 0 || l.expires > now => {
+                let remaining = if l.active_actions != 0 {
+                    WRITER_IDLE_TTL
+                } else {
+                    l.expires.saturating_duration_since(now)
+                };
                 json!({"active":true,"controller":l.controller,
-                "remaining_ms":l.expires.saturating_duration_since(Instant::now()).as_millis(),
+                "remaining_ms":remaining.as_millis(),
                 "scopes":["observe","control","capture"]})
             }
             _ => json!({"active":false,"last_release_reason":c.last_release}),
@@ -170,7 +205,7 @@ impl Core {
         session: &str,
         connection: &str,
         dimension: &str,
-    ) -> Result<Arc<AtomicBool>, String> {
+    ) -> Result<WriterAction<'_>, String> {
         if !self.allow_control {
             return Err("control_not_locally_authorized".into());
         }
@@ -191,7 +226,8 @@ impl Core {
         // they cannot leak to the new writer.
         let reclaim = c.lease.as_ref().is_some_and(|lease| {
             lease.session != session
-                && (lease.expires <= Instant::now() || !lease.live.load(Ordering::Acquire))
+                && ((lease.active_actions == 0 && lease.expires <= Instant::now())
+                    || !lease.live.load(Ordering::Acquire))
         });
         if reclaim {
             if let Some(lease) = c.lease.take() {
@@ -207,7 +243,9 @@ impl Core {
             if lease.session != session {
                 return Err("controller_busy".into());
             }
-            if lease.expires <= Instant::now() || !lease.live.load(Ordering::Acquire) {
+            if (lease.active_actions == 0 && lease.expires <= Instant::now())
+                || !lease.live.load(Ordering::Acquire)
+            {
                 return Err("lease_expired".into());
             }
             lease.observe_respawn(connection, dimension);
@@ -218,22 +256,24 @@ impl Core {
                 lease.pending_respawn = None;
                 lease.pending_ui_respawn = false;
             }
-            lease.expires = Instant::now() + Duration::from_secs(120);
-            return Ok(lease.live.clone());
+            lease.active_actions += 1;
+            lease.expires = Instant::now() + WRITER_IDLE_TTL;
+            return Ok(WriterAction { core: self, fence: lease.live.clone() });
         }
         let live = Arc::new(AtomicBool::new(true));
         c.lease = Some(Lease {
             session: session.into(),
             controller: session.into(),
-            expires: Instant::now() + Duration::from_secs(120),
+            expires: Instant::now() + WRITER_IDLE_TTL,
             live: live.clone(),
+            active_actions: 1,
             connection: connection.into(),
             dimension: dimension.into(),
             pending_respawn: None,
             pending_ui_respawn: false,
         });
         c.controller_revision = c.controller_revision.wrapping_add(1);
-        Ok(live)
+        Ok(WriterAction { core: self, fence: live })
     }
     /// Watchdog decision under the control lock: the revocation reason plus the fence
     /// of the lease that was checked, or the next expiry deadline.
@@ -246,14 +286,14 @@ impl Core {
             lease.observe_respawn(connection, dimension);
         }
         match &c.lease {
-            Some(l) if l.expires <= Instant::now() => {
+            Some(l) if l.active_actions == 0 && l.expires <= Instant::now() => {
                 (Some(("lease_expired", l.live.clone())), None)
             }
             Some(l) if l.connection != connection || l.dimension != dimension => {
                 (Some(("context_changed", l.live.clone())), None)
             }
-            Some(l) => (None, Some(l.expires)),
-            None => (None, None),
+            Some(l) if l.active_actions == 0 => (None, Some(l.expires)),
+            Some(_) | None => (None, None),
         }
     }
 }

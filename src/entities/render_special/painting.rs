@@ -51,7 +51,7 @@ pub(super) fn append(
         Some(value) => value.int().ok_or("painting direction metadata invalid")?,
         None => e.spawn_data,
     };
-    let anchor = e.presented_transform(tick, partial).position.map(f64::floor);
+    let anchor = store.presented_transform(e, tick, partial)?.position.map(f64::floor);
     let (center, rotation) = painting_placement(anchor, direction, width, height)?;
     let root = translation(center, origin) * Mat4::from_rotation_y(rotation);
     let mut lights = [[0.; 2]; 256];

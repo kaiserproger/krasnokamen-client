@@ -1159,6 +1159,7 @@ impl UiState {
         }
     }
     pub fn release_all(&mut self) {
+        self.slider_drag = None;
         self.drag = None;
         self.drag_slots.clear();
         self.drag_carrying = false;
@@ -4147,13 +4148,22 @@ fn append_item(
     }) {
         return append_depth_sorted_item(model, transform, display, out);
     }
-    // Preserve layered/cutout and translucent models' original composition. Opaque
-    // item faces need painter ordering because the overlay discards depth.
+    // Opaque item faces need painter ordering because the overlay discards depth.
+    // Other layers retain their original composition order.
     if model.quads.iter().all(|q| q.layer == RenderLayer::Opaque && q.alpha == 1.) {
         return append_depth_sorted_item(model, transform, display, out);
     }
     for q in &model.quads {
         let positions = q.positions.map(|p| transform.transform_point3(Vec3::from_array(p)).to_array());
+        // Overlay triangles are double-sided and have no depth attachment. Cull
+        // the rear face of ordinary translucent/cutout item geometry before
+        // blending; GUI Y is inverted by the transform above.
+        if q.entity_material.is_none() && (q.layer != RenderLayer::Opaque || q.alpha < 1.) {
+            let [a, b, c, _] = positions.map(Vec3::from_array);
+            if (b - a).cross(c - a).z > 0. {
+                continue;
+            }
+        }
         append_item_quad(q, positions, display, out)?;
     }
     Ok(())
@@ -4556,6 +4566,35 @@ mod item_projection_tests {
             assert_eq!(indices.len(), 12);
             assert_eq!(mesh.vertices[indices[0] as usize].texture_layer, 10);
             assert_eq!(mesh.vertices[indices[6] as usize].texture_layer, 20);
+        }
+    }
+
+    #[test]
+    fn gui_blended_item_draws_only_the_facing_side_after_rotation() {
+        let content = Content::test_cube();
+        let mut model = content.models[0].clone();
+        let mut front = model.quads[0].clone();
+        let mut back = front.clone();
+        front.positions = crate::protocol::models::face_positions(3, [0., 0., 0.46875], [1., 1., 0.53125]);
+        back.positions = crate::protocol::models::face_positions(2, [0., 0., 0.46875], [1., 1., 0.53125]);
+        front.texture_layer = 10;
+        back.texture_layer = 20;
+        front.entity_material = None;
+        back.entity_material = None;
+        for layer in [RenderLayer::Cutout, RenderLayer::Translucent] {
+            front.layer = layer;
+            back.layer = layer;
+            for (angle, expected) in [(0., 10), (180., 20)] {
+                model.quads = vec![front.clone(), back.clone()];
+                model.display.insert("gui".into(), crate::protocol::models::ModelTransform {
+                    rotation: [0., angle, 0.], ..Default::default()
+                });
+                let mut mesh = MeshGeometry::default();
+                append_item(&model, [0., 0., 16., 16.], Mat4::IDENTITY, &mut mesh).unwrap();
+                let indices = &mesh.indices[RenderLayer::Translucent as usize];
+                assert_eq!(indices.len(), 6);
+                assert!(indices.iter().all(|&i| mesh.vertices[i as usize].texture_layer == expected));
+            }
         }
     }
 

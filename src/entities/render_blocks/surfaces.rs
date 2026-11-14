@@ -298,6 +298,9 @@ fn wire(
     color: [f32; 3],
     out: &mut DynamicGeometry,
 ) -> Result<()> {
+    if out.vertices.len().saturating_add(48) > 2_000_000 {
+        return Err("structure overlay geometry vertex bound reached".into());
+    }
     let color = color.map(|v| f32::from((v * 255.) as u8) / 255.);
     let normal_transform = glam::Mat3::from_mat4(root).inverse().transpose();
     for axis in 0..3 {
@@ -355,14 +358,14 @@ fn vector(value: &Value) -> Result<[i32; 3]> {
 }
 fn structure_box(data: &Value) -> ([i32; 3], [i32; 3]) {
     let origin = [
-        data["posX"].as_i64().unwrap_or(0) as i32,
-        data["posY"].as_i64().unwrap_or(1) as i32,
-        data["posZ"].as_i64().unwrap_or(0) as i32,
+        data["posX"].as_i64().unwrap_or(0).clamp(-48, 48) as i32,
+        data["posY"].as_i64().unwrap_or(1).clamp(-48, 48) as i32,
+        data["posZ"].as_i64().unwrap_or(0).clamp(-48, 48) as i32,
     ];
     let size = [
-        data["sizeX"].as_i64().unwrap_or(0) as i32,
-        data["sizeY"].as_i64().unwrap_or(0) as i32,
-        data["sizeZ"].as_i64().unwrap_or(0) as i32,
+        data["sizeX"].as_i64().unwrap_or(0).clamp(0, 48) as i32,
+        data["sizeY"].as_i64().unwrap_or(0).clamp(0, 48) as i32,
+        data["sizeZ"].as_i64().unwrap_or(0).clamp(0, 48) as i32,
     ];
     let mirror = data["mirror"].as_str().unwrap_or("NONE");
     let rotation = data["rotation"].as_str().unwrap_or("NONE");
@@ -406,6 +409,156 @@ fn structure_box(data: &Value) -> ([i32; 3], [i32; 3]) {
         [x0.min(x0 + dx), origin[1], z0.min(z0 + dz)],
         [dx.abs(), size[1], dz.abs()],
     )
+}
+
+pub(super) fn structure(
+    e: &BlockEntity,
+    c: &Content,
+    world: &World,
+    root: Mat4,
+    visible: bool,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let data = &e.data;
+    let mode = data["mode"].as_str().or_else(|| prop(e, c, "mode")).unwrap_or("");
+    let flag = |key: &str, default: bool| {
+        data[key].as_bool().or_else(|| data[key].as_i64().map(|v| v != 0)).unwrap_or(default)
+    };
+    let save = mode.eq_ignore_ascii_case("save");
+    let load = mode.eq_ignore_ascii_case("load");
+    if !visible || !(save || load && flag("showboundingbox", true)) {
+        return Ok(BlockRenderStatus::SourceHidden);
+    }
+    let (low, size) = structure_box(data);
+    if size.iter().any(|&v| v < 1) {
+        return Ok(BlockRenderStatus::SourceHidden);
+    }
+    if save && flag("showair", false) {
+        for x in 0..size[0] {
+            for y in 0..size[1] {
+                for z in 0..size[2] {
+                    let p = [low[0] + x, low[1] + y, low[2] + z];
+                    if world.block(std::array::from_fn(|i| e.position[i] + p[i])).is_none() {
+                        return Ok(BlockRenderStatus::WorldPending);
+                    }
+                }
+            }
+        }
+    }
+    let high = std::array::from_fn(|i| low[i] + size[i]);
+    wire(root, low.map(|v| v as f32), high.map(|v| v as f32), [0.9; 3], out)?;
+    if save && flag("showair", false) {
+        for x in 0..size[0] {
+            for y in 0..size[1] {
+                for z in 0..size[2] {
+                    let p = [low[0] + x, low[1] + y, low[2] + z];
+                    let absolute = std::array::from_fn(|i| e.position[i] + p[i]);
+                    let state = world.block(absolute).ok_or("structure overlay world changed")?;
+                    let name = c.name(state).ok_or("structure overlay unknown block state")?;
+                    let (inset, color) = match name {
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => (0.4, [0.5, 0.5, 1.]),
+                        "minecraft:structure_void" => (0.45, [1., 0.75, 0.75]),
+                        "minecraft:barrier" => (0.45, [1., 0., 0.]),
+                        "minecraft:light" => (0.45, [1., 1., 0.]),
+                        _ => continue,
+                    };
+                    let lo = p.map(|v| v as f32 + inset);
+                    let hi = p.map(|v| v as f32 + 1. - inset);
+                    wire(root, lo, hi, color, out)?;
+                }
+            }
+        }
+    }
+    Ok(BlockRenderStatus::Rendered)
+}
+
+pub(super) struct TestInstanceFrame<'a> {
+    pub origin: [f64; 3],
+    pub camera: [f64; 3],
+    pub camera_rotation: [f32; 2],
+    pub game_time: i64,
+    pub partial: f32,
+    pub scoping: bool,
+    pub visible: bool,
+    pub text: Option<&'a TextRenderer>,
+    pub cache: &'a mut Cache,
+}
+
+pub(super) fn test_instance(
+    e: &BlockEntity,
+    c: &Content,
+    f: &mut TestInstanceFrame,
+    root: Mat4,
+    out: &mut DynamicGeometry,
+) -> Result<BlockRenderStatus> {
+    let data = &e.data["data"];
+    let status = data["status"].as_str().unwrap_or("cleared");
+    let needs_test = f.visible || status == "finished" && !data["error_message"].is_null();
+    let test = match (needs_test, data["test"].as_str()) {
+        (true, Some(name)) => c.registry_entries("minecraft:test_instance")?
+            .iter().find(|(id, _)| id == name).map(|(_, value)| value),
+        _ => None,
+    };
+    if test.is_some_and(Value::is_null) {
+        return Err("test instance registry value not received".into());
+    }
+    let color = match status {
+        "running" => Some(0x808080),
+        "finished" if data["error_message"].is_null() => Some(0x00ff00),
+        "finished" if test.is_some_and(|v| v["required"].as_bool() == Some(false)) => Some(0xff8000),
+        "finished" => Some(0xff0000),
+        _ => None,
+    };
+    let initial = out.vertices.len();
+    if let Some(color) = color {
+        let distance = ((f.camera[0] - f64::from(e.position[0]) - 0.5).powi(2)
+            + (f.camera[2] - f64::from(e.position[2]) - 0.5).powi(2)).sqrt() as f32;
+        let radius = if f.scoping { 1. } else { (distance / 96.).max(1.) };
+        beam(c, root, (f.game_time % 40) as f32 + f.partial, 0, 2048, color,
+             1., 0.2 * radius, 0.25 * radius, "entity/beacon/beacon_beam", out)?;
+    }
+    if f.visible {
+        let padding = test.and_then(|v| v["padding"].as_i64()).unwrap_or(0) as i32;
+        let mut size = vector(&data["size"])?;
+        let quarter = |rotation: &str| match rotation {
+            "clockwise_90" => 1, "clockwise_180" => 2,
+            "counterclockwise_90" => 3, _ => 0,
+        };
+        let rotation = quarter(data["rotation"].as_str().unwrap_or("none"))
+            + quarter(test.and_then(|v| v["rotation"].as_str()).unwrap_or("none"));
+        if rotation % 2 != 0 {
+            size.swap(0, 2);
+        }
+        if size.iter().all(|&v| v > 0) {
+            let pos = [padding, padding + 1, padding + 1];
+            wire(root, pos.map(|v| v as f32),
+                std::array::from_fn(|i| (pos[i] + size[i]) as f32), [0.9; 3], out)?;
+        }
+    }
+    if let Some(errors) = e.data["errors"].as_array().filter(|v| !v.is_empty()) {
+        let text = f.text.ok_or("source error marker font painter not activated")?;
+        let layouts = f.cache.errors(e, text)?;
+        for (index, error) in errors.iter().enumerate() {
+            let p = vector(&error["pos"])?;
+            let matrix = Mat4::from_translation(Vec3::from_array(std::array::from_fn(|i| {
+                (f64::from(p[i]) - f.origin[i] - 0.02) as f32
+            }))) * Mat4::from_scale(Vec3::splat(1.04));
+            cube(matrix, [1., 0., 0.], 0.375, EntityMaterial::DebugFilledBox, out)?;
+            let layout = layouts.get(index).ok_or("source error marker layout missing")?;
+            let matrix = Mat4::from_translation(Vec3::new(
+                (f64::from(p[0]) + 0.5 - f.origin[0]) as f32,
+                (f64::from(p[1]) + 1.2 - f.origin[1]) as f32,
+                (f64::from(p[2]) + 0.5 - f.origin[2]) as f32,
+            )) * Mat4::from_rotation_y(-f.camera_rotation[0].to_radians())
+                * Mat4::from_rotation_x(f.camera_rotation[1].to_radians())
+                * Mat4::from_scale(Vec3::new(-0.16, -0.16, 0.16))
+                * Mat4::from_translation(Vec3::new(-layout.width / 2., 0., 0.));
+            text.append_world_layout(c, layout, matrix, 0xffffffff,
+                &WorldTextOptions { alignment: TextAlignment::Center,
+                    layer: EntityMaterial::TextSeeThrough, ..Default::default() }, out)?;
+        }
+    }
+    Ok(if out.vertices.len() == initial { BlockRenderStatus::SourceHidden } else { BlockRenderStatus::Rendered })
 }
 pub(super) fn beacon(
     e: &BlockEntity,

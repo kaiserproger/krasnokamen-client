@@ -123,6 +123,17 @@ impl Store {
         if let Some(index) = models.accessor("minecraft:player", "DATA_PLAYER_MODE_CUSTOMISATION") {
             e.metadata.insert(index, Metadata::Byte(127));
         }
+        let action = player.visual_item_use();
+        if let Some(index) = models.accessor("minecraft:player", "DATA_PLAYER_MAIN_HAND") {
+            e.metadata.insert(index, Metadata::Arm(u8::from(player.main_arm_right())));
+        }
+        if let Some(index) = models.accessor("minecraft:player", "DATA_LIVING_ENTITY_FLAGS") {
+            let flags = action.map_or(0, |(hand, _, _)| 1 | (hand << 1));
+            e.metadata.insert(index, Metadata::Byte(flags as i8));
+        }
+        if let Some(living) = e.source.as_mut().and_then(|s| s.living.as_mut()) {
+            living.set_local_item_use(action.map(|(_, ticks, duration)| (ticks, duration)));
+        }
         for (slot, inventory_slot) in [
             (0, 36 + usize::from(inventory.selected_slot)),
             (1, 45),
