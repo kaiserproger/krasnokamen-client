@@ -94,8 +94,12 @@ jobs:
           zlib="$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/libz-sys-*/src/zlib | head -n 1)"
           test -f "$zlib/zlib.h"
           echo "CFLAGS_x86_64_pc_windows_msvc=/I$(cygpath -w "$zlib")" >> "$GITHUB_ENV"
+      # Build separately: the client's wgpu default features include OpenGL and
+      # would otherwise unify into the launcher through the shared workspace.
       - name: Build release binaries
-        run: cargo build --release --locked
+        run: |
+          cargo build --release --locked -p solaris-client
+          cargo build --release --locked -p solaris-launcher
       - name: Check out Solaris server (pinned)
         uses: actions/checkout@v4
         with:
