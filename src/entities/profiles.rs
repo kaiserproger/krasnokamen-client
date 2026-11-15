@@ -21,9 +21,14 @@ pub struct ProfileProperty {
     pub value: String,
     pub signature: Option<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProfileTextureTarget {
+    Player(String),
+    Head([u8; 32]),
+}
 #[derive(Clone, Debug)]
 pub struct ProfileTextureRequest {
-    pub uuid: String,
+    pub target: ProfileTextureTarget,
     pub generation: u64,
     pub property: Arc<ProfileProperty>,
     pub require_secure: bool,
@@ -168,9 +173,7 @@ fn decode(r: &mut Reader<'_>) -> Result<Vec<Update>> {
     r.done()?;
     Ok(out)
 }
-/// Listed player behind a placed or held head's `profile` value (UUID as four
-/// ints, else its name). Other profiles stay unresolved; their textures are
-/// never fetched for a head here.
+/// PlayerInfo fallback for a head without its own textures property.
 pub(super) fn listed_head_profile<'a>(
     profiles: &'a std::collections::BTreeMap<String, PlayerProfile>,
     profile: &Value,
@@ -202,17 +205,19 @@ pub(super) fn listed_head_profile<'a>(
         _ => Err("player head profile id is not four ints".into()),
     }
 }
-/// Skin of a placed player head: the head's profile (UUID as four ints, else its name)
-/// must name a listed player whose textures the client already verified and published.
-/// Other profiles stay unresolved; their textures are never fetched for a head here.
+/// Own properties take precedence over PlayerInfo, including while their download is pending.
 pub(super) fn head_skin(
-    profiles: &std::collections::BTreeMap<String, PlayerProfile>,
+    content: &crate::protocol::content::Content,
+    profiles: Option<&std::collections::BTreeMap<String, PlayerProfile>>,
     profile: &Value,
 ) -> Result<TextureRegion> {
-    listed_head_profile(profiles, profile)?
+    if let Some(skin) = content.head_textures.skin(profile)? {
+        return Ok(skin);
+    }
+    listed_head_profile(profiles.ok_or("player profiles unavailable")?, profile)?
         .textures
         .and_then(|textures| textures.skin)
-        .ok_or_else(|| "player head profile is not a listed player with a published skin".into())
+        .ok_or_else(|| "player head profile has no published skin".into())
 }
 impl Store {
     pub fn set_local_player(&mut self, network_id: i32, uuid: &str) -> Result<()> {
@@ -231,6 +236,31 @@ impl Store {
         self.profile_requests
             .pop_first()
             .map(|(_, request)| request)
+    }
+    pub(crate) fn reset_profile_textures(&mut self) {
+        self.profile_requests.clear();
+        for (uuid, profile) in &mut self.profiles {
+            profile.textures = None;
+            if let Some(property) = profile.properties.iter().find(|p| p.name == "textures") {
+                self.profile_requests.insert(
+                    uuid.clone(),
+                    ProfileTextureRequest {
+                        target: ProfileTextureTarget::Player(uuid.clone()),
+                        generation: profile.generation,
+                        property: Arc::clone(property),
+                        require_secure: self.local_uuid.as_deref() != Some(uuid),
+                    },
+                );
+            }
+        }
+        for entity in &mut self.slots {
+            entity.binding = None;
+        }
+        if let Some(avatar) = &mut self.local_avatar {
+            avatar.binding = None;
+        }
+        self.revision += 1;
+        self.profiles_revision = self.profiles_revision.wrapping_add(1);
     }
     pub fn set_profile_texture(
         &mut self,
@@ -354,7 +384,7 @@ impl Store {
                         self.profile_requests.insert(
                             update.uuid.clone(),
                             ProfileTextureRequest {
-                                uuid: update.uuid.clone(),
+                                target: ProfileTextureTarget::Player(update.uuid.clone()),
                                 generation,
                                 property,
                                 require_secure: self.local_uuid.as_deref() != Some(&update.uuid),

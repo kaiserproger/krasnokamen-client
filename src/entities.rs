@@ -51,8 +51,8 @@ pub use physical::EntityHit;
 pub(crate) use presentation::emit as presentation_emit;
 pub use presentation::{PresentationStats, special_item};
 pub use profiles::{
-    PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextures,
-    RemoteChatKey,
+    PlayerModel, PlayerProfile, ProfileProperty, ProfileTextureRequest, ProfileTextureTarget,
+    ProfileTextures, RemoteChatKey,
 };
 pub(crate) use render_blocks::StaticBlockSceneFrame;
 pub use resources::Models;

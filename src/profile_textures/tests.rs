@@ -159,3 +159,89 @@ fn bad_signed_property_is_not_treated_as_unsigned() {
         TextureTrust::Unsigned
     );
 }
+
+#[test]
+fn skull_parity_unsigned_property_uses_existing_resolver_policy_and_atlas_namespace() {
+    let root = std::env::temp_dir().join(format!("skull-parity-{}", uuid::Uuid::new_v4()));
+    let (keys, _, _) = setup();
+    let shared = Shared {
+        completions: Mutex::default(),
+        pending: AtomicUsize::new(0),
+        resource_generation: AtomicU64::new(7),
+        stopped: AtomicBool::new(false),
+        wake: Arc::new(|| {}),
+        keys,
+        key_fetch: Mutex::default(),
+        keys_queued: AtomicBool::new(false),
+        cache: Mutex::new(cache::TextureCache::new(root.clone())),
+    };
+    let url = "https://textures.minecraft.net/texture/skull-parity-authored";
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, 64, 64);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&vec![255; 64 * 64 * 4])
+            .unwrap();
+    }
+    shared
+        .cache
+        .lock()
+        .publish_original(url, &png_bytes)
+        .unwrap();
+    let property = ProfileProperty {
+        name: "textures".into(),
+        value: STANDARD.encode(
+            serde_json::to_vec(&serde_json::json!({
+                "textures":{"SKIN":{"url":url}}
+            }))
+            .unwrap(),
+        ),
+        signature: None,
+    };
+    let mut job = Job {
+        request: ProfileTextureRequest {
+            target: ProfileTextureTarget::Head([0; 32]),
+            generation: 0,
+            property: Arc::new(property),
+            require_secure: false,
+        },
+        resource_generation: 7,
+    };
+    let client = Client::builder().build().unwrap();
+    let resolved = shared.resolve(&client, &job).unwrap();
+    assert!(!resolved.secure);
+    let skin = resolved.skin.unwrap();
+    assert!(skin.id.starts_with("profile:skin_"), "{}", skin.id);
+    assert_eq!((skin.width, skin.height), (64, 64));
+    job.request.require_secure = true;
+    assert!(
+        shared
+            .resolve(&client, &job)
+            .unwrap_err()
+            .contains("unsigned remote")
+    );
+    job.request.require_secure = false;
+    job.request.property = Arc::new(ProfileProperty {
+        name: "textures".into(),
+        value: job.request.property.value.clone(),
+        signature: Some(String::new()),
+    });
+    assert!(
+        shared
+            .resolve(&client, &job)
+            .unwrap_err()
+            .contains("invalid Mojang")
+    );
+    job.resource_generation = 6;
+    assert!(
+        shared
+            .resolve(&client, &job)
+            .unwrap_err()
+            .contains("generation cancelled")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

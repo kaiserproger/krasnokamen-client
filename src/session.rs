@@ -25,6 +25,7 @@ mod observation;
 mod packets;
 #[cfg(test)]
 mod placement_prediction_tests;
+mod profile_textures;
 mod replay;
 mod torch_particles;
 mod ui_packets;
@@ -144,6 +145,9 @@ pub struct Session {
     pub(crate) voice_net: crate::voice::Net,
     /// Entity profiles revision already reported in the observation.
     profiles_synced: u64,
+    profile_resolver: Option<crate::profile_textures::Resolver>,
+    profile_resolver_started: bool,
+    profile_texture_epoch: u64,
     environment: Environment,
     terrain: Option<Terrain>,
     /// Far terrain beyond the loaded chunks (Krasnokamen `[lod]` servers).
@@ -285,6 +289,9 @@ impl Session {
             screen_audio_owner: Default::default(),
             voice_net: Default::default(),
             profiles_synced: 0,
+            profile_resolver: None,
+            profile_resolver_started: false,
+            profile_texture_epoch: 0,
             environment: Environment::new(),
             terrain: None,
             far: crate::far::Far::default(),
@@ -721,6 +728,8 @@ impl Session {
         self.keys.clear();
         self.commands.clear();
         self.network = None;
+        self.profile_resolver = None;
+        self.profile_resolver_started = false;
         self.loading = None;
         self.loader.reset();
         self.screen_relay = Default::default();
@@ -1158,6 +1167,7 @@ impl Session {
         {
             (self.wake_callback())();
         }
+        changed |= self.process_profile_textures();
         if self.phase == "play" || self.ui.as_ref().is_some_and(UiState::shell_screen_active) {
             match self.refresh_scene() {
                 Ok(value) => changed |= value,
@@ -1579,6 +1589,12 @@ impl Session {
         Ok(())
     }
     fn install_atlas(&mut self, content: &Content) {
+        self.profile_texture_epoch = self.profile_texture_epoch.wrapping_add(1);
+        if let Some(resolver) = &self.profile_resolver {
+            resolver.set_fence(self.profile_texture_epoch);
+        }
+        content.reset_profile_textures();
+        self.entities.reset_profile_textures();
         self.scene.texture_rgba = Some(content.rgba.clone());
         self.scene.texture_mips = Some(content.mips.clone());
         self.scene.texture_width = content.width;

@@ -1,6 +1,6 @@
 //! Mojang cosmetics are verified and decoded on bounded workers, never on the event loop.
 //! Source: authlib 7.0.63 services/property/URL contracts and 26.1.2 SkinTextureDownloader.
-use crate::entities::{PlayerModel, ProfileProperty, ProfileTextureRequest};
+use crate::entities::{PlayerModel, ProfileProperty, ProfileTextureRequest, ProfileTextureTarget};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use parking_lot::{Mutex, RwLock};
 use reqwest::{Url, blocking::Client, redirect::Policy};
@@ -26,7 +26,9 @@ use std::{
     time::{Duration, Instant},
 };
 mod cache;
+mod heads;
 mod image;
+pub(crate) use heads::HeadTextures;
 #[cfg(test)]
 mod tests;
 
@@ -149,7 +151,7 @@ pub struct ResolvedProfileTextures {
 }
 #[derive(Debug)]
 pub struct ProfileTextureCompletion {
-    pub uuid: String,
+    pub target: ProfileTextureTarget,
     pub generation: u64,
     pub resource_generation: u64,
     pub result: Result<ResolvedProfileTextures>,
@@ -332,10 +334,7 @@ impl Shared {
         };
         let mut decoded = image::decode_png(&bytes, skin)?;
         let digest = hex(&Sha256::digest(&bytes));
-        decoded.id = format!(
-            "krasnokamen:profile/{}_{digest}",
-            if skin { "skin" } else { "texture" }
-        );
+        decoded.id = format!("profile:{}_{digest}", if skin { "skin" } else { "texture" });
         let mut cache = self.cache.lock();
         cache.publish_original(url.as_str(), &bytes)?;
         cache.insert(key, decoded.clone());
@@ -401,7 +400,7 @@ impl Resolver {
                                 };
                                 state.complete(ResolverCompletion::Texture(
                                     ProfileTextureCompletion {
-                                        uuid: job.request.uuid,
+                                        target: job.request.target,
                                         generation: job.request.generation,
                                         resource_generation: job.resource_generation,
                                         result,

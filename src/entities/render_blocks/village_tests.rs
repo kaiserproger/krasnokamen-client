@@ -2927,3 +2927,160 @@ fn test_instance_scene_tracks_received_status_box_and_errors() {
     assert!(!failed.indices[EntityMaterial::DebugFilledBox as usize].is_empty());
     assert!(!failed.indices[EntityMaterial::TextSeeThrough as usize].is_empty());
 }
+
+#[test]
+fn skull_parity_dragon_model_and_static_jaw() {
+    // 26.3 DragonHeadModel.createHeadLayer / PartPose.scaled / setupAnim.
+    let models = models_with(Vec::new());
+    let mut content = Content::test_cube();
+    content.insert_test_texture("minecraft:entity/enderdragon/dragon", test_region(5));
+    let rig = models.rig("minecraft:dragon_skull#main");
+    let head = &rig.bones[rig.part_by_name["head"]];
+    assert!((head.pivot - Vec3::new(0., -5.99 / 16., 0.)).length() < 1e-6);
+    assert_eq!(head.scale, Vec3::splat(0.75));
+    let upper = &head.quads[6..12];
+    let span =
+        upper
+            .iter()
+            .flatten()
+            .fold(([f32::MAX; 5], [f32::MIN; 5]), |(mut lo, mut hi), v| {
+                for i in 0..5 {
+                    lo[i] = lo[i].min(v[i]);
+                    hi[i] = hi[i].max(v[i]);
+                }
+                (lo, hi)
+            });
+    assert_eq!(&span.0[..3], &[-0.5, -0.5, -10. / 16.]);
+    assert_eq!(&span.1[..3], &[0.5, 0.5, 6. / 16.]);
+    assert_eq!(&span.0[3..], &[112. / 256., 30. / 256.]);
+    assert_eq!(&span.1[3..], &[176. / 256., 62. / 256.]);
+    let jaw = &rig.bones[rig.part_by_name["jaw"]];
+    assert_eq!(jaw.parent, Some(rig.part_by_name["head"]));
+    assert_eq!(jaw.pivot, Vec3::new(0., 4. / 16., -8. / 16.));
+    let item = crate::entities::special_item(
+        &models,
+        &content,
+        &Default::default(),
+        &serde_json::json!({"type":"minecraft:head", "kind":"dragon"}),
+        None,
+    )
+    .unwrap();
+    let jaw_transform = Mat4::from_translation(head.pivot)
+        * Mat4::from_scale(Vec3::splat(0.75))
+        * Mat4::from_translation(jaw.pivot)
+        * Mat4::from_rotation_x(0.2);
+    assert_eq!(item.quads.len(), 42);
+    for (actual, local) in item.quads[36..].iter().zip(&jaw.quads) {
+        for (actual, local) in actual.positions.iter().zip(local) {
+            let expected = jaw_transform.transform_point3(Vec3::new(local[0], local[1], local[2]));
+            assert!((Vec3::from_array(*actual) - expected).length() < 1e-6);
+        }
+    }
+}
+
+#[test]
+fn skull_parity_piglin_ear_geometry_and_static_pose() {
+    // AbstractPiglinModel.addHead and PiglinHeadModel.setupAnim(0): +/-0.7 radians.
+    let models = models_with(Vec::new());
+    let mut content = Content::test_cube();
+    content.insert_test_texture("minecraft:entity/piglin/piglin", test_region(5));
+    let rig = models.rig("minecraft:piglin_head#main");
+    let item = crate::entities::special_item(
+        &models,
+        &content,
+        &Default::default(),
+        &serde_json::json!({"type":"minecraft:head", "kind":"piglin"}),
+        None,
+    )
+    .unwrap();
+    assert_eq!(item.quads.len(), 36);
+    for (name, x, angle, start, uv_x) in [
+        ("right_ear", -4.5, 0.7, 24, 39.),
+        ("left_ear", 4.5, -0.7, 30, 51.),
+    ] {
+        let bone = &rig.bones[rig.part_by_name[name]];
+        let pivot = Vec3::new(x, -6., 0.) / 16.;
+        assert_eq!(bone.pivot, pivot);
+        let lo = bone
+            .quads
+            .iter()
+            .flatten()
+            .fold([f32::MAX; 5], |mut lo, v| {
+                for i in 0..5 {
+                    lo[i] = lo[i].min(v[i]);
+                }
+                lo
+            });
+        assert_eq!(
+            &lo[..3],
+            &[if x < 0. { -1. / 16. } else { 0. }, 0., -2. / 16.]
+        );
+        assert_eq!(&lo[3..], &[uv_x / 64., 6. / 64.]);
+        let transform = Mat4::from_translation(pivot) * Mat4::from_rotation_z(angle);
+        for (actual, local) in item.quads[start..start + 6].iter().zip(&bone.quads) {
+            for (actual, local) in actual.positions.iter().zip(local) {
+                let expected = transform.transform_point3(Vec3::new(local[0], local[1], local[2]));
+                assert!(
+                    (Vec3::from_array(*actual) - expected).length() < 1e-6,
+                    "{name}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn skull_parity_unlisted_property_reaches_items_and_placed_heads() {
+    let content = village_content(
+        "minecraft:player_head",
+        "minecraft:skull",
+        BTreeMap::from([("rotation".into(), "0".into())]),
+        vec![("minecraft:entity/player/wide/steve", 5)],
+    );
+    let mut store = super::super::Store::new();
+    let models = Arc::new(models_with(Vec::new()));
+    store.activate_models(Arc::clone(&models));
+    let profile = serde_json::json!({"name":"NotListed", "properties":[
+        {"name":"textures","value":"eyJ0ZXh0dXJlcyI6e319"}
+    ]});
+    let mut stack = crate::inventory::Stack::default();
+    Arc::make_mut(&mut stack.components).insert("minecraft:profile".into(), profile.clone());
+    let special = serde_json::json!({"type":"minecraft:player_head"});
+    let pending = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
+    assert!(pending.quads.iter().all(|q| q.texture_layer == 5));
+    let request = content
+        .head_textures
+        .pop_request()
+        .expect("unlisted property must be queued");
+    assert!(!request.require_secure, "skulls accept unsigned properties");
+    assert!(request.property.signature.is_none());
+    let crate::entities::ProfileTextureTarget::Head(key) = request.target else {
+        panic!("head target");
+    };
+    assert!(content.head_textures.publish(&key, test_region(9)));
+    let item = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
+    assert_eq!(item.quads.len(), 12);
+    assert!(item.quads.iter().all(|q| q.texture_layer == 9));
+    let position = [8, 64, -12];
+    place(&mut store, &content, position);
+    store.block_entities.get_mut(&position).unwrap().data =
+        Arc::new(serde_json::json!({"profile":profile}));
+    let (origin, camera) = camera_for(position);
+    let mut geometry = DynamicGeometry::default();
+    let stats = render_static(
+        &mut store,
+        &content,
+        &World::new(0, 256),
+        origin,
+        camera,
+        0.,
+        &mut geometry,
+    );
+    assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+    assert_eq!(geometry.vertices.len(), 48);
+    assert!(geometry.vertices.iter().all(|v| v.texture_layer == 9));
+    assert!(
+        content.head_textures.pop_request().is_none(),
+        "all surfaces share one request"
+    );
+}

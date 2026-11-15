@@ -3266,11 +3266,10 @@ pub fn special_item(
                     "entity/enderdragon/dragon".to_owned(),
                 ),
                 "player" => {
-                    // A profiled head uses the listed player's published skin when the
-                    // client has one; unresolved profiles keep Steve (heads never fetch).
+                    // The item's own property is resolved asynchronously; until publication
+                    // it keeps the default skin, without borrowing another player's texture.
                     if let Some(profile) = stack.component("minecraft:profile")
-                        && let Some(profiles) = profiles
-                        && let Ok(skin) = super::profiles::head_skin(profiles, profile)
+                        && let Ok(skin) = super::profiles::head_skin(content, profiles, profile)
                     {
                         head_skin = Some(skin);
                     }
@@ -3386,8 +3385,14 @@ pub fn special_item(
     };
     let mut matrices = Vec::with_capacity(rig.bones.len());
     for bone in &rig.bones {
+        // SkullModelBase.setupAnim also runs for static item/worn heads:
+        // animation position zero still opens the jaw and lowers both ears.
+        let mut rotation = bone.rotation;
+        if matches!(kind, "head" | "player_head") {
+            super::render_blocks::skull_pose(&bone.name, 0., &mut rotation);
+        }
         let matrix = bone.parent.map(|i| matrices[i]).unwrap_or(item_root)
-            * resources::transform(bone.pivot, bone.rotation, bone.scale);
+            * resources::transform(bone.pivot, rotation, bone.scale);
         matrices.push(matrix);
         let reflected = kind == "chest" && matrix.determinant() < 0.;
         for q in &bone.quads {

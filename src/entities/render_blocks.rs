@@ -511,7 +511,7 @@ impl super::Store {
                             // A profile the client cannot resolve to a published skin keeps
                             // the default skin, exactly like the item path and vanilla: an
                             // unresolved owner never makes the placed head invisible.
-                            super::profiles::head_skin(&self.profiles, profile).ok()
+                            super::profiles::head_skin(content, Some(&self.profiles), profile).ok()
                         } else {
                             None
                         };

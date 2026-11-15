@@ -136,14 +136,31 @@ distinct geometry for standing, running, sitting and star. This source test
 does not establish visual parity; compare the received item in a real window
 against the Java oracle. The separate spear swap-animation scale remains open.
 
-### Player head item profile
+### Player head profile and skull geometry
 
-`player_head` items read the stack's `profile` component and bake onto the
-listed player's published skin when the client has one; unresolved profiles
-keep Steve (heads never fetch textures themselves).
-`player_head_item_uses_listed_profile_skin` covers the listed/unlisted/none
-branches. Visual proof of a custom skin still needs a listed player with a
-verified published skin in the real-client scene.
+Own `minecraft:profile` texture properties take precedence over PlayerInfo for
+inventory, worn and placed heads, even when the owner is not in the player list.
+They use the existing bounded `profile_textures::Resolver` (two workers, 32 jobs),
+with a resource-scoped 256-entry demand registry. Unsigned skull properties are
+accepted, as in 26.3 `PlayerSkinRenderCache`; invalid signatures and disallowed
+URLs retain the default skin under the existing download failure policy.
+Remote player skins still require signatures. Without an own textures property,
+heads can reuse a PlayerInfo skin; unresolved owners retain Steve.
+
+The session now drains `Store::pop_profile_texture_request`, submits to the
+resolver, installs content-addressed atlas sprites, and calls
+`Store::set_profile_texture` or publishes a head skin. Completion invalidates
+item snapshots (including crowd equipment); atlas reload requeues visible
+heads and PlayerInfo textures, and disconnect drops the resolver. Failed
+cosmetics produce bounded session events, never disconnects.
+
+`skull_parity_*` tests cover geometry/UVs, static jaw and ear poses, unlisted
+properties across item/placed consumers, resolver signature policy, publication,
+deduplication, bounds and reload fencing. Dragon pivot/scale/UVs and piglin ear
+pivots come from local 26.3 `DragonHeadModel`, `PartPose`,
+`AbstractPiglinModel.addHead` and `PiglinHeadModel.setupAnim` bytecode. Static
+item/worn heads run the same zero-time skull pose as placed heads. These units
+do not substitute for a pinned real-client frame against Java.
 
 Worn skulls resolve their SkullBlock family/profile directly, independently of
 the inventory item graph's normalization, display transforms or model override.
@@ -157,13 +174,13 @@ back. Unit geometry alone is not visual acceptance.
 
 ### Placed player head
 
-A placed `player_head` block resolves the same profile through the client's
-listed players and samples that skin with the hat overlay
-(`listed_player_head_profile_renders_skin_with_hat_layer`). An owner the client
-cannot resolve, or a head without a profile, keeps the default skin instead of
-disappearing (`static_skulls_render_and_unresolved_player_heads_keep_the_default_skin`);
-vanilla and the item path behave the same way. Placement appearance against a
-real Java head still needs a real-client frame.
+A placed `player_head` uses the same own-property registry and PlayerInfo
+fallback as an item, with the hat overlay. The listed-profile regression is
+`listed_player_head_profile_renders_skin_with_hat_layer`; unlisted properties
+are covered by `skull_parity_unlisted_property_reaches_items_and_placed_heads`.
+Missing or failed properties preserve a visible default head
+(`static_skulls_render_and_unresolved_player_heads_keep_the_default_skin`).
+Placement appearance still requires a real Java/native comparison.
 
 ### Received maps: held decorations and item frames
 

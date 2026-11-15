@@ -955,6 +955,7 @@ pub struct Content {
     tags: Arc<BTreeMap<String, BTreeMap<String, RegistryTag>>>,
     data_root: PathBuf,
     dynamic: Mutex<DynamicAtlas>,
+    pub(crate) head_textures: crate::profile_textures::HeadTextures,
     loader_base: Option<loader_resources::BaseResources>,
     loader_items: BTreeMap<String, crate::loader::items::ItemDefinition>,
     loader_blocks: Vec<Value>,
@@ -1464,6 +1465,7 @@ impl Content {
                 entries: BTreeMap::new(),
                 sequence: 0,
             }),
+            head_textures: Default::default(),
             width: atlas.side,
             height: atlas.side,
             texture_layers: atlas.layers,
@@ -1601,6 +1603,14 @@ impl Content {
             .copied()
             .or_else(|| self.dynamic.lock().ok()?.entries.get(name).copied())
     }
+    pub(crate) fn reset_profile_textures(&self) {
+        self.dynamic
+            .lock()
+            .expect("dynamic texture registry poisoned")
+            .entries
+            .clear();
+        self.head_textures.clear();
+    }
     pub fn install_dynamic_texture(
         &self,
         id: &str,
@@ -1631,11 +1641,11 @@ impl Content {
             region
         } else {
             let slot = atlas.entries.len() as u32;
-            if slot >= 256 {
+            let columns = self.width / 128;
+            let slots_per_layer = columns * (self.height / 128);
+            if slot >= 256.min(slots_per_layer) {
                 return Err("dynamic profile texture slots exhausted".into());
             }
-            let columns = self.width / 128;
-            let slots_per_layer = columns * columns;
             let x = (slot % slots_per_layer % columns) * 128;
             let y = (slot % slots_per_layer / columns) * 128;
             let region = TextureRegion {
@@ -2608,6 +2618,7 @@ impl Content {
                 entries: BTreeMap::new(),
                 sequence: 0,
             }),
+            head_textures: Default::default(),
             loader_base: None,
             loader_items: BTreeMap::new(),
             loader_blocks: Vec::new(),
