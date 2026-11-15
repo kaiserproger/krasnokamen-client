@@ -1,4 +1,6 @@
 //! Krasnokamen launcher: downloads the game content, then starts `krasnokamen-client`.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod bootstrap;
 mod capture;
 mod config;
@@ -139,6 +141,18 @@ fn headless(args: &Args, layout: &Layout) -> Result<()> {
 }
 
 fn main() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn AttachConsole(process_id: u32) -> i32;
+        }
+        // Keep terminal help, bootstrap progress and errors without opening a
+        // console on desktop launch. Inherited STARTF_USESTDHANDLES pipes stay put.
+        // No parent console or already attached is normal.
+        // SAFETY: ATTACH_PARENT_PROCESS is a valid DWORD; there are no pointers.
+        unsafe { AttachConsole(u32::MAX) };
+    }
     let args = match parse(std::env::args().skip(1)) {
         Ok(Some(args)) => args,
         Ok(None) => {
