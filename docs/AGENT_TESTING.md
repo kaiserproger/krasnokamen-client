@@ -141,7 +141,11 @@ against the Java oracle. The separate spear swap-animation scale remains open.
 Own `minecraft:profile` texture properties take precedence over PlayerInfo for
 inventory, worn and placed heads, even when the owner is not in the player list.
 They use the existing bounded `profile_textures::Resolver` (two workers, 32 jobs),
-with a resource-scoped 256-entry demand registry. Unsigned skull properties are
+with a resource-scoped 256-entry demand registry. At capacity it evicts failed
+entries first, then the least recently accessed entry; repeated failed lookups
+stay negatively cached until eviction. Pending work is bounded too, and each
+admission has a generation fence so evicted completions cannot upload pixels
+or overwrite a readmitted key. Unsigned skull properties are
 accepted, as in 26.3 `PlayerSkinRenderCache`; invalid signatures and disallowed
 URLs retain the default skin under the existing download failure policy.
 Remote player skins still require signatures. Without an own textures property,
@@ -161,6 +165,15 @@ pivots come from local 26.3 `DragonHeadModel`, `PartPose`,
 `AbstractPiglinModel.addHead` and `PiglinHeadModel.setupAnim` bytecode. Static
 item/worn heads run the same zero-time skull pose as placed heads. These units
 do not substitute for a pinned real-client frame against Java.
+
+`failed_head_registry_saturation_admits_new_valid_profile` exercises failed
+resolver completions followed by new demand. `head_registry_*` tests cover
+failed-first/access-order eviction, queue bounds, readmission and stale atlas
+publication. Real-client acceptance rotates 261 malformed heads before a valid
+head, plus under-limit (198) and valid-before-flood controls; inspect both worn
+and hotbar pixels, not just the scene harness lifecycle result. Vanilla 26.3
+`PlayerSkinRenderCache` uses five-minute `expireAfterAccess`; our bounded demand
+admission policy is not a claim of identical cache lifetime.
 
 Worn skulls resolve their SkullBlock family/profile directly, independently of
 the inventory item graph's normalization, display transforms or model override.

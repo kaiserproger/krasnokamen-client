@@ -79,7 +79,10 @@ impl Session {
                     }
                     break;
                 }
-                Err(SubmitError::Closed(_) | SubmitError::Stale(_)) => {
+                Err(SubmitError::Closed(request) | SubmitError::Stale(request)) => {
+                    if let ProfileTextureTarget::Head(key) = request.target {
+                        content.head_textures.fail(&key, request.generation);
+                    }
                     self.event(json!({"type":"profile_texture_error", "error":"resolver admission unavailable"}));
                     break;
                 }
@@ -89,6 +92,22 @@ impl Session {
     }
 
     fn publish_profile_texture(&mut self, completion: ProfileTextureCompletion) -> Result<bool> {
+        let head = match completion.target {
+            ProfileTextureTarget::Head(key) => Some(key),
+            ProfileTextureTarget::Player(_) => None,
+        };
+        let generation = completion.generation;
+        let result = self.install_profile_texture(completion);
+        if result.is_err()
+            && let Some(key) = head
+            && let Some(content) = &self.content
+        {
+            content.head_textures.fail(&key, generation);
+        }
+        result
+    }
+
+    fn install_profile_texture(&mut self, completion: ProfileTextureCompletion) -> Result<bool> {
         if completion.resource_generation != self.profile_texture_epoch {
             return Ok(false);
         }
@@ -103,6 +122,12 @@ impl Session {
             {
                 return Ok(false);
             }
+        }
+        if let ProfileTextureTarget::Head(key) = &completion.target
+            && !content.head_textures.is_current(key, completion.generation)
+        {
+            // An evicted request may finish after the same key has been admitted again.
+            return Ok(false);
         }
         let textures = completion.result?;
         let mut install = |texture: Option<crate::profile_textures::ResolvedTexture>| {
@@ -127,7 +152,7 @@ impl Session {
         let published = match completion.target {
             ProfileTextureTarget::Head(key) => {
                 let skin = skin.ok_or("head profile contains no skin")?;
-                let published = content.head_textures.publish(&key, skin);
+                let published = content.head_textures.publish(&key, completion.generation, skin);
                 if published {
                     // Refresh the shared item selection snapshots (GUI, hands, worn/crowd).
                     self.entities.profiles_revision =
@@ -175,7 +200,7 @@ mod tests {
         session.content = Some(content);
         let completion = |epoch| ProfileTextureCompletion {
             target: request.target.clone(),
-            generation: 0,
+            generation: request.generation,
             resource_generation: epoch,
             result: Ok(ResolvedProfileTextures {
                 skin: Some(ResolvedTexture {
@@ -265,5 +290,112 @@ mod tests {
                 .install_dynamic_texture("profile:small", &pixels, 64, 64)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn head_registry_evicted_completion_cannot_allocate_atlas_or_poison_readmission() {
+        let mut session = Session::new_mode("head-registry".into(), false);
+        let content = Content::test_cube();
+        let profile = |index| json!({"properties":[{"name":"textures","value":format!("head-{index}")}]});
+        assert!(content.head_textures.skin(&profile(0)).is_err());
+        let old = content.head_textures.pop_request().unwrap();
+        for index in 1..=256 {
+            assert!(content.head_textures.skin(&profile(index)).is_err());
+        }
+        assert!(content.head_textures.skin(&profile(0)).is_err());
+        session.content = Some(content);
+        assert!(!session.publish_profile_texture(ProfileTextureCompletion {
+            target: old.target, generation: old.generation,
+            resource_generation: session.profile_texture_epoch,
+            result: Ok(ResolvedProfileTextures {
+                skin: Some(ResolvedTexture {
+                    id: "profile:evicted".into(),
+                    rgba: Arc::from(vec![255; 64 * 64 * 4]),
+                    width: 64, height: 64,
+                }),
+                cape: None, elytra: None,
+                model: None,
+                secure: false,
+            }),
+        }).unwrap());
+        assert!(session.scene.texture_patches.is_empty());
+        assert!(session.content.as_ref().unwrap().texture("profile:evicted").is_none());
+    }
+
+    #[test]
+    fn head_registry_failed_completions_preserve_preloaded_skin() {
+        let mut session = Session::new_mode("head-registry".into(), false);
+        let mut content = Content::test_cube();
+        content.width = 256;
+        content.height = 256;
+        let profile = json!({"properties":[{"name":"textures","value":"preloaded"}]});
+        assert!(content.head_textures.skin(&profile).is_err());
+        let request = content.head_textures.pop_request().unwrap();
+        session.content = Some(content);
+        assert!(session.publish_profile_texture(ProfileTextureCompletion {
+            target: request.target, generation: request.generation,
+            resource_generation: session.profile_texture_epoch,
+            result: Ok(ResolvedProfileTextures {
+                skin: Some(ResolvedTexture {
+                    id: "profile:preloaded".into(),
+                    rgba: Arc::from(vec![255; 64 * 64 * 4]),
+                    width: 64, height: 64,
+                }),
+                cape: None, elytra: None, model: None, secure: false,
+            }),
+        }).unwrap());
+        for index in 0..261 {
+            let content = session.content.as_ref().unwrap();
+            assert!(content.head_textures.skin(&json!({"properties":[
+                {"name":"textures","value":format!("failed-{index}")}
+            ]})).is_err());
+            let request = content.head_textures.pop_request().unwrap();
+            assert!(session.publish_profile_texture(ProfileTextureCompletion {
+                target: request.target, generation: request.generation,
+                resource_generation: session.profile_texture_epoch,
+                result: if index % 2 == 0 {
+                    Err("invalid property".into())
+                } else {
+                    Ok(ResolvedProfileTextures {
+                        skin: None, cape: None, elytra: None, model: None, secure: false,
+                    })
+                },
+            }).is_err());
+        }
+        assert!(session.content.as_ref().unwrap().head_textures.skin(&profile).unwrap().is_some());
+        assert_eq!(session.scene.texture_patches.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    use crate::protocol::content::Content;
+
+    #[test]
+    fn failed_head_registry_saturation_admits_new_valid_profile() {
+        let mut session = Session::new_mode("head-registry".into(), false);
+        session.content = Some(Content::test_cube());
+        for index in 0..256 {
+            let content = session.content.as_ref().unwrap();
+            assert!(content.head_textures.skin(&json!({"properties":[
+                {"name":"textures","value":format!("invalid-{index}")}
+            ]})).is_err());
+            let request = content.head_textures.pop_request().unwrap();
+            // Actual production completion path: a decoding error, not a download/atlas allocation.
+            assert!(session.publish_profile_texture(ProfileTextureCompletion {
+                target: request.target, generation: request.generation,
+                resource_generation: session.profile_texture_epoch,
+                result: Err("profile texture payload base64: invalid".into()),
+            }).is_err());
+        }
+        assert!(session.scene.texture_patches.is_empty());
+        let content = session.content.as_ref().unwrap();
+        assert!(!content.head_textures.has_requests());
+        assert!(content.head_textures.skin(&json!({"properties":[
+            {"name":"textures","value":"eyJ0ZXh0dXJlcyI6e319"}
+        ]})).is_err());
+        assert!(content.head_textures.pop_request().is_some(),
+            "failed completions must not permanently deny a new profile admission");
     }
 }

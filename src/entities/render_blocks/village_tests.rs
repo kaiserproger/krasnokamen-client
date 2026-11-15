@@ -3057,7 +3057,7 @@ fn skull_parity_unlisted_property_reaches_items_and_placed_heads() {
     let crate::entities::ProfileTextureTarget::Head(key) = request.target else {
         panic!("head target");
     };
-    assert!(content.head_textures.publish(&key, test_region(9)));
+    assert!(content.head_textures.publish(&key, request.generation, test_region(9)));
     let item = crate::entities::special_item(&models, &content, &stack, &special, None).unwrap();
     assert_eq!(item.quads.len(), 12);
     assert!(item.quads.iter().all(|q| q.texture_layer == 9));
