@@ -2,6 +2,54 @@
 
 ## Authority and implementation truth
 
+### Teleport before destination terrain
+
+`Player::eye_medium` preserves `Unloaded` separately from received air and
+water/lava. The frame uses atmospheric presentation without a fluid overlay
+until that block arrives; `minecraft_observe.player.eye_medium` stays null,
+not `"air"`. Invalid received block/content still returns its original error.
+Local movement waits when feet/underfoot terrain is missing. Neighbourhood
+collision/fluid/vehicle queries deliberately retain their prediction refusals:
+`Player::tick` records `movement_blocked` and clears velocity, not the session.
+Unknown neighbours must not be replaced with air or synthesize fluid currents.
+
+`unloaded_eye_keeps_play_frames_and_waits_for_terrain` covers a far teleport,
+continued Play scene refresh, unknown observation, stopped prediction, invalid
+received state, water arrival and prediction resuming after a missing fluid
+neighbour arrives. `tools/unloaded_eye_scene.json` is the real-window repro:
+ordinary operator `/tp` to 1000.5/176/1000.5 outside the initial received chunks,
+then destination terrain and water, a second teleport into that water, causal
+terrain waits and completed captures. Run `tools/unloaded_eye_repro.py` with the
+server repository on `PYTHONPATH`, arguments `scene-shot --client native
+--windowed --timeout-seconds 180` and the absolute scene path. Wrap Python in
+Main's `scene-slot.sh mem-run.sh -m 6G`, with explicit immutable client/server
+pins and the normal imported content environment.
+
+The driver reuses the server harness's packet decoder/scene lifecycle. Its
+loopback proxy forwards unchanged packets in order and pauses subsequent server
+traffic at the first destination position until the actual client observes null
+eye medium and captures the unloaded view. It then releases the traffic, waits
+for terrain, prepares water using ordinary operator fills and teleports into it.
+The nonzero scene latency setting selects this proxy; the driver uses no timed
+network delay. Fixture fills/teleports and transport pause are explicit test
+setup, not earned gameplay or fabricated client/world state. A bare scene run
+without this driver is timing-dependent and is not the unloaded-eye gate.
+
+Agent-run Linux/Xvfb/lavapipe evidence under
+`/run/media/kaiserroman/games/solaris-work/receipts/EyeUnloaded/`:
+`unit-green.log` passes the regression; `unit-red.log` fails with only the
+missing-eye normal-state handling reverted. Client pin `ace7a8049bc1` passes
+three causal graphical runs (`positive/20261115T020423-scene-shot-wxi03l1d`,
+`positive/20261115T020706-scene-shot-7pmjgp91`,
+`positive/20261115T020743-scene-shot-dd24uz5s`): Play survives the unloaded frame,
+the unknown medium stays null, received water becomes `"water"`, and four
+strictly advancing actual-window captures complete on the GPU. The paired
+pre-fix `12e076e9c761` run (`negative/20261115T020020-scene-shot-okor0oz3`)
+ends with `session failed: unloaded_eye_environment`. All use server pin
+`8b6fc28e58bb`. The unloaded sky/cloud frame and later underwater stone-floor
+frame were inspected. This is not physical display, vanilla pixel parity or
+full-client acceptance.
+
 ### 26.3 sulfur cube and cushion activation
 
 `entity_render_263_cushion_activates_colored_rig_above_ground` and

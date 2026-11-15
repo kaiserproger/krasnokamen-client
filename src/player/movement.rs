@@ -89,8 +89,13 @@ impl Player {
         }
         self.vehicle = None;
         self.vehicle_prediction = None;
-        let env = self.environment(world, content)?;
         let underwater = self.update_eye_environment(world, content)?;
+        let Some(env) = self.environment(world, content)? else {
+            // LocalPlayer waits for terrain rather than predicting into a missing
+            // column. Keep the session and teleport acknowledgement alive.
+            self.velocity = [0.; 3];
+            return Ok(());
+        };
         // Overlapping living entities push the local player away (vanilla client
         // `LivingEntity.pushEntities` -> `Entity.push`), while he is pushable: alive, not a
         // spectator, not on a climbable (`env.climbable` is `Player.onClimbable`).
@@ -458,7 +463,7 @@ impl Player {
     }
 
     fn update_eye_environment(&mut self, world: &World, content: &Content) -> Result<bool> {
-        let underwater = self.eye_medium(world, content)? == Some(FluidKind::Water);
+        let underwater = self.eye_medium(world, content)? == EyeMedium::Fluid(FluidKind::Water);
         self.eye_in_water = underwater;
         self.water_vision_ticks = if underwater {
             (self.water_vision_ticks + if self.game_mode == 3 { 10 } else { 1 }).min(600)
@@ -494,13 +499,12 @@ impl Player {
             below.speed_factor
         })
     }
-    fn environment(&self, world: &World, content: &Content) -> Result<Environment> {
+    fn environment(&self, world: &World, content: &Content) -> Result<Option<Environment>> {
         let p = self.position.map(|v| v.floor() as i32);
-        let inside_state = world.block(p).ok_or("unloaded_collision_neighborhood")?;
         let below = [p[0], (self.position[1] - 0.5000001).floor() as i32, p[2]];
-        let below_state = world
-            .block(below)
-            .ok_or("unloaded_collision_neighborhood")?;
+        let (Some(inside_state), Some(below_state)) = (world.block(p), world.block(below)) else {
+            return Ok(None);
+        };
         let mut env = Environment {
             inside_state,
             below_state,
@@ -518,7 +522,7 @@ impl Player {
         env.lava_cells = fluid.cells[1];
         env.flow_water = fluid.flow[0];
         env.flow_lava = fluid.flow[1];
-        Ok(env)
+        Ok(Some(env))
     }
     pub(super) fn has_block_tag(&self, content: &Content, state: u32, tag: &str) -> Result<bool> {
         content.block_has_tag(state, tag)
