@@ -198,6 +198,13 @@ cargo build --release          # builds krasnokamen-client and krasnokamen-launc
 
 CI (`.github/workflows/release.yml`) builds Linux and Windows archives plus an ad-hoc-signed Apple Silicon `Krasnokamen.app` zip on every `v*` tag, attaches checksums, and asserts that no `.jar` or `assets/` directory is in the package.
 
+Windows process-loopback audio uses the pinned `windows` / `windows-core`
+0.58 `PROPVARIANT` wrapper: initialize its raw representation, then wrap it
+without running `PropVariantClear` on the borrowed activation parameters.
+Both GNU and MSVC use this API. `cargo check --target x86_64-pc-windows-gnu
+--workspace --all-targets --locked` compile-checks the Windows-only paths;
+it does not verify desktop capture or audio on a Windows device.
+
 ### Tests
 
 ```sh

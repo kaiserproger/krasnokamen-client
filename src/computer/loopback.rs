@@ -4,6 +4,7 @@
 //! Windows host yet: it is compile-checked only (`x86_64-pc-windows-gnu`).
 use super::audio::{AudioSource, FloatBytes, Pcm, RATE};
 use std::{
+    mem::ManuallyDrop,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -28,7 +29,7 @@ use windows::{
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
         },
         System::{
-            Com::{BLOB, COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
+            Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
             Threading::{CreateEventW, SetEvent, WaitForSingleObject},
             Variant::VT_BLOB,
         },
@@ -110,21 +111,24 @@ fn capture(
                 },
             },
         };
-        let mut variant = PROPVARIANT::default();
+        let mut raw = *PROPVARIANT::default().as_raw();
         {
-            let inner = &mut variant.Anonymous.Anonymous;
-            inner.vt = VT_BLOB;
-            inner.Anonymous.blob = BLOB {
-                cbSize: std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32,
-                pBlobData: (&mut params as *mut AUDIOCLIENT_ACTIVATION_PARAMS).cast(),
-            };
+            let inner = &mut raw.Anonymous.Anonymous;
+            inner.vt = VT_BLOB.0;
+            inner.Anonymous.blob.cbSize =
+                std::mem::size_of::<AUDIOCLIENT_ACTIVATION_PARAMS>() as u32;
+            inner.Anonymous.blob.pBlobData =
+                (&mut params as *mut AUDIOCLIENT_ACTIVATION_PARAMS).cast();
         }
+        // windows-core 0.58 owns PROPVARIANT data and clears it on Drop. This
+        // activation blob borrows stack storage, so never let it free `params`.
+        let variant = ManuallyDrop::new(PROPVARIANT::from_raw(raw));
         let done = CreateEventW(None, false, false, None).map_err(win("CreateEvent"))?;
         let handler: IActivateAudioInterfaceCompletionHandler = Completed(done.0 as isize).into();
         let operation = ActivateAudioInterfaceAsync(
             VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
             &IAudioClient::IID,
-            Some(&variant),
+            Some(&*variant),
             &handler,
         )
         .map_err(win("ActivateAudioInterfaceAsync"));
