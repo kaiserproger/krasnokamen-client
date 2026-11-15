@@ -188,6 +188,18 @@ krasnokamen-client --help
 
 `--headless-bootstrap` does the whole first-run install without a window (CI, servers; `--play` then starts the game and waits). `--autoplay` / `--tab settings|logs` are window-mode helpers for testing.
 
+On Windows both executables use the GUI subsystem: desktop launches do not
+create a console window. When started from a terminal, they attach to its
+existing console before printing help, `setup`/bootstrap output or errors;
+redirected stdout/stderr remain available to scripts and the launcher's
+`logs/launcher.log`. No new console is allocated. In an interactive `cmd.exe`,
+use `start "" /wait krasnokamen-client.exe setup ...` (or the launcher command)
+when the shell must wait for the GUI-subsystem process to finish.
+
+Check the shipped executables' subsystem on Linux or Windows with
+`python3 packaging/check-windows-subsystem.py PATH/krasnokamen-client.exe PATH/krasnokamen-launcher.exe`.
+This checks the PE headers, not console attachment or window behavior on Windows.
+
 ## Building from source
 
 ```sh
