@@ -1,4 +1,4 @@
-//! One local data root; Mojang content is linked from the user's existing caches.
+//! One local data root; existing content is symlinked on Unix and copied elsewhere.
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -103,6 +103,7 @@ pub(crate) fn validate(presentation: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn link(source: &Path, destination: &Path) -> Result<(), String> {
     let source = source
         .canonicalize()
@@ -116,12 +117,119 @@ fn link(source: &Path, destination: &Path) -> Result<(), String> {
             destination.display()
         ));
     }
-    #[cfg(unix)]
     std::os::unix::fs::symlink(&source, destination)
         .map_err(|e| format!("{}: {e}", destination.display()))?;
-    #[cfg(not(unix))]
-    return Err("setup currently requires Unix symlinks".into());
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn link(source: &Path, destination: &Path) -> Result<(), String> {
+    copy_content(source, destination)
+}
+
+// Also compiled in Linux tests so the non-Unix installation path has regression coverage.
+#[cfg(any(not(unix), test))]
+fn copy_content(source: &Path, destination: &Path) -> Result<(), String> {
+    let copy = || -> std::io::Result<()> {
+        let source = source.canonicalize()?;
+        let destination = destination
+            .parent()
+            .ok_or_else(|| std::io::Error::other("destination has no parent"))?
+            .canonicalize()?
+            .join(
+                destination
+                    .file_name()
+                    .ok_or_else(|| std::io::Error::other("destination has no filename"))?,
+            );
+        if source == destination {
+            return Ok(());
+        }
+        if destination.starts_with(&source) {
+            return Err(std::io::Error::other("destination is inside the source"));
+        }
+        copy_tree(&source, &destination)
+    };
+    copy().map_err(|e| {
+        format!(
+            "copy content {} to {}: {e}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+#[cfg(any(not(unix), test))]
+fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::{fs, io};
+    let kind = fs::symlink_metadata(source)?.file_type();
+    let existing = match fs::symlink_metadata(destination) {
+        Ok(metadata) => Some(metadata),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
+    if existing.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
+        return Err(io::Error::other(format!(
+            "refusing destination symlink: {}",
+            destination.display()
+        )));
+    }
+    if kind.is_dir() {
+        if !existing.as_ref().is_some_and(|m| m.is_dir()) {
+            fs::create_dir(destination)?;
+        }
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            copy_tree(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if !kind.is_file() {
+        return Err(io::Error::other(format!(
+            "content is not a regular file or directory: {}",
+            source.display()
+        )));
+    }
+    if existing.is_some() {
+        if existing.is_some_and(|m| m.is_file()) && same_file_bytes(source, destination)? {
+            return Ok(());
+        }
+        return Err(io::Error::other(format!(
+            "setup destination already exists with different content: {}",
+            destination.display()
+        )));
+    }
+    let mut input = fs::File::open(source)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    let result = io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
+    drop(output);
+    if result.is_err() {
+        // Only this invocation's newly created file can be incomplete.
+        fs::remove_file(destination)?;
+    }
+    result
+}
+
+#[cfg(any(not(unix), test))]
+fn same_file_bytes(left: &Path, right: &Path) -> std::io::Result<bool> {
+    use std::{fs::File, io::Read};
+    let (mut left, mut right) = (File::open(left)?, File::open(right)?);
+    if left.metadata()?.len() != right.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut a, mut b) = ([0; 8192], [0; 8192]);
+    loop {
+        let size = left.read(&mut a)?;
+        if size == 0 {
+            return Ok(right.read(&mut b[..1])? == 0);
+        }
+        right.read_exact(&mut b[..size])?;
+        if a[..size] != b[..size] {
+            return Ok(false);
+        }
+    }
 }
 
 pub(crate) fn setup(dist: &Path, assets: &Path, root: &Path) -> Result<(), String> {
@@ -142,9 +250,16 @@ pub(crate) fn setup(dist: &Path, assets: &Path, root: &Path) -> Result<(), Strin
         &root.join("assets/asset-index.json"),
     )?;
     link(&assets.join("objects"), &root.join("assets/objects"))?;
+    #[cfg(unix)]
     println!(
         "Content ready at {} (keep the source caches in place)",
         root.display()
     );
+    #[cfg(not(unix))]
+    println!("Content copied to {}", root.display());
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "content_paths_tests.rs"]
+mod tests;

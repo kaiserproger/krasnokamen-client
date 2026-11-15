@@ -235,7 +235,9 @@ Upload the archive(s) and `solaris-content.json` to `http://135.106.208.217:8080
 ./target/release/krasnokamen-client
 ```
 
-`setup` links an existing locally prepared bundle and Prism assets cache into the data folder. `KRASNOKAMEN_CLIENT_*` variables optionally override individual content paths (see [docs/AGENT_TESTING.md](docs/AGENT_TESTING.md)); `KRASNOKAMEN_CLIENT_DATA_DIR` is the **vanilla metadata directory** (`data/vanilla`), not the whole root. Missing startup files produce an error naming the path before a window opens. `KRASNOKAMEN_CLIENT_SETTINGS` overrides where Options are saved (default: `client-settings.json` in the selected data folder, shared with the launcher).
+`setup` installs an existing locally prepared bundle and Prism assets cache into the data folder. Unix uses symlinks, so keep the source caches in place. Windows copies the files without requiring administrator rights or Developer Mode; allow enough disk space for a second copy. Repeating a Windows setup accepts identical files, but refuses conflicting existing files rather than overwriting them. The asset index always comes from the prepared bundle, not a newer Prism index.
+
+`KRASNOKAMEN_CLIENT_*` variables optionally override individual content paths (see [docs/AGENT_TESTING.md](docs/AGENT_TESTING.md)); `KRASNOKAMEN_CLIENT_DATA_DIR` is the **vanilla metadata directory** (`data/vanilla`), not the whole root. Missing startup files produce an error naming the path before a window opens. `KRASNOKAMEN_CLIENT_SETTINGS` overrides where Options are saved (default: `client-settings.json` in the selected data folder, shared with the launcher).
 
 No arguments opens the Title screen; `--server HOST[:PORT]` joins directly (default port `25565`, default username `Player`). The `play` subcommand and automation flags remain supported (`play --help`).
 
