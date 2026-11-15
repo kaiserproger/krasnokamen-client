@@ -42,6 +42,13 @@ pub struct InteractionWorld<'a> {
     pub entities: &'a EntityStore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EyeMedium {
+    Unloaded,
+    Air,
+    Fluid(FluidKind),
+}
+
 static EMPTY_FEATURES: LazyLock<Arc<BTreeSet<String>>> =
     LazyLock::new(|| Arc::new(BTreeSet::new()));
 
@@ -638,12 +645,16 @@ impl Player {
     pub fn look_direction(&self) -> [f64; 3] {
         math::view(self.pitch, self.yaw)
     }
-    pub fn eye_medium(&self, world: &World, content: &Content) -> Result<Option<FluidKind>> {
+    pub fn eye_medium(&self, world: &World, content: &Content) -> Result<EyeMedium> {
         let eye = self.eye_position();
         let p = eye.map(|v| v.floor() as i32);
-        let state = world.block(p).ok_or("unloaded_eye_environment")?;
+        // Teleport position may precede its chunk. Preserve unknown separately
+        // from received air; presentation can omit the fluid overlay meanwhile.
+        let Some(state) = world.block(p) else {
+            return Ok(EyeMedium::Unloaded);
+        };
         let Some(fluid) = content.info(state)?.fluid else {
-            return Ok(None);
+            return Ok(EyeMedium::Air);
         };
         let above = world
             .block([p[0], p[1] + 1, p[2]])
@@ -655,7 +666,11 @@ impl Player {
         } else {
             f64::from(fluid.height())
         };
-        Ok((eye[1] < f64::from(p[1]) + height).then_some(fluid.kind))
+        Ok(if eye[1] < f64::from(p[1]) + height {
+            EyeMedium::Fluid(fluid.kind)
+        } else {
+            EyeMedium::Air
+        })
     }
     pub fn apply(
         &mut self,

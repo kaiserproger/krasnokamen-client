@@ -179,9 +179,9 @@ impl Session {
             .as_ref()
             .map(|content| player.eye_medium(&self.world, content))
         {
-            Some(Ok(Some(FluidKind::Water))) => json!("water"),
-            Some(Ok(Some(FluidKind::Lava))) => json!("lava"),
-            Some(Ok(None)) => json!("air"),
+            Some(Ok(crate::player::EyeMedium::Fluid(FluidKind::Water))) => json!("water"),
+            Some(Ok(crate::player::EyeMedium::Fluid(FluidKind::Lava))) => json!("lava"),
+            Some(Ok(crate::player::EyeMedium::Air)) => json!("air"),
             _ => Value::Null,
         };
         value["player"]["camera_roll_deg"] = json!(self.scene.roll_deg);
@@ -881,9 +881,11 @@ impl Session {
                     &self.world,
                     self.content.as_ref().ok_or("content unavailable")?,
                 )? {
-                    Some(FluidKind::Water) => CameraMedium::Water,
-                    Some(FluidKind::Lava) => CameraMedium::Lava,
-                    None => CameraMedium::Atmospheric,
+                    crate::player::EyeMedium::Fluid(FluidKind::Water) => CameraMedium::Water,
+                    crate::player::EyeMedium::Fluid(FluidKind::Lava) => CameraMedium::Lava,
+                    crate::player::EyeMedium::Air | crate::player::EyeMedium::Unloaded => {
+                        CameraMedium::Atmospheric
+                    }
                 };
                 let facts = PlayerEnvironmentFacts {
                     medium,
@@ -2028,6 +2030,143 @@ mod destruction_tests {
         session.terrain = Some(terrain);
         assert!(session.play_world_presentation_ready());
         session
+    }
+
+    #[test]
+    fn unloaded_eye_keeps_play_frames_and_waits_for_terrain() {
+        let mut session = ready_presentation_session();
+        session.phase = "play".into();
+        session.frame_driven = true;
+        let (connection, dimension) = session.context_epochs();
+        session.note_renderer_scene_confirmation(connection, dimension, session.scene.revision);
+        session
+            .player
+            .correct([1000.5, 6., 1000.5], [0.; 3], 0., 0., 0)
+            .unwrap();
+        session.player.velocity = [1., -1., 1.];
+        session.player.eye_in_water = true;
+        session.player.water_vision = 1.;
+        let content = session.content.as_ref().unwrap();
+        assert_eq!(
+            session.player.eye_medium(&session.world, content).unwrap(),
+            crate::player::EyeMedium::Unloaded
+        );
+        let mut commands = Vec::new();
+        session
+            .player
+            .tick(
+                crate::player::InteractionWorld {
+                    world: &session.world,
+                    content,
+                    inventory: &session.inventory,
+                    entities: &session.entities,
+                },
+                &BTreeSet::new(),
+                1,
+                1,
+                &mut commands,
+            )
+            .unwrap();
+        assert_eq!(session.player.position, [1000.5, 6., 1000.5]);
+        assert_eq!(session.player.velocity, [0.; 3]);
+        assert!(!session.player.eye_in_water);
+        assert_eq!(session.player.water_vision, 0.);
+        assert!(session.player.movement_blocked.is_none());
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert_eq!(session.phase, "play");
+        assert!(session.minecraft_observation()["player"]["eye_medium"].is_null());
+
+        // The same session resumes on received terrain; invalid received state
+        // still errors instead of being mistaken for an unloaded block.
+        let chunk = session.world.chunk([0, 0]).unwrap().clone();
+        session.world.insert([62, 62], chunk).unwrap();
+        let eye = session
+            .player
+            .eye_position()
+            .map(|value| value.floor() as i32);
+        session
+            .world
+            .set(eye, u32::MAX, |state| Ok(state == 0))
+            .unwrap();
+        assert!(
+            session
+                .player
+                .eye_medium(&session.world, session.content.as_ref().unwrap())
+                .is_err()
+        );
+        session.world.set(eye, 0, |state| Ok(state == 0)).unwrap();
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+        assert_eq!(session.phase, "play");
+        assert_eq!(
+            session.minecraft_observation()["player"]["eye_medium"],
+            "air"
+        );
+
+        // Terrain received after teleport can contain water. It must activate
+        // submersion instead of leaving the temporary atmospheric view latched.
+        session.content.as_mut().unwrap().states[0].fluid =
+            Some(crate::protocol::content::FluidState {
+                kind: FluidKind::Water,
+                amount: 8,
+                falling: false,
+                waterlogged: false,
+            });
+        session.player.set_mode(3).unwrap();
+        let tick = |session: &mut Session| {
+            session
+                .player
+                .tick(
+                    crate::player::InteractionWorld {
+                        world: &session.world,
+                        content: session.content.as_ref().unwrap(),
+                        inventory: &session.inventory,
+                        entities: &session.entities,
+                    },
+                    &BTreeSet::new(),
+                    2,
+                    2,
+                    &mut Vec::new(),
+                )
+                .unwrap();
+        };
+        session.player.velocity = [0.1, 0., 0.];
+        tick(&mut session);
+        assert!(session.player.position[0] > 1000.5);
+        assert!(session.player.eye_in_water);
+        assert!(session.player.water_vision > 0.);
+        assert_eq!(
+            session.minecraft_observation()["player"]["eye_medium"],
+            "water"
+        );
+        session.revision += 1;
+        assert!(session.refresh_scene().unwrap());
+
+        // An incomplete neighbouring fluid/collision scan still blocks motion;
+        // unknown neighbours must not be replaced with air and invent a current.
+        session
+            .player
+            .correct([1007.9, 6., 1000.5], [0.1, 0., 0.], 0., 0., 0)
+            .unwrap();
+        tick(&mut session);
+        assert_eq!(session.player.position, [1007.9, 6., 1000.5]);
+        assert_eq!(session.player.velocity, [0.; 3]);
+        assert!(
+            session
+                .player
+                .movement_blocked
+                .as_ref()
+                .unwrap()
+                .contains("unloaded")
+        );
+        let chunk = session.world.chunk([62, 62]).unwrap().clone();
+        session.world.insert([63, 62], chunk).unwrap();
+        session.player.velocity = [0.1, 0., 0.];
+        tick(&mut session);
+        assert!(session.player.position[0] > 1007.9);
+        assert!(session.player.movement_blocked.is_none());
+        assert!(session.player.eye_in_water);
     }
 
     #[test]

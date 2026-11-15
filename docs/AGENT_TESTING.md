@@ -2,6 +2,31 @@
 
 ## Authority and implementation truth
 
+### Teleport before destination terrain
+
+`Player::eye_medium` preserves `Unloaded` separately from received air and
+water/lava. The frame uses atmospheric presentation without a fluid overlay
+until that block arrives; `minecraft_observe.player.eye_medium` stays null,
+not `"air"`. Invalid received block/content still returns its original error.
+Local movement waits when feet/underfoot terrain is missing. Neighbourhood
+collision/fluid/vehicle queries deliberately retain their prediction refusals:
+`Player::tick` records `movement_blocked` and clears velocity, not the session.
+Unknown neighbours must not be replaced with air or synthesize fluid currents.
+
+`unloaded_eye_keeps_play_frames_and_waits_for_terrain` covers a far teleport,
+continued Play scene refresh, unknown observation, stopped prediction, invalid
+received state, water arrival and prediction resuming after a missing fluid
+neighbour arrives. `tools/unloaded_eye_scene.json` is the real-window repro:
+ordinary operator `/tp` to 1000.5/176/1000.5 outside the initial received chunks,
+then destination terrain and water, causal terrain waits and completed captures.
+Run it with the server harness's `scene-shot --client native --windowed` profile
+and that absolute scene path, explicit immutable client/server pins and the
+normal imported content environment. Fixture fill/teleport is privileged setup,
+not earned gameplay. The pre-fix client must end its session with
+`unloaded_eye_environment`; a fixed run must retain Play, report water when it
+arrives and render subsequent frames. Receipts belong under
+`/run/media/kaiserroman/games/solaris-work/receipts/EyeUnloaded/`.
+
 ### 26.3 sulfur cube and cushion activation
 
 `entity_render_263_cushion_activates_colored_rig_above_ground` and

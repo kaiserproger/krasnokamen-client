@@ -1,0 +1,96 @@
+{
+  "seed": 100,
+  "operator": true,
+  "username": "EyeTeleport",
+  "server_view_distance": 2,
+  "client_settings": {
+    "graphics_preset": "low",
+    "render_distance": 2,
+    "fov": 70
+  },
+  "steps": [
+    {
+      "cmd": "gamemode spectator @s"
+    },
+    {
+      "wait_chat": "spectator"
+    },
+    {
+      "observe": "before-teleport"
+    },
+    {
+      "shot": "before-teleport"
+    },
+    {
+      "tp": [
+        1000.5,
+        176,
+        1000.5,
+        0,
+        20
+      ]
+    },
+    {
+      "wait_play": true
+    },
+    {
+      "observe": "after-teleport"
+    },
+    {
+      "cmd": "fill 996 174 996 1004 174 1004 minecraft:stone"
+    },
+    {
+      "cmd": "fill 996 175 996 1004 179 1004 minecraft:water"
+    },
+    {
+      "wait_chat": "blocks"
+    },
+    {
+      "wait_terrain": {
+        "name": "destination-terrain",
+        "args": {
+          "sections": [
+            [
+              62,
+              10,
+              62
+            ],
+            [
+              62,
+              11,
+              62
+            ]
+          ],
+          "timeout_seconds": 120
+        }
+      }
+    },
+    {
+      "wait_ticks": 5
+    },
+    {
+      "wait_play": true
+    },
+    {
+      "observe": "water-arrived"
+    },
+    {
+      "shot": "water-arrived"
+    },
+    {
+      "look": {
+        "yaw": 90,
+        "pitch": 20
+      }
+    },
+    {
+      "wait_ticks": 2
+    },
+    {
+      "observe": "still-playing"
+    },
+    {
+      "shot": "still-playing"
+    }
+  ]
+}
