@@ -2885,18 +2885,34 @@ pub(super) fn append_block_quads(
 pub(super) fn item_matrix(model: &BakedModel, context: &str) -> Mat4 {
     crate::ui::items::display_matrix(model, context)
 }
-/// Source `ItemInHandLayer` pose from an arm (or head) bone transform: rotate X -90 and
-/// Y 180, then translate (+-1/16, 0.125, -0.625). Folded through the two rotations
-/// that is (-+1/16, 0.625, -0.125) in the bone frame; heads take no sideways shift.
-pub(super) fn held_item_attachment(bone: Mat4, slot: usize) -> Mat4 {
-    let side = match slot {
-        0 => -1.,
-        1 => 1.,
-        _ => 0.,
-    } / 16.;
-    bone * Mat4::from_translation(Vec3::new(side, 0.625, -0.125))
-        * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
-        * Mat4::from_rotation_y(std::f32::consts::PI)
+pub(super) fn worn_skull(content: &Content, stack: &Stack, slot: usize) -> bool {
+    slot == 5 && super::skull_item_kind(content, stack).is_some()
+}
+
+/// ItemInHandLayer for hands; CustomHeadLayer for head equipment.
+/// Vanilla 26.3 submits worn skulls in the head bone's own coordinates at
+/// 1.1875 scale, without the ordinary item's display/head recentering.
+pub(super) fn equipment_item_matrix(
+    bone: Mat4,
+    model: &BakedModel,
+    slot: usize,
+    context: &str,
+    skull: bool,
+) -> Mat4 {
+    if slot == 5 && skull {
+        return bone * Mat4::from_scale(Vec3::splat(1.1875));
+    }
+    let attachment = if slot == 5 {
+        bone * Mat4::from_translation(Vec3::new(0., -0.25, 0.))
+            * Mat4::from_rotation_y(std::f32::consts::PI)
+            * Mat4::from_scale(Vec3::new(0.625, -0.625, -0.625))
+    } else {
+        let side = if slot == 0 { -1. } else { 1. } / 16.;
+        bone * Mat4::from_translation(Vec3::new(side, 0.625, -0.125))
+            * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+            * Mat4::from_rotation_y(std::f32::consts::PI)
+    };
+    attachment * item_matrix(model, context)
 }
 /// Source `CrossedArmsItemLayer.applyTranslation`: from the arms bone, rotate X 0.75 rad,
 /// scale 1.07, translate (0, 0.13, -0.34), then flip X by pi.
@@ -3066,16 +3082,14 @@ pub(super) fn append_equipment(
                     Some(grip) => bone * grip,
                     None => bone,
                 };
-                let attachment =
-                    held_item_attachment(bone, if slot < 2 { anatomical_hand } else { slot });
-                append_baked_stack(
+                let matrix = equipment_item_matrix(
+                    bone,
                     model,
-                    attachment * item_matrix(model, context),
-                    light,
-                    content,
-                    stack,
-                    out,
-                )?;
+                    if slot < 2 { anatomical_hand } else { slot },
+                    context,
+                    worn_skull(content, stack, slot),
+                );
+                append_baked_stack(model, matrix, light, content, stack, out)?;
             }
             Err(reason) => {
                 stats

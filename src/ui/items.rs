@@ -159,6 +159,8 @@ impl Reads {
 #[derive(Default)]
 pub struct ItemModels {
     definitions: BTreeMap<String, Arc<Value>>,
+    /// Canonical CustomHeadLayer skulls do not evaluate an inventory item graph.
+    worn_skulls: BTreeMap<&'static str, Arc<Value>>,
     baked: BTreeMap<String, BakedModel>,
     /// Retained selections with their geometry shape (see `model_shape`).
     selected: BTreeMap<
@@ -332,15 +334,19 @@ impl ItemModels {
         {
             self.selections += 1;
         }
-        let id = item_model_id(c, s).ok_or("unknown item model ID")?;
-        if !self.definitions.contains_key(id) {
-            let (ns, path) = item_model_location(id);
-            let bytes = c.resource_bytes(&format!("assets/{ns}/items/{path}.json"))?;
-            let v: Value =
-                serde_json::from_slice(&bytes).map_err(|e| format!("item graph {id}: {e}"))?;
-            self.definitions.insert(id.into(), Arc::new(v));
-        }
-        let definition = Arc::clone(&self.definitions[id]);
+        let skull = (ctx.display == "head")
+            .then(|| entities::skull_item_kind(c, s))
+            .flatten();
+        let definition = if let Some(kind) = skull {
+            Arc::clone(self.worn_skulls.entry(kind).or_insert_with(|| {
+                Arc::new(serde_json::json!({"model": {
+                    "type": "minecraft:special",
+                    "model": {"type": "minecraft:head", "kind": kind}
+                }}))
+            }))
+        } else {
+            self.definition(c, s)?
+        };
         let graph = &definition["model"];
         let mut nodes = Vec::new();
         let mut reads = Reads::default();
@@ -413,10 +419,12 @@ impl ItemModels {
                             &node["model"],
                             self.profiles.as_deref(),
                         )?;
-                        let base = c.bake_model(
-                            node["base"].as_str().ok_or("special item base missing")?,
-                        )?;
-                        special.display = base.display;
+                        if skull.is_none() {
+                            let base = c.bake_model(
+                                node["base"].as_str().ok_or("special item base missing")?,
+                            )?;
+                            special.display = base.display;
+                        }
                         special
                     }
                     "bundle/selected_item" => {
@@ -468,7 +476,11 @@ impl ItemModels {
             if self.shapes.len() >= 4096 {
                 self.shapes.clear();
             }
-            let display = display_matrix(&result, &ctx.display);
+            let display = if skull.is_some() {
+                Mat4::IDENTITY
+            } else {
+                display_matrix(&result, &ctx.display)
+            };
             let bounds = model_bounds(&result, display);
             let shape = *self
                 .shapes

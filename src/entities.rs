@@ -65,6 +65,20 @@ use std::{
     sync::Arc,
 };
 
+/// SkullBlock item family used by CustomHeadLayer, independent of its item graph.
+pub(crate) fn skull_item_kind(content: &Content, stack: &Stack) -> Option<&'static str> {
+    Some(match content.item_names.get(&stack.id)?.as_str() {
+        "minecraft:player_head" => "player",
+        "minecraft:skeleton_skull" => "skeleton",
+        "minecraft:wither_skeleton_skull" => "wither_skeleton",
+        "minecraft:zombie_head" => "zombie",
+        "minecraft:creeper_head" => "creeper",
+        "minecraft:piglin_head" => "piglin",
+        "minecraft:dragon_head" => "dragon",
+        _ => return None,
+    })
+}
+
 /// World time inputs used to render clocks owned by received entities.
 pub type ClockEnvironment<'a> = (
     &'a crate::ui::items::ItemContext,

@@ -201,8 +201,8 @@ struct Key {
     texture: [u32; 5],
     /// Worn layers: rig, texture, colour, material.
     worn: Vec<(usize, [u32; 5], [u32; 3], u8)>,
-    /// Held/head items: slot, anatomical hand, attachment bone, shape.
-    items: Vec<(u8, u8, u16, u64)>,
+    /// Held/head items: slot, anatomical hand, attachment bone, shape, skull pose.
+    items: Vec<(u8, u8, u16, u64, bool)>,
 }
 
 fn texture_key(texture: TextureRegion) -> [u32; 5] {
@@ -525,6 +525,7 @@ struct Held {
     state: ItemContext,
     shape: u64,
     reads: Reads,
+    skull: bool,
 }
 
 impl Held {
@@ -714,7 +715,7 @@ fn composite(
             .collect(),
         items: held
             .iter()
-            .map(|h| (h.slot as u8, h.hand as u8, h.bone as u16, h.shape))
+            .map(|h| (h.slot as u8, h.hand as u8, h.bone as u16, h.shape, h.skull))
             .collect(),
     };
     let composite = match registry.keys.get(&key) {
@@ -839,6 +840,7 @@ fn held_item(
         state,
         shape,
         reads,
+        skull: p::worn_skull(content, stack, slot),
     })
 }
 
@@ -1044,10 +1046,13 @@ fn build(parts: &[Part<'_>], main: &Rig, max_offset: f32) -> Option<Built> {
                     0.
                 };
                 reach.push((base + scale * grip, scale));
-                let attachment = p::held_item_attachment(
+                let attachment = p::equipment_item_matrix(
                     Mat4::IDENTITY,
+                    model,
                     if held.slot < 2 { held.hand } else { held.slot },
-                ) * p::item_matrix(model, held.context);
+                    held.context,
+                    held.skull,
+                );
                 let area = |q: &[[f32; 3]; 4]| {
                     (Vec3::from_array(q[1]) - Vec3::from_array(q[0]))
                         .cross(Vec3::from_array(q[3]) - Vec3::from_array(q[0]))

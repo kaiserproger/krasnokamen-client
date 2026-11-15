@@ -97,6 +97,16 @@ keep Steve (heads never fetch textures themselves).
 branches. Visual proof of a custom skin still needs a listed player with a
 verified published skin in the real-client scene.
 
+Worn skulls resolve their SkullBlock family/profile directly, independently of
+the inventory item graph's normalization, display transforms or model override.
+They use `CustomHeadLayer`'s head-bone-local 1.1875 scale, not the hand layer.
+`worn_skull_and_custom_head_follow_the_head_bone_not_the_hand_pose` checks the
+real resolver and emitted geometry under a rotated head bone;
+`worn_skull_composites_match_cpu_and_do_not_alias_ordinary_head_items` checks
+crowd parity and cache separation. The canonical `native-player-head` gate
+requires the authored hat pixels on the actual head, never on the avatar's
+back. Unit geometry alone is not visual acceptance.
+
 ### Placed player head
 
 A placed `player_head` block resolves the same profile through the client's

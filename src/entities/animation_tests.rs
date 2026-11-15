@@ -693,8 +693,13 @@ fn held_tool_points_forward_from_the_fist_not_along_the_arm() {
         },
     );
     // Arm bone frame: +Y runs down the arm, model front is -Z.
-    let matrix = presentation::held_item_attachment(Mat4::IDENTITY, 0)
-        * presentation::item_matrix(&model, "thirdperson_righthand");
+    let matrix = presentation::equipment_item_matrix(
+        Mat4::IDENTITY,
+        &model,
+        0,
+        "thirdperson_righthand",
+        false,
+    );
     let handle = matrix.transform_point3(Vec3::new(0.1, 0.1, 0.5));
     let tip = matrix.transform_point3(Vec3::new(0.95, 0.95, 0.5));
     let blade = tip - handle;
@@ -712,8 +717,125 @@ fn held_tool_points_forward_from_the_fist_not_along_the_arm() {
         (handle.y - 0.51).abs() < 0.05 && handle.x < 0.,
         "{handle:?}"
     );
-    let left = presentation::held_item_attachment(Mat4::IDENTITY, 1);
+    let left = presentation::equipment_item_matrix(
+        Mat4::IDENTITY,
+        &model,
+        1,
+        "thirdperson_lefthand",
+        false,
+    );
     assert!(left.transform_point3(Vec3::ZERO).x > 0.);
+}
+
+#[test]
+fn worn_skull_and_custom_head_follow_the_head_bone_not_the_hand_pose() {
+    use crate::protocol::content::{Content, TextureRegion};
+    let (models, mut entity) = fixture();
+    let models = Arc::new(models);
+    entity.type_name = "minecraft:player".into();
+    let rig = krasnokamen_models::authored("minecraft:player").unwrap();
+    let head = rig
+        .bones
+        .iter()
+        .position(|b| b.role == BoneRole::Head)
+        .unwrap();
+    let head_matrix = Mat4::from_translation(Vec3::new(2., 3., 4.))
+        * Mat4::from_rotation_y(0.7)
+        * Mat4::from_rotation_x(-0.3);
+    let mut transforms = vec![Mat4::IDENTITY; rig.bones.len()];
+    transforms[head] = head_matrix;
+    let mut content = Content::test_cube();
+    content.item_names.insert(1, "minecraft:player_head".into());
+    content
+        .item_names
+        .insert(2, "minecraft:carved_pumpkin".into());
+    content.insert_test_texture(
+        "minecraft:entity/player/wide/steve",
+        TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 64,
+            height: 64,
+        },
+    );
+    content.insert_test_resource("assets/test/models/item/head.json", b"{}");
+    for (id, expected_y, expected_width) in
+        [(1, -0.25 * 1.1875, 0.5625 * 1.1875), (2, -0.25, 0.625)]
+    {
+        let mut items = crate::ui::items::ItemModels::new();
+        items.set_entity_models(Arc::clone(&models));
+        if id == 1 {
+            // An authored inventory graph normalizes and flips the raw skull.
+            // CustomHeadLayer must ignore that graph, including its display.
+            items.insert_test_graph(
+                "test:head",
+                json!({
+                    "type": "minecraft:special", "base": "test:item/head",
+                    "model": {"type": "minecraft:player_head"},
+                    "transformation": {
+                        "translation": [0.5, 0., 0.5],
+                        "left_rotation": [1., 0., 0., 0.]
+                    }
+                }),
+            );
+        } else {
+            items.insert_test_model("test:head", content.models[0].clone());
+        }
+        let mut stack = Stack::default();
+        stack.id = id;
+        stack.count = 1;
+        stack.components = Arc::new(BTreeMap::from([(
+            "minecraft:item_model".into(),
+            json!("test:head"),
+        )]));
+        entity.equipment[5] = Some(stack);
+        let mut out = DynamicGeometry::default();
+        let mut stats = presentation::PresentationStats::default();
+        presentation::append_equipment(
+            presentation::EquipmentPose {
+                item_context: None,
+                entity: &entity,
+                rig,
+                transforms: &transforms,
+            },
+            &mut items,
+            &mut equipment::Cache::default(),
+            equipment::Frame {
+                models: &models,
+                content: &content,
+                root: Mat4::IDENTITY,
+                tick: 0,
+                partial: 0.,
+                light: [15., 0.],
+            },
+            &mut out,
+            &mut stats,
+        )
+        .unwrap();
+        assert!(stats.unrendered.is_empty(), "{:?}", stats.unrendered);
+        assert!(!out.vertices.is_empty());
+        let inverse = head_matrix.inverse();
+        let positions: Vec<_> = out
+            .vertices
+            .iter()
+            .map(|v| inverse.transform_point3(Vec3::from_array(v.position)))
+            .collect();
+        let centroid = positions.iter().copied().sum::<Vec3>() / positions.len() as f32;
+        assert!(
+            (centroid - Vec3::new(0., expected_y, 0.)).length() < 1e-5,
+            "item {id}: head-local centroid {centroid:?}"
+        );
+        let min_x = positions.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let max_x = positions
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            (max_x - min_x - expected_width).abs() < 1e-5,
+            "item {id}: head-local width {}",
+            max_x - min_x
+        );
+    }
 }
 
 #[test]

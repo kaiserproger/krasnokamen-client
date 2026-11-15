@@ -402,6 +402,67 @@ fn crowd_instance_reproduces_cpu_entity_vertices() {
 }
 
 #[test]
+fn worn_skull_composites_match_cpu_and_do_not_alias_ordinary_head_items() {
+    let (mut store, mut content) = fixture();
+    content.item_names.insert(7, "minecraft:player_head".into());
+    content.item_names.insert(8, "test:ordinary_head".into());
+    content.insert_test_texture(
+        "minecraft:entity/player/wide/steve",
+        crate::protocol::content::TextureRegion {
+            uv: [0., 0., 1., 1.],
+            layer: 0,
+            width: 64,
+            height: 64,
+        },
+    );
+    let mut model = crate::entities::special_item(
+        store.models.as_ref().unwrap(),
+        &content,
+        &Stack::default(),
+        &json!({"type": "minecraft:player_head"}),
+        None,
+    )
+    .unwrap();
+    // Cancel ordinary item recentering: both models have the same shape key,
+    // but CustomHeadLayer still attaches skulls and generic head items differently.
+    model.display.insert(
+        "head".into(),
+        crate::protocol::models::ModelTransform {
+            rotation: [0.; 3],
+            translation: [0.5; 3],
+            scale: [1.; 3],
+        },
+    );
+    store.items.insert_test_model("test:head", model);
+    let mut composites = Vec::new();
+    for id in [7, 8, 7] {
+        store.slots[0].equipment[5] = Some(stack(id, json!({"minecraft:item_model": "test:head"})));
+        store.slots[0].appearance_revision += 1;
+        let (cpu, _) = render(&mut store, &content, false);
+        let (_, stats) = render(&mut store, &content, true);
+        assert_eq!(stats.crowd, 1);
+        let registry = &store.crowd;
+        composites.push(registry.instances()[0].words[0]);
+        let quads = crowd_quads(
+            registry.meshes(),
+            &registry.instances()[0],
+            &clip_pose::library(),
+        );
+        for (material, crowd) in MATERIALS.iter().zip(quads) {
+            assert_same_quads(&format!("{material:?}"), cpu_quads(&cpu, *material), crowd);
+        }
+    }
+    assert_ne!(
+        composites[0], composites[1],
+        "same mesh, different head attachment"
+    );
+    assert_eq!(
+        composites[0], composites[2],
+        "returning skull reuses its composite"
+    );
+}
+
+#[test]
 fn composites_are_shared_and_follow_appearance_changes() {
     let (mut store, content) = fixture();
     render(&mut store, &content, true);
@@ -770,6 +831,7 @@ fn detail_levels_drop_thin_item_quads_then_trims() {
         state: ItemContext::default(),
         shape: 1,
         reads: Reads::default(),
+        skull: false,
     };
     let texture = crate::protocol::content::TextureRegion {
         uv: [0., 0., 1., 1.],
@@ -821,8 +883,8 @@ fn detail_levels_drop_thin_item_quads_then_trims() {
         .position(|m| *m == EntityMaterial::ItemCutout)
         .unwrap();
     let first = (group.first_index[items] - meshes.chunks[0].first[1]) as usize;
-    let attachment = p::held_item_attachment(Mat4::IDENTITY, 0)
-        * p::item_matrix(&model, "thirdperson_righthand");
+    let attachment =
+        p::equipment_item_matrix(Mat4::IDENTITY, &model, 0, "thirdperson_righthand", false);
     let faces: Vec<Vec3> = model.quads[..2]
         .iter()
         .flat_map(|quad| {
