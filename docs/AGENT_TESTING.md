@@ -2,6 +2,21 @@
 
 ## Authority and implementation truth
 
+### 26.3 sulfur cube and cushion activation
+
+`entity_render_263_cushion_activates_colored_rig_above_ground` and
+`entity_render_263_sulfur_cube_activates_both_layers_and_sizes` exercise received
+spawn/metadata through rig binding and geometry submission. Cushion uses the
+received dye color and cardinal heading. Sulfur cubes bind their adult/small
+outer rig and translucent inner rig, with the 26.3 renderer's size and centering.
+The existing authored boxes already match the local 26.3 model definitions;
+the missing family entries previously prevented either kind from reaching them.
+The older `35df28a0` fix covered boat geometry, not these missing families.
+Model/texture facts were checked against the installed 26.3 client archive
+(`SulfurCubeModel`, `SmallSulfurCubeModel`, `CushionModel`, their renderers and
+`SulfurCubeInnerLayer`), not copied into Git. The `native-263-entity-rigs` scene
+is the graphical gate; unit geometry is not a visual-parity verdict.
+
 The generic `armor_baby_{head,chest,legs,feet}` models were removed as unreachable.
 The equipment resolver scales the adult shell for small armor stands; the baby
 humanoid wearers in the 26.3 entity facts select their family-specific shells.

@@ -1437,7 +1437,7 @@ mod tests {
     use super::*;
 
     /// Textures of the received-render fixture; each has its own atlas layer.
-    const FIXTURE_TEXTURES: [&str; 8] = [
+    const FIXTURE_TEXTURES: [&str; 12] = [
         "test:painting/canvas",
         "minecraft:painting/back",
         "minecraft:test/frame",
@@ -1446,6 +1446,10 @@ mod tests {
         "minecraft:entity/cushion/lime_cushion",
         "minecraft:entity/boat/poplar",
         "minecraft:entity/chest_boat/poplar",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner",
+        "minecraft:entity/sulfur_cube/sulfur_cube_outer_small",
+        "minecraft:entity/sulfur_cube/sulfur_cube_inner_small",
     ];
     fn fixture_layer(texture: &str) -> u32 {
         7 + FIXTURE_TEXTURES
@@ -1777,6 +1781,76 @@ mod tests {
     }
 
     #[test]
+    fn entity_render_263_cushion_activates_colored_rig_above_ground() {
+        for (color, texture) in [(0, "white"), (5, "lime")] {
+            let out = render_received_fixture("minecraft:cushion", 0, &[1, 8, 43, color, 255]);
+            let layer = fixture_layer(&format!("minecraft:entity/cushion/{texture}_cushion"));
+            assert!(out.vertices.iter().all(|v| v.texture_layer == layer));
+            let bottom = out
+                .vertices
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::INFINITY, f32::min);
+            let top = out
+                .vertices
+                .iter()
+                .map(|v| v.position[1])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(bottom >= 0. && bottom < 0.001, "{bottom}");
+            assert!((top - 0.25).abs() < 0.001, "{top}");
+        }
+    }
+
+    #[test]
+    fn entity_render_263_sulfur_cube_activates_both_layers_and_sizes() {
+        for baby in [false, true] {
+            for size in [1, 3] {
+                let out = render_received_fixture(
+                    "minecraft:sulfur_cube",
+                    0,
+                    &[1, 16, 8, u8::from(baby), 18, 1, size, 255],
+                );
+                for part in ["outer", "inner"] {
+                    let suffix = if baby { "_small" } else { "" };
+                    let layer = fixture_layer(&format!(
+                        "minecraft:entity/sulfur_cube/sulfur_cube_{part}{suffix}"
+                    ));
+                    assert_eq!(
+                        out.vertices
+                            .iter()
+                            .filter(|v| v.texture_layer == layer)
+                            .count(),
+                        24
+                    );
+                }
+                assert_eq!(
+                    out.indices[crate::api::EntityMaterial::EntityTranslucent as usize].len(),
+                    72
+                );
+                let bottom = out
+                    .vertices
+                    .iter()
+                    .map(|v| v.position[1])
+                    .fold(f32::INFINITY, f32::min);
+                let top = out
+                    .vertices
+                    .iter()
+                    .map(|v| v.position[1])
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let height = if baby { 10. / 16. } else { 9. / 16. } * 0.999 * f32::from(size);
+                assert!(
+                    bottom > 0. && bottom < 0.04,
+                    "baby={baby} size={size}: {bottom}"
+                );
+                assert!(
+                    (top - bottom - height).abs() < 0.0001,
+                    "{top} - {bottom} != {height}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn entity_render_rc1_frame_metadata_direction_overrides_spawn() {
         let out = render_received_fixture("minecraft:item_frame", 2, &[1, 8, 12, 5, 255]);
         assert!(
@@ -1914,9 +1988,9 @@ mod tests {
         let doc = Models::parse().unwrap();
         assert_eq!(doc.entities.len(), 161);
         assert_eq!(doc.motion.len(), doc.entities.len());
-        assert_eq!(doc.families.len(), 131);
-        assert!(!doc.families.contains_key("minecraft:cushion"));
-        assert!(!doc.families.contains_key("minecraft:sulfur_cube"));
+        assert_eq!(doc.families.len(), 133);
+        assert!(doc.families.contains_key("minecraft:cushion"));
+        assert!(doc.families.contains_key("minecraft:sulfur_cube"));
         assert_eq!(doc.default_skins.len(), 18);
         let zombie = &doc.entities["minecraft:zombie"];
         assert_eq!(zombie.protocol_id, 154);

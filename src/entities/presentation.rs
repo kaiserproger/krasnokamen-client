@@ -32,6 +32,8 @@ pub(crate) enum RootStyle {
     Minecart,
     Arrow,
     Object,
+    Cushion,
+    SulfurCube,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PresentationStats {
@@ -345,6 +347,18 @@ pub(super) fn material(
     } else {
         family.texture.clone()
     };
+    if e.type_name == "minecraft:cushion" {
+        let color = number(models, e, "DATA_COLOR").unwrap_or(0) as usize;
+        selected = family.materials["TEXTURES_BY_COLOR"]
+            .get(color)
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+    }
+    if e.type_name == "minecraft:sulfur_cube" && baby {
+        selected = family.materials["SMALL_TEXTURE"]
+            .as_str()
+            .map(str::to_owned);
+    }
     if e.type_name == "minecraft:tropical_fish" {
         let key = if number(models, e, "DATA_ID_TYPE_VARIANT").unwrap_or(0) & 255 == 1 {
             "LARGE_TEXTURE"
@@ -453,7 +467,11 @@ pub(super) fn material(
             .cloned();
     }
 
-    let style = if e.type_name.ends_with("_boat") || e.type_name.ends_with("_raft") {
+    let style = if e.type_name == "minecraft:cushion" {
+        RootStyle::Cushion
+    } else if e.type_name == "minecraft:sulfur_cube" {
+        RootStyle::SulfurCube
+    } else if e.type_name.ends_with("_boat") || e.type_name.ends_with("_raft") {
         RootStyle::Boat
     } else if e.type_name.ends_with("minecart") {
         RootStyle::Minecart
@@ -1078,6 +1096,33 @@ pub(super) fn root_matrix(
         RootStyle::Object => {
             Mat4::from_translation(relative) * Mat4::from_rotation_y(t.yaw.to_radians())
         }
+        RootStyle::Cushion => {
+            // CushionRenderer snaps the heading to a cardinal, flips X, then raises the
+            // 4px cushion. The authored rig has the same box at y=20..24 rather than 0..4.
+            let yaw = (t.yaw / 90. + 0.5).floor() * 90.;
+            Mat4::from_translation(relative)
+                * Mat4::from_rotation_y((180. - yaw).to_radians())
+                * Mat4::from_rotation_x(std::f32::consts::PI)
+                * Mat4::from_translation(Vec3::new(0., -1.5, 0.))
+        }
+        RootStyle::SulfurCube => {
+            // SulfurCubeRenderer uses separate small geometry, not a scaled adult.
+            // Fold downscaleSlightly, size and the renderer's centering into the
+            // ordinary living root; subtract the authored rig's feet-based pivot.
+            let baby = flag_at(entity, models.ids(entity).baby);
+            let size = int_at(entity, models.ids(entity).size).unwrap_or(1).max(1) as f32;
+            let (scale, offset, pivot) = if baby {
+                (1., 1.24, 19.)
+            } else {
+                (0.5, 0.98, 15.)
+            };
+            Mat4::from_translation(relative)
+                * Mat4::from_rotation_y((180. - body_yaw).to_radians())
+                * Mat4::from_scale(Vec3::new(-0.999, -0.999, 0.999))
+                * Mat4::from_translation(Vec3::new(0., 0.001, 0.))
+                * Mat4::from_scale(Vec3::splat(size * scale))
+                * Mat4::from_translation(Vec3::new(0., offset - 1. / 16. - 1.501 - pivot / 16., 0.))
+        }
     };
     let ids = models.ids(entity);
     let pose = int_at(entity, ids.pose).unwrap_or(0);
@@ -1187,7 +1232,7 @@ pub(super) fn root_matrix(
         .flatten();
     if let Some(death) = entity
         .death_tick
-        .filter(|_| matches!(binding.style, RootStyle::Living))
+        .filter(|_| matches!(binding.style, RootStyle::Living | RootStyle::SulfurCube))
     {
         let vanilla = 1. - clip.map_or(0., |clip| clip.replace);
         matrix *= death_tilt(
@@ -1278,7 +1323,11 @@ pub(super) fn draw_entity(
                     RigStyle {
                         tex,
                         color: [1.; 3],
-                        layer: EntityMaterial::EntityCutout,
+                        layer: if matches!(binding.style, RootStyle::SulfurCube) {
+                            EntityMaterial::EntityTranslucent
+                        } else {
+                            EntityMaterial::EntityCutout
+                        },
                         alpha: 1.,
                         light,
                     },
@@ -1297,6 +1346,43 @@ pub(super) fn draw_entity(
                     light,
                     out,
                 )?;
+                if matches!(binding.style, RootStyle::SulfurCube) {
+                    let baby = flag_at(entity, models.ids(entity).baby);
+                    let (key, resource) = if baby {
+                        (
+                            "minecraft:sulfur_cube_inner_baby#main",
+                            "minecraft:entity/sulfur_cube/sulfur_cube_inner_small",
+                        )
+                    } else {
+                        (
+                            "minecraft:sulfur_cube_inner#main",
+                            "minecraft:entity/sulfur_cube/sulfur_cube_inner",
+                        )
+                    };
+                    let inner = models.rig(key);
+                    evaluate_rig(
+                        inner,
+                        entity,
+                        models,
+                        content,
+                        tick,
+                        partial,
+                        matrix,
+                        store.transforms,
+                    );
+                    emit_rig(
+                        inner,
+                        store.transforms,
+                        RigStyle {
+                            tex: texture(content, resource)?,
+                            color: [1.; 3],
+                            layer: EntityMaterial::EntityTranslucent,
+                            alpha: 1.,
+                            light,
+                        },
+                        out,
+                    )?;
+                }
                 if entity.type_name == "minecraft:snow_golem"
                     && number(models, entity, "DATA_PUMPKIN_ID").unwrap_or(16) & 16 != 0
                 {
@@ -1365,7 +1451,7 @@ pub(super) fn draw_entity(
                         stats.unrendered.insert(entity.type_name.clone(), reason);
                     }
                 }
-                let hurt = matches!(binding.style, RootStyle::Living)
+                let hurt = matches!(binding.style, RootStyle::Living | RootStyle::SulfurCube)
                     && (entity
                         .damage_tick
                         .is_some_and(|damage| tick.saturating_sub(damage) < 10)
