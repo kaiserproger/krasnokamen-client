@@ -2,18 +2,19 @@
   "seed": 100,
   "operator": true,
   "username": "EyeTeleport",
-  "server_view_distance": 2,
+  "server_view_distance": 4,
+  "client_latency_ms": 1,
   "client_settings": {
     "graphics_preset": "low",
-    "render_distance": 2,
+    "render_distance": 4,
     "fov": 70
   },
   "steps": [
     {
-      "cmd": "gamemode spectator @s"
+      "cmd": "gamemode creative @s"
     },
     {
-      "wait_chat": "spectator"
+      "wait_chat": "Creative Mode"
     },
     {
       "observe": "before-teleport"
@@ -43,7 +44,16 @@
       "cmd": "fill 996 175 996 1004 179 1004 minecraft:water"
     },
     {
-      "wait_chat": "blocks"
+      "wait_chat": "Changed 405 block(s)"
+    },
+    {
+      "tp": [
+        1000.5,
+        176,
+        1000.5,
+        0,
+        20
+      ]
     },
     {
       "wait_terrain": {
@@ -79,8 +89,8 @@
     },
     {
       "look": {
-        "yaw": 90,
-        "pitch": 20
+        "yaw_deg": 90,
+        "pitch_deg": 20
       }
     },
     {
