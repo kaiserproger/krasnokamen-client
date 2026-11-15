@@ -160,6 +160,14 @@ impl Session {
             "hurt_tilt_deg":player.hurt_tilt_deg(self.client_tick,0.,self.damage_tilt_strength),
             "hurt_direction":player.hurt_direction,"hurt_tick":player.hurt_tick.map(|tick|tick.to_string()),
             "server_position":player.server_position,"origin":"locally_predicted_reconciled_by_server"});
+        // Raw server metadata, not the locally predicted pose. The local player
+        // normally has no AddEntity row; SetEntityData is retained separately.
+        value["player"]["received_metadata"] = json!(
+            self.entities
+                .get(player.entity_id)
+                .map(|entity| &entity.metadata)
+                .unwrap_or(&self.entities.own_metadata)
+        );
         value["player"]["motion"] = player.visual_motion_observation();
         // Vanilla Entity.getAirSupply is only ever *received* for the local player; a server
         // that never sends DATA_AIR_SUPPLY_ID leaves it null. `eye_medium` is derived from the

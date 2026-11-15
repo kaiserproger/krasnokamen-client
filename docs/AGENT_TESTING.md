@@ -33,6 +33,14 @@ real-client frames remain the visual acceptance.
 
 Read ../SPECIFICATION.md (especially original §16–19, §23), ../COMPATIBILITY_MATRIX.md and the sole cursor in ../LONG_TERM_PLAN.md. A requirement is not an implemented tool. The integration evidence below records exercised preview behavior, not full-client acceptance. Obtain the live schemas, supported protocol revisions, limits and actual features from discovery; do not infer support from a proposed name or cached conversation.
 
+`minecraft_observe.player.received_metadata` contains only retained server
+SetEntityData rows for the local player, using the same indexed `kind`/`value`
+encoding as `minecraft_list_entities`. Missing rows stay absent: the locally
+predicted `player.pose` is not evidence of received sleeping state. Villager
+occupied-bed gates use received pose and sleeping-position metadata here;
+`local_player_observation_reads_received_sleep_metadata_not_predicted_pose`
+checks that distinction without changing gameplay or prediction.
+
 
 ### Frame and villager regressions
 

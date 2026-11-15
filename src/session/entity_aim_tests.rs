@@ -244,6 +244,39 @@ fn local_player_air_supply_is_captured_from_its_own_metadata_row() {
 }
 
 #[test]
+fn local_player_observation_reads_received_sleep_metadata_not_predicted_pose() {
+    use crate::entities::Metadata;
+    let (mut session, _) = session([4.5, 4., 7.5]);
+    session.player.entity_id = 7;
+    session.entities.own_id = Some(7);
+    session.dimension = Some("minecraft:overworld".into());
+    assert_eq!(
+        session.minecraft_observation()["player"]["received_metadata"],
+        json!({})
+    );
+    session.entities.own_metadata.insert(6, Metadata::Pose(2));
+    session
+        .entities
+        .own_metadata
+        .insert(14, Metadata::OptionalBlockPosition(Some([8, 64, 9])));
+    let received = &session.minecraft_observation()["player"]["received_metadata"];
+    assert_eq!(received["6"], json!({"kind": "pose", "value": 2}));
+    assert_eq!(
+        received["14"],
+        json!({"kind": "optional_block_position", "value": [8, 64, 9]})
+    );
+    assert_eq!(session.player.pose, crate::player::Pose::Standing);
+    session.entities.own_metadata.insert(6, Metadata::Pose(0));
+    session
+        .entities
+        .own_metadata
+        .insert(14, Metadata::OptionalBlockPosition(None));
+    let received = &session.minecraft_observation()["player"]["received_metadata"];
+    assert_eq!(received["6"]["value"], 0);
+    assert!(received["14"]["value"].is_null());
+}
+
+#[test]
 fn merchant_offers_are_observable_with_effective_price() {
     use crate::inventory::{ItemCost, Stack, Trade, Trades};
     let (session, _handle) = session([4.5, 4., 7.5]);
