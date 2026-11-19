@@ -95,12 +95,16 @@ def build(source, destination, kind):
             draw.line((x+2, 40, x+33, 40), fill=(236, 244, 248, 255), width=2)
             draw.line((x+2, 65, x+33, 65), fill=(54, 60, 66, 255), width=3)
             draw.line((x+3, 68, x+32, 68), fill=(171, 180, 184, 255), width=1)
-            for cx in (x+6, x+29):
-                draw.ellipse((cx-2, 58, cx+2, 62), fill=(51, 51, 48, 255))
-                draw.point((cx-1, 59), fill=(249, 239, 205, 255))
-            # Visor seam with a bright lip: narrow enough to read at rank distance.
-            draw.line((x+3, 52, x+32, 52), fill=(46, 54, 60, 255), width=3)
-            draw.line((x+4, 50, x+31, 50), fill=(225, 234, 236, 255), width=1)
+            # Rivets belong on the upper rim, not on the face of the visor.
+            for cx in (x+3, x+32):
+                draw.point((cx, 42), fill=(45, 48, 50, 255))
+                draw.point((cx, 41), fill=(252, 245, 221, 255))
+            # Continuous eye slit above a row of small breathing perforations.
+            draw.line((x+3, 51, x+32, 51), fill=(32, 39, 46, 255), width=3)
+            draw.line((x+4, 49, x+31, 49), fill=(225, 234, 236, 255), width=1)
+            for cx in range(x+7, x+31, 4):
+                draw.point((cx, 59), fill=(35, 39, 43, 255))
+                draw.point((cx, 60), fill=(54, 59, 63, 255))
         # Reflective crown face and an axial raised ridge.
         for y in range(0, 36):
             level = round(148 + 52 * sin(pi * y / 35))
@@ -108,18 +112,30 @@ def build(source, destination, kind):
         draw.rectangle((36, 0, 71, 35), outline=(53, 62, 70, 255), width=2)
         draw.line((52, 2, 52, 33), fill=(246, 249, 246, 255), width=2)
         draw.line((55, 2, 55, 33), fill=(67, 78, 88, 255), width=2)
-    if source.stem == 'iron_plate':
-        # The large shell panels from the original rig's box unwrap. Preserve
-        # all original non-steel texels and alpha (plumes, leather and mail).
+    if source.stem in ('iron_plate', 'holy'):
+        # Shade the UV-unwrapped armor panels without painting over the
+        # source's colored decorations, straps or transparent texels.
+        iron_panels = ((71, 28, 9, 9), (80, 28, 9, 9),
+                       (89, 28, 9, 9), (98, 28, 9, 9),
+                       (38, 13, 10, 10), (48, 13, 10, 10),
+                       (28, 23, 10, 3), (38, 23, 10, 3),
+                       (48, 23, 10, 3), (58, 23, 10, 3),
+                       (0, 17, 5, 13), (5, 17, 9, 13),
+                       (14, 17, 5, 13), (19, 17, 9, 13),
+                       (0, 67, 5, 5), (5, 67, 6, 5),
+                       (11, 67, 5, 5), (16, 67, 6, 5))
+        holy_panels = ((0, 33, 5, 13), (5, 33, 9, 13),
+                       (14, 33, 5, 13), (19, 33, 9, 13),
+                       (25, 28, 7, 5), (32, 28, 6, 5),
+                       (38, 28, 7, 5), (45, 28, 6, 5),
+                       (32, 21, 6, 7), (38, 21, 6, 7),
+                       (46, 33, 5, 12), (51, 33, 5, 12),
+                       (56, 33, 5, 12), (61, 33, 5, 12),
+                       (37, 49, 4, 5), (41, 49, 4, 5),
+                       (45, 49, 4, 5), (49, 49, 4, 5))
         overlay = Image.new('RGBA', out.size)
         draw = ImageDraw.Draw(overlay)
-        for ux, uy, width, height in ((71, 28, 9, 9), (80, 28, 9, 9),
-                                      (89, 28, 9, 9), (98, 28, 9, 9),
-                                      (38, 13, 10, 10), (48, 13, 10, 10),
-                                      (28, 23, 10, 3), (38, 23, 10, 3),
-                                      (48, 23, 10, 3), (58, 23, 10, 3),
-                                      (5, 17, 9, 13), (19, 17, 9, 13),
-                                      (5, 67, 6, 5), (16, 67, 6, 5)):
+        for ux, uy, width, height in (iron_panels if source.stem == 'iron_plate' else holy_panels):
             x, y, w1, h1 = (round(v * SCALE) for v in (ux, uy, width, height))
             for yy in range(h1):
                 for xx in range(w1):
@@ -127,13 +143,14 @@ def build(source, destination, kind):
                     down = yy / max(1, h1-1)
                     light = round(195 - 80*down + 35*cos((across-.30)*pi))
                     draw.point((x+xx, y+yy), fill=(max(0,light-9), light, min(255,light+12), 135))
-            draw.rectangle((x, y, x+w1-1, y+h1-1), outline=(30, 36, 43, 230), width=3)
+            draw.rectangle((x, y, x+w1-1, y+h1-1), outline=(45, 52, 58, 200), width=2)
             draw.line((x+3, y+4, x+w1-4, y+4), fill=(235, 245, 255, 230), width=2)
-            draw.line((x+3, y+h1-5, x+w1-4, y+h1-5), fill=(39, 39, 38, 220), width=3)
+            draw.line((x+3, y+h1-5, x+w1-4, y+h1-5), fill=(55, 53, 50, 200), width=2)
             draw.line((x+w1//3, y+6, x+w1//3, y+h1-7), fill=(220, 233, 245, 125), width=2)
-            for cx in (x+6, x+w1-7):
-                draw.ellipse((cx-2, y+h1-11, cx+2, y+h1-7), fill=(33, 31, 28, 255))
-                draw.point((cx-1, y+h1-10), fill=(255, 242, 209, 255))
+            # Tiny edge fasteners, not two large dots in the middle of a plate.
+            for cx in (x+3, x+w1-4):
+                draw.point((cx, y+2), fill=(36, 36, 35, 255))
+                draw.point((cx, y+3), fill=(245, 237, 211, 255))
         mask = Image.new('L', out.size)
         m = mask.load()
         for y in range(out.height):
@@ -155,13 +172,14 @@ def build(source, destination, kind):
     out.save(destination, optimize=True)
 
 
-for name in ('iron_plate', 'crested_helm'):
+for name in ('iron_plate', 'crested_helm', 'holy'):
     build(ROOT / 'humanoid' / (name + '.png'), TEXTURES / 'entity/equipment/humanoid' / (name + '.png'), 'metal')
 for name in ('iron_plate_plume', 'crested_helm_plume'):
     build(ROOT / 'humanoid' / (name + '.png'), TEXTURES / 'entity/equipment/humanoid' / (name + '.png'), 'plume')
 for name in ('red_surcoat', 'blue_surcoat'):
     build(ROOT / 'humanoid' / (name + '.png'), TEXTURES / 'entity/equipment/humanoid' / (name + '.png'), 'cloth')
 build(ROOT / 'humanoid_leggings/iron_plate.png', TEXTURES / 'entity/equipment/humanoid_leggings/iron_plate.png', 'metal')
+build(ROOT / 'humanoid_leggings/holy.png', TEXTURES / 'entity/equipment/humanoid_leggings/holy.png', 'metal')
 for name in ('battle_parts', 'iron_spear', 'iron_halberd', 'iron_lance', 'iron_longsword'):
     build(ROOT / 'item' / (name + '.png'), TEXTURES / 'item' / (name + '.png'), 'metal')
 for name in ('red_heater_shield', 'blue_heater_shield', 'iron_kite_shield', 'iron_tower_shield'):

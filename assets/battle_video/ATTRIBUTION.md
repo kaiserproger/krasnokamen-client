@@ -31,8 +31,8 @@ effect planes (gold rings and white crosses around the torso and arms), which
 are omitted because, drawn static at full size, they cut a flat cloud through
 the wearer.
 
-The iron plate, plumes, crested helm, surcoats, shields, weapon sprites and
-shared 3-D weapon-parts atlas have 4x derived shading, retaining their original
+The iron plate, Holy armor, plumes, crested helm, surcoats, shields, weapon
+sprites and shared 3-D weapon-parts atlas have 4x derived shading, retaining their original
 UV layout. Rebuild them with `python3 source-textures/ArmorTex/generate.py`
 (requires Pillow); the generator reads the original PNGs in that directory.
 
